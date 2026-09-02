@@ -56,13 +56,11 @@ const LocalAdapter = {
 
     let url = env.apiBase + env.apiPrefix + path
     if (query && Object.keys(query).length > 0) {
-      const params = new URLSearchParams()
-      Object.entries(query).forEach(([k, v]) => {
-        if (v !== undefined && v !== null) {
-          params.append(k, String(v))
-        }
-      })
-      url += '?' + params.toString()
+      const qs = Object.entries(query)
+        .filter(([, v]) => v !== undefined && v !== null)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+        .join('&')
+      if (qs) url += '?' + qs
     }
 
     const token = getStorageSync(ACCESS_TOKEN_KEY)

@@ -105,7 +105,7 @@
 		filterDemands
 	} from '../../common/search.js'
 	import { ensureLoginForDock, canProposeDock } from '../../common/user.js'
-	import { searchAchievements } from '../../subpackages/tech-transfer/api/achievement.js'
+	import { searchAchievements } from '../../common/achievement-api.js'
 
 	export default {
 		data() {

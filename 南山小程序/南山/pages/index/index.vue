@@ -180,7 +180,7 @@
 	import { ensureLoginForDock, isFavorite, toggleFavorite, canProposeDock } from '../../common/user.js'
 	import { getCapitalGroups } from '../../common/capital.js'
 	import { openExternalSearchMiniProgram } from '../../common/external-miniprogram.js'
-	import { getAchievements } from '../../subpackages/tech-transfer/api/achievement.js'
+	import { getAchievements } from '../../common/achievement-api.js'
 
 	const PRICING_LABELS = {
 		'negotiable': '面议',
