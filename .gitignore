@@ -1,0 +1,21 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Compiled output
+南山小程序/南山/unpackage/
+
+# Cache
+tech-transfer-service/cache/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

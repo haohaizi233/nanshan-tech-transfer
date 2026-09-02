@@ -1,0 +1,2841 @@
+openapi: 3.1.0
+info:
+  title: 南山科转通 AI 智助平台 API（tech-transfer-service）
+  version: 1.0.0
+  description: |
+    南山科转通领域服务对外 HTTP 契约。与《06-api-design.md》逐路径对齐。
+
+    - 统一前缀：/api/tech-transfer/v1
+    - 双环境同构：本地（LocalAdapter 直连服务）与正式（AiNanshanAdapter 经上级网关）使用相同路径与结构。
+    - 响应包：成功 {code:0, message:"ok", data, requestId}；失败 {code:"TT_*", message, details, requestId}。
+    - 前端只允许依据稳定错误码 code 分支，禁止解析中文 message。
+    - 幂等键矩阵（X-Idempotency-Key 必填的仅限 6 个创建类接口）：POST /achievements、POST /demands、
+      POST /cooperations、POST /ai/match-tasks、POST /ai/evaluation-tasks、POST /uploads/presign；
+      状态流转类（submit/offline/cancel/close/accept/reject/confirm/complete/approve/reject-admin）
+      幂等由状态机前置校验保证（重复请求返回 409 TT_*_40901）；PUT/DELETE/PATCH 天然幂等，
+      POST /auth/* 由身份映射唯一约束兜底，POST /uploads/{uploadId}/complete 由 uploadId 兜底——以上均不要求幂等键。
+    - 会话 Token 生命周期：accessToken 2h（JWT HS256，无状态校验）；refreshToken 14d（含 jti，
+      服务端 auth_session 表校验可吊销）；401 TT_COMMON_40102 时前端静默 POST /auth/refresh 一次，
+      仍失败则重走 bootstrap；POST /auth/logout 吊销 refreshToken（accessToken 短有效期自然过期，无黑名单）。
+    - 所有列表接口使用统一分页参数（page/pageSize，pageSize 上限 50）。
+    - 契约冻结：本文件经 2026-09-02 冻结评审（见 10-freeze-review.md），此后字段只增不改。
+
+    本文件为设计基线，尚有少量上级平台待确认项（Token 格式、上传通道），
+    相关默认方案见《08-upper-platform-checklist.md》，不影响本契约结构。
+servers:
+  - url: '{protocol}://{host}'
+    description: 双环境入口（本地开发 / 上级网关），路径与结构完全一致
+    variables:
+      protocol:
+        enum: [http, https]
+        default: http
+      host:
+        enum:
+          - 127.0.0.1:8787
+          - api.ainanshan.example
+        default: 127.0.0.1:8787
+tags:
+  - name: auth
+    description: 身份与当前用户
+  - name: achievements
+    description: 成果
+  - name: demands
+    description: 需求
+  - name: favorites
+    description: 收藏
+  - name: cooperations
+    description: 对接意向
+  - name: search
+    description: 统一搜索
+  - name: ai
+    description: AI 评估与匹配任务
+  - name: capital
+    description: 资本资源（公开只读）
+  - name: patents
+    description: 专利
+  - name: uploads
+    description: 文件上传
+  - name: admin
+    description: 管理审核（admin 角色）
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/bootstrap:
+    post:
+      operationId: bootstrapSession
+      tags: [auth]
+      summary: 宿主凭证换取科转通会话
+      description: |
+        前端启动时调用。LocalAdapter 传本地票据，AiNanshanAdapter 传上级 token/一次性票据（格式待上级确认，默认方案见 08 清单 C-01）。
+        服务端经 IdentityProvider 解析 → external_identity 映射 → 查找或创建 app_user → 签发科转通会话 accessToken + refreshToken。
+        幂等：天然幂等（身份映射 UNIQUE(issuer, tenant_id, external_subject) 兜底"查或建"，并发首登冲突重查），
+        不要求 X-Idempotency-Key；重复调用签发新 token，旧 refreshToken 保留至过期。
+        审计：首次建档记 identity.bootstrap。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostCredential]
+              properties:
+                hostCredential:
+                  type: string
+                  description: 宿主身份凭证（本地票据或上级 token）
+                  examples: ["local-dev-ticket-dev-user-001"]
+      responses:
+        '200':
+          description: 会话签发成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BootstrapResult'
+        '401':
+          $ref: '#/components/responses/BootstrapCredentialInvalid'
+
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [auth]
+      summary: 刷新会话 accessToken
+      description: |
+        accessToken 过期（401 TT_COMMON_40102）时前端静默调用本接口换新，每请求链路最多一次；refreshToken 无效/吊销/过期返回 401，前端重走 bootstrap。
+        refreshToken 轮换：刷新时签发新 refreshToken 并吊销旧 jti（防旧 token 长期滞留客户端）。
+        幂等：由旧 jti 一次性消费保证（重复用已消费的 refreshToken 返回 401）。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                  description: bootstrap/refresh 签发的 refreshToken
+      responses:
+        '200':
+          description: 新会话签发成功（结构同 bootstrap，isNewUser 恒为 false）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BootstrapResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: 注销会话（吊销 refreshToken）
+      description: |
+        吊销当前 refreshToken（auth_session 置 revoked）。accessToken 无黑名单，2h 内自然过期（接受的无状态取舍，文档明示）。
+        审计：是（identity.logout）。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: 注销成功（幂等：重复吊销同一 token 返回 200）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          revoked: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: 当前用户信息
+      description: displayName 为 null 时前端显示"未填写"；禁止将机器身份标识（externalSubject）显示为姓名。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/profile:
+    patch:
+      operationId: updateMyProfile
+      tags: [auth]
+      summary: 更新当前用户资料
+      description: |
+        乐观锁：请求体必须携带 version（GET /me 返回），不匹配返回 409 TT_COMMON_40902。
+        审计：手机号/邮箱变更记录脱敏前后快照。
+        幂等：天然幂等（重复提交同请求体结果一致），不要求 X-Idempotency-Key。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /me/demands:
+    get:
+      operationId: listMyDemands
+      tags: [auth]
+      summary: 我的需求列表
+      description: 数据权限：服务端强制 owner=当前用户（IdentityContext 注入，忽略前端任何用户过滤参数）。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DemandStatus'
+      responses:
+        '200':
+          description: 需求分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/DemandSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/achievements:
+    get:
+      operationId: listMyAchievements
+      tags: [auth]
+      summary: 我的成果列表
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AchievementStatus'
+      responses:
+        '200':
+          description: 成果分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/AchievementSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/favorites:
+    get:
+      operationId: listMyFavorites
+      tags: [favorites]
+      summary: 我的收藏列表
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: targetType
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/FavoriteTargetType'
+      responses:
+        '200':
+          description: 收藏分页（内嵌目标摘要与目标当前状态，已下线目标仍返回并标注）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/FavoriteItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/cooperations:
+    get:
+      operationId: listMyCooperations
+      tags: [cooperations]
+      summary: 我参与的对接意向列表
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: role
+          in: query
+          description: 视角过滤，默认 both
+          schema:
+            type: string
+            enum: [initiator, target, both]
+            default: both
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CooperationStatus'
+      responses:
+        '200':
+          description: 意向分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/CooperationIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /achievements:
+    get:
+      operationId: listAchievements
+      tags: [achievements]
+      summary: 成果列表
+      description: |
+        数据权限：includeMine=false（默认）仅返回 published；true 时附带本人各状态记录并标 isMine。
+        排序白名单：published_at.desc（默认）/ created_at.desc / view_count.desc。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+        - name: categoryCode
+          in: query
+          schema: { type: string }
+        - name: maturityLevel
+          in: query
+          schema:
+            $ref: '#/components/schemas/MaturityLevel'
+        - name: includeMine
+          in: query
+          schema: { type: boolean, default: false }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [published_at.desc, created_at.desc, view_count.desc]
+            default: published_at.desc
+      responses:
+        '200':
+          description: 成果分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/AchievementSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createAchievement
+      tags: [achievements]
+      summary: 创建成果（草稿）
+      description: |
+        owner 由服务端从 IdentityContext 注入；请求体传入 ownerUserId 一律忽略并记告警。
+        创建即 draft。幂等：X-Idempotency-Key 必填（防双击重复发布）。审计：achievement.create。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AchievementUpsertRequest'
+      responses:
+        '201':
+          description: 创建成功（status=draft）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AchievementDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /achievements/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getAchievement
+      tags: [achievements]
+      summary: 成果详情
+      description: |
+        draft/rejected/offline 非本人访问返回 404（防探测）。
+        联系方式脱敏：完整手机号仅 owner、已 confirmed 意向对方、admin 可见，其余返回掩码（如 138****1111）。
+        非人查看完整联系方式记 sensitive_view 审计。patents 字段在专利服务降级时返回空数组并带 degraded=true。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 成果详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AchievementDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateAchievement
+      tags: [achievements]
+      summary: 编辑成果
+      description: |
+        仅 owner（403 TT_ACH_40301）。前置状态：draft / rejected（published 编辑需先下线，一期不允许 → 409 TT_ACH_40901）。
+        乐观锁：version 必填。审计：achievement.update。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AchievementUpsertRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AchievementDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /achievements/{id}/submit:
+    post:
+      operationId: submitAchievement
+      tags: [achievements]
+      summary: 提交成果审核
+      description: |
+        仅 owner。前置状态 draft / rejected → pending_review。状态机由后端校验，非法流转 409 TT_ACH_40901。
+        幂等：由状态机校验保证（重复请求 409）。审计：状态流转。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+      responses:
+        '200':
+          description: 已提交审核
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/AchievementStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /achievements/{id}/offline:
+    post:
+      operationId: offlineAchievement
+      tags: [achievements]
+      summary: 成果下线
+      description: owner（或 admin 强制下线）。前置 published → offline。幂等由状态机校验保证（重复请求 409）。审计：状态流转。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: 已下线
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/AchievementStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /achievements/{id}/evaluations:
+    get:
+      operationId: listAchievementEvaluations
+      tags: [achievements]
+      summary: 成果 AI 评估历史
+      description: |
+        需登录（任意认证用户可看，一期不限 owner；冻结评审决议：评估结果是平台模型对成果的商业化判断，
+        属增值输出，不开放匿名访问，防无成本爬取；成果列表/详情仍公开）。
+        404 TT_ACH_40401 含成果不可见情形。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 评估分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/AchievementEvaluation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /achievements/{id}/patents:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: listAchievementPatents
+      tags: [achievements]
+      summary: 成果关联专利列表
+      description: 专利服务降级时 patents 返回空数组且 degraded=true（详情主体不失败）。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 专利列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          patents:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/PatentSummary'
+                          degraded: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: attachAchievementPatent
+      tags: [achievements]
+      summary: 成果挂接专利
+      description: |
+        仅成果 owner。两种模式：传 patentId 挂接既有专利；或传 publicationNo 等字段在检索无果时手工建档并关联。
+        幂等：重复挂接同一专利返回既有关联（200）。唯一约束 (achievement_id, patent_id) 兜底。审计：关联变更。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [patentId]
+                  properties:
+                    patentId: { type: integer, format: int64 }
+                - type: object
+                  required: [publicationNo, title, patentType]
+                  properties:
+                    publicationNo: { type: string, maxLength: 64 }
+                    title: { type: string, maxLength: 200 }
+                    patentType:
+                      $ref: '#/components/schemas/PatentType'
+                    applicant: { type: string, maxLength: 128 }
+                    applyDate: { type: string, format: date }
+      responses:
+        '200':
+          description: 已挂接
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PatentSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /achievements/{id}/patents/{patentId}:
+    delete:
+      operationId: detachAchievementPatent
+      tags: [achievements]
+      summary: 解除成果—专利关联
+      description: 仅成果 owner。幂等：已解除返回 204。审计：关联变更。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - name: patentId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '204':
+          description: 已解除
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /demands:
+    get:
+      operationId: listDemands
+      tags: [demands]
+      summary: 需求列表
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+        - name: categoryCode
+          in: query
+          schema: { type: string }
+        - name: includeMine
+          in: query
+          schema: { type: boolean, default: false }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [published_at.desc, created_at.desc]
+            default: published_at.desc
+      responses:
+        '200':
+          description: 需求分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/DemandSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createDemand
+      tags: [demands]
+      summary: 创建需求（草稿）
+      description: owner 服务端注入；创建即 draft；幂等键必填；审计 demand.create。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DemandUpsertRequest'
+      responses:
+        '201':
+          description: 创建成功（status=draft）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DemandDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /demands/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getDemand
+      tags: [demands]
+      summary: 需求详情
+      description: 联系方式脱敏与审计规则同成果详情。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 需求详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DemandDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateDemand
+      tags: [demands]
+      summary: 编辑需求
+      description: 仅 owner；前置 draft / rejected；乐观锁 version 必填。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DemandUpsertRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DemandDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /demands/{id}/submit:
+    post:
+      operationId: submitDemand
+      tags: [demands]
+      summary: 提交需求审核
+      description: 仅 owner；前置 draft / rejected → pending_review；幂等由状态机校验保证（重复请求 409）；审计状态流转。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+      responses:
+        '200':
+          description: 已提交审核
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/DemandStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /demands/{id}/cancel:
+    post:
+      operationId: cancelDemand
+      tags: [demands]
+      summary: 取消发布需求
+      description: 仅 owner；前置 published → cancelled（matched 不允许取消 → 409 TT_DMD_40901）；幂等由状态机校验保证（重复请求 409）。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+      responses:
+        '200':
+          description: 已取消
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/DemandStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /demands/{id}/close:
+    post:
+      operationId: closeDemand
+      tags: [demands]
+      summary: 关闭需求
+      description: 仅 owner；前置 published / matched → closed；幂等由状态机校验保证（重复请求 409）。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+      responses:
+        '200':
+          description: 已关闭
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/DemandStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /demands/{id}/matches:
+    get:
+      operationId: listDemandMatches
+      tags: [demands]
+      summary: 需求的 AI 匹配结果
+      description: 数据权限：需求 owner 或 admin（匹配结果是发布方私有工作台数据，403 TT_DMD_40301）。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 匹配结果分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/MatchItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /favorites/{targetType}/{targetId}:
+    parameters:
+      - $ref: '#/components/parameters/FavoriteTargetType'
+      - $ref: '#/components/parameters/FavoriteTargetId'
+    put:
+      operationId: addFavorite
+      tags: [favorites]
+      summary: 收藏
+      description: 幂等：重复 PUT 返回既有记录（唯一约束 user_id+target_type+target_id 兜底）。目标不存在/不可见 → 404 TT_FAV_40401。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 已收藏（或此前已收藏）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: integer, format: int64 }
+                          favoritedAt: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: removeFavorite
+      tags: [favorites]
+      summary: 取消收藏
+      description: 幂等：已取消返回 204。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '204':
+          description: 已取消
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /cooperations:
+    post:
+      operationId: createCooperation
+      tags: [cooperations]
+      summary: 发起对接意向
+      description: |
+        initiator 服务端注入（请求体不含发起人字段）。
+        校验：目标必须 published；不能对自己发布的内容发起（400 TT_COOP_40001）；
+        已有活跃意向（pending/accepted/confirmed）→ 409 TT_COOP_40902。
+        幂等：X-Idempotency-Key 必填。审计：cooperation_event(created)。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetType, targetId]
+              properties:
+                targetType:
+                  $ref: '#/components/schemas/FavoriteTargetType'
+                targetId: { type: integer, format: int64 }
+                message: { type: string, maxLength: 1000 }
+      responses:
+        '201':
+          description: 意向已创建（status=pending）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cooperations/{id}:
+    get:
+      operationId: getCooperation
+      tags: [cooperations]
+      summary: 对接意向详情
+      description: 数据权限：initiator / target_owner / admin，其余 404（防探测）。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 意向详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /cooperations/{id}/accept:
+    post:
+      operationId: acceptCooperation
+      tags: [cooperations]
+      summary: 接受意向（目标方）
+      description: |
+        仅目标方（被发起方）。前置 pending → accepted。
+        副作用：同一目标的其他 pending 意向自动拒绝（event=auto_rejected，同一事务）。
+        幂等由状态机校验保证（重复请求 409）；乐观锁 version 必填；审计 cooperation_event + audit_log。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+      responses:
+        '200':
+          description: 已接受
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cooperations/{id}/reject:
+    post:
+      operationId: rejectCooperation
+      tags: [cooperations]
+      summary: 拒绝意向（目标方）
+      description: 仅目标方。前置 pending → rejected。请求体 reason 必填。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, reason]
+              properties:
+                version: { type: integer, minimum: 1 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: 已拒绝
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cooperations/{id}/confirm:
+    post:
+      operationId: confirmCooperation
+      tags: [cooperations]
+      summary: 确认对接（双方）
+      description: 双方可操作。前置 accepted → confirmed。副作用：目标需求（若为需求对接）自动流转 matched。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+      responses:
+        '200':
+          description: 已确认
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cooperations/{id}/cancel:
+    post:
+      operationId: cancelCooperation
+      tags: [cooperations]
+      summary: 取消对接（双方）
+      description: 双方可操作。前置 accepted / confirmed → cancelled。reason 建议（用于事件备注）。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: 已取消
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cooperations/{id}/complete:
+    post:
+      operationId: completeCooperation
+      tags: [cooperations]
+      summary: 完成对接（双方）
+      description: 双方可操作。前置 confirmed → completed。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                remark: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: 已完成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CooperationIntent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cooperations/{id}/events:
+    get:
+      operationId: listCooperationEvents
+      tags: [cooperations]
+      summary: 对接事件时间线
+      description: 权限同意向详情。operator 仅显示角色（initiator/target_owner/admin/system），不显示姓名。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 事件分页（按时间正序）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/CooperationEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /search:
+    get:
+      operationId: search
+      tags: [search]
+      summary: 统一搜索
+      description: 一期实现为 MySQL FULLTEXT/LIKE + 标签过滤（223 条量级）；结果集只含对当前用户可见记录。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [achievement, demand, all]
+            default: all
+        - name: categoryCode
+          in: query
+          schema: { type: string }
+        - name: maturityLevel
+          in: query
+          schema:
+            $ref: '#/components/schemas/MaturityLevel'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 双类型搜索结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          achievements:
+                            allOf:
+                              - $ref: '#/components/schemas/PageMeta'
+                              - type: object
+                                properties:
+                                  list:
+                                    type: array
+                                    items:
+                                      $ref: '#/components/schemas/AchievementSummary'
+                          demands:
+                            allOf:
+                              - $ref: '#/components/schemas/PageMeta'
+                              - type: object
+                                properties:
+                                  list:
+                                    type: array
+                                    items:
+                                      $ref: '#/components/schemas/DemandSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /ai/match-tasks:
+    post:
+      operationId: createMatchTask
+      tags: [ai]
+      summary: 创建需求 AI 匹配任务
+      description: |
+        数据权限：需求 owner only。异步任务制：202 返回 taskId，前端轮询 GET /ai/match-tasks/{taskId}。
+        限流：同一需求 10 分钟内重复创建直接返回进行中任务（不重复排队）；用户级 5 次/小时。
+        AI 能力未配置或熔断 → 503 TT_AI_50301。审计：ai.task.create + external_api_log。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [demandId]
+              properties:
+                demandId: { type: integer, format: int64 }
+      responses:
+        '202':
+          description: 任务已受理
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AsyncTaskCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /ai/match-tasks/{taskId}:
+    get:
+      operationId: getMatchTask
+      tags: [ai]
+      summary: 查询匹配任务
+      description: 仅任务创建者可查（403 TT_AI_40301）。status=queued/running 时 results 为 null。
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 任务状态与结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MatchTaskResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ai/evaluation-tasks:
+    post:
+      operationId: createEvaluationTask
+      tags: [ai]
+      summary: 创建成果 AI 评估任务
+      description: |
+        数据权限：成果 owner only（评估触发权归成果方；评估结果公开可见）。
+        正式模式禁止假评分回退（Provider 失败任务置 failed，不返回演示分数）。
+        同成果 10 分钟创建窗口；用户级 5 次/小时。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [achievementId]
+              properties:
+                achievementId: { type: integer, format: int64 }
+      responses:
+        '202':
+          description: 任务已受理
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AsyncTaskCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /ai/evaluation-tasks/{taskId}:
+    get:
+      operationId: getEvaluationTask
+      tags: [ai]
+      summary: 查询评估任务
+      description: 仅任务创建者可查。succeeded 时返回 evaluation（含四维评分与模型版本）。
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 任务状态与评估结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EvaluationTaskResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /capital/platforms:
+    get:
+      operationId: listCapitalPlatforms
+      tags: [capital]
+      summary: 概念验证/中试平台列表（公开）
+      security: []
+      description: 迁移自现网 /api/platform-base；响应包 msg 字段统一为 message。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [poc, pilot, all]
+            default: all
+        - $ref: '#/components/parameters/Keyword'
+      responses:
+        '200':
+          description: 平台分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/CapitalPlatform'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /capital/platforms/{id}:
+    get:
+      operationId: getCapitalPlatform
+      tags: [capital]
+      summary: 平台详情（公开）
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 平台详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CapitalPlatform'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /capital/investment-organizations:
+    get:
+      operationId: listInvestmentOrganizations
+      tags: [capital]
+      summary: 投资机构列表（公开）
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+      responses:
+        '200':
+          description: 机构分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/CapitalOrganization'
+
+  /capital/financial-organizations:
+    get:
+      operationId: listFinancialOrganizations
+      tags: [capital]
+      summary: 银行融资机构列表（公开）
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+      responses:
+        '200':
+          description: 机构分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/CapitalOrganization'
+
+  /capital/service-organizations:
+    get:
+      operationId: listServiceOrganizations
+      tags: [capital]
+      summary: 专业服务机构列表（公开）
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+      responses:
+        '200':
+          description: 机构分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/CapitalOrganization'
+
+  /patents:
+    get:
+      operationId: listPatents
+      tags: [patents]
+      summary: 专利检索
+      description: '一期优先命中本地 patent 表，miss 再查外部 PatentProvider 并落库（source=provider）。Provider 故障退化为仅本地命中（响应头 X-Deprecation: TT_PATENT_50301）。'
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: keyword
+          in: query
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: patentType
+          in: query
+          schema:
+            $ref: '#/components/schemas/PatentType'
+        - name: legalStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/PatentLegalStatus'
+      responses:
+        '200':
+          description: 专利分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/PatentSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /patents/{id}:
+    get:
+      operationId: getPatent
+      tags: [patents]
+      summary: 专利详情（含年费计算）
+      description: 年费按服务端费率规则计算（迁移自前端 patent-fee.js 真实费率表），latestPayDate = 申请日 + N 年前一日。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 专利详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PatentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /uploads/presign:
+    post:
+      operationId: presignUpload
+      tags: [uploads]
+      summary: 申请上传凭证
+      description: |
+        contentType 白名单：image/jpeg, image/png, image/webp, application/pdf, application/msword, docx；大小上限 20MB。
+        本地模式 uploadUrl 为本地直传接口；正式模式为上级统一上传或对象存储预签名（待 08 清单 C-04，默认方案不改变本响应结构）。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, contentType, fileSize]
+              properties:
+                fileName: { type: string, maxLength: 255 }
+                contentType: { type: string }
+                fileSize: { type: integer, format: int64, maximum: 20971520 }
+      responses:
+        '200':
+          description: 上传凭证
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UploadPresignResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /uploads/{uploadId}/complete:
+    post:
+      operationId: completeUpload
+      tags: [uploads]
+      summary: 确认上传完成
+      description: 服务端校验文件存在与大小一致后置 file_object.status=uploaded；返回 fileId 供成果/需求创建引用。幂等：重复 complete 返回既有 fileId。审计：file.upload。
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contentHash:
+                  type: string
+                  description: SHA-256 十六进制（可选，服务端校验一致性）
+      responses:
+        '200':
+          description: 上传完成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UploadCompleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/achievements/review-queue:
+    get:
+      operationId: listAchievementReviewQueue
+      tags: [admin]
+      summary: 成果审核队列
+      description: 仅 admin 角色（403 TT_ADMIN_40301）。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: categoryCode
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 待审成果分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/ReviewQueueItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/achievements/{id}/approve:
+    post:
+      operationId: approveAchievement
+      tags: [admin]
+      summary: 审核通过成果
+      description: 前置 pending_review → published；副作用：通知提交人。幂等由状态机校验保证（重复请求 409）；审计审核动作。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewAction'
+      responses:
+        '200':
+          description: 已通过
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/AchievementStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/achievements/{id}/reject:
+    post:
+      operationId: rejectAchievement
+      tags: [admin]
+      summary: 驳回成果
+      description: 前置 pending_review → rejected；reason 必填（400 TT_ADMIN_40001）；通知提交人（含驳回原因）。
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewReject'
+      responses:
+        '200':
+          description: 已驳回
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/AchievementStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/demands/review-queue:
+    get:
+      operationId: listDemandReviewQueue
+      tags: [admin]
+      summary: 需求审核队列
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 待审需求分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/ReviewQueueItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/demands/{id}/approve:
+    post:
+      operationId: approveDemand
+      tags: [admin]
+      summary: 审核通过需求
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewAction'
+      responses:
+        '200':
+          description: 已通过
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/DemandStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/demands/{id}/reject:
+    post:
+      operationId: rejectDemand
+      tags: [admin]
+      summary: 驳回需求
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewReject'
+      responses:
+        '200':
+          description: 已驳回
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/DemandStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [admin]
+      summary: 审计日志查询
+      description: 只读；导出记审计（sensitive_export）。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: actorUserId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: targetType
+          in: query
+          schema: { type: string }
+        - name: requestId
+          in: query
+          schema: { type: string }
+        - name: startTime
+          in: query
+          schema: { type: string, format: date-time }
+        - name: endTime
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: 审计日志分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/PageMeta'
+                          - type: object
+                            properties:
+                              list:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: tech-transfer-session-token
+      description: accessToken（JWT HS256），由 POST /auth/bootstrap 或 POST /auth/refresh 签发，有效期 2 小时；过期返回 401 TT_COMMON_40102，前端静默 POST /auth/refresh 一次，仍失败重走 bootstrap。
+
+  parameters:
+    XRequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema: { type: string, maxLength: 64 }
+      description: 链路 ID（ULID）。客户端传则透传；服务端必生成并回写响应。日志/审计全部关联。
+    XIdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 64 }
+      description: |
+        幂等键（ULID），有效期 24h。同键同体返回首次结果；同键异体 409 TT_IDEM_40901。
+        仅 6 个创建类接口必填（前端统一注入）：POST /achievements、POST /demands、POST /cooperations、
+        POST /ai/match-tasks、POST /ai/evaluation-tasks、POST /uploads/presign。
+        其余写操作不要求：状态流转由状态机校验保证幂等，PUT/DELETE/PATCH 天然幂等，
+        POST /auth/* 由唯一约束兜底，POST /uploads/{uploadId}/complete 由 uploadId 兜底。
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+    Keyword:
+      name: keyword
+      in: query
+      schema: { type: string, maxLength: 64 }
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    FavoriteTargetType:
+      name: targetType
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/FavoriteTargetType'
+    FavoriteTargetId:
+      name: targetId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+    BadRequest:
+      description: 参数校验失败（TT_COMMON_40001 / TT_COOP_40001 / TT_ADMIN_40001）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: 会话凭证缺失/无效/过期（TT_COMMON_40101 缺失或无效 / TT_COMMON_40102 过期——前端静默 refresh 一次后重走 bootstrap）。仅用于携带 accessToken 的受保护接口。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    BootstrapCredentialInvalid:
+      description: 宿主凭证无效（TT_AUTH_40103）。仅用于 POST /auth/bootstrap 与 POST /auth/refresh——会话尚未建立，错误属于宿主凭证/刷新令牌校验阶段，与会话级 40101/40102 分域。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: 已认证但无权限（TT_COMMON_40301 / TT_ACH_40301 / TT_DMD_40301 / TT_COOP_40301 / TT_AI_40301 / TT_ADMIN_40301）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: 资源不存在或不可见（TT_COMMON_40401 / TT_ACH_40401 / TT_DMD_40401 / TT_COOP_40401 / TT_FAV_40401 / TT_AI_40401 / TT_PATENT_40401 / TT_FILE_40401）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: 状态机冲突 / 乐观锁冲突 / 幂等冲突 / 活跃意向冲突（TT_*_40901 / TT_COMMON_40902 / TT_IDEM_40901 / TT_COOP_40902 / TT_FILE_40901）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TooManyRequests:
+      description: 限流（TT_COMMON_42901 / TT_AI_42901），响应含 Retry-After
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: 建议等待秒数
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServerError:
+      description: 服务内部错误（TT_COMMON_50001），响应不含堆栈与 SQL 细节
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServiceUnavailable:
+      description: 外部能力未配置或熔断（TT_AI_50301 / TT_PATENT_50301 / TT_FILE_50301）；AI Provider 失败为 502 TT_AI_50201
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          examples: ["ok"]
+        data: {}
+        requestId:
+          type: string
+          description: 本次请求链路 ID（ULID）
+    ErrorEnvelope:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+          description: 稳定业务错误码（前端唯一分支依据），如 TT_DEMAND_40901
+          examples: ["TT_DEMAND_40901"]
+        message:
+          type: string
+          description: 人类可读描述（文案可变，前端禁止解析）
+        details:
+          description: 结构化补充，如乐观锁冲突返回服务端当前 version
+        requestId:
+          type: string
+    PageMeta:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 50 }
+        total: { type: integer, minimum: 0 }
+    BootstrapResult:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, user, isNewUser]
+      properties:
+        accessToken:
+          type: string
+          description: 会话访问令牌（JWT HS256，有效期 2h，后续请求放 Authorization Bearer 头）
+        refreshToken:
+          type: string
+          description: 刷新令牌（JWT HS256 + jti，有效期 14d，服务端 auth_session 可吊销；刷新时轮换）
+        expiresIn:
+          type: integer
+          description: accessToken 有效期（秒），固定 7200
+        user:
+          $ref: '#/components/schemas/UserProfile'
+        isNewUser:
+          type: boolean
+          description: 本次 bootstrap 是否首次建档（外部身份首次映射）
+    UserProfile:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        userNo: { type: string }
+        displayName:
+          type: [string, 'null']
+          description: 为 null 时前端显示"未填写"；禁止用机器身份标识替代
+        userType:
+          type: [string, 'null']
+          enum: [enterprise_staff, researcher, investor, service_org, other, null]
+        phone:
+          type: [string, 'null']
+        email:
+          type: [string, 'null']
+        orgId: { type: [integer, 'null'], format: int64 }
+        orgName: { type: [string, 'null'] }
+        orgTitle: { type: [string, 'null'] }
+        roles:
+          type: array
+          items: { type: string, enum: [user, admin] }
+    ProfileUpdateRequest:
+      type: object
+      required: [version]
+      properties:
+        displayName: { type: string, maxLength: 64 }
+        userType: { type: string, enum: [enterprise_staff, researcher, investor, service_org, other] }
+        phone: { type: string, maxLength: 32 }
+        email: { type: string, maxLength: 128 }
+        orgId: { type: integer, format: int64 }
+        orgTitle: { type: string, maxLength: 64 }
+        version: { type: integer, minimum: 1 }
+    AchievementStatus:
+      type: string
+      enum: [draft, pending_review, published, rejected, offline]
+    DemandStatus:
+      type: string
+      enum: [draft, pending_review, published, rejected, matched, closed, cancelled]
+    CooperationStatus:
+      type: string
+      enum: [pending, accepted, rejected, confirmed, completed, cancelled]
+    AiTaskStatus:
+      type: string
+      enum: [queued, running, succeeded, failed]
+    MaturityLevel:
+      type: string
+      description: 成熟度结构化枚举（详见 05 §3.1）
+      enum: ['01_idea', '02_lab', '03_pilot_ready', '04_pilot_done', '05_mass_ready']
+    PricingMode:
+      type: string
+      enum: [negotiable, license, transfer, cooperation, other]
+    FavoriteTargetType:
+      type: string
+      enum: [achievement, demand]
+    PatentType:
+      type: string
+      enum: [invention, utility_model, design]
+    PatentLegalStatus:
+      type: string
+      enum: [valid, invalid, pending, expired, unknown]
+    AchievementSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        orgName: { type: [string, 'null'] }
+        categoryName: { type: [string, 'null'] }
+        maturityLevel: { $ref: '#/components/schemas/MaturityLevel' }
+        maturityDesc: { type: [string, 'null'] }
+        pricingMode: { $ref: '#/components/schemas/PricingMode' }
+        priceMinWan: { type: [number, 'null'] }
+        priceMaxWan: { type: [number, 'null'] }
+        applicationFields:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        status: { $ref: '#/components/schemas/AchievementStatus' }
+        isMine: { type: boolean }
+        viewCount: { type: integer }
+        publishedAt: { type: [string, 'null'], format: date-time }
+    AchievementDetail:
+      allOf:
+        - $ref: '#/components/schemas/AchievementSummary'
+        - type: object
+          properties:
+            version: { type: integer }
+            rejectReason:
+              type: [string, 'null']
+              description: 最近一次驳回原因（owner 重新编辑提示用；仅 owner/admin 可见）
+            techIntro: { type: [string, 'null'] }
+            techRoute: { type: [string, 'null'] }
+            innovationPoints:
+              type: array
+              items: { type: string }
+            inventors:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  orgName: { type: [string, 'null'] }
+                  personType: { type: string, enum: [first_inventor, co_inventor, team_member] }
+                  sortOrder: { type: integer }
+            contactName: { type: [string, 'null'] }
+            contactTitle: { type: [string, 'null'] }
+            contactPhone:
+              type: [string, 'null']
+              description: 脱敏掩码（138****1111）或完整号（权限内）
+            contactEmail: { type: [string, 'null'] }
+            contactWechat: { type: [string, 'null'] }
+            patents:
+              type: array
+              items:
+                $ref: '#/components/schemas/PatentSummary'
+            latestEvaluation:
+              nullable: true
+              allOf:
+                - $ref: '#/components/schemas/AchievementEvaluation'
+    AchievementUpsertRequest:
+      type: object
+      required: [title, maturityLevel, pricingMode]
+      description: 创建与编辑共用；编辑时 version 必填。请求体不得包含 ownerUserId（服务端注入）。
+      properties:
+        title: { type: string, maxLength: 200 }
+        categoryId: { type: integer, format: int64 }
+        orgId: { type: integer, format: int64 }
+        techIntro: { type: string }
+        techRoute: { type: string }
+        maturityLevel: { $ref: '#/components/schemas/MaturityLevel' }
+        maturityDesc: { type: string, maxLength: 255 }
+        applicationFields:
+          type: array
+          items: { type: string }
+        innovationPoints:
+          type: array
+          items: { type: string }
+        pricingMode: { $ref: '#/components/schemas/PricingMode' }
+        priceMinWan: { type: number }
+        priceMaxWan: { type: number }
+        contactName: { type: string, maxLength: 64 }
+        contactTitle: { type: string, maxLength: 64 }
+        contactPhone: { type: string, maxLength: 32 }
+        contactEmail: { type: string, maxLength: 128 }
+        contactWechat: { type: string, maxLength: 64 }
+        tags:
+          type: array
+          items: { type: string }
+        inventorRefs:
+          type: array
+          description: 结构化完成人（禁止"姓名1、姓名2"合并字段）
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string, maxLength: 64 }
+              orgName: { type: string, maxLength: 128 }
+              personType: { type: string, enum: [first_inventor, co_inventor, team_member] }
+              sortOrder: { type: integer }
+        mediaFileIds:
+          type: array
+          items: { type: integer, format: int64 }
+        version: { type: integer, minimum: 1 }
+    DemandSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        orgName: { type: [string, 'null'] }
+        region: { type: [string, 'null'] }
+        coopMode:
+          type: array
+          items: { type: string }
+        budgetMinWan: { type: [number, 'null'] }
+        budgetMaxWan: { type: [number, 'null'] }
+        budgetNegotiable: { type: boolean }
+        deadlineDesc: { type: [string, 'null'] }
+        categoryName: { type: [string, 'null'] }
+        tags:
+          type: array
+          items: { type: string }
+        status: { $ref: '#/components/schemas/DemandStatus' }
+        isMine: { type: boolean }
+        publishedAt: { type: [string, 'null'], format: date-time }
+    DemandDetail:
+      allOf:
+        - $ref: '#/components/schemas/DemandSummary'
+        - type: object
+          properties:
+            version: { type: integer }
+            rejectReason:
+              type: [string, 'null']
+              description: 最近一次驳回原因（owner 重新编辑提示用；仅 owner/admin 可见）
+            description: { type: string }
+            expectDeadline: { type: [string, 'null'], format: date }
+            orgIntro: { type: [string, 'null'] }
+            contactName: { type: [string, 'null'] }
+            contactTitle: { type: [string, 'null'] }
+            contactPhone: { type: [string, 'null'] }
+            contactEmail: { type: [string, 'null'] }
+            contactWechat: { type: [string, 'null'] }
+    DemandUpsertRequest:
+      type: object
+      required: [title, description]
+      properties:
+        title: { type: string, maxLength: 200 }
+        categoryId: { type: integer, format: int64 }
+        orgId: { type: integer, format: int64 }
+        description: { type: string }
+        region: { type: string, maxLength: 64 }
+        coopMode:
+          type: array
+          items: { type: string }
+        budgetMinWan: { type: number }
+        budgetMaxWan: { type: number }
+        budgetNegotiable: { type: boolean }
+        expectDeadline: { type: string, format: date }
+        deadlineDesc: { type: string, maxLength: 128 }
+        contactName: { type: string, maxLength: 64 }
+        contactTitle: { type: string, maxLength: 64 }
+        contactPhone: { type: string, maxLength: 32 }
+        contactEmail: { type: string, maxLength: 128 }
+        contactWechat: { type: string, maxLength: 64 }
+        tags:
+          type: array
+          items: { type: string }
+        attachmentFileIds:
+          type: array
+          items: { type: integer, format: int64 }
+        version: { type: integer, minimum: 1 }
+    FavoriteItem:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        targetType: { $ref: '#/components/schemas/FavoriteTargetType' }
+        targetId: { type: integer, format: int64 }
+        favoritedAt: { type: string, format: date-time }
+        achievement:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/AchievementSummary'
+        demand:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/DemandSummary'
+    CooperationIntent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        initiatorUserId: { type: integer, format: int64 }
+        targetType: { $ref: '#/components/schemas/FavoriteTargetType' }
+        targetId: { type: integer, format: int64 }
+        targetOwnerUserId: { type: integer, format: int64 }
+        message: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/CooperationStatus' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        acceptedAt: { type: [string, 'null'], format: date-time }
+        confirmedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time, description: 终态（rejected/cancelled）关闭时间 }
+    CooperationIntentDetail:
+      allOf:
+        - $ref: '#/components/schemas/CooperationIntent'
+        - type: object
+          properties:
+            counterpartDisplayName:
+              type: [string, 'null']
+              description: 对方展示名（取 user_profile.display_name，为 null 前端显示"未填写"）
+            targetSummary:
+              type: object
+              properties:
+                title: { type: string }
+                orgName: { type: [string, 'null'] }
+                status: { type: string }
+    CooperationEvent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        intentId: { type: integer, format: int64 }
+        eventType:
+          type: string
+          enum: [created, accepted, rejected, confirmed, cancelled, completed, auto_rejected]
+        fromStatus: { type: [string, 'null'] }
+        toStatus: { type: string }
+        operatorRole:
+          type: string
+          enum: [initiator, target_owner, admin, system]
+        remark: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    MatchItem:
+      type: object
+      properties:
+        achievementId: { type: integer, format: int64 }
+        achievementTitle: { type: string }
+        orgName: { type: [string, 'null'] }
+        score: { type: number, minimum: 0, maximum: 100 }
+        matchReasons:
+          type: array
+          items: { type: string }
+        modelVersionLabel: { type: string }
+    AchievementEvaluation:
+      type: object
+      description: 四维评分对齐演示版维度（技术特点/应用范围/成熟度/合作可行性）
+      properties:
+        id: { type: integer, format: int64 }
+        achievementId: { type: integer, format: int64 }
+        scoreTech: { type: number, minimum: 0, maximum: 100 }
+        scoreApplication: { type: number, minimum: 0, maximum: 100 }
+        scoreMaturity: { type: number, minimum: 0, maximum: 100 }
+        scoreFeasibility: { type: number, minimum: 0, maximum: 100 }
+        totalScore: { type: number, minimum: 0, maximum: 100 }
+        summary: { type: [string, 'null'] }
+        suggestions:
+          type: array
+          items: { type: string }
+        modelVersionLabel: { type: string }
+        inputDataVersion: { type: string }
+        createdAt: { type: string, format: date-time }
+    AsyncTaskCreated:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/AiTaskStatus' }
+    MatchTaskResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/AiTaskStatus' }
+        results:
+          type: [array, 'null']
+          items:
+            $ref: '#/components/schemas/MatchItem'
+        failReason: { type: [string, 'null'] }
+        modelVersionLabel: { type: [string, 'null'] }
+        inputDataVersion: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+    EvaluationTaskResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/AiTaskStatus' }
+        evaluation:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/AchievementEvaluation'
+        failReason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+    CapitalPlatform:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        platformType:
+          type: string
+          enum: [poc, pilot]
+        supportUnit: { type: [string, 'null'] }
+        functions: { type: [string, 'null'] }
+        contactPerson: { type: [string, 'null'] }
+        contactMobile: { type: [string, 'null'] }
+        sourceSite: { type: [string, 'null'] }
+    CapitalOrganization:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        orgKind:
+          type: string
+          enum: [invest, financial, service]
+        name: { type: string }
+        intro: { type: [string, 'null'] }
+        detailInfo: { type: [string, 'null'] }
+        label: { type: [string, 'null'] }
+        logoUrl: { type: [string, 'null'] }
+        sortOrder: { type: integer }
+    PatentSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        publicationNo: { type: string }
+        title: { type: string }
+        patentType: { $ref: '#/components/schemas/PatentType' }
+        applicant: { type: [string, 'null'] }
+        applyDate: { type: [string, 'null'], format: date }
+        legalStatus: { $ref: '#/components/schemas/PatentLegalStatus' }
+    PatentDetail:
+      allOf:
+        - $ref: '#/components/schemas/PatentSummary'
+        - type: object
+          properties:
+            feeReducedLevel:
+              type: string
+              enum: [standard, reduce_70, reduce_85]
+            annualFees:
+              type: array
+              description: 各年度年费（服务端费率规则计算，迁移自 patent-fee.js）
+              items:
+                type: object
+                properties:
+                  year: { type: integer }
+                  feeWan: { type: number }
+            latestPayDate: { type: [string, 'null'], format: date }
+    UploadPresignResult:
+      type: object
+      properties:
+        uploadId: { type: integer, format: int64 }
+        uploadUrl: { type: string }
+        uploadMethod: { type: string, enum: [PUT, POST] }
+        expireAt: { type: string, format: date-time }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+    UploadCompleteResult:
+      type: object
+      properties:
+        fileId: { type: integer, format: int64 }
+        url: { type: string }
+    VersionRequest:
+      type: object
+      required: [version]
+      description: 状态流转通用请求体（乐观锁）
+      properties:
+        version: { type: integer, minimum: 1 }
+    AdminReviewAction:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        remark: { type: string, maxLength: 500 }
+    AdminReviewReject:
+      type: object
+      required: [version, reason]
+      properties:
+        version: { type: integer, minimum: 1 }
+        reason: { type: string, maxLength: 500 }
+    ReviewQueueItem:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        submitterDisplayName: { type: [string, 'null'] }
+        submittedAt: { type: string, format: date-time }
+        version: { type: integer }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        requestId: { type: string }
+        actorUserId: { type: [integer, 'null'], format: int64 }
+        actorRole: { type: [string, 'null'] }
+        action: { type: string }
+        targetType: { type: [string, 'null'] }
+        targetId: { type: [integer, 'null'], format: int64 }
+        createdAt: { type: string, format: date-time }

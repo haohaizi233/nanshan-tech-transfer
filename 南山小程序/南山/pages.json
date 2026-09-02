@@ -1,0 +1,172 @@
+{
+	"pages": [
+		{
+			"path": "pages/dev-home/dev-home",
+			"style": {
+				"navigationBarTitleText": "南山科转通",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black",
+				"backgroundColor": "#F5F6F8"
+			}
+		},
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationBarTitleText": "南山科转通",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black",
+				"backgroundColor": "#F5F6F8"
+			}
+		},
+		{
+			"path": "pages/ai-match/ai-match",
+			"style": {
+				"navigationBarTitleText": "AI匹配",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black",
+				"backgroundColor": "#F5F6F8"
+			}
+		},
+		{
+			"path": "pages/mine/mine",
+			"style": {
+				"navigationBarTitleText": "我的",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black",
+				"backgroundColor": "#F5F6F8"
+			}
+		},
+		{
+			"path": "pages/capital-list/capital-list",
+			"style": {
+				"navigationBarTitleText": "资本对接",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black",
+				"backgroundColor": "#F5F6F8"
+			}
+		}
+	],
+	"subPackages": [
+		{
+			"root": "subpackages/tech-transfer",
+			"pages": [
+				{
+					"path": "pages/mine/mine",
+					"style": {
+						"navigationBarTitleText": "我的",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				}
+			]
+		},
+		{
+			"root": "packageA",
+			"pages": [
+				{
+					"path": "search/search",
+					"style": {
+						"navigationBarTitleText": "搜索",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "dock-detail/dock-detail",
+					"style": {
+						"navigationBarTitleText": "对接详情",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "post-demand/post-demand",
+					"style": {
+						"navigationBarTitleText": "发布需求",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "post-result/post-result",
+					"style": {
+						"navigationBarTitleText": "发布成果",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "fee-detail/fee-detail",
+					"style": {
+						"navigationBarTitleText": "年费详情",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "my-list/my-list",
+					"style": {
+						"navigationBarTitleText": "我的内容",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "ai-eval-detail/ai-eval-detail",
+					"style": {
+						"navigationBarTitleText": "AI 评估结果",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				}
+			]
+		}
+	],
+	"preloadRule": {
+		"pages/dev-home/dev-home": {
+			"network": "all",
+			"packages": ["subpackages/tech-transfer"]
+		}
+	},
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "南山科转通",
+		"navigationBarBackgroundColor": "#FFFFFF",
+		"backgroundColor": "#F5F6F8"
+	},
+	"tabBar": {
+		"color": "#999999",
+		"selectedColor": "#2B73F8",
+		"backgroundColor": "#FFFFFF",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/dev-home/dev-home",
+				"text": "首页",
+				"iconPath": "static/tab/home.png",
+				"selectedIconPath": "static/tab/home-active.png"
+			},
+			{
+				"pagePath": "pages/index/index",
+				"text": "科转通",
+				"iconPath": "static/tab/ai.png",
+				"selectedIconPath": "static/tab/ai-active.png"
+			},
+			{
+				"pagePath": "pages/mine/mine",
+				"text": "我的",
+				"iconPath": "static/tab/mine.png",
+				"selectedIconPath": "static/tab/mine-active.png"
+			}
+		]
+	},
+	"uniIdRouter": {}
+}

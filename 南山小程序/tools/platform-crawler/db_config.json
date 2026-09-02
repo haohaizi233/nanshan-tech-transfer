@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 3306,
+  "user": "root",
+  "password": "123456",
+  "database": "nanshan_capital",
+  "table": "platform_base",
+  "note": "已配置为本机 MySQL（root）。建表语句见 schema_platform_base.sql，数据见 platform_base_data.json，可用 tools/import_data.py 重新导入。"
+}
