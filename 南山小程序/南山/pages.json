@@ -49,17 +49,36 @@
 	"subPackages": [
 		{
 			"root": "subpackages/tech-transfer",
-			"pages": [
-				{
-					"path": "pages/mine/mine",
-					"style": {
-						"navigationBarTitleText": "我的",
-						"navigationBarBackgroundColor": "#FFFFFF",
-						"navigationBarTextStyle": "black",
-						"backgroundColor": "#F5F6F8"
+				"pages": [
+					{
+						"path": "pages/mine/mine",
+						"style": {
+							"navigationBarTitleText": "我的",
+							"navigationBarBackgroundColor": "#FFFFFF",
+							"navigationBarTextStyle": "black",
+							"backgroundColor": "#F5F6F8"
+						}
+					},
+					{
+						"path": "pages/achievement-list/achievement-list",
+						"style": {
+							"navigationBarTitleText": "科技成果",
+							"navigationBarBackgroundColor": "#FFFFFF",
+							"navigationBarTextStyle": "black",
+							"backgroundColor": "#F5F6F8",
+							"enablePullDownRefresh": true
+						}
+					},
+					{
+						"path": "pages/achievement-detail/achievement-detail",
+						"style": {
+							"navigationBarTitleText": "成果详情",
+							"navigationBarBackgroundColor": "#FFFFFF",
+							"navigationBarTextStyle": "black",
+							"backgroundColor": "#F5F6F8"
+						}
 					}
-				}
-			]
+				]
 		},
 		{
 			"root": "packageA",

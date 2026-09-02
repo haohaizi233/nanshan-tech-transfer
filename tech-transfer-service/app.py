@@ -35,6 +35,7 @@ from core.errors import BizError
 from db import get_conn, get_cursor
 from routes.auth import bp as auth_bp
 from routes.me import bp as me_bp
+from routes.achievement import bp as achievement_bp
 
 assert_environment()
 
@@ -43,6 +44,7 @@ CORS(app)
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(me_bp)
+app.register_blueprint(achievement_bp)
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────
 @app.before_request

@@ -1,0 +1,128 @@
+"""
+成果只读链路 API 测试
+覆盖：分页、详情、搜索、分类、权限、空数据、错误状态
+"""
+import requests
+import json
+
+BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
+PASS = 0
+FAIL = 0
+
+
+def check(name, condition, detail=""):
+    global PASS, FAIL
+    if condition:
+        PASS += 1
+        print(f"  [PASS] {name}")
+    else:
+        FAIL += 1
+        print(f"  [FAIL] {name} — {detail}")
+
+
+# ── 0. 获取 token ──────────────────────────────────────────
+resp = requests.post(f"{BASE}/auth/bootstrap",
+    json={"hostCredential": "local-dev-ticket-test-user"}, timeout=10)
+token = resp.json()["data"]["accessToken"]
+headers = {"Authorization": f"Bearer {token}"}
+print(f"[0] Bootstrap OK, token acquired\n")
+
+# ── 1. 成果列表 — 默认分页 ──────────────────────────────────
+resp = requests.get(f"{BASE}/achievements", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("列表返回200", resp.status_code == 200)
+check("total=223", data["total"] == 223, f"got {data['total']}")
+check("默认page=1", data["page"] == 1)
+check("默认pageSize=10", data["pageSize"] == 10)
+check("totalPages=23", data["totalPages"] == 23, f"got {data['totalPages']}")
+check("list长度=10", len(data["list"]) == 10, f"got {len(data['list'])}")
+check("列表项有title", bool(data["list"][0].get("title")))
+check("列表项有id", bool(data["list"][0].get("id")))
+print()
+
+# ── 2. 分页 — 第2页 ─────────────────────────────────────────
+resp = requests.get(f"{BASE}/achievements?page=2&pageSize=20", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("第2页page=2", data["page"] == 2)
+check("pageSize=20", data["pageSize"] == 20)
+check("第2页list长度=20", len(data["list"]) == 20)
+check("第2页与第1页不同", data["list"][0]["id"] != requests.get(f"{BASE}/achievements?page=1&pageSize=20", headers=headers, timeout=10).json()["data"]["list"][0]["id"])
+print()
+
+# ── 3. 关键词搜索 ───────────────────────────────────────────
+resp = requests.get(f"{BASE}/achievements?keyword=电池", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("搜索'电池'有结果", data["total"] > 0, f"got {data['total']}")
+for item in data["list"]:
+    assert "电池" in item["title"] or "电池" in item.get("techIntro", ""), f"不匹配: {item['title']}"
+check("搜索结果均含'电池'", True)
+print()
+
+# ── 4. 分类筛选 ─────────────────────────────────────────────
+resp = requests.get(f"{BASE}/achievements?category=new_material", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("分类筛选new_material有结果", data["total"] > 0)
+check("分类筛选结果categoryCode=new_material", all(item["categoryCode"] == "new_material" for item in data["list"]))
+print()
+
+# ── 5. 分类列表 ──────────────────────────────────────────────
+resp = requests.get(f"{BASE}/achievements/categories", headers=headers, timeout=10)
+cats = resp.json()["data"]
+check("分类列表返回200", resp.status_code == 200)
+check("分类数=10", len(cats) == 10, f"got {len(cats)}")
+check("分类有code和name", bool(cats[0].get("code")) and bool(cats[0].get("name")))
+print()
+
+# ── 6. 成果详情 ─────────────────────────────────────────────
+resp = requests.get(f"{BASE}/achievements/1", headers=headers, timeout=10)
+detail = resp.json()["data"]
+check("详情返回200", resp.status_code == 200)
+check("详情有title", bool(detail.get("title")))
+check("详情有techIntro", bool(detail.get("techIntro")))
+check("详情有maturityLevel", bool(detail.get("maturityLevel")))
+check("详情有inventors", isinstance(detail.get("inventors"), list) and len(detail["inventors"]) > 0)
+check("详情有applicationFields", isinstance(detail.get("applicationFields"), list))
+check("详情有innovationPoints", isinstance(detail.get("innovationPoints"), list))
+print()
+
+# ── 7. 不存在的成果 ─────────────────────────────────────────
+resp = requests.get(f"{BASE}/achievements/99999", headers=headers, timeout=10)
+check("不存在成果返回data=null", resp.json().get("data") is None)
+print()
+
+# ── 8. 搜索接口 ─────────────────────────────────────────────
+resp = requests.get(f"{BASE}/search?type=achievement&keyword=AI", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("搜索接口type=achievement返回结果", data["total"] > 0)
+check("搜索接口有分页结构", "page" in data and "totalPages" in data)
+print()
+
+# ── 9. 搜索接口 — 非成果类型 ────────────────────────────────
+resp = requests.get(f"{BASE}/search?type=demand", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("非achievement类型返回空", data["total"] == 0)
+print()
+
+# ── 10. 权限 — 无Token访问 ──────────────────────────────────
+resp = requests.get(f"{BASE}/achievements", timeout=10)
+check("无Token访问成果列表=401", resp.status_code == 401)
+resp = requests.get(f"{BASE}/achievements/1", timeout=10)
+check("无Token访问成果详情=401", resp.status_code == 401)
+print()
+
+# ── 11. 空数据 — 搜索不存在的关键词 ──────────────────────────
+resp = requests.get(f"{BASE}/achievements?keyword=zzzznonexistent", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("不存在的关键词=0结果", data["total"] == 0)
+check("空结果list=[]", data["list"] == [])
+check("空结果totalPages=0", data["totalPages"] == 0)
+print()
+
+# ── 12. 分页边界 — 超出总页数 ────────────────────────────────
+resp = requests.get(f"{BASE}/achievements?page=999", headers=headers, timeout=10)
+data = resp.json()["data"]
+check("超出页数返回空list", data["list"] == [])
+check("但total仍=223", data["total"] == 223)
+print()
+
+print(f"=== 成果 API 测试完成: {PASS} passed, {FAIL} failed ===")

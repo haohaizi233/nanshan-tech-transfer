@@ -103,39 +103,42 @@
 			</block>
 
 			<!-- 成果卡片（高校成果） -->
-			<block v-if="currentTabKey === 'result'">
-				<view
-					v-for="item in resultList"
-					:key="item.id"
-					class="card"
-					@click="openDetail('result', item.id)"
-				>
-					<view class="card-head">
-						<text class="card-title">{{ item.title }}</text>
-						<text
-							:class="item.favorited ? 'star-btn star-on' : 'star-btn'"
-							@click.stop="onToggleFavorite('result', item)"
-						>{{ item.favorited ? '★' : '☆' }}</text>
-					</view>
-					<view class="meta-row">
-						<view class="meta-item meta-item-full">
-							<text class="meta-label">来源</text>
-							<text class="meta-value">{{ item.source }}</text>
+				<block v-if="currentTabKey === 'result'">
+					<view
+						v-for="item in resultList"
+						:key="item.id"
+						class="card"
+						@click="openDetail('result', item.id)"
+					>
+						<view class="card-head">
+							<text class="card-title">{{ item.title }}</text>
+							<text
+								:class="item.favorited ? 'star-btn star-on' : 'star-btn'"
+								@click.stop="onToggleFavorite('result', item)"
+							>{{ item.favorited ? '★' : '☆' }}</text>
+						</view>
+						<view class="meta-row">
+							<view class="meta-item meta-item-full">
+								<text class="meta-label">来源</text>
+								<text class="meta-value">{{ item.source }}</text>
+							</view>
+						</view>
+						<view class="info-block">
+							<text class="info-label">技术简介</text>
+							<text class="info-text">{{ item.techIntro }}</text>
+						</view>
+						<view class="price-row">
+							<text class="price-label">期望报价</text>
+							<text class="price-value">{{ item.price }}</text>
+						</view>
+						<view v-if="item.canDock" class="card-foot">
+							<button class="dock-btn" size="mini" @click.stop="openDetail('result', item.id)">我要对接</button>
 						</view>
 					</view>
-					<view class="info-block">
-						<text class="info-label">技术简介</text>
-						<text class="info-text">{{ item.techIntro }}</text>
+					<view v-if="resultList.length > 0" class="view-all-link" @click="goAchievementList">
+						<text class="view-all-text">查看全部成果</text>
 					</view>
-					<view class="price-row">
-						<text class="price-label">期望报价</text>
-						<text class="price-value">{{ item.price }}</text>
-					</view>
-					<view v-if="item.canDock" class="card-foot">
-						<button class="dock-btn" size="mini" @click.stop="openDetail('result', item.id)">我要对接</button>
-					</view>
-				</view>
-			</block>
+				</block>
 
 			<!-- 资本对接 -->
 			<block v-if="currentTabKey === 'capital'">
@@ -173,10 +176,26 @@
 </template>
 
 <script>
-	import { getAllDemands, getAllResults } from '../../common/mock-data.js'
+	import { getAllDemands } from '../../common/mock-data.js'
 	import { ensureLoginForDock, isFavorite, toggleFavorite, canProposeDock } from '../../common/user.js'
 	import { getCapitalGroups } from '../../common/capital.js'
 	import { openExternalSearchMiniProgram } from '../../common/external-miniprogram.js'
+	import { getAchievements } from '../../subpackages/tech-transfer/api/achievement.js'
+
+	const PRICING_LABELS = {
+		'negotiable': '面议',
+		'license': '许可',
+		'transfer': '转让',
+		'cooperation': '合作',
+	}
+
+	function formatAchPrice(item) {
+		if (item.pricingMode === 'negotiable' || !item.priceMinWan) return PRICING_LABELS[item.pricingMode] || '面议'
+		const min = item.priceMinWan
+		const max = item.priceMaxWan
+		if (min && max) return `${min}–${max} 万`
+		return `${min} 万`
+	}
 
 	export default {
 		data() {
@@ -238,17 +257,27 @@
 			this.refreshList()
 		},
 		methods: {
-			refreshList() {
+			async refreshList() {
 				this.demandList = getAllDemands().map((item) => ({
 					...item,
 					favorited: isFavorite('demand', item.id),
 					canDock: canProposeDock('demand', item)
 				}))
-				this.resultList = getAllResults().map((item) => ({
-					...item,
-					favorited: isFavorite('result', item.id),
-					canDock: canProposeDock('result', item)
-				}))
+				try {
+					const data = await getAchievements({ page: 1, pageSize: 10 })
+					this.resultList = (data.list || []).map((item) => ({
+						id: String(item.id),
+						title: item.title,
+						source: item.sourceOrgName || '',
+						techIntro: item.techIntro || '',
+						price: formatAchPrice(item),
+						favorited: isFavorite('result', String(item.id)),
+						canDock: canProposeDock('result', { id: String(item.id) })
+					}))
+				} catch (e) {
+					console.error('[index] loadAchievements failed:', e)
+					this.resultList = []
+				}
 			},
 			switchTab(index) {
 				const tab = this.tabs[index]
@@ -312,8 +341,19 @@
 			},
 			openDetail(type, id) {
 				if (!ensureLoginForDock()) return
+				if (type === 'result') {
+					uni.navigateTo({
+						url: '/subpackages/tech-transfer/pages/achievement-detail/achievement-detail?id=' + id
+					})
+					return
+				}
 				uni.navigateTo({
 					url: '/packageA/dock-detail/dock-detail?type=' + type + '&id=' + id
+				})
+			},
+			goAchievementList() {
+				uni.navigateTo({
+					url: '/subpackages/tech-transfer/pages/achievement-list/achievement-list'
 				})
 			}
 		}
@@ -655,6 +695,18 @@
 		margin: 0;
 		padding: 0 28rpx;
 		line-height: 60rpx;
+	}
+
+	.view-all-link {
+		display: flex;
+		justify-content: center;
+		padding: 24rpx 0;
+	}
+
+	.view-all-text {
+		font-size: 28rpx;
+		color: #2b73f8;
+		font-weight: 500;
 	}
 
 	.capital-group {

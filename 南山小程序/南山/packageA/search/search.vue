@@ -94,7 +94,7 @@
 </template>
 
 <script>
-	import { getAllDemands, getAllResults } from '../../common/mock-data.js'
+	import { getAllDemands } from '../../common/mock-data.js'
 	import {
 		getDemandSearchHistory,
 		getResultSearchHistory,
@@ -102,10 +102,10 @@
 		addResultSearchHistory,
 		clearDemandSearchHistory,
 		clearResultSearchHistory,
-		filterDemands,
-		filterResults
+		filterDemands
 	} from '../../common/search.js'
 	import { ensureLoginForDock, canProposeDock } from '../../common/user.js'
+	import { searchAchievements } from '../../subpackages/tech-transfer/api/achievement.js'
 
 	export default {
 		data() {
@@ -137,11 +137,16 @@
 		},
 		onLoad() {
 			this.loadHistory()
-			this.applyFilter('')
+			this.applyDemandFilter('')
+			this.loadResults('')
 		},
 		onShow() {
 			this.loadHistory()
-			this.applyFilter(this.keyword)
+			if (this.searchType === 0) {
+				this.applyDemandFilter(this.keyword)
+			} else {
+				this.loadResults(this.keyword)
+			}
 		},
 		methods: {
 			loadHistory() {
@@ -151,22 +156,39 @@
 			switchType(type) {
 				this.searchType = type
 				this.keyword = ''
-				this.applyFilter('')
+				if (type === 0) {
+					this.applyDemandFilter('')
+				} else {
+					this.loadResults('')
+				}
 			},
-			applyFilter(kw) {
+			applyDemandFilter(kw) {
 				const key = (kw || '').trim()
 				this.demandList = filterDemands(getAllDemands(), key).map((item) => ({
 					...item,
 					canDock: canProposeDock('demand', item)
 				}))
-				this.resultList = filterResults(getAllResults(), key).map((item) => ({
-					...item,
-					canDock: canProposeDock('result', item)
-				}))
+			},
+			async loadResults(keyword) {
+				try {
+					const data = await searchAchievements({ keyword: keyword || '', page: 1, pageSize: 50 })
+					this.resultList = (data.list || []).map((item) => ({
+						id: String(item.id),
+						title: item.title,
+						source: item.sourceOrgName || '',
+						techIntro: item.techIntro || '',
+						canDock: canProposeDock('result', { id: String(item.id) })
+					}))
+				} catch (e) {
+					console.error('[search] loadResults failed:', e)
+					this.resultList = []
+				}
 			},
 			onInput(e) {
 				this.keyword = e.detail.value
-				this.applyFilter(this.keyword)
+				if (this.searchType === 0) {
+					this.applyDemandFilter(this.keyword)
+				}
 			},
 			onConfirmSearch() {
 				const kw = (this.keyword || '').trim()
@@ -175,7 +197,11 @@
 					return
 				}
 				this.keyword = kw
-				this.applyFilter(kw)
+				if (this.searchType === 0) {
+					this.applyDemandFilter(kw)
+				} else {
+					this.loadResults(kw)
+				}
 				this.saveHistory(kw)
 			},
 			saveHistory(kw) {
@@ -207,6 +233,12 @@
 			},
 			openDetail(type, id) {
 				if (!ensureLoginForDock()) return
+				if (type === 'result') {
+					uni.navigateTo({
+						url: '/subpackages/tech-transfer/pages/achievement-detail/achievement-detail?id=' + id
+					})
+					return
+				}
 				uni.navigateTo({
 					url: '/packageA/dock-detail/dock-detail?type=' + type + '&id=' + id
 				})

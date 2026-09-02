@@ -1,6 +1,6 @@
 /**
  * 首页与对接详情页共用演示数据
- * 后续对接接口时，可替换为 uni.request 结果
+ * 成果数据已迁移至后端 API，resultList Mock 已移除
  */
 
 import { isDemandSuccessfullyMatched } from './user.js'
@@ -53,60 +53,6 @@ export const demandList = [
 		phone: '13700003333',
 		email: 'chen@ns-medtech.com',
 		wechat: 'ns_med_chen'
-	}
-]
-
-export const resultList = [
-	{
-		id: 'r1',
-		title: '二维黑磷半导体材料制备技术',
-		source: '中国科学院深圳先进技术研究院',
-		techIntro: '面向光电与传感应用的二维黑磷制备与稳定化工艺，具备较好的迁移率与可加工性，适合中小试放大。',
-		price: '洽谈 / 技术许可',
-		purpose: '可用于光电探测器、柔性传感器、高性能晶体管等器件制备，服务半导体与传感产业升级。',
-		techPath: '原材料纯化 → 液相剥离/化学气相沉积制备 → 表面钝化与封装稳定化 → 器件级验证与工艺放大。',
-		patentHolder: '中国科学院深圳先进技术研究院',
-		patentNo: '演示专利号 ZL2023XXXXXXX.1',
-		maturity: '实验室验证完成，可进入中试',
-		contactName: '赵老师',
-		contactTitle: '成果转化联系人',
-		phone: '13600004444',
-		email: 'zhao@siat.ac.cn',
-		wechat: 'siat_zhao'
-	},
-	{
-		id: 'r2',
-		title: '工业机器人柔顺力控算法包',
-		source: '南方科技大学 · 机器人研究所',
-		techIntro: '适用于装配、打磨等接触式作业场景，可降低碰撞风险并提升装配一次成功率，支持主流工业控制器对接。',
-		price: '期望 60–90 万',
-		purpose: '面向 3C、汽车零部件等精密装配与打磨产线，提升人机协作安全性与装配良率。',
-		techPath: '力/力矩传感采集 → 阻抗/导纳控制建模 → 在线柔顺策略优化 → 工业控制器二次开发与现场标定。',
-		patentHolder: '南方科技大学',
-		patentNo: '演示专利号 ZL2022XXXXXXX.8',
-		maturity: '已完成产线试点验证',
-		contactName: '周老师',
-		contactTitle: '技术成果联系人',
-		phone: '13500005555',
-		email: 'zhou@sustech.edu.cn',
-		wechat: 'sustech_zhou'
-	},
-	{
-		id: 'r3',
-		title: '低成本海水淡化膜材料与组件',
-		source: '中山大学 · 材料科学与工程学院',
-		techIntro: '提升抗污染与使用寿命，降低运维成本，已完成实验室验证，可提供样品与工艺指导。',
-		price: '期望 40 万起',
-		purpose: '用于沿海工业用水、海岛供水等场景，降低淡化系统膜更换频率与整体运维成本。',
-		techPath: '膜基材改性 → 抗污染功能层构建 → 组件封装与通量测试 → 中试线工艺参数固化。',
-		patentHolder: '中山大学',
-		patentNo: '演示专利号 ZL2021XXXXXXX.3',
-		maturity: '实验室验证完成，可提供样品',
-		contactName: '吴老师',
-		contactTitle: '专利转化联系人',
-		phone: '13400006666',
-		email: 'wu@mail.sysu.edu.cn',
-		wechat: 'sysu_wu'
 	}
 ]
 
@@ -171,7 +117,7 @@ export function getAllDemands() {
 }
 
 export function getAllResults() {
-	return getUserResults().concat(resultList)
+	return getUserResults()
 }
 
 export function addDemand(item) {
@@ -197,7 +143,7 @@ function getRawDemands() {
 }
 
 function getRawResults() {
-	return getUserResults().concat(resultList)
+	return getUserResults()
 }
 
 export function getDemandById(id) {
