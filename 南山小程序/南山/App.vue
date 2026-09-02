@@ -1,5 +1,5 @@
 <script>
-	import HostBridge from './subpackages/tech-transfer/runtime/host-bridge.js'
+	import HostBridge from './host/host-bridge.js'
 	import LocalAdapter from './host/local-adapter.js'
 	import { assertEnvironment } from './config/env-check.js'
 

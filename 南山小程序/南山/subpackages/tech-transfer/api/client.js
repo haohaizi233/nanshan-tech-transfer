@@ -5,7 +5,7 @@
  * 解包 code!==0 → 按 error-codes.js 抛业务错误
  */
 
-import HostBridge from '../runtime/host-bridge.js'
+import HostBridge from '../../../host/host-bridge.js'
 import {
   TT_COMMON_40102,
   TT_AUTH_40103,
