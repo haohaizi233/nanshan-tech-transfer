@@ -93,7 +93,7 @@
 </template>
 
 <script>
-import { getAchievements, getAchievementCategories } from '../../api/achievement.js'
+import { getAchievements, getAchievementCategories } from '../../../../common/achievement-api.js'
 
 const MATURITY_LABELS = {
   '01_idea': '概念阶段',

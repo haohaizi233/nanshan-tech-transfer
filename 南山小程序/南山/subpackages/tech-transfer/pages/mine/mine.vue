@@ -5,7 +5,7 @@
       <text>正在加载...</text>
     </view>
 
-    <!-- 已加载 -->
+    <!-- 已加载：个人资料 -->
     <view v-else-if="user" class="profile-box">
       <view class="avatar-box">
         <image class="avatar" src="/static/logo.png" mode="aspectFill" />
@@ -76,7 +76,7 @@
     </view>
 
     <!-- 未登录 -->
-    <view v-else class="login-box">
+    <view v-if="!loading && !user" class="login-box">
       <text class="login-tip">本地开发环境，点击下方按钮自动登录</text>
       <button class="btn-primary" @tap="handleLogin">进入科转通</button>
     </view>
@@ -84,8 +84,7 @@
 </template>
 
 <script>
-import { getCachedUser, getCurrentUser, updateMyProfile, logout } from '../../api/me.js'
-import { TT_COMMON_40902 } from '../../constants/error-codes.js'
+import { getCachedUser, getCurrentUser, updateMyProfile, logout } from '../../../../common/me-api.js'
 
 const USER_TYPE_OPTIONS = [
   { label: '请选择', value: '' },
@@ -184,12 +183,7 @@ export default {
         this.editMode = false
         uni.showToast({ title: '保存成功', icon: 'success' })
       } catch (e) {
-        if (e.code === TT_COMMON_40902) {
-          uni.showToast({ title: '数据已变更，请刷新后重试', icon: 'none' })
-          await this.loadUser()
-        } else {
-          uni.showToast({ title: '保存失败: ' + (e.message || ''), icon: 'none' })
-        }
+        uni.showToast({ title: '保存失败: ' + (e.message || ''), icon: 'none' })
       } finally {
         this.saving = false
       }
