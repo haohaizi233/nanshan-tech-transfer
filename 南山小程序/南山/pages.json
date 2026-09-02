@@ -3,7 +3,7 @@
 		{
 			"path": "pages/dev-home/dev-home",
 			"style": {
-				"navigationBarTitleText": "南山科转通",
+				"navigationBarTitleText": "本地开发宿主",
 				"navigationBarBackgroundColor": "#FFFFFF",
 				"navigationBarTextStyle": "black",
 				"backgroundColor": "#F5F6F8"
@@ -168,14 +168,14 @@
 		"borderStyle": "black",
 		"list": [
 			{
-				"pagePath": "pages/dev-home/dev-home",
+				"pagePath": "pages/index/index",
 				"text": "首页",
 				"iconPath": "static/tab/home.png",
 				"selectedIconPath": "static/tab/home-active.png"
 			},
 			{
-				"pagePath": "pages/index/index",
-				"text": "科转通",
+				"pagePath": "pages/ai-match/ai-match",
+				"text": "AI匹配",
 				"iconPath": "static/tab/ai.png",
 				"selectedIconPath": "static/tab/ai-active.png"
 			},

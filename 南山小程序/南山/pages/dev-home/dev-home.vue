@@ -2,34 +2,33 @@
   <view class="dev-home">
     <view class="dev-header">
       <text class="dev-title">南山科转通 · 本地开发宿主</text>
-      <text class="dev-env">APP_ENV=local · HOST_MODE=local · AUTH_PROVIDER=mock</text>
+      <text class="dev-env">HOST_MODE=local · AUTH_PROVIDER=mock</text>
     </view>
 
-    <view class="dev-section">
-      <view class="dev-card" @tap="goTo('/subpackages/tech-transfer/pages/mine/mine')">
-        <text class="card-title">我的</text>
-        <text class="card-desc">身份引导 · 个人资料 · 登录/注销</text>
-      </view>
-
+    <view class="dev-cards">
       <view class="dev-card" @tap="goTo('/pages/index/index')">
-        <text class="card-title">首页（旧）</text>
-        <text class="card-desc">原演示首页，待迁移至分包</text>
+        <view class="card-icon"><text class="card-icon-text">首</text></view>
+        <text class="card-title">首页</text>
+        <text class="card-desc">成果 · 需求 · 资本对接</text>
       </view>
 
-      <view class="dev-card" @tap="goTo('/pages/capital-list/capital-list')">
-        <text class="card-title">资本对接（旧）</text>
-        <text class="card-desc">原资本列表页，待迁移至分包</text>
+      <view class="dev-card" @tap="goTo('/pages/ai-match/ai-match')">
+        <view class="card-icon"><text class="card-icon-text">AI</text></view>
+        <text class="card-title">AI 匹配</text>
+        <text class="card-desc">需求描述 → 成果匹配</text>
+      </view>
+
+      <view class="dev-card" @tap="goTo('/subpackages/tech-transfer/pages/mine/mine')">
+        <view class="card-icon"><text class="card-icon-text">我</text></view>
+        <text class="card-title">我的</text>
+        <text class="card-desc">身份引导 · 个人资料</text>
       </view>
     </view>
 
-    <view class="dev-section">
-      <text class="section-title">后端状态</text>
-      <view class="dev-card">
-        <text class="card-desc">API: http://127.0.0.1:8787/api/tech-transfer/v1</text>
-        <text class="card-desc" :class="{ ok: healthOk, fail: !healthOk }">
-          {{ healthOk ? '✓ 后端连接正常' : '✗ 后端未响应' }}
-        </text>
-      </view>
+    <view class="dev-footer">
+      <text class="footer-text" :class="{ ok: healthOk, fail: !healthOk }">
+        {{ healthOk ? '✓ 后端正常' : '✗ 后端未响应' }} · http://127.0.0.1:8787
+      </text>
     </view>
   </view>
 </template>
@@ -74,52 +73,80 @@ export default {
 .dev-home {
   min-height: 100vh;
   background: #F5F6F8;
-  padding: 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 32rpx;
 }
 .dev-header {
   text-align: center;
-  margin-bottom: 40rpx;
-  padding-top: 40rpx;
+  margin-top: 120rpx;
+  margin-bottom: 80rpx;
 }
 .dev-title {
   display: block;
-  font-size: 36rpx;
+  font-size: 40rpx;
   font-weight: bold;
   color: #333;
-  margin-bottom: 12rpx;
+  margin-bottom: 16rpx;
 }
 .dev-env {
   font-size: 22rpx;
   color: #999;
 }
-.dev-section {
-  margin-bottom: 32rpx;
-}
-.section-title {
-  display: block;
-  font-size: 28rpx;
-  color: #666;
-  margin-bottom: 16rpx;
-  padding-left: 8rpx;
+.dev-cards {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
 }
 .dev-card {
+  flex: 1;
   background: #fff;
-  border-radius: 16rpx;
-  padding: 32rpx;
-  margin-bottom: 16rpx;
+  border-radius: 20rpx;
+  padding: 40rpx 20rpx;
+  margin: 0 8rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.card-icon {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  background: #2B73F8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20rpx;
+}
+.card-icon-text {
+  font-size: 32rpx;
+  color: #fff;
+  font-weight: bold;
 }
 .card-title {
   display: block;
-  font-size: 32rpx;
+  font-size: 30rpx;
   font-weight: 500;
   color: #333;
   margin-bottom: 8rpx;
 }
 .card-desc {
   display: block;
-  font-size: 24rpx;
+  font-size: 20rpx;
+  color: #999;
+  text-align: center;
+}
+.dev-footer {
+  margin-top: auto;
+  margin-bottom: 60rpx;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.footer-text {
+  font-size: 22rpx;
   color: #999;
 }
-.ok { color: #4caf50 !important; }
-.fail { color: #f44336 !important; }
+.ok { color: #4caf50; }
+.fail { color: #f44336; }
 </style>
