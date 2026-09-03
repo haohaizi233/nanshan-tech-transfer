@@ -184,7 +184,7 @@ def get_achievement_detail(ach_id: int):
 def list_categories():
     with get_cursor() as cur:
         cur.execute(
-            "SELECT id, code, name, sort_order FROM achievement_category WHERE enabled=1 ORDER BY sort_order"
+            "SELECT id, code, name, sort_order FROM achievement_category WHERE enabled ORDER BY sort_order"
         )
         rows = cur.fetchall() or []
     return [

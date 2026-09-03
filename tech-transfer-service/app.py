@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 
 from fastapi import FastAPI, Request
@@ -18,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from config import assert_environment, API_PREFIX
+from config import assert_environment, API_PREFIX, APP_ENV
 from core.response import success, error, set_request_id
 from core.errors import BizError
 from db import get_cursor
@@ -35,11 +36,28 @@ assert_environment()
 
 app = FastAPI(title="tech-transfer-service", docs_url=None, redoc_url=None, openapi_url=None)
 
+
+def _build_cors() -> tuple[list[str], str | None]:
+    """返回 (allow_origins, allow_origin_regex)。
+
+    local：H5 dev server 固定 5173 端口，主机名不限（127.0.0.1/localhost/局域网 IP），
+           局域网真机浏览器经 LAN IP 访问时 Origin 不可预知，用 regex 覆盖。
+    staging/production：仅 CORS_ORIGINS 环境变量显式白名单，无 regex，禁止通配。
+    """
+    raw = os.environ.get("CORS_ORIGINS", "")
+    explicit = [o.strip() for o in raw.split(",") if o.strip()]
+    if APP_ENV in ("staging", "production"):
+        return explicit, None
+    return explicit, r"^https?://(localhost|127\.0\.0\.1|\d{1,3}(\.\d{1,3}){3}):5173$"
+
+
+_cors_origins, _cors_regex = _build_cors()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_regex,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id", "X-Idempotency-Key"],
 )
 
 app.include_router(auth_router)
@@ -96,6 +114,8 @@ def health():
             "code": 0,
             "message": "ok",
             "data": {
+                "status": "ok",
+                "database": "ok",
                 "db": True,
                 "appUsers": user_count,
                 "authProvider": _cfg.AUTH_PROVIDER,
@@ -103,7 +123,11 @@ def health():
             },
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"code": 1, "message": str(e), "data": {"db": False}})
+        return JSONResponse(status_code=200, content={
+            "code": 1,
+            "message": str(e),
+            "data": {"status": "degraded", "database": "unavailable", "db": False},
+        })
 
 
 if __name__ == "__main__":

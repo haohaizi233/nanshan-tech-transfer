@@ -87,7 +87,7 @@ def add_favorite(user_id: int, user_no: str, target_type: str, target_id: int, r
             raise favorite_not_found()
 
         cur.execute(
-            "INSERT IGNORE INTO favorite (user_id, target_type, target_id) VALUES (%s, %s, %s)",
+            "INSERT INTO favorite (user_id, target_type, target_id) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (user_id, target_type, target_id),
         )
         cur.execute(

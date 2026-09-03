@@ -8,10 +8,16 @@ API_BASE = os.environ.get("API_BASE", "http://127.0.0.1:8787")
 API_PREFIX = "/api/tech-transfer/v1"
 
 DB_HOST = os.environ.get("DB_HOST", "127.0.0.1")
-DB_PORT = int(os.environ.get("DB_PORT", "3306"))
-DB_USER = os.environ.get("DB_USER", "root")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "123456")
+DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+DB_USER = os.environ.get("DB_USER", "postgres")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres123")
 DB_NAME = os.environ.get("DB_NAME", "tech_transfer")
+
+# 存量资本库（MySQL，仅 legacy capital 接口过渡期使用，P0-1 后由 institution 表接管）
+CAPITAL_DB_HOST = os.environ.get("CAPITAL_DB_HOST", "127.0.0.1")
+CAPITAL_DB_PORT = int(os.environ.get("CAPITAL_DB_PORT", "3306"))
+CAPITAL_DB_USER = os.environ.get("CAPITAL_DB_USER", "root")
+CAPITAL_DB_PASSWORD = os.environ.get("CAPITAL_DB_PASSWORD", "123456")
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "tech-transfer-dev-secret-key")
 ACCESS_TOKEN_EXPIRES = 7200

@@ -6,5 +6,5 @@
 export const APP_ENV = 'local'
 export const HOST_MODE = 'local'
 export const AUTH_PROVIDER = 'mock'
-export const API_BASE = 'http://127.0.0.1:8787'
+export const API_BASE = 'http://43.138.138.200:8076'
 export const API_PREFIX = '/api/tech-transfer/v1'
