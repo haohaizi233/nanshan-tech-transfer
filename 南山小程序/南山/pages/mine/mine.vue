@@ -193,7 +193,8 @@
 		getSessionPhone,
 		checkStorageHealth
 	} from '../../common/user.js'
-	import { getMyDemands, getMyResults } from '../../common/mock-data.js'
+	import { getMyResults } from '../../common/mock-data.js'
+	import { getMyDemands } from '../../common/demand-api.js'
 
 	export default {
 		data() {
@@ -267,13 +268,26 @@
 				}
 
 				const phone = this.authPhone || (this.profile && this.profile.phone) || ''
-				this.myDemandCount = getMyDemands(phone).length
+				this.loadMyDemandCount()
 				this.myResultCount = getMyResults(phone).length
 				this.favoriteCount = getFavorites().length
 				this.intentionCount = getSentIntentions(phone).length + getReceivedIntentions(phone).length
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
+				}
+			},
+			async loadMyDemandCount() {
+				if (!isLoggedIn()) {
+					this.myDemandCount = 0
+					return
+				}
+				try {
+					const data = await getMyDemands({ page: 1, pageSize: 1 })
+					this.myDemandCount = data.total || 0
+				} catch (e) {
+					console.error('[mine] loadMyDemandCount failed:', e)
+					this.myDemandCount = 0
 				}
 			},
 			toggleAuthMode() {

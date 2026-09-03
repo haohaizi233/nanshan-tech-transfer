@@ -96,18 +96,18 @@
 
 ---
 
-## Phase B — Core Domain Migration（本轮仅规划）
+## Phase B — Core Domain Migration（进行中）
 
-| 链路 | 模块 | 前置 | 工作量 |
-|------|------|------|--------|
-| 需求 CRUD | demand | 建表 + service + router + 前端迁移 | 大 |
-| 收藏 | favorite | 建表 + service + router | 小 |
-| 对接 | cooperation | 建表 + 状态机 + 四角色权限 | 大 |
-| 搜索统一 | search | 抽离 achievement 搜索 | 中 |
-| Mock 清除 | — | 删除 mock-data.js, user.js | 中 |
-| 资本迁移 | capital | nanshan_capital → tech_transfer | 中 |
-| 主包 HostBridge | — | common/*.js 改用 HostBridge | 中 |
-| packageA 迁移 | — | 7 页迁移到 tech-transfer | 大 |
+| 链路 | 模块 | 前置 | 工作量 | 状态 |
+|------|------|------|--------|------|
+| 需求 CRUD | demand | 建表 + service + router + 前端迁移 | 大 | ✅ 已完成（2026-09-03，见文档 16） |
+| 收藏 | favorite | 建表 + service + router | 小 | 待办 |
+| 对接 | cooperation | 建表 + 状态机 + 四角色权限 | 大 | 待办 |
+| 搜索统一 | search | 抽离 achievement 搜索 | 中 | 待办 |
+| Mock 清除 | — | 删除 mock-data.js, user.js | 中 | 需求部分已清除；成果/意向部分待 Phase C |
+| 资本迁移 | capital | nanshan_capital → tech_transfer | 中 | 待办 |
+| 主包 HostBridge | — | common/*.js 改用 HostBridge | 中 | 待办 |
+| packageA 迁移 | — | 7 页迁移到 tech-transfer | 大 | 需求相关 4 页已迁移；成果相关 3 页待 Phase C |
 
 ---
 

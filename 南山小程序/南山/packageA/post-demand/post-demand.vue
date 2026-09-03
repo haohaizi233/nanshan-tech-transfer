@@ -3,6 +3,10 @@
 		<view class="section">
 			<text class="section-title">需求信息</text>
 			<view class="form-item">
+				<text class="label">需求标题 <text class="required">*</text></text>
+				<input class="input" v-model="form.title" placeholder="例如：高精度视觉检测算法合作需求" maxlength="50" />
+			</view>
+			<view class="form-item">
 				<text class="label">公司名称 <text class="required">*</text></text>
 				<input class="input" v-model="form.company" placeholder="请输入公司名称" />
 			</view>
@@ -75,13 +79,60 @@
 </template>
 
 <script>
-	import { addDemand, createId } from '../../common/mock-data.js'
+	import { createDemand, submitDemand } from '../../common/demand-api.js'
 	import { getSessionPhone, getUserProfile, ensureLoginForDock } from '../../common/user.js'
+
+	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
+	function parseBudgetText(text) {
+		const t = (text || '').replace(/\s+/g, '').replace(/万/g, '')
+		if (!t) return {}
+		if (t.indexOf('面议') >= 0) return { budgetNegotiable: true }
+		let m = t.match(/^(\d+(?:\.\d+)?)[–\-~至](\d+(?:\.\d+)?)$/)
+		if (m) return { budgetMinWan: Number(m[1]), budgetMaxWan: Number(m[2]) }
+		m = t.match(/^(\d+(?:\.\d+)?)以内$/)
+		if (m) return { budgetMaxWan: Number(m[1]) }
+		m = t.match(/^(\d+(?:\.\d+)?)以上$/)
+		if (m) return { budgetMinWan: Number(m[1]) }
+		return {}
+	}
+
+	/** 表单 → DemandUpsertRequest（orgName/categoryName 由后端 get-or-create） */
+	function buildPayload(data) {
+		const payload = {
+			title: data.title,
+			description: data.demandDesc,
+			region: data.location || null,
+			deadlineDesc: data.deadline || null,
+			contactName: data.contactName || null,
+			contactTitle: data.contactTitle || null,
+			contactPhone: data.phone || null,
+			contactEmail: data.email || null,
+			contactWechat: data.wechat || null,
+			...parseBudgetText(data.budget)
+		}
+		if (data.company) {
+			payload.orgName = data.company
+			if (data.companyIntro) payload.orgIntro = data.companyIntro
+		}
+		if (data.cooperationType) {
+			payload.coopMode = data.cooperationType
+				.split(/[\/、,，]/)
+				.map((s) => s.trim())
+				.filter(Boolean)
+		}
+		if (data.industry) {
+			const parts = data.industry.split(/[·•]/).map((s) => s.trim()).filter(Boolean)
+			if (parts[0]) payload.categoryName = parts[0]
+			if (parts.length > 1) payload.tags = parts.slice(1)
+		}
+		return payload
+	}
 
 	export default {
 		data() {
 			return {
 				form: {
+					title: '',
 					company: '',
 					location: '',
 					budget: '',
@@ -95,7 +146,8 @@
 					phone: '',
 					email: '',
 					wechat: ''
-				}
+				},
+				submitting: false
 			}
 		},
 		onLoad() {
@@ -130,6 +182,7 @@
 			},
 			validate(data) {
 				const required = [
+					{ key: 'title', tip: '请填写需求标题' },
 					{ key: 'company', tip: '请填写公司名称' },
 					{ key: 'location', tip: '请填写地点' },
 					{ key: 'budget', tip: '请填写预算' },
@@ -151,7 +204,8 @@
 				}
 				return true
 			},
-			onSubmit() {
+			async onSubmit() {
+				if (this.submitting) return
 				if (!ensureLoginForDock()) return
 				const ownerPhone = getSessionPhone()
 				if (!ownerPhone) {
@@ -161,31 +215,37 @@
 				const data = this.trimForm()
 				if (!this.validate(data)) return
 
-				addDemand({
-					id: createId('ud'),
-					company: data.company,
-					location: data.location,
-					budget: data.budget,
-					industry: data.industry || '未填写',
-					cooperationType: data.cooperationType || '面议',
-					deadline: data.deadline || '待沟通',
-					demandDesc: data.demandDesc,
-					companyIntro: data.companyIntro,
-					contactName: data.contactName,
-					contactTitle: data.contactTitle || '对接人',
-					phone: ownerPhone,
-					ownerPhone,
-					email: data.email || '未填写',
-					wechat: data.wechat || '未填写'
-				})
-
-				uni.showToast({
-					title: '提交成功',
-					icon: 'success'
-				})
-				setTimeout(() => {
-					uni.navigateBack()
-				}, 800)
+				this.submitting = true
+				uni.showLoading({ title: '提交中', mask: true })
+				try {
+					// 创建（draft）→ 提交审核（pending_review）
+					const detail = await createDemand(buildPayload(data))
+					let submitted = false
+					try {
+						await submitDemand(detail.id, detail.version)
+						submitted = true
+					} catch (e) {
+						console.error('[post-demand] submit review failed:', e)
+					}
+					uni.hideLoading()
+					uni.showToast({
+						title: submitted ? '已提交，等待审核' : '已保存为草稿',
+						icon: 'success'
+					})
+					setTimeout(() => {
+						uni.navigateBack()
+					}, 900)
+				} catch (e) {
+					uni.hideLoading()
+					console.error('[post-demand] create failed:', e)
+					uni.showToast({
+						title: (e && e.message) || '提交失败，请稍后重试',
+						icon: 'none',
+						duration: 2500
+					})
+				} finally {
+					this.submitting = false
+				}
 			}
 		}
 	}

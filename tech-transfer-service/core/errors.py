@@ -37,7 +37,9 @@ TT_AUTH_40104 = ("TT_AUTH_40104", "refresh token 已被吊销", 401)
 TT_ACH_40901 = ("TT_ACH_40901", "成果状态不允许此操作", 409)
 
 # ── Demand ──────────────────────────────────────────────────
-TT_DMND_40901 = ("TT_DMND_40901", "需求状态不允许此操作", 409)
+TT_DMD_40301 = ("TT_DMD_40301", "非需求所有者", 403)
+TT_DMD_40401 = ("TT_DMD_40401", "需求不存在", 404)
+TT_DMD_40901 = ("TT_DMD_40901", "需求状态不允许此操作", 409)
 
 # ── Cooperation ─────────────────────────────────────────────
 TT_COOP_40901 = ("TT_COOP_40901", "对接状态不允许此操作", 409)
@@ -77,6 +79,21 @@ def conflict(msg="资源版本冲突", details=None):
 
 def not_found(msg="资源不存在", details=None):
     code, message, status = TT_COMMON_40402
+    return BizError(code, msg, status, details)
+
+
+def demand_not_found(msg="需求不存在", details=None):
+    code, message, status = TT_DMD_40401
+    return BizError(code, msg, status, details)
+
+
+def demand_forbidden(msg="非需求所有者", details=None):
+    code, message, status = TT_DMD_40301
+    return BizError(code, msg, status, details)
+
+
+def demand_conflict(msg="需求状态不允许此操作", details=None):
+    code, message, status = TT_DMD_40901
     return BizError(code, msg, status, details)
 
 

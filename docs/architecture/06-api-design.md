@@ -385,7 +385,7 @@ stateDiagram-v2
 
 #### POST /demands —— 创建需求
 
-认证/角色/幂等/审计：同 POST /achievements。请求体：`{ title*, categoryId, orgId, description*, region, coopMode[], budgetMinWan, budgetMaxWan, budgetNegotiable, expectDeadline, deadlineDesc, contactName..., tags[], attachmentFileIds[] }`。成功 201（status=draft）。页面：post-demand.vue。
+认证/角色/幂等/审计：同 POST /achievements。请求体：`{ title*, categoryId, orgId, orgName, orgIntro, categoryName, description*, region, coopMode[], budgetMinWan, budgetMaxWan, budgetNegotiable, expectDeadline, deadlineDesc, contactName..., tags[], attachmentFileIds[] }`（orgName/orgIntro/categoryName 为过渡期便捷字段：服务端按名称 get-or-create organization/demand_category 后落 org_id/category_id，映射规则同 §12.2 演示数据，供无 ID 选择器的小程序表单使用）。成功 201（status=draft）。页面：post-demand.vue。
 
 #### PATCH /demands/{id} —— 编辑需求
 

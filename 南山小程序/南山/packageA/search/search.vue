@@ -1,4 +1,4 @@
-<template>
+﻿<template>
 	<view class="page">
 		<!-- 顶部搜索栏 -->
 		<view class="search-bar">
@@ -64,10 +64,10 @@
 			<block v-if="searchType === 0">
 				<view v-for="item in demandList" :key="'d-' + item.id" class="card" @click="openDetail('demand', item.id)">
 					<view class="card-head">
-						<text class="card-title">{{ item.company }}</text>
+						<text class="card-title">{{ item.title }}</text>
 						<text class="badge badge-d">需求</text>
 					</view>
-					<text class="meta">{{ item.location }} ｜ {{ item.budget }}</text>
+					<text class="meta">{{ item.metaLine }}</text>
 					<text class="desc">{{ item.demandDesc }}</text>
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn" size="mini" @click.stop="openDetail('demand', item.id)">我要对接</button>
@@ -94,18 +94,17 @@
 </template>
 
 <script>
-	import { getAllDemands } from '../../common/mock-data.js'
 	import {
 		getDemandSearchHistory,
 		getResultSearchHistory,
 		addDemandSearchHistory,
 		addResultSearchHistory,
 		clearDemandSearchHistory,
-		clearResultSearchHistory,
-		filterDemands
+		clearResultSearchHistory
 	} from '../../common/search.js'
 	import { ensureLoginForDock, canProposeDock } from '../../common/user.js'
 	import { searchAchievements } from '../../common/achievement-api.js'
+	import { getDemands, toDemandCard } from '../../common/demand-api.js'
 
 	export default {
 		data() {
@@ -137,13 +136,13 @@
 		},
 		onLoad() {
 			this.loadHistory()
-			this.applyDemandFilter('')
+			this.loadDemands('')
 			this.loadResults('')
 		},
 		onShow() {
 			this.loadHistory()
 			if (this.searchType === 0) {
-				this.applyDemandFilter(this.keyword)
+				this.loadDemands(this.keyword)
 			} else {
 				this.loadResults(this.keyword)
 			}
@@ -157,17 +156,26 @@
 				this.searchType = type
 				this.keyword = ''
 				if (type === 0) {
-					this.applyDemandFilter('')
+					this.loadDemands('')
 				} else {
 					this.loadResults('')
 				}
 			},
-			applyDemandFilter(kw) {
-				const key = (kw || '').trim()
-				this.demandList = filterDemands(getAllDemands(), key).map((item) => ({
-					...item,
-					canDock: canProposeDock('demand', item)
-				}))
+			async loadDemands(keyword) {
+				try {
+					const data = await getDemands({ keyword: keyword || '', page: 1, pageSize: 50 })
+					this.demandList = (data.list || []).map((item) => {
+						const card = toDemandCard(item)
+						return {
+							...card,
+							metaLine: [card.company, card.location, card.budget].filter(Boolean).join(' ｜ '),
+							canDock: !card.isMine && canProposeDock('demand', card)
+						}
+					})
+				} catch (e) {
+					console.error('[search] loadDemands failed:', e)
+					this.demandList = []
+				}
 			},
 			async loadResults(keyword) {
 				try {
@@ -187,7 +195,7 @@
 			onInput(e) {
 				this.keyword = e.detail.value
 				if (this.searchType === 0) {
-					this.applyDemandFilter(this.keyword)
+					this.loadDemands(this.keyword)
 				}
 			},
 			onConfirmSearch() {
@@ -198,7 +206,7 @@
 				}
 				this.keyword = kw
 				if (this.searchType === 0) {
-					this.applyDemandFilter(kw)
+					this.loadDemands(kw)
 				} else {
 					this.loadResults(kw)
 				}
@@ -213,7 +221,11 @@
 			},
 			onHistoryTap(item) {
 				this.keyword = item
-				this.applyFilter(item)
+				if (this.searchType === 0) {
+					this.loadDemands(item)
+				} else {
+					this.loadResults(item)
+				}
 				this.saveHistory(item)
 			},
 			onClearHistory() {

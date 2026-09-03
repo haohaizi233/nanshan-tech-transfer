@@ -72,12 +72,13 @@
 					@click="openDetail('demand', item.id)"
 				>
 					<view class="card-head">
-						<text class="card-title">{{ item.company }}</text>
+						<text class="card-title">{{ item.title }}</text>
 						<text
 							:class="item.favorited ? 'star-btn star-on' : 'star-btn'"
 							@click.stop="onToggleFavorite('demand', item)"
 						>{{ item.favorited ? '★' : '☆' }}</text>
 					</view>
+					<text v-if="item.company" class="card-sub">{{ item.company }}</text>
 					<view class="meta-row">
 						<view class="meta-item">
 							<text class="meta-label">地点</text>
@@ -92,9 +93,9 @@
 						<text class="info-label">需求说明</text>
 						<text class="info-text">{{ item.demandDesc }}</text>
 					</view>
-					<view class="info-block">
-						<text class="info-label">公司简介</text>
-						<text class="info-text info-text-muted">{{ item.companyIntro }}</text>
+					<view v-if="item.industryLine" class="info-block">
+						<text class="info-label">行业 / 合作方式</text>
+						<text class="info-text info-text-muted">{{ item.industryLine }}</text>
 					</view>
 					<view v-if="item.canDock" class="card-foot">
 						<button class="dock-btn" size="mini" @click.stop="openDetail('demand', item.id)">我要对接</button>
@@ -176,11 +177,11 @@
 </template>
 
 <script>
-	import { getAllDemands } from '../../common/mock-data.js'
 	import { ensureLoginForDock, isFavorite, toggleFavorite, canProposeDock } from '../../common/user.js'
 	import { getCapitalGroups } from '../../common/capital.js'
 	import { openExternalSearchMiniProgram } from '../../common/external-miniprogram.js'
 	import { getAchievements } from '../../common/achievement-api.js'
+	import { getDemands, toDemandCard } from '../../common/demand-api.js'
 
 	const PRICING_LABELS = {
 		'negotiable': '面议',
@@ -258,11 +259,24 @@
 		},
 		methods: {
 			async refreshList() {
-				this.demandList = getAllDemands().map((item) => ({
-					...item,
-					favorited: isFavorite('demand', item.id),
-					canDock: canProposeDock('demand', item)
-				}))
+				// 需求列表（真实 API）
+				try {
+					const data = await getDemands({ page: 1, pageSize: 10 })
+					this.demandList = (data.list || []).map((item) => {
+						const card = toDemandCard(item)
+						return {
+							...card,
+							industryLine: [card.industry, card.cooperationType].filter(Boolean).join(' · '),
+							favorited: isFavorite('demand', card.id),
+							canDock: !card.isMine && canProposeDock('demand', card)
+						}
+					})
+				} catch (e) {
+					console.error('[index] loadDemands failed:', e)
+					this.demandList = []
+				}
+
+				// 成果列表（真实 API）
 				try {
 					const data = await getAchievements({ page: 1, pageSize: 10 })
 					this.resultList = (data.list || []).map((item) => ({
@@ -584,6 +598,13 @@
 		font-weight: 600;
 		line-height: 1.4;
 		padding-right: 16rpx;
+	}
+
+	.card-sub {
+		display: block;
+		font-size: 26rpx;
+		color: #666666;
+		margin: -8rpx 0 20rpx;
 	}
 
 	.star-btn {

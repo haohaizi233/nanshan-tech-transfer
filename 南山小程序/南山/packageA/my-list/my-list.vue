@@ -22,8 +22,8 @@
 				<text class="card-title">{{ item._title }}</text>
 				<view class="badge-wrap">
 					<text
-						v-if="pageType === 'intention' && item._statusLabel"
-						:class="'status-tag status-' + item._status"
+						v-if="(pageType === 'intention' || pageType === 'demand') && item._statusLabel"
+						:class="'status-tag status-' + item._statusCls"
 					>{{ item._statusLabel }}</text>
 					<text :class="item._type === 'demand' ? 'badge badge-d' : 'badge badge-r'">
 						{{ item._type === 'demand' ? '需求' : '成果' }}
@@ -46,7 +46,8 @@
 </template>
 
 <script>
-	import { getMyDemands, getMyResults, getDemandById, getResultById } from '../../common/mock-data.js'
+	import { getMyResults, getResultById } from '../../common/mock-data.js'
+	import { getMyDemands, getDemandDetail, toDemandCard } from '../../common/demand-api.js'
 	import {
 		getFavorites,
 		toggleFavorite,
@@ -114,16 +115,17 @@
 
 					if (this.intentTab === 0) {
 						// 我提出的：展示对方那条（我点击对接的需求/成果）
-						const detail = item.type === 'result' ? getResultById(item.id) : getDemandById(item.id)
-						title = detail
-							? (item.type === 'result' ? detail.title : detail.company)
-							: (item.title || '意向对接')
-						desc = detail
-							? (item.type === 'result' ? detail.techIntro : detail.demandDesc)
-							: (item.desc || '')
+						// 成果详情仍走 Mock（Phase B 后续迁移）；需求用意向创建时快照的 title/desc
+						if (item.type === 'result') {
+							const detail = getResultById(item.id)
+							title = detail ? detail.title : (item.title || '意向对接')
+							desc = detail ? detail.techIntro : (item.desc || '')
+						} else {
+							title = item.title || '意向对接'
+							desc = item.desc || ''
+						}
 					} else {
-						// 我收到的：展示发起方自己的内容
-						// 需求方收到 → 看供应方技术；供应方收到 → 看需求方需求
+						// 我收到的：展示发起方自己的内容（意向创建时已快照 fromSide*）
 						if (item.fromSideTitle || item.fromSideId) {
 							title = item.fromSideTitle || '对方对接内容'
 							desc = item.fromSideDesc || ''
@@ -131,34 +133,12 @@
 							openId = item.fromSideId || ''
 							badgeType = openType
 						} else {
-							// 兼容旧数据：按发起方身份查其发布内容
-							const fromPhone = item.fromPhone || ''
-							if (item.fromIdentity === 'supply') {
-								const mine = getMyResults(fromPhone)[0]
-								if (mine) {
-									title = mine.title
-									desc = mine.techIntro
-									openType = 'result'
-									openId = mine.id
-									badgeType = 'result'
-								}
-							} else {
-								const mine = getMyDemands(fromPhone)[0]
-								if (mine) {
-									title = mine.company
-									desc = mine.demandDesc
-									openType = 'demand'
-									openId = mine.id
-									badgeType = 'demand'
-								}
-							}
-							if (!title) {
-								title = (item.fromNickname || '用户') + ' 的对接意向'
-								desc = '对方暂未发布可展示的需求/成果，可通过联系方式沟通'
-								openType = item.type
-								openId = item.id
-								badgeType = item.fromIdentity === 'supply' ? 'result' : 'demand'
-							}
+							// 兼容旧数据：无快照时仅展示占位文案
+							title = (item.fromNickname || '用户') + ' 的对接意向'
+							desc = '对方暂未发布可展示的需求/成果，可通过联系方式沟通'
+							openType = item.type
+							openId = item.id
+							badgeType = item.fromIdentity === 'supply' ? 'result' : 'demand'
 						}
 					}
 
@@ -181,23 +161,35 @@
 						_role: this.intentTab === 0 ? 'sent' : 'received',
 						_status: status,
 						_statusLabel: getIntentionStatusLabel(status),
+						_statusCls: status,
 						_title: title,
 						_desc: desc || '对接意向',
 						_sub: sub
 					}
 				})
 			},
-			loadList() {
+			async loadList() {
 				if (this.pageType === 'demand') {
-					const profile = getUserProfile()
-					const phone = profile && profile.phone ? profile.phone : ''
-					this.list = getMyDemands(phone).map((item) => ({
-						...item,
-						_key: 'd-' + item.id,
-						_type: 'demand',
-						_title: item.company,
-						_desc: item.demandDesc
-					}))
+					try {
+						const data = await getMyDemands({ page: 1, pageSize: 50 })
+						this.list = (data.list || []).map((item) => {
+							const card = toDemandCard(item)
+							return {
+								...card,
+								_key: 'd-' + card.id,
+								_type: 'demand',
+								_title: card.title,
+								_sub: card.company || '',
+								_desc: card.demandDesc,
+								_status: card.status,
+								_statusLabel: card.statusLabel,
+								_statusCls: card.statusCls
+							}
+						})
+					} catch (e) {
+						console.error('[my-list] loadMyDemands failed:', e)
+						this.list = []
+					}
 					return
 				}
 				if (this.pageType === 'result') {
@@ -221,19 +213,37 @@
 					this.list = this.mapIntentionRows(rows)
 					return
 				}
+				// 收藏：成果走 Mock；需求并行拉取详情（失效收藏自动跳过）
 				const favorites = getFavorites()
 				const rows = []
-				favorites.forEach((fav) => {
-					const detail = fav.type === 'result' ? getResultById(fav.id) : getDemandById(fav.id)
-					if (!detail) return
-					rows.push({
-						...detail,
-						_key: fav.type + '-' + fav.id,
-						_type: fav.type,
-						_title: fav.type === 'result' ? detail.title : detail.company,
-						_desc: fav.type === 'result' ? detail.techIntro : detail.demandDesc
-					})
-				})
+				await Promise.all(favorites.map(async (fav) => {
+					if (fav.type === 'result') {
+						const detail = getResultById(fav.id)
+						if (!detail) return
+						rows.push({
+							...detail,
+							_key: fav.type + '-' + fav.id,
+							_type: fav.type,
+							_title: detail.title,
+							_desc: detail.techIntro
+						})
+						return
+					}
+					try {
+						const data = await getDemandDetail(fav.id)
+						const card = toDemandCard(data)
+						rows.push({
+							...card,
+							_key: fav.type + '-' + fav.id,
+							_type: fav.type,
+							_title: card.title,
+							_sub: card.company || '',
+							_desc: card.demandDesc
+						})
+					} catch (e) {
+						// 需求已下线/不可见，跳过
+					}
+				}))
 				this.list = rows
 			},
 			onOpen(item) {
@@ -381,6 +391,11 @@
 		font-size: 22rpx;
 		padding: 4rpx 12rpx;
 		border-radius: 8rpx;
+	}
+
+	.status-draft {
+		color: #666666;
+		background: rgba(102, 102, 102, 0.12);
 	}
 
 	.status-pending {

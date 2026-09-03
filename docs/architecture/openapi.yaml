@@ -2592,6 +2592,18 @@ components:
         title: { type: string, maxLength: 200 }
         categoryId: { type: integer, format: int64 }
         orgId: { type: integer, format: int64 }
+        orgName:
+          type: string
+          maxLength: 128
+          description: 过渡期便捷字段——按名称 get-or-create organization 并写入 orgId（与 orgId 同传时以 orgName 解析结果为准）
+        orgIntro:
+          type: string
+          maxLength: 2000
+          description: 组织简介，须与 orgName 一起提供；仅当组织 intro 为空时写入
+        categoryName:
+          type: string
+          maxLength: 64
+          description: 过渡期便捷字段——按名称 get-or-create demand_category 并写入 categoryId
         description: { type: string }
         region: { type: string, maxLength: 64 }
         coopMode:

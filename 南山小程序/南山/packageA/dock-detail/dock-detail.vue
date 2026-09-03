@@ -12,28 +12,37 @@
 
 			<!-- 需求详情 -->
 			<block v-if="type === 'demand'">
-				<text class="main-title">{{ detail.company }}</text>
+				<text class="main-title">{{ detail.title }}</text>
+				<view v-if="detail.isMine && detail.statusLabel" class="mine-status-row">
+					<text class="mine-status-text">状态：{{ detail.statusLabel }}</text>
+				</view>
 				<view class="meta-row">
 					<view class="meta-item">
-						<text class="meta-label">地点</text>
-						<text class="meta-value">{{ detail.location }}</text>
+						<text class="meta-label">公司名称</text>
+						<text class="meta-value">{{ detail.company || '未填写' }}</text>
 					</view>
 					<view class="meta-item">
+						<text class="meta-label">地点</text>
+						<text class="meta-value">{{ detail.location || '未填写' }}</text>
+					</view>
+				</view>
+				<view class="meta-row">
+					<view class="meta-item">
 						<text class="meta-label">预算</text>
-						<text class="meta-value meta-em">{{ detail.budget }}</text>
+						<text class="meta-value meta-em">{{ detail.budget || '未填写' }}</text>
+					</view>
+					<view class="meta-item">
+						<text class="meta-label">期望周期</text>
+						<text class="meta-value">{{ detail.deadline || '待沟通' }}</text>
 					</view>
 				</view>
 				<view class="field">
 					<text class="field-label">所属行业</text>
-					<text class="field-value">{{ detail.industry }}</text>
+					<text class="field-value">{{ detail.industry || '未填写' }}</text>
 				</view>
 				<view class="field">
 					<text class="field-label">合作方式</text>
-					<text class="field-value">{{ detail.cooperationType }}</text>
-				</view>
-				<view class="field">
-					<text class="field-label">期望周期</text>
-					<text class="field-value">{{ detail.deadline }}</text>
+					<text class="field-value">{{ detail.cooperationType || '面议' }}</text>
 				</view>
 				<view class="field">
 					<text class="field-label">需求说明</text>
@@ -41,7 +50,7 @@
 				</view>
 				<view class="field">
 					<text class="field-label">公司简介</text>
-					<text class="field-value field-muted">{{ detail.companyIntro }}</text>
+					<text class="field-value field-muted">{{ detail.companyIntro || '暂无简介' }}</text>
 				</view>
 			</block>
 
@@ -108,7 +117,7 @@
 					<text class="contact-value contact-link">{{ detail.wechat }}</text>
 				</view>
 			</view>
-			<text class="tip">以上为演示联系方式，正式上线后将对接真实数据</text>
+			<text class="tip">{{ type === 'demand' ? '为保护发布方隐私，非发布方查看时联系方式已脱敏' : '以上为演示联系方式，正式上线后将对接真实数据' }}</text>
 		</view>
 
 		<!-- 底部操作区 -->
@@ -165,7 +174,8 @@
 </template>
 
 <script>
-	import { getDemandById, getResultById, getMyDemands, getMyResults } from '../../common/mock-data.js'
+	import { getResultById, getMyResults } from '../../common/mock-data.js'
+	import { getDemandDetail, toDemandCard, getMyDemands as fetchMyDemands } from '../../common/demand-api.js'
 	import {
 		isFavorite,
 		toggleFavorite,
@@ -191,6 +201,7 @@
 				entryRole: '',
 				intentId: '',
 				intention: null,
+				myDemands: [],
 				confirmVisible: false,
 				confirmRole: '',
 				confirmAction: '',
@@ -225,6 +236,7 @@
 				const phone = me && me.phone ? me.phone : ''
 				const row = this.intention
 				if (!row) {
+					if (this.detail && this.type === 'demand' && this.detail.isMine) return 'blocked'
 					if (this.detail && !canProposeDock(this.type, this.detail)) return 'blocked'
 					return 'propose'
 				}
@@ -240,6 +252,9 @@
 				return 'status'
 			},
 			blockHint() {
+				if (this.type === 'demand' && this.detail && this.detail.isMine) {
+					return '这是您自己发布的需求，无法申请对接'
+				}
 				return getDockBlockMessage(this.type, this.detail)
 			},
 			confirmTitle() {
@@ -257,7 +272,17 @@
 			this.entryRole = options.role || ''
 			this.intentId = options.intentId || ''
 
-			const detail = type === 'result' ? getResultById(id) : getDemandById(id)
+			uni.setNavigationBarTitle({
+				title: type === 'result' ? '成果对接' : '需求对接'
+			})
+
+			if (type === 'demand') {
+				this.loadDemandDetail(id)
+				return
+			}
+
+			// 成果（Mock 数据，Phase B 后续迁移）
+			const detail = getResultById(id)
 			if (!detail) {
 				uni.showToast({
 					title: '未找到对应信息',
@@ -268,21 +293,43 @@
 				}, 1200)
 				return
 			}
-
 			this.detail = detail
 			this.favorited = isFavorite(type, detail.id)
 			this.refreshIntention()
-			uni.setNavigationBarTitle({
-				title: type === 'result' ? '成果对接' : '需求对接'
-			})
 		},
 		onUnload() {
 			this.clearConfirmTimer()
 		},
 		onShow() {
 			if (this.detail) this.refreshIntention()
+			this.prefetchMyDemands()
 		},
 		methods: {
+			async loadDemandDetail(id) {
+				if (!id) {
+					uni.showToast({ title: '未找到对应信息', icon: 'none' })
+					setTimeout(() => uni.navigateBack(), 1200)
+					return
+				}
+				try {
+					const data = await getDemandDetail(id)
+					this.detail = toDemandCard(data)
+					this.favorited = isFavorite('demand', this.detail.id)
+					this.refreshIntention()
+				} catch (e) {
+					console.error('[dock-detail] loadDemand failed:', e)
+					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
+					setTimeout(() => uni.navigateBack(), 1200)
+				}
+			},
+			async prefetchMyDemands() {
+				try {
+					const data = await fetchMyDemands({ page: 1, pageSize: 5 })
+					this.myDemands = (data.list || []).map(toDemandCard)
+				} catch (e) {
+					this.myDemands = []
+				}
+			},
 			refreshIntention() {
 				if (this.intentId) {
 					this.intention = getIntentionById(this.intentId)
@@ -353,12 +400,20 @@
 			onCall() {
 				if (!ensureLoginForDock()) return
 				if (!this.detail || !this.detail.phone) return
+				if (this.detail.phone.indexOf('*') >= 0) {
+					uni.showToast({ title: '联系方式已脱敏，正式对接后可见', icon: 'none' })
+					return
+				}
 				uni.makePhoneCall({
 					phoneNumber: this.detail.phone
 				})
 			},
 			onCopy(text, label) {
 				if (!ensureLoginForDock()) return
+				if (!text) {
+					uni.showToast({ title: '暂无' + label, icon: 'none' })
+					return
+				}
 				uni.setClipboardData({
 					data: text,
 					success() {
@@ -393,6 +448,10 @@
 			onProposeDock() {
 				if (!ensureLoginForDock()) return
 				if (!this.detail) return
+				if (this.type === 'demand' && this.detail.isMine) {
+					uni.showToast({ title: '这是您自己发布的需求，无法申请对接', icon: 'none' })
+					return
+				}
 				if (!canProposeDock(this.type, this.detail)) {
 					uni.showToast({
 						title: getDockBlockMessage(this.type, this.detail) || '无法对接',
@@ -400,7 +459,7 @@
 					})
 					return
 				}
-				const title = this.type === 'result' ? this.detail.title : this.detail.company
+				const title = this.detail.title
 				const desc = this.type === 'result' ? this.detail.techIntro : this.detail.demandDesc
 				const toPhone = (this.detail.phone || '').trim()
 				if (!toPhone) {
@@ -421,12 +480,12 @@
 						}
 					}
 				} else {
-					const mine = getMyDemands(myPhone)[0]
+					const mine = (this.myDemands || []).find((d) => d.status === 'published') || (this.myDemands || [])[0]
 					if (mine) {
 						fromSide = {
 							fromSideType: 'demand',
 							fromSideId: mine.id,
-							fromSideTitle: mine.company,
+							fromSideTitle: mine.title,
 							fromSideDesc: mine.demandDesc
 						}
 					}
@@ -500,6 +559,19 @@
 		font-weight: 600;
 		line-height: 1.4;
 		margin-bottom: 20rpx;
+	}
+
+	.mine-status-row {
+		display: inline-flex;
+		background: rgba(43, 115, 248, 0.1);
+		border-radius: 8rpx;
+		padding: 6rpx 16rpx;
+		margin-bottom: 20rpx;
+	}
+
+	.mine-status-text {
+		font-size: 24rpx;
+		color: #2b73f8;
 	}
 
 	.meta-row {
