@@ -46,16 +46,17 @@
 </template>
 
 <script>
-	import { getMyResults, getResultById } from '../../common/mock-data.js'
-	import { getMyDemands, getDemandDetail, toDemandCard } from '../../common/demand-api.js'
+	import { getMyResults } from '../../common/mock-data.js'
+	import { getMyDemands, toDemandCard } from '../../common/demand-api.js'
 	import {
-		getFavorites,
-		toggleFavorite,
-		getSentIntentions,
-		getReceivedIntentions,
-		getIntentionStatusLabel,
-		getUserProfile
-	} from '../../common/user.js'
+		getMyFavorites,
+		removeFavorite,
+		getMyCooperations,
+		toFeType,
+		getCoopStatusLabel,
+		getCoopStatusCls
+	} from '../../common/interaction-api.js'
+	import { getUserProfile } from '../../common/user.js'
 
 	export default {
 		data() {
@@ -79,7 +80,7 @@
 				if (this.pageType === 'intention') {
 					return this.intentTab === 0
 						? '在对接详情页点击「确认对接」后会出现在这里'
-						: '当他人对接你发布的需求/成果（或演示数据对应手机号）时会出现在这里'
+						: '当他人向你发布的需求/成果发起对接时会出现在这里'
 				}
 				return '可在首页发布后在此查看'
 			}
@@ -106,65 +107,25 @@
 				this.loadList()
 			},
 			mapIntentionRows(rows) {
+				// 后端意向行内嵌 targetSummary + counterpartDisplayName，两侧均按目标内容展示
+				const isSent = this.intentTab === 0
 				return rows.map((item) => {
-					let title = ''
-					let desc = ''
-					let openType = item.type
-					let openId = item.id
-					let badgeType = item.type
-
-					if (this.intentTab === 0) {
-						// 我提出的：展示对方那条（我点击对接的需求/成果）
-						// 成果详情仍走 Mock（Phase B 后续迁移）；需求用意向创建时快照的 title/desc
-						if (item.type === 'result') {
-							const detail = getResultById(item.id)
-							title = detail ? detail.title : (item.title || '意向对接')
-							desc = detail ? detail.techIntro : (item.desc || '')
-						} else {
-							title = item.title || '意向对接'
-							desc = item.desc || ''
-						}
-					} else {
-						// 我收到的：展示发起方自己的内容（意向创建时已快照 fromSide*）
-						if (item.fromSideTitle || item.fromSideId) {
-							title = item.fromSideTitle || '对方对接内容'
-							desc = item.fromSideDesc || ''
-							openType = item.fromSideType || (item.fromIdentity === 'supply' ? 'result' : 'demand')
-							openId = item.fromSideId || ''
-							badgeType = openType
-						} else {
-							// 兼容旧数据：无快照时仅展示占位文案
-							title = (item.fromNickname || '用户') + ' 的对接意向'
-							desc = '对方暂未发布可展示的需求/成果，可通过联系方式沟通'
-							openType = item.type
-							openId = item.id
-							badgeType = item.fromIdentity === 'supply' ? 'result' : 'demand'
-						}
-					}
-
-					let sub = ''
-					if (this.intentTab === 0) {
-						sub = '对接对象：' + (item.toName || item.toPhone || '对方')
-					} else {
-						sub = '来自：' + (item.fromNickname || '用户') +
-							(item.fromCompany ? ' · ' + item.fromCompany : '') +
-							'（' + (item.fromPhone || '') + '）'
-					}
-					const status = item.status || 'pending'
+					const sum = item.targetSummary || {}
+					const feType = toFeType(item.targetType)
 					return {
-						id: openId || item.id,
-						_key: 'i-' + (item.intentId || (item.type + '-' + item.id + '-' + item.fromPhone)),
-						_type: badgeType === 'result' ? 'result' : 'demand',
-						_openType: openType,
-						_openId: openId,
-						_intentId: item.intentId || '',
-						_role: this.intentTab === 0 ? 'sent' : 'received',
-						_status: status,
-						_statusLabel: getIntentionStatusLabel(status),
-						_statusCls: status,
-						_title: title,
-						_desc: desc || '对接意向',
-						_sub: sub
+						id: item.targetId,
+						_key: 'c-' + item.id,
+						_type: feType,
+						_openType: feType,
+						_openId: item.targetId,
+						_intentId: item.id,
+						_role: isSent ? 'sent' : 'received',
+						_status: item.status,
+						_statusLabel: getCoopStatusLabel(item.status),
+						_statusCls: getCoopStatusCls(item.status),
+						_title: sum.title || '意向对接',
+						_desc: sum.desc || sum.orgName || '对接意向',
+						_sub: (isSent ? '对接对象：' : '来自：') + (item.counterpartDisplayName || '对方')
 					}
 				})
 			},
@@ -205,46 +166,46 @@
 					return
 				}
 				if (this.pageType === 'intention') {
-					const profile = getUserProfile()
-					const phone = profile && profile.phone ? profile.phone : ''
-					const rows = this.intentTab === 0
-						? getSentIntentions(phone)
-						: getReceivedIntentions(phone)
-					this.list = this.mapIntentionRows(rows)
+					try {
+						const data = await getMyCooperations({
+							role: this.intentTab === 0 ? 'initiator' : 'target',
+							page: 1,
+							pageSize: 50
+						})
+						this.list = this.mapIntentionRows(data.list || [])
+					} catch (e) {
+						console.error('[my-list] loadCooperations failed:', e)
+						this.list = []
+					}
 					return
 				}
-				// 收藏：成果走 Mock；需求并行拉取详情（失效收藏自动跳过）
-				const favorites = getFavorites()
-				const rows = []
-				await Promise.all(favorites.map(async (fav) => {
-					if (fav.type === 'result') {
-						const detail = getResultById(fav.id)
-						if (!detail) return
+				// 收藏：后端列表内嵌目标摘要（已下线目标仍返回并标注）
+				try {
+					const [favDemand, favResult] = await Promise.all([
+						getMyFavorites('demand', { page: 1, pageSize: 50 }),
+						getMyFavorites('result', { page: 1, pageSize: 50 })
+					])
+					const rows = []
+					const push = (fav, feType) => {
+						const sum = fav.targetSummary
+						if (!sum) return
+						const offline = sum.status && sum.status !== 'published'
 						rows.push({
-							...detail,
-							_key: fav.type + '-' + fav.id,
-							_type: fav.type,
-							_title: detail.title,
-							_desc: detail.techIntro
+							id: fav.targetId,
+							_key: feType + '-' + fav.targetId,
+							_type: feType,
+							_title: sum.title ? (offline ? sum.title + '（已下线）' : sum.title) : '已收藏内容',
+							_sub: sum.orgName || '',
+							_desc: sum.desc || ''
 						})
-						return
 					}
-					try {
-						const data = await getDemandDetail(fav.id)
-						const card = toDemandCard(data)
-						rows.push({
-							...card,
-							_key: fav.type + '-' + fav.id,
-							_type: fav.type,
-							_title: card.title,
-							_sub: card.company || '',
-							_desc: card.demandDesc
-						})
-					} catch (e) {
-						// 需求已下线/不可见，跳过
-					}
-				}))
-				this.list = rows
+					;(favDemand.list || []).forEach((fav) => push(fav, 'demand'))
+					;(favResult.list || []).forEach((fav) => push(fav, 'result'))
+					this.list = rows
+				} catch (e) {
+					console.error('[my-list] loadFavorites failed:', e)
+					this.list = []
+				}
 			},
 			onOpen(item) {
 				const type = item._openType || item._type
@@ -259,10 +220,15 @@
 				}
 				uni.navigateTo({ url })
 			},
-			onRemoveFavorite(item) {
-				toggleFavorite(item._type, item.id)
-				this.loadList()
-				uni.showToast({ title: '已取消收藏', icon: 'none' })
+			async onRemoveFavorite(item) {
+				try {
+					await removeFavorite(item._type, item.id)
+					this.loadList()
+					uni.showToast({ title: '已取消收藏', icon: 'none' })
+				} catch (e) {
+					console.error('[my-list] removeFavorite failed:', e)
+					uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
+				}
 			}
 		}
 	}

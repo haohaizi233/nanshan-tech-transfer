@@ -101,13 +101,13 @@
 | 链路 | 模块 | 前置 | 工作量 | 状态 |
 |------|------|------|--------|------|
 | 需求 CRUD | demand | 建表 + service + router + 前端迁移 | 大 | ✅ 已完成（2026-09-03，见文档 16） |
-| 收藏 | favorite | 建表 + service + router | 小 | 待办 |
-| 对接 | cooperation | 建表 + 状态机 + 四角色权限 | 大 | 待办 |
+| 收藏 | favorite | 建表 + service + router | 小 | ✅ 已完成（2026-09-03，迁移 005 + /me/favorites + 幂等 PUT/DELETE，前端 index/dock-detail/my-list/mine 已接入） |
+| 对接 | cooperation | 建表 + 状态机 + 四角色权限 | 大 | ✅ 已完成（2026-09-03，迁移 005 + 五操作状态机 + 乐观锁 + accept 自动拒绝/confirm 需求转 matched 副作用，前端 dock-detail/my-list/mine 已接入，78 项断言 + 成果目标冒烟 13/13） |
 | 搜索统一 | search | 抽离 achievement 搜索 | 中 | 待办 |
-| Mock 清除 | — | 删除 mock-data.js, user.js | 中 | 需求部分已清除；成果/意向部分待 Phase C |
+| Mock 清除 | — | 删除 mock-data.js, user.js | 中 | 需求/收藏/意向部分已清除；成果发布与 AI 部分待 Phase C |
 | 资本迁移 | capital | nanshan_capital → tech_transfer | 中 | 待办 |
-| 主包 HostBridge | — | common/*.js 改用 HostBridge | 中 | 待办 |
-| packageA 迁移 | — | 7 页迁移到 tech-transfer | 大 | 需求相关 4 页已迁移；成果相关 3 页待 Phase C |
+| 主包 HostBridge | — | common/*.js 改用 HostBridge | 中 | 待办（已抽出 common/api-core.js 共享请求基础设施，为 HostBridge 切换收敛入口） |
+| packageA 迁移 | — | 7 页迁移到 tech-transfer | 大 | 需求/收藏/意向相关 5 页已迁移（index/dock-detail/my-list/mine/search）；成果发布 2 页待 Phase C |
 
 ---
 

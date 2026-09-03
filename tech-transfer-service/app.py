@@ -22,6 +22,8 @@ from routes.auth import bp as auth_bp
 from routes.me import bp as me_bp
 from routes.achievement import bp as achievement_bp
 from routes.demand import bp as demand_bp
+from routes.favorite import bp as favorite_bp
+from routes.cooperation import bp as cooperation_bp
 from routes.capital import bp as capital_bp
 from routes.file import bp as file_bp
 
@@ -34,6 +36,8 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(me_bp)
 app.register_blueprint(achievement_bp)
 app.register_blueprint(demand_bp)
+app.register_blueprint(favorite_bp)
+app.register_blueprint(cooperation_bp)
 app.register_blueprint(capital_bp)
 app.register_blueprint(file_bp)
 

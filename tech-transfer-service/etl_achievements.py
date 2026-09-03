@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 
 random.seed(42)
 
+# 演示成果归属 dev-user-002（app_user 2）：与前端 mock 票据身份 dev-user-001 区分，
+# 使默认用户可对成果发起对接（不能对接自己发布的内容），与 etl_demands.py 约定一致
+DEMO_OWNER_USER_ID = 2
+
 DB_CONFIG = {
     "host": "127.0.0.1",
     "port": 3306,
@@ -199,7 +203,7 @@ def generate_223_achievements():
 
         achievements.append({
             "id": idx,
-            "owner_user_id": 1,
+            "owner_user_id": DEMO_OWNER_USER_ID,
             "source_org_name": org[0],
             "org_type": org[1],
             "region": org[2],

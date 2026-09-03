@@ -187,14 +187,12 @@
 		loginAccount,
 		listCachedAccounts,
 		getIdentityLabel,
-		getFavorites,
-		getSentIntentions,
-		getReceivedIntentions,
 		getSessionPhone,
 		checkStorageHealth
 	} from '../../common/user.js'
 	import { getMyResults } from '../../common/mock-data.js'
 	import { getMyDemands } from '../../common/demand-api.js'
+	import { getMyFavorites, getMyCooperations } from '../../common/interaction-api.js'
 
 	export default {
 		data() {
@@ -269,9 +267,8 @@
 
 				const phone = this.authPhone || (this.profile && this.profile.phone) || ''
 				this.loadMyDemandCount()
+				this.loadInteractionCounts()
 				this.myResultCount = getMyResults(phone).length
-				this.favoriteCount = getFavorites().length
-				this.intentionCount = getSentIntentions(phone).length + getReceivedIntentions(phone).length
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
@@ -288,6 +285,24 @@
 				} catch (e) {
 					console.error('[mine] loadMyDemandCount failed:', e)
 					this.myDemandCount = 0
+				}
+			},
+			async loadInteractionCounts() {
+				if (!isLoggedIn()) {
+					this.favoriteCount = 0
+					this.intentionCount = 0
+					return
+				}
+				try {
+					const [favDemand, favResult, coop] = await Promise.all([
+						getMyFavorites('demand', { page: 1, pageSize: 1 }),
+						getMyFavorites('result', { page: 1, pageSize: 1 }),
+						getMyCooperations({ role: 'both', page: 1, pageSize: 1 })
+					])
+					this.favoriteCount = (favDemand.total || 0) + (favResult.total || 0)
+					this.intentionCount = coop.total || 0
+				} catch (e) {
+					console.error('[mine] loadInteractionCounts failed:', e)
 				}
 			},
 			toggleAuthMode() {

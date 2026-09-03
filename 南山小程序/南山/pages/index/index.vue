@@ -177,26 +177,12 @@
 </template>
 
 <script>
-	import { ensureLoginForDock, isFavorite, toggleFavorite, canProposeDock } from '../../common/user.js'
+	import { ensureLoginForDock, canDockContentType } from '../../common/user.js'
 	import { getCapitalGroups } from '../../common/capital.js'
 	import { openExternalSearchMiniProgram } from '../../common/external-miniprogram.js'
-	import { getAchievements } from '../../common/achievement-api.js'
+	import { getAchievements, formatAchPrice } from '../../common/achievement-api.js'
 	import { getDemands, toDemandCard } from '../../common/demand-api.js'
-
-	const PRICING_LABELS = {
-		'negotiable': '面议',
-		'license': '许可',
-		'transfer': '转让',
-		'cooperation': '合作',
-	}
-
-	function formatAchPrice(item) {
-		if (item.pricingMode === 'negotiable' || !item.priceMinWan) return PRICING_LABELS[item.pricingMode] || '面议'
-		const min = item.priceMinWan
-		const max = item.priceMaxWan
-		if (min && max) return `${min}–${max} 万`
-		return `${min} 万`
-	}
+	import { addFavorite, removeFavorite, getFavoriteIdSet } from '../../common/interaction-api.js'
 
 	export default {
 		data() {
@@ -259,6 +245,17 @@
 		},
 		methods: {
 			async refreshList() {
+				// 收藏状态（后端 API，失败时列表仍正常展示，只是不带收藏标记）
+				let favDemandIds = new Set()
+				let favResultIds = new Set()
+				try {
+					const sets = await Promise.all([getFavoriteIdSet('demand'), getFavoriteIdSet('result')])
+					favDemandIds = sets[0]
+					favResultIds = sets[1]
+				} catch (e) {
+					console.error('[index] loadFavorites failed:', e)
+				}
+
 				// 需求列表（真实 API）
 				try {
 					const data = await getDemands({ page: 1, pageSize: 10 })
@@ -267,8 +264,8 @@
 						return {
 							...card,
 							industryLine: [card.industry, card.cooperationType].filter(Boolean).join(' · '),
-							favorited: isFavorite('demand', card.id),
-							canDock: !card.isMine && canProposeDock('demand', card)
+							favorited: favDemandIds.has(String(card.id)),
+							canDock: !card.isMine && canDockContentType('demand')
 						}
 					})
 				} catch (e) {
@@ -285,8 +282,8 @@
 						source: item.sourceOrgName || '',
 						techIntro: item.techIntro || '',
 						price: formatAchPrice(item),
-						favorited: isFavorite('result', String(item.id)),
-						canDock: canProposeDock('result', { id: String(item.id) })
+						favorited: favResultIds.has(String(item.id)),
+						canDock: canDockContentType('result')
 					}))
 				} catch (e) {
 					console.error('[index] loadAchievements failed:', e)
@@ -345,13 +342,22 @@
 					url: '/packageA/post-result/post-result'
 				})
 			},
-			onToggleFavorite(type, item) {
+			async onToggleFavorite(type, item) {
 				if (!ensureLoginForDock()) return
-				item.favorited = toggleFavorite(type, item.id)
-				uni.showToast({
-					title: item.favorited ? '已收藏' : '已取消收藏',
-					icon: 'none'
-				})
+				// 乐观更新，失败回滚
+				const next = !item.favorited
+				item.favorited = next
+				try {
+					if (next) {
+						await addFavorite(type, item.id)
+					} else {
+						await removeFavorite(type, item.id)
+					}
+					uni.showToast({ title: next ? '已收藏' : '已取消收藏', icon: 'none' })
+				} catch (e) {
+					item.favorited = !next
+					uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
+				}
 			},
 			openDetail(type, id) {
 				if (!ensureLoginForDock()) return

@@ -117,45 +117,52 @@
 					<text class="contact-value contact-link">{{ detail.wechat }}</text>
 				</view>
 			</view>
-			<text class="tip">{{ type === 'demand' ? '为保护发布方隐私，非发布方查看时联系方式已脱敏' : '以上为演示联系方式，正式上线后将对接真实数据' }}</text>
+			<text class="tip">{{ type === 'demand' ? '为保护发布方隐私，非发布方查看时联系方式已脱敏' : '联系方式以成果发布方提供的信息为准' }}</text>
 		</view>
 
 		<!-- 底部操作区 -->
-		<view class="confirm-wrap">
-			<!-- 发起对接 / 取消待定 -->
-			<button
-				v-if="actionMode === 'propose'"
-				class="confirm-btn"
-				@click="onProposeDock"
-			>确认对接</button>
-			<button
-				v-else-if="actionMode === 'cancel_pending'"
-				class="confirm-btn confirm-btn-cancel"
-				@click="onCancelPending"
-			>取消对接</button>
+			<view class="confirm-wrap">
+				<!-- 发起对接 / 取消待定 -->
+				<button
+					v-if="actionMode === 'propose'"
+					class="confirm-btn"
+					@click="onProposeDock"
+				>确认对接</button>
+				<button
+					v-else-if="actionMode === 'cancel_pending'"
+					class="confirm-btn confirm-btn-cancel"
+					@click="onCancelPending"
+				>取消对接</button>
 
-			<!-- 接收方：同意 / 拒绝 -->
-			<view v-else-if="actionMode === 'receiver_decide'" class="btn-row">
-				<button class="confirm-btn half accept" @click="openConfirm('receiver', 'accept')">同意</button>
-				<button class="confirm-btn half reject" @click="openConfirm('receiver', 'reject')">拒绝</button>
-			</view>
+				<!-- 接收方：同意 / 拒绝 -->
+				<view v-else-if="actionMode === 'receiver_decide'" class="btn-row">
+					<button class="confirm-btn half accept" @click="openConfirm('accept')">同意</button>
+					<button class="confirm-btn half reject" @click="openConfirm('reject')">拒绝</button>
+				</view>
 
-			<!-- 发起方最终确认 -->
-			<view v-else-if="actionMode === 'initiator_final'" class="btn-row">
-				<button class="confirm-btn half accept" @click="openConfirm('initiator', 'accept')">最终确认</button>
-				<button class="confirm-btn half reject" @click="openConfirm('initiator', 'reject')">拒绝</button>
-			</view>
+				<!-- 已同意：双方均可确认 / 取消 -->
+				<view v-else-if="actionMode === 'confirm_or_cancel'" class="btn-row">
+					<button class="confirm-btn half accept" @click="openConfirm('confirm')">确认对接</button>
+					<button class="confirm-btn half reject" @click="openConfirm('cancel')">取消对接</button>
+				</view>
 
-			<!-- 终态展示 / 不可对接提示 -->
-			<view v-else-if="actionMode === 'status' || actionMode === 'blocked'" class="status-bar">
-				<text
-					v-if="actionMode === 'status'"
-					:class="'status-text status-' + (intention && intention.status)"
-				>{{ statusLabel }}</text>
-				<text v-else class="status-text status-rejected">不可对接</text>
-				<text class="status-hint">{{ actionMode === 'blocked' ? blockHint : statusHint }}</text>
+				<!-- 已确认：标记完成 -->
+				<button
+					v-else-if="actionMode === 'complete'"
+					class="confirm-btn"
+					@click="openConfirm('complete')"
+				>完成对接</button>
+
+				<!-- 终态展示 / 不可对接提示 -->
+				<view v-else-if="actionMode === 'status' || actionMode === 'blocked'" class="status-bar">
+					<text
+						v-if="actionMode === 'status'"
+						:class="'status-text status-' + statusCls"
+					>{{ statusLabel }}</text>
+					<text v-else class="status-text status-rejected">不可对接</text>
+					<text class="status-hint">{{ actionMode === 'blocked' ? blockHint : statusHint }}</text>
+				</view>
 			</view>
-		</view>
 
 		<!-- 5 秒不可撤销确认弹层 -->
 		<view v-if="confirmVisible" class="mask" @click.stop="closeConfirm">
@@ -174,23 +181,32 @@
 </template>
 
 <script>
-	import { getResultById, getMyResults } from '../../common/mock-data.js'
-	import { getDemandDetail, toDemandCard, getMyDemands as fetchMyDemands } from '../../common/demand-api.js'
+	import { getDemandDetail, toDemandCard } from '../../common/demand-api.js'
+	import { getAchievementDetail, formatAchPrice } from '../../common/achievement-api.js'
+	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../common/user.js'
 	import {
-		isFavorite,
-		toggleFavorite,
-		ensureLoginForDock,
-		addIntention,
-		removeIntention,
-		getMySentIntention,
-		getIntentionById,
-		getIntentionStatusLabel,
-		receiverRespondIntention,
-		initiatorFinalizeIntention,
-		getUserProfile,
-		canProposeDock,
-		getDockBlockMessage
-	} from '../../common/user.js'
+		addFavorite,
+		removeFavorite,
+		getFavoriteIdSet,
+		createCooperation,
+		getCooperationDetail,
+		getMyActiveIntentForTarget,
+		acceptCooperation,
+		rejectCooperation,
+		confirmCooperation,
+		cancelCooperation,
+		completeCooperation,
+		getCoopStatusLabel,
+		getCoopStatusCls
+	} from '../../common/interaction-api.js'
+
+	const ACTION_TIPS = {
+		accepted: '已同意，等待双方确认对接',
+		rejected: '已拒绝',
+		confirmed: '对接已确认',
+		cancelled: '已取消',
+		completed: '对接已完成'
+	}
 
 	export default {
 		data() {
@@ -198,13 +214,10 @@
 				type: 'demand',
 				detail: null,
 				favorited: false,
-				entryRole: '',
 				intentId: '',
 				intention: null,
-				myDemands: [],
 				confirmVisible: false,
-				confirmRole: '',
-				confirmAction: '',
+				confirmOp: '',
 				confirmLeft: 5,
 				confirmReady: false,
 				confirmTimer: null
@@ -212,64 +225,56 @@
 		},
 		computed: {
 			statusLabel() {
-				if (!this.intention) return ''
-				return getIntentionStatusLabel(this.intention.status)
+				return this.intention ? getCoopStatusLabel(this.intention.status) : ''
+			},
+			statusCls() {
+				return this.intention ? getCoopStatusCls(this.intention.status) : 'pending'
 			},
 			statusHint() {
-				if (!this.intention) return ''
-				const me = getUserProfile()
-				const phone = me && me.phone ? me.phone : ''
-				const isSender = phone && this.intention.fromPhone === phone
-				const s = this.intention.status
-				if (s === 'pending') {
-					return isSender ? '等待对方处理' : '请选择同意或拒绝'
+				const row = this.intention
+				if (!row) return ''
+				const isInitiator = row.myRole === 'initiator'
+				if (row.status === 'pending') {
+					return isInitiator ? '等待对方处理' : '请选择同意或拒绝'
 				}
-				if (s === 'accepted') {
-					return isSender ? '对方已同意，请最终确认' : '已同意，等待对方最终确认'
-				}
-				if (s === 'rejected') return '该对接已拒绝，不可撤销'
-				if (s === 'success') return '双方均已同意，对接成功'
+				if (row.status === 'accepted') return '对方已同意，双方均可确认或取消对接'
+				if (row.status === 'confirmed') return '双方已确认对接，可标记完成'
+				if (row.status === 'completed') return '本次对接已完成'
+				if (row.status === 'rejected') return '该对接已被拒绝'
+				if (row.status === 'cancelled') return '该对接已取消'
 				return ''
 			},
 			actionMode() {
-				const me = getUserProfile()
-				const phone = me && me.phone ? me.phone : ''
 				const row = this.intention
 				if (!row) {
-					if (this.detail && this.type === 'demand' && this.detail.isMine) return 'blocked'
 					if (this.detail && !canProposeDock(this.type, this.detail)) return 'blocked'
 					return 'propose'
 				}
-
-				const isSender = phone && row.fromPhone === phone
-				const isReceiver = phone && row.toPhone === phone
-
-				if (row.status === 'rejected' || row.status === 'success') return 'status'
-				if (isReceiver && row.status === 'pending') return 'receiver_decide'
-				if (isSender && row.status === 'accepted') return 'initiator_final'
-				if (isSender && row.status === 'pending') return 'cancel_pending'
-				if (isReceiver && row.status === 'accepted') return 'status'
+				if (row.status === 'pending') {
+					return row.myRole === 'target_owner' ? 'receiver_decide' : 'cancel_pending'
+				}
+				if (row.status === 'accepted') return 'confirm_or_cancel'
+				if (row.status === 'confirmed') return 'complete'
 				return 'status'
 			},
 			blockHint() {
-				if (this.type === 'demand' && this.detail && this.detail.isMine) {
-					return '这是您自己发布的需求，无法申请对接'
-				}
 				return getDockBlockMessage(this.type, this.detail)
 			},
 			confirmTitle() {
-				if (this.confirmRole === 'initiator' && this.confirmAction === 'accept') {
-					return '确认最终同意对接？'
+				const titles = {
+					accept: '确认同意该对接意向？',
+					reject: '确认拒绝该对接意向？',
+					confirm: '确认与对方建立对接？',
+					cancel: '确认取消该对接？',
+					complete: '确认本次对接已完成？'
 				}
-				const act = this.confirmAction === 'accept' ? '同意' : '拒绝'
-				return '确认' + act + '该对接意向？'
+				return titles[this.confirmOp] || '确认操作？'
 			}
 		},
 		onLoad(options) {
 			const type = options.type || 'demand'
 			const id = options.id || ''
 			this.type = type
-			this.entryRole = options.role || ''
 			this.intentId = options.intentId || ''
 
 			uni.setNavigationBarTitle({
@@ -278,31 +283,17 @@
 
 			if (type === 'demand') {
 				this.loadDemandDetail(id)
-				return
+			} else {
+				this.loadResultDetail(id)
 			}
-
-			// 成果（Mock 数据，Phase B 后续迁移）
-			const detail = getResultById(id)
-			if (!detail) {
-				uni.showToast({
-					title: '未找到对应信息',
-					icon: 'none'
-				})
-				setTimeout(() => {
-					uni.navigateBack()
-				}, 1200)
-				return
-			}
-			this.detail = detail
-			this.favorited = isFavorite(type, detail.id)
-			this.refreshIntention()
+			this.loadFavoriteState(id)
+			this.loadIntent(id)
 		},
 		onUnload() {
 			this.clearConfirmTimer()
 		},
 		onShow() {
-			if (this.detail) this.refreshIntention()
-			this.prefetchMyDemands()
+			if (this.detail) this.loadIntent(this.detail.id)
 		},
 		methods: {
 			async loadDemandDetail(id) {
@@ -314,29 +305,69 @@
 				try {
 					const data = await getDemandDetail(id)
 					this.detail = toDemandCard(data)
-					this.favorited = isFavorite('demand', this.detail.id)
-					this.refreshIntention()
 				} catch (e) {
 					console.error('[dock-detail] loadDemand failed:', e)
 					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
 					setTimeout(() => uni.navigateBack(), 1200)
 				}
 			},
-			async prefetchMyDemands() {
-				try {
-					const data = await fetchMyDemands({ page: 1, pageSize: 5 })
-					this.myDemands = (data.list || []).map(toDemandCard)
-				} catch (e) {
-					this.myDemands = []
-				}
-			},
-			refreshIntention() {
-				if (this.intentId) {
-					this.intention = getIntentionById(this.intentId)
+			async loadResultDetail(id) {
+				if (!id) {
+					uni.showToast({ title: '未找到对应信息', icon: 'none' })
+					setTimeout(() => uni.navigateBack(), 1200)
 					return
 				}
-				this.intention = getMySentIntention(this.type, this.detail.id)
-				if (this.intention) this.intentId = this.intention.intentId
+				try {
+					const data = await getAchievementDetail(id)
+					if (!data) throw new Error('未找到对应信息')
+					this.detail = {
+						id: data.id,
+						title: data.title,
+						source: data.sourceOrgName || '未填写',
+						price: formatAchPrice(data),
+						techIntro: data.techIntro || '',
+						purpose: (data.applicationFields || []).join(' / ') || '未填写',
+						techPath: data.techRoute || '未填写',
+						patentHolder: (data.inventors || []).map((v) => v.name).join('、') || '未填写',
+						patentNo: '详见成果详情',
+						maturity: data.maturityDesc || data.maturityLevel || '未填写',
+						contactName: data.contactName || '暂无',
+						contactTitle: data.contactTitle || '',
+						phone: data.contactPhone || '',
+						email: data.contactEmail || '',
+						wechat: data.contactWechat || '',
+						isMine: false
+					}
+				} catch (e) {
+					console.error('[dock-detail] loadResult failed:', e)
+					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
+					setTimeout(() => uni.navigateBack(), 1200)
+				}
+			},
+			async loadFavoriteState(id) {
+				if (!id) return
+				try {
+					const set = await getFavoriteIdSet(this.type)
+					this.favorited = set.has(String(parseInt(id, 10)))
+				} catch (e) {
+					this.favorited = false
+				}
+			},
+			async loadIntent(id) {
+				try {
+					if (this.intentId) {
+						this.intention = await getCooperationDetail(this.intentId)
+						this.intentId = String(this.intention.id)
+						return
+					}
+					if (!id) return
+					this.intention = await getMyActiveIntentForTarget(this.type, id)
+					this.intentId = this.intention ? String(this.intention.id) : ''
+				} catch (e) {
+					// 无权限或网络异常时按无意向处理（发起按钮可重试）
+					console.error('[dock-detail] loadIntent failed:', e)
+					this.intention = null
+				}
 			},
 			clearConfirmTimer() {
 				if (this.confirmTimer) {
@@ -344,11 +375,11 @@
 					this.confirmTimer = null
 				}
 			},
-			openConfirm(role, action) {
+			openConfirm(op) {
 				if (!ensureLoginForDock()) return
+				if (!this.intention) return
 				this.clearConfirmTimer()
-				this.confirmRole = role
-				this.confirmAction = action
+				this.confirmOp = op
 				this.confirmLeft = 5
 				this.confirmReady = false
 				this.confirmVisible = true
@@ -369,33 +400,34 @@
 				this.confirmLeft = 5
 			},
 			stopBubble() {},
-			onConfirmAction() {
-				if (!this.confirmReady) return
-				const intentId = this.intentId || (this.intention && this.intention.intentId)
-				if (!intentId) {
-					uni.showToast({ title: '意向不存在', icon: 'none' })
-					this.closeConfirm()
-					return
-				}
-				let res
-				if (this.confirmRole === 'receiver') {
-					res = receiverRespondIntention(intentId, this.confirmAction)
-				} else {
-					res = initiatorFinalizeIntention(intentId, this.confirmAction)
-				}
+			async onConfirmAction() {
+				if (!this.confirmReady || !this.intention) return
+				const intentId = this.intention.id
+				const version = this.intention.version
+				const op = this.confirmOp
 				this.closeConfirm()
-				if (!res || !res.ok) {
-					uni.showToast({ title: (res && res.message) || '操作失败', icon: 'none' })
-					return
+				try {
+					let next = null
+					if (op === 'accept') {
+						next = await acceptCooperation(intentId, version)
+					} else if (op === 'reject') {
+						next = await rejectCooperation(intentId, version, '对方拒绝了该对接意向')
+					} else if (op === 'confirm') {
+						next = await confirmCooperation(intentId, version)
+					} else if (op === 'cancel') {
+						next = await cancelCooperation(intentId, version, '取消对接')
+					} else if (op === 'complete') {
+						next = await completeCooperation(intentId, version)
+					}
+					if (next) {
+						this.intention = next
+						uni.showToast({ title: ACTION_TIPS[next.status] || '操作成功', icon: 'none' })
+					}
+				} catch (e) {
+					console.error('[dock-detail] onConfirmAction failed:', e)
+					uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
+					this.loadIntent(this.detail.id)
 				}
-				this.intention = res.intention
-				const tip =
-					res.intention.status === 'success'
-						? '对接成功'
-						: res.intention.status === 'rejected'
-							? '已拒绝'
-							: '已同意，等待发起方最终确认'
-				uni.showToast({ title: tip, icon: 'none' })
 			},
 			onCall() {
 				if (!ensureLoginForDock()) return
@@ -424,34 +456,40 @@
 					}
 				})
 			},
-			onToggleFavorite() {
+			async onToggleFavorite() {
 				if (!ensureLoginForDock()) return
 				if (!this.detail) return
-				this.favorited = toggleFavorite(this.type, this.detail.id)
-				uni.showToast({
-					title: this.favorited ? '已收藏' : '已取消收藏',
-					icon: 'none'
-				})
-			},
-			onCancelPending() {
-				if (!ensureLoginForDock()) return
-				if (!this.detail) return
-				const ok = removeIntention(this.type, this.detail.id)
-				if (!ok) {
-					uni.showToast({ title: '当前状态不可取消', icon: 'none' })
-					return
+				const next = !this.favorited
+				this.favorited = next
+				try {
+					if (next) {
+						await addFavorite(this.type, this.detail.id)
+					} else {
+						await removeFavorite(this.type, this.detail.id)
+					}
+					uni.showToast({ title: next ? '已收藏' : '已取消收藏', icon: 'none' })
+				} catch (e) {
+					this.favorited = !next
+					uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
 				}
-				this.intention = null
-				this.intentId = ''
-				uni.showToast({ title: '已取消对接', icon: 'none' })
 			},
-			onProposeDock() {
+			async onCancelPending() {
+				if (!ensureLoginForDock()) return
+				if (!this.intention) return
+				try {
+					await cancelCooperation(this.intention.id, this.intention.version, '发起方取消对接')
+					this.intention = null
+					this.intentId = ''
+					uni.showToast({ title: '已取消对接', icon: 'none' })
+				} catch (e) {
+					console.error('[dock-detail] onCancelPending failed:', e)
+					uni.showToast({ title: (e && e.message) || '取消失败', icon: 'none' })
+					this.loadIntent(this.detail.id)
+				}
+			},
+			async onProposeDock() {
 				if (!ensureLoginForDock()) return
 				if (!this.detail) return
-				if (this.type === 'demand' && this.detail.isMine) {
-					uni.showToast({ title: '这是您自己发布的需求，无法申请对接', icon: 'none' })
-					return
-				}
 				if (!canProposeDock(this.type, this.detail)) {
 					uni.showToast({
 						title: getDockBlockMessage(this.type, this.detail) || '无法对接',
@@ -459,52 +497,21 @@
 					})
 					return
 				}
-				const title = this.detail.title
-				const desc = this.type === 'result' ? this.detail.techIntro : this.detail.demandDesc
-				const toPhone = (this.detail.phone || '').trim()
-				if (!toPhone) {
-					uni.showToast({ title: '对方联系方式缺失', icon: 'none' })
-					return
+				try {
+					const intention = await createCooperation({
+						type: this.type,
+						id: this.detail.id,
+						message: '希望就「' + this.detail.title + '」与您对接，盼回复。'
+					})
+					this.intention = intention
+					this.intentId = String(intention.id)
+					uni.showToast({ title: '对接意向已提交', icon: 'success' })
+				} catch (e) {
+					console.error('[dock-detail] onProposeDock failed:', e)
+					uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none' })
+					// 已有进行中意向等场景：刷新为意向态展示
+					this.loadIntent(this.detail.id)
 				}
-				const me = getUserProfile()
-				const myPhone = me && me.phone ? me.phone : ''
-				let fromSide = { fromSideType: '', fromSideId: '', fromSideTitle: '', fromSideDesc: '' }
-				if (me && me.identity === 'supply') {
-					const mine = getMyResults(myPhone)[0]
-					if (mine) {
-						fromSide = {
-							fromSideType: 'result',
-							fromSideId: mine.id,
-							fromSideTitle: mine.title,
-							fromSideDesc: mine.techIntro
-						}
-					}
-				} else {
-					const mine = (this.myDemands || []).find((d) => d.status === 'published') || (this.myDemands || [])[0]
-					if (mine) {
-						fromSide = {
-							fromSideType: 'demand',
-							fromSideId: mine.id,
-							fromSideTitle: mine.title,
-							fromSideDesc: mine.demandDesc
-						}
-					}
-				}
-				const res = addIntention({
-					type: this.type,
-					id: this.detail.id,
-					title,
-					desc,
-					toPhone,
-					toName: this.detail.contactName || this.detail.patentHolder || this.detail.company || '',
-					...fromSide
-				})
-				if (!res.ok) {
-					uni.showToast({ title: res.message || '提交失败，请先登录', icon: 'none' })
-					return
-				}
-				this.refreshIntention()
-				uni.showToast({ title: '对接意向已提交', icon: 'success' })
 			}
 		}
 	}
