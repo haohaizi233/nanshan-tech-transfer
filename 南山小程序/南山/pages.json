@@ -159,7 +159,9 @@
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "南山科转通",
 		"navigationBarBackgroundColor": "#FFFFFF",
-		"backgroundColor": "#F5F6F8"
+		"backgroundColor": "#F5F6F8",
+		"rpxCalcMaxDeviceWidth": 414,
+		"rpxCalcBaseDeviceWidth": 414
 	},
 	"tabBar": {
 		"color": "#999999",

@@ -119,7 +119,7 @@ def _parse_upsert_body(body: dict, partial: bool):
     if "budgetNegotiable" in body and body["budgetNegotiable"] is not None:
         if not isinstance(body["budgetNegotiable"], bool):
             raise bad_request("budgetNegotiable 必须是布尔值")
-        fields["budget_negotiable"] = 1 if body["budgetNegotiable"] else 0
+        fields["budget_negotiable"] = bool(body["budgetNegotiable"])
 
     if "expectDeadline" in body and body["expectDeadline"] is not None:
         val = str(body["expectDeadline"]).strip()
@@ -204,10 +204,10 @@ def _resolve_name_refs(cur, fields):
                 )
         else:
             cur.execute(
-                "INSERT INTO organization (org_name, intro) VALUES (%s, %s)",
+                "INSERT INTO organization (org_name, intro) VALUES (%s, %s) RETURNING id",
                 (org_name, org_intro),
             )
-            org_id = cur.lastrowid
+            org_id = cur.fetchone()["id"]
         fields["org_id"] = org_id
 
     if category_name:
@@ -220,10 +220,10 @@ def _resolve_name_refs(cur, fields):
             fields["category_id"] = row["id"]
         else:
             cur.execute(
-                "INSERT INTO demand_category (code, name) VALUES (%s, %s)",
+                "INSERT INTO demand_category (code, name) VALUES (%s, %s) RETURNING id",
                 (category_name, category_name),
             )
-            fields["category_id"] = cur.lastrowid
+            fields["category_id"] = cur.fetchone()["id"]
 
 
 # ── 标签 ─────────────────────────────────────────────────────
@@ -260,12 +260,12 @@ def _sync_tags(cur, demand_id: int, tag_names):
             tag_id = row["id"]
         else:
             cur.execute(
-                "INSERT INTO demand_tag (code, name) VALUES (%s, %s)",
+                "INSERT INTO demand_tag (code, name) VALUES (%s, %s) RETURNING id",
                 (name, name),
             )
-            tag_id = cur.lastrowid
+            tag_id = cur.fetchone()["id"]
         cur.execute(
-            "INSERT IGNORE INTO demand_tag_relation (demand_id, tag_id) VALUES (%s, %s)",
+            "INSERT INTO demand_tag_relation (demand_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
             (demand_id, tag_id),
         )
 
@@ -439,6 +439,7 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
                  expect_deadline, deadline_desc, contact_name, contact_title,
                  contact_phone, contact_email, contact_wechat, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+            RETURNING id
             """,
             (
                 user_id,
@@ -450,7 +451,7 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
                 fields.get("coop_mode"),
                 fields.get("budget_min_wan"),
                 fields.get("budget_max_wan"),
-                fields.get("budget_negotiable", 0),
+                fields.get("budget_negotiable", False),
                 fields.get("expect_deadline"),
                 fields.get("deadline_desc"),
                 fields.get("contact_name"),
@@ -460,7 +461,7 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
                 fields.get("contact_wechat"),
             ),
         )
-        demand_id = cur.lastrowid
+        demand_id = cur.fetchone()["id"]
         if tags is not None:
             _sync_tags(cur, demand_id, tags)
 

@@ -177,10 +177,11 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
             INSERT INTO cooperation_intent
                 (initiator_user_id, target_type, target_id, target_owner_user_id, message)
             VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (user_id, target_type, target_id, target["owner_user_id"], message),
         )
-        intent_id = cur.lastrowid
+        intent_id = cur.fetchone()["id"]
         _insert_event(cur, intent_id, "created", None, "pending",
                       user_id, "initiator", message)
 

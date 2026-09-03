@@ -10,13 +10,13 @@ Note: Phase B will migrate these tables to tech_transfer schema.
 
 import pymysql
 
-from config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD
+from config import CAPITAL_DB_HOST, CAPITAL_DB_PORT, CAPITAL_DB_USER, CAPITAL_DB_PASSWORD
 
 CAPITAL_DB_CONFIG = {
-    "host": DB_HOST,
-    "port": DB_PORT,
-    "user": DB_USER,
-    "password": DB_PASSWORD,
+    "host": CAPITAL_DB_HOST,
+    "port": CAPITAL_DB_PORT,
+    "user": CAPITAL_DB_USER,
+    "password": CAPITAL_DB_PASSWORD,
     "database": "nanshan_capital",
     "charset": "utf8mb4",
     "cursorclass": pymysql.cursors.DictCursor,
@@ -121,8 +121,8 @@ def list_orgs(table: str, kind: str, keyword_fields: list, page: int, page_size:
         where_sql += " AND (" + " OR ".join(parts) + ")"
         params.extend([like] * len(keyword_fields))
 
-    count_sql = f"SELECT COUNT(*) AS c FROM `{table}`" + where_sql
-    list_sql = f"SELECT * FROM `{table}`" + where_sql + " ORDER BY sort_order ASC, id ASC LIMIT %s OFFSET %s"
+    count_sql = f"SELECT COUNT(*) AS c FROM {table}" + where_sql
+    list_sql = f"SELECT * FROM {table}" + where_sql + " ORDER BY sort_order ASC, id ASC LIMIT %s OFFSET %s"
 
     conn = _get_capital_conn()
     try:

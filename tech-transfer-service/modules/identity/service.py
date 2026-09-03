@@ -86,10 +86,10 @@ def find_or_create_user(ext: ExternalIdentity) -> tuple[IdentityContext, bool]:
             is_new = True
             user_no = _generate_user_no(cur)
             cur.execute(
-                "INSERT INTO app_user (user_no, status) VALUES (%s, 'active')",
+                "INSERT INTO app_user (user_no, status) VALUES (%s, 'active') RETURNING id",
                 (user_no,),
             )
-            user_id = cur.lastrowid
+            user_id = cur.fetchone()["id"]
 
             cur.execute(
                 """
@@ -138,7 +138,7 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
         cur.execute(
             """
             INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
-            VALUES (%s, %s, 'active', NOW(), DATE_ADD(NOW(), INTERVAL 14 DAY))
+            VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '14 days')
             """,
             (identity.userId, jti),
         )
@@ -172,7 +172,8 @@ def refresh_session(refresh_token: str) -> dict:
 
     jti = payload.get("jti")
     user_id = int(payload["sub"])
-    now = datetime.now()
+    # PG TIMESTAMPTZ 读取为带时区 datetime，比较也须用带时区当前时间
+    now = datetime.now(timezone.utc)
 
     with get_cursor(commit=True) as cur:
         cur.execute(
@@ -206,7 +207,7 @@ def refresh_session(refresh_token: str) -> dict:
         cur.execute(
             """
             INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
-            VALUES (%s, %s, 'active', NOW(), DATE_ADD(NOW(), INTERVAL 14 DAY))
+            VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '14 days')
             """,
             (user_id, new_jti),
         )

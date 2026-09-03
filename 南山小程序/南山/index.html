@@ -10,6 +10,29 @@
 				(coverSupport ? ', viewport-fit=cover' : '') + '" />')
 		</script>
 		<title></title>
+		<style>
+			html, body { margin: 0; padding: 0; }
+			@media screen and (min-width: 500px) {
+				body { background-color: #e9e9e9; }
+				#app {
+					max-width: 414px;
+					margin: 0 auto;
+					min-height: 100vh;
+					background-color: #f5f6f8;
+					box-shadow: 0 0 20px rgba(0, 0, 0, 0.08);
+				}
+				/* 用框架自带的 --window-left/right 变量把 tabBar / 页面头等
+				   fixed 元素约束到居中的 414px 列内（207 = 414 / 2）。
+				   !important 必须加：运行时 initCssVar() 会把这两个变量以
+				   内联样式写成 0px，非 important 的样式表规则会被覆盖。
+				   用 50% 而非 50vw：在 fixed 元素上按初始包含块解析（不含
+				   滚动条），与 #app 的居中基准一致；50vw 含滚动条会偏半根。 */
+				html {
+					--window-left: calc(50% - 207px) !important;
+					--window-right: calc(50% - 207px) !important;
+				}
+			}
+		</style>
 		<!--preload-links-->
 		<!--app-context-->
 	</head>
