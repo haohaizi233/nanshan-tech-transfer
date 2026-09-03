@@ -3,32 +3,28 @@
 
 Architecture source: openapi.yaml paths /favorites/{targetType}/{targetId}；06-api-design.md §8
 """
-from flask import Blueprint, request, g
+from fastapi import APIRouter, Depends
 
-from core.response import success
-from core.middleware import auth_required
+from core.response import success, get_request_id
+from core.middleware import identity
 from modules.favorite.service import add_favorite, remove_favorite
 
-bp = Blueprint("favorite", __name__, url_prefix="/api/tech-transfer/v1")
+router = APIRouter(prefix="/api/tech-transfer/v1")
 
 
-@bp.put("/favorites/<target_type>/<int:target_id>")
-@auth_required
-def favorite_add(target_type: str, target_id: int):
-    user = g.identity
+@router.put("/favorites/{target_type}/{target_id}")
+def favorite_add(target_type: str, target_id: int, user: dict = Depends(identity)):
     result = add_favorite(
         user["userId"], user.get("userNo", ""), target_type, target_id,
-        request_id=g.get("request_id"),
+        request_id=get_request_id(),
     )
     return success(result)
 
 
-@bp.delete("/favorites/<target_type>/<int:target_id>")
-@auth_required
-def favorite_remove(target_type: str, target_id: int):
-    user = g.identity
+@router.delete("/favorites/{target_type}/{target_id}")
+def favorite_remove(target_type: str, target_id: int, user: dict = Depends(identity)):
     remove_favorite(
         user["userId"], user.get("userNo", ""), target_type, target_id,
-        request_id=g.get("request_id"),
+        request_id=get_request_id(),
     )
     return success(None, "已取消收藏")

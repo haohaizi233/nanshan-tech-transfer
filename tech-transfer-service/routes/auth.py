@@ -1,15 +1,16 @@
-from flask import Blueprint, request
-from core.response import success, error
-from core.errors import BizError, bootstrap_credential_invalid, TT_AUTH_40103
+from fastapi import APIRouter, Depends
+
+from core.response import success
+from core.middleware import json_body
+from core.errors import bootstrap_credential_invalid, BizError, TT_COMMON_40102
 from modules.identity.provider import get_identity_provider
 from modules.identity.service import bootstrap_session, refresh_session, logout_session
 
-bp = Blueprint("auth", __name__, url_prefix="/api/tech-transfer/v1/auth")
+router = APIRouter(prefix="/api/tech-transfer/v1/auth")
 
 
-@bp.post("/bootstrap")
-def bootstrap():
-    body = request.get_json(silent=True) or {}
+@router.post("/bootstrap")
+def bootstrap(body: dict = Depends(json_body)):
     host_credential = body.get("hostCredential")
     if not host_credential:
         raise bootstrap_credential_invalid("缺少 hostCredential")
@@ -20,12 +21,10 @@ def bootstrap():
     return success(result)
 
 
-@bp.post("/refresh")
-def refresh():
-    body = request.get_json(silent=True) or {}
+@router.post("/refresh")
+def refresh(body: dict = Depends(json_body)):
     refresh_token = body.get("refreshToken")
     if not refresh_token:
-        from core.errors import BizError, TT_COMMON_40102
         code, message, status = TT_COMMON_40102
         raise BizError(code, "缺少 refreshToken", status)
 
@@ -33,12 +32,10 @@ def refresh():
     return success(result)
 
 
-@bp.post("/logout")
-def logout():
-    body = request.get_json(silent=True) or {}
+@router.post("/logout")
+def logout(body: dict = Depends(json_body)):
     refresh_token = body.get("refreshToken")
     if not refresh_token:
-        from core.errors import BizError, TT_COMMON_40102
         code, message, status = TT_COMMON_40102
         raise BizError(code, "缺少 refreshToken", status)
 

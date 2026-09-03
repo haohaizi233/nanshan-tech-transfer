@@ -2,7 +2,7 @@
 南山科转通 · 前后端一键联调启动器（PyCharm 中右键运行本文件即可）
 
 启动内容：
-  1. Flask 后端      tools/api-server/app.py  →  http://127.0.0.1:8787
+  1. FastAPI 后端    tech-transfer-service/app.py  →  http://127.0.0.1:8787
   2. 小程序前端      调用 HBuilderX CLI 编译 → 自动拉起微信开发者工具（改源码自动热编译）
 
 用法：
@@ -90,7 +90,7 @@ def check_db_config():
 
 
 def ensure_backend_deps():
-    missing = [m for m in ("flask", "flask_cors", "pymysql", "jwt") if importlib.util.find_spec(m) is None]
+    missing = [m for m in ("fastapi", "uvicorn", "pymysql", "jwt") if importlib.util.find_spec(m) is None]
     if not missing:
         print("  [OK] 后端依赖已就绪")
         return
@@ -170,7 +170,7 @@ def main():
             pass
 
     parser = argparse.ArgumentParser(description="南山科转通前后端一键联调启动器")
-    parser.add_argument("--backend-only", action="store_true", help="只启动 Flask 后端")
+    parser.add_argument("--backend-only", action="store_true", help="只启动 FastAPI 后端")
     parser.add_argument("--frontend-only", action="store_true", help="只编译并运行小程序前端")
     parser.add_argument("--demo", action="store_true", help="恢复演示模式(USE_CAPITAL_DEMO=true)后退出")
     args = parser.parse_args()

@@ -1,29 +1,43 @@
-from flask import jsonify, g
-from datetime import datetime, timezone
+"""
+统一响应封装（FastAPI 版）
+
+路由返回 dict（success），由 FastAPI 序列化为 JSON；
+error 供异常处理器构造 JSONResponse。
+requestId 通过 contextvar 传递：中间件写入 → 线程池中的同步端点可读
+（anyio.to_thread 会复制当前上下文到工作线程）。
+"""
+
+from contextvars import ContextVar
 import uuid
 
+from fastapi.responses import JSONResponse
 
-def _request_id():
-    if hasattr(g, "request_id"):
-        return g.request_id
-    return str(uuid.uuid4())
+_request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 
-def success(data=None, message="ok"):
-    return jsonify({
+def set_request_id(request_id: str):
+    _request_id_var.set(request_id)
+
+
+def get_request_id() -> str:
+    return _request_id_var.get() or str(uuid.uuid4())
+
+
+def success(data=None, message: str = "ok") -> dict:
+    return {
         "code": 0,
         "message": message,
         "data": data,
-        "requestId": _request_id(),
-    })
+        "requestId": get_request_id(),
+    }
 
 
-def error(code: str, message: str, http_status: int = 400, details=None):
+def error(code: str, message: str, http_status: int = 400, details=None) -> JSONResponse:
     body = {
         "code": code,
         "message": message,
-        "requestId": _request_id(),
+        "requestId": get_request_id(),
     }
     if details is not None:
         body["details"] = details
-    return jsonify(body), http_status
+    return JSONResponse(status_code=http_status, content=body)

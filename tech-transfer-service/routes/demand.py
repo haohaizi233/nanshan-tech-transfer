@@ -4,11 +4,11 @@
 Architecture source: openapi.yaml paths /demands, /demands/{id},
                      /demands/{id}/submit|cancel|close；06-api-design.md §8
 """
-from flask import Blueprint, request, g
+from fastapi import APIRouter, Depends, Request
 
-from core.response import success
+from core.response import success, get_request_id
+from core.middleware import identity, json_body
 from core.errors import bad_request
-from core.middleware import auth_required
 from modules.demand.service import (
     list_demands,
     get_demand_detail,
@@ -19,86 +19,69 @@ from modules.demand.service import (
     close_demand,
 )
 
-bp = Blueprint("demand", __name__, url_prefix="/api/tech-transfer/v1")
+router = APIRouter(prefix="/api/tech-transfer/v1")
 
 
-@bp.get("/demands")
-@auth_required
-def demands_list():
-    user_id = g.identity["userId"]
-    return success(list_demands(request.args, user_id))
+@router.get("/demands")
+def demands_list(request: Request, user: dict = Depends(identity)):
+    return success(list_demands(request.query_params, user["userId"]))
 
 
-@bp.post("/demands")
-@auth_required
-def demands_create():
-    user = g.identity
+@router.post("/demands", status_code=201)
+def demands_create(request: Request, user: dict = Depends(identity), body: dict = Depends(json_body)):
     idem_key = request.headers.get("X-Idempotency-Key")
     if idem_key:
         print(f"[demand] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
-    body = request.get_json(silent=True)
     detail = create_demand(
         user["userId"], user.get("userNo", ""), body,
-        request_id=g.get("request_id"),
+        request_id=get_request_id(),
     )
-    return success(detail, "创建成功"), 201
+    return success(detail, "创建成功")
 
 
-@bp.get("/demands/<int:demand_id>")
-@auth_required
-def demand_detail(demand_id: int):
-    user_id = g.identity["userId"]
-    return success(get_demand_detail(demand_id, user_id))
+@router.get("/demands/{demand_id}")
+def demand_detail(demand_id: int, user: dict = Depends(identity)):
+    return success(get_demand_detail(demand_id, user["userId"]))
 
 
-@bp.patch("/demands/<int:demand_id>")
-@auth_required
-def demand_update(demand_id: int):
-    user = g.identity
-    body = request.get_json(silent=True)
+@router.patch("/demands/{demand_id}")
+def demand_update(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     detail = update_demand(
         user["userId"], user.get("userNo", ""), demand_id, body,
-        request_id=g.get("request_id"),
+        request_id=get_request_id(),
     )
     return success(detail)
 
 
-def _version_body():
-    body = request.get_json(silent=True) or {}
-    version = body.get("version")
+def _version_body(body: dict):
+    version = (body or {}).get("version")
     if version is None:
         raise bad_request("必须携带 version（乐观锁）")
     return version
 
 
-@bp.post("/demands/<int:demand_id>/submit")
-@auth_required
-def demand_submit(demand_id: int):
-    user = g.identity
+@router.post("/demands/{demand_id}/submit")
+def demand_submit(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     result = submit_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(),
-        request_id=g.get("request_id"),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(body),
+        request_id=get_request_id(),
     )
     return success(result)
 
 
-@bp.post("/demands/<int:demand_id>/cancel")
-@auth_required
-def demand_cancel(demand_id: int):
-    user = g.identity
+@router.post("/demands/{demand_id}/cancel")
+def demand_cancel(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     result = cancel_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(),
-        request_id=g.get("request_id"),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(body),
+        request_id=get_request_id(),
     )
     return success(result)
 
 
-@bp.post("/demands/<int:demand_id>/close")
-@auth_required
-def demand_close(demand_id: int):
-    user = g.identity
+@router.post("/demands/{demand_id}/close")
+def demand_close(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     result = close_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(),
-        request_id=g.get("request_id"),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(body),
+        request_id=get_request_id(),
     )
     return success(result)

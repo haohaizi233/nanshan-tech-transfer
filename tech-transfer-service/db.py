@@ -1,15 +1,25 @@
-import pymysql
+"""
+数据库连接（线程本地）
+
+FastAPI 的同步端点运行在线程池中，每个线程持有独立连接，
+避免多线程共用同一 pymysql 连接导致的协议错乱。
+公共 API 与 Flask 版保持一致：get_conn / get_cursor。
+"""
+
+import threading
 from contextlib import contextmanager
+
+import pymysql
 
 from config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 
-_pool = None
+_local = threading.local()
 
 
-def _get_pool():
-    global _pool
-    if _pool is None:
-        _pool = pymysql.connect(
+def _get_thread_conn():
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        conn = pymysql.connect(
             host=DB_HOST,
             port=DB_PORT,
             user=DB_USER,
@@ -19,12 +29,13 @@ def _get_pool():
             cursorclass=pymysql.cursors.DictCursor,
             autocommit=False,
         )
-    return _pool
+        _local.conn = conn
+    return conn
 
 
 @contextmanager
 def get_conn():
-    conn = _get_pool()
+    conn = _get_thread_conn()
     try:
         conn.ping(reconnect=True)
         yield conn
@@ -33,16 +44,15 @@ def get_conn():
             conn.close()
         except Exception:
             pass
-        global _pool
-        _pool = None
+        _local.conn = None
         raise
 
 
 @contextmanager
 def get_cursor(commit: bool = False):
     with get_conn() as conn:
+        cur = conn.cursor()
         try:
-            cur = conn.cursor()
             yield cur
             if commit:
                 conn.commit()

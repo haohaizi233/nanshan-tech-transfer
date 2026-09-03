@@ -1,5 +1,5 @@
 """
-南山科转通 tech-transfer-service —— 模块化单体后端
+南山科转通 tech-transfer-service —— 模块化单体后端（FastAPI 版）
 
 启动：
   python app.py
@@ -9,57 +9,78 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
-from flask import Flask, Response, jsonify, request, g
-from flask_cors import CORS
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import assert_environment, API_PREFIX
-from core.response import success, error
+from core.response import success, error, set_request_id
 from core.errors import BizError
-from db import get_conn, get_cursor
-from routes.auth import bp as auth_bp
-from routes.me import bp as me_bp
-from routes.achievement import bp as achievement_bp
-from routes.demand import bp as demand_bp
-from routes.favorite import bp as favorite_bp
-from routes.cooperation import bp as cooperation_bp
-from routes.capital import bp as capital_bp
-from routes.file import bp as file_bp
+from db import get_cursor
+from routes.auth import router as auth_router
+from routes.me import router as me_router
+from routes.achievement import router as achievement_router
+from routes.demand import router as demand_router
+from routes.favorite import router as favorite_router
+from routes.cooperation import router as cooperation_router
+from routes.capital import router as capital_router
+from routes.file import router as file_router
 
 assert_environment()
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI(title="tech-transfer-service", docs_url=None, redoc_url=None, openapi_url=None)
 
-app.register_blueprint(auth_bp)
-app.register_blueprint(me_bp)
-app.register_blueprint(achievement_bp)
-app.register_blueprint(demand_bp)
-app.register_blueprint(favorite_bp)
-app.register_blueprint(cooperation_bp)
-app.register_blueprint(capital_bp)
-app.register_blueprint(file_bp)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(me_router)
+app.include_router(achievement_router)
+app.include_router(demand_router)
+app.include_router(favorite_router)
+app.include_router(cooperation_router)
+app.include_router(capital_router)
+app.include_router(file_router)
+
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────
-@app.before_request
-def _set_request_id():
-    g.request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+@app.middleware("http")
+async def _set_request_id(request: Request, call_next):
+    set_request_id(request.headers.get("X-Request-Id") or str(uuid.uuid4()))
+    return await call_next(request)
 
 
 # ── 统一错误处理 ─────────────────────────────────────────────
-@app.errorhandler(BizError)
-def _handle_biz_error(e: BizError):
+@app.exception_handler(BizError)
+async def _handle_biz_error(_: Request, e: BizError):
     return error(e.code, e.message, e.http_status, e.details)
 
 
-@app.errorhandler(404)
-def _handle_404(_):
+@app.exception_handler(RequestValidationError)
+async def _handle_validation_error(_: Request, e: RequestValidationError):
+    # 等价 Flask 行为：路径参数类型不匹配（如 /demands/abc）→ 404 接口不存在
     return error("TT_COMMON_40401", "接口不存在", 404)
 
 
-@app.errorhandler(500)
-def _handle_500(e):
+@app.exception_handler(StarletteHTTPException)
+async def _handle_http_error(_: Request, e: StarletteHTTPException):
+    if e.status_code == 404:
+        return error("TT_COMMON_40401", "接口不存在", 404)
+    return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+
+
+@app.exception_handler(Exception)
+async def _handle_500(_: Request, e: Exception):
+    logging.exception("unhandled error")
     return error("TT_COMMON_50001", f"服务内部错误: {e}", 500)
 
 
@@ -71,7 +92,7 @@ def health():
             cur.execute("SELECT COUNT(*) AS c FROM app_user")
             user_count = cur.fetchone()["c"]
         import config as _cfg
-        return jsonify({
+        return {
             "code": 0,
             "message": "ok",
             "data": {
@@ -80,15 +101,18 @@ def health():
                 "authProvider": _cfg.AUTH_PROVIDER,
                 "appEnv": _cfg.APP_ENV,
             },
-        })
+        }
     except Exception as e:
-        return jsonify({"code": 1, "message": str(e), "data": {"db": False}}), 500
+        return JSONResponse(status_code=500, content={"code": 1, "message": str(e), "data": {"db": False}})
 
 
 if __name__ == "__main__":
+    assert_environment()
+    import uvicorn
+
     print("tech-transfer-service listening on http://0.0.0.0:8787")
     print(f"  API prefix: {API_PREFIX}")
     print("  Health:     http://127.0.0.1:8787/api/health")
     print("  Bootstrap:  POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/bootstrap")
     print("  Get Me:     GET  http://127.0.0.1:8787/api/tech-transfer/v1/me")
-    app.run(host="0.0.0.0", port=8787, debug=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8787, reload=True)
