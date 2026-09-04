@@ -55,6 +55,19 @@ const rejectReason = ref('')
 const auditError = ref('')
 const auditSubmitting = ref(false)
 
+const formVisible = ref(false)
+const formMode = ref('create')
+const formLoading = ref(false)
+const formSaving = ref(false)
+const formError = ref('')
+const editingId = ref(null)
+const achievementForm = reactive({
+  title: '', categoryId: '', sourceOrgName: '', techIntro: '', techRoute: '',
+  maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
+  priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
+  applicationFieldsText: '', inventorNamesText: '', version: null,
+})
+
 const fmtTime = v =>
   v ? String(v).replace('T', ' ').slice(0, 16) : '-'
 
@@ -229,6 +242,90 @@ const openView = item => {
   viewError.value = ''
 
   fetchDetail(item.id)
+}
+
+const resetAchievementForm = () => {
+  Object.assign(achievementForm, {
+    title: '', categoryId: '', sourceOrgName: '', techIntro: '', techRoute: '',
+    maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
+    priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
+    applicationFieldsText: '', inventorNamesText: '', version: null,
+  })
+}
+
+const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
+
+const openCreate = () => {
+  formMode.value = 'create'
+  editingId.value = null
+  formError.value = ''
+  resetAchievementForm()
+  formVisible.value = true
+}
+
+const openEdit = async item => {
+  resetAchievementForm()
+  formMode.value = 'edit'
+  editingId.value = item.id
+  formError.value = ''
+  formLoading.value = true
+  formVisible.value = true
+  try {
+    const data = await api(`/admin/achievements/${item.id}`)
+    Object.assign(achievementForm, {
+      title: data.title || '', sourceOrgName: data.orgName || '', techIntro: data.techIntro || '',
+      techRoute: data.techRoute || '', maturityLevel: data.maturityLevel || '02_lab',
+      maturityDesc: data.maturityDesc || '', pricingMode: data.pricingMode || 'negotiable',
+      priceMinWan: data.priceMinWan ?? '', priceMaxWan: data.priceMaxWan ?? '',
+      contactName: data.contactName || '', contactPhone: data.contactPhone || '',
+      contactEmail: data.contactEmail || '',
+      applicationFieldsText: (data.applicationFields || []).join('，'),
+      inventorNamesText: (data.inventors || []).map(x => x.name).filter(Boolean).join('，'),
+      version: data.version,
+    })
+  } catch (err) {
+    formError.value = err.message || '加载成果详情失败'
+  } finally {
+    formLoading.value = false
+  }
+}
+
+const saveAchievement = async () => {
+  if (!achievementForm.title.trim()) {
+    formError.value = '请输入成果名称'
+    return
+  }
+  formSaving.value = true
+  formError.value = ''
+  try {
+    const body = { title: achievementForm.title.trim(), maturityLevel: achievementForm.maturityLevel, pricingMode: achievementForm.pricingMode }
+    const optionalTextFields = {
+      sourceOrgName: achievementForm.sourceOrgName, techIntro: achievementForm.techIntro,
+      techRoute: achievementForm.techRoute, maturityDesc: achievementForm.maturityDesc,
+      contactName: achievementForm.contactName, contactPhone: achievementForm.contactPhone,
+      contactEmail: achievementForm.contactEmail,
+    }
+    Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
+    if (formMode.value === 'create' || achievementForm.applicationFieldsText.trim()) body.applicationFields = splitText(achievementForm.applicationFieldsText)
+    if (achievementForm.categoryId) body.categoryId = Number(achievementForm.categoryId)
+    if (achievementForm.priceMinWan !== '') body.priceMinWan = Number(achievementForm.priceMinWan)
+    if (achievementForm.priceMaxWan !== '') body.priceMaxWan = Number(achievementForm.priceMaxWan)
+    const inventors = splitText(achievementForm.inventorNamesText)
+    if (inventors.length) body.inventorRefs = inventors.map((name, index) => ({ name, sortOrder: index }))
+    if (formMode.value === 'create') {
+      await api('/admin/achievements', { method: 'POST', body })
+      currentPage.value = 1
+    } else {
+      body.version = achievementForm.version
+      await api(`/admin/achievements/${editingId.value}`, { method: 'PATCH', body })
+    }
+    formVisible.value = false
+    fetchList()
+  } catch (err) {
+    formError.value = err.message || '保存成果失败'
+  } finally {
+    formSaving.value = false
+  }
 }
 
 const inventorNames = computed(() => {
@@ -533,6 +630,7 @@ onMounted(() => {
         </div>
 
         <div class="right-actions">
+          <button type="button" class="primary-button" @click="openCreate">新增成果</button>
           <button
             type="button"
             class="default-button"
@@ -653,6 +751,8 @@ onMounted(() => {
 
                 <td>
                   <div class="operation-buttons">
+                    <button type="button" @click="openEdit(item)">编辑</button>
+                    <span>|</span>
 
                     <button
                       type="button"
@@ -786,6 +886,29 @@ onMounted(() => {
 
     </section>
 
+
+    <div v-if="formVisible" class="modal-mask" @click.self="!formSaving && (formVisible = false)">
+      <div class="modal form-modal">
+        <div class="modal-header"><h3>{{ formMode === 'create' ? '新增成果' : '编辑成果' }}</h3><button type="button" class="close-button" @click="formVisible = false">×</button></div>
+        <div class="form-content">
+          <p v-if="formLoading" class="modal-state">加载中…</p>
+          <template v-else>
+            <label>成果名称 *</label><input v-model="achievementForm.title" />
+            <label>分类（新建时可选）</label><select v-model="achievementForm.categoryId"><option value="">不修改/不选择</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+            <label>来源机构</label><input v-model="achievementForm.sourceOrgName" />
+            <label>技术简介</label><textarea v-model="achievementForm.techIntro" rows="4"></textarea>
+            <div class="form-grid"><div><label>成熟度 *</label><select v-model="achievementForm.maturityLevel"><option value="01_idea">概念阶段</option><option value="02_lab">实验室验证</option><option value="03_pilot_ready">可中试</option><option value="04_pilot_done">中试完成</option><option value="05_mass_ready">量产准备</option></select></div><div><label>定价方式 *</label><select v-model="achievementForm.pricingMode"><option value="negotiable">面议</option><option value="license">许可</option><option value="transfer">转让</option><option value="cooperation">合作</option><option value="other">其他</option></select></div></div>
+            <div class="form-grid"><div><label>最低报价（万元）</label><input v-model="achievementForm.priceMinWan" type="number" min="0" /></div><div><label>最高报价（万元）</label><input v-model="achievementForm.priceMaxWan" type="number" min="0" /></div></div>
+            <label>应用领域（逗号分隔）</label><input v-model="achievementForm.applicationFieldsText" />
+            <label>发明人（逗号分隔）</label><input v-model="achievementForm.inventorNamesText" />
+            <div class="form-grid"><div><label>联系人</label><input v-model="achievementForm.contactName" /></div><div><label>联系电话</label><input v-model="achievementForm.contactPhone" /></div></div>
+            <label>联系邮箱</label><input v-model="achievementForm.contactEmail" />
+            <p v-if="formError" class="audit-error">{{ formError }}</p>
+          </template>
+        </div>
+        <div class="modal-footer"><button type="button" class="default-button" :disabled="formSaving" @click="formVisible = false">取消</button><button type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement">{{ formSaving ? '保存中…' : '保存' }}</button></div>
+      </div>
+    </div>
 
     <div
       v-if="modalVisible"
@@ -1523,4 +1646,10 @@ tbody tr:hover {
     gap: 18px 20px;
   }
 }
+.form-modal { width: 720px; }
+.form-content { overflow-y: auto; padding: 20px 24px; }
+.form-content label { display: block; margin: 12px 0 6px; color: #283447; font-size: 13px; font-weight: 600; }
+.form-content input, .form-content select, .form-content textarea { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid #dce4ee; border-radius: 5px; font: inherit; }
+.form-content textarea { resize: vertical; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 </style>

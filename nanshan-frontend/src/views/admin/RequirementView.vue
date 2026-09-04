@@ -133,6 +133,37 @@ const auditReason = ref('')
 const auditSubmitting = ref(false)
 const auditError = ref('')
 
+const formVisible = ref(false)
+const formMode = ref('create')
+const formLoading = ref(false)
+const formSaving = ref(false)
+const formError = ref('')
+const editingId = ref(null)
+const demandForm = reactive({ title: '', description: '', region: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
+
+const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
+const resetDemandForm = () => Object.assign(demandForm, { title: '', description: '', region: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
+const openCreate = () => { formMode.value = 'create'; editingId.value = null; formError.value = ''; resetDemandForm(); formVisible.value = true }
+const openEdit = async item => {
+  resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formError.value = ''; formLoading.value = true; formVisible.value = true
+  try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
+}
+const saveDemand = async () => {
+  if (!demandForm.title.trim() || !demandForm.description.trim()) { formError.value = '请填写需求标题和需求描述'; return }
+  formSaving.value = true; formError.value = ''
+  try {
+    const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable }
+    const optionalTextFields = { region: demandForm.region, orgName: demandForm.orgName, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: demandForm.contactPhone }
+    Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
+    if (demandForm.coopModeText.trim()) body.coopMode = splitText(demandForm.coopModeText)
+    if (demandForm.tagsText.trim()) body.tags = splitText(demandForm.tagsText)
+    if (demandForm.budgetMinWan !== '') body.budgetMinWan = Number(demandForm.budgetMinWan)
+    if (demandForm.budgetMaxWan !== '') body.budgetMaxWan = Number(demandForm.budgetMaxWan)
+    if (formMode.value === 'create') { await api('/admin/demands', { method: 'POST', body }); currentPage.value = 1 } else { body.version = demandForm.version; await api(`/admin/demands/${editingId.value}`, { method: 'PATCH', body }) }
+    formVisible.value = false; fetchList()
+  } catch (err) { formError.value = err.message || '保存需求失败' } finally { formSaving.value = false }
+}
+
 const openAudit = item => {
   auditItem.value = item
   auditReason.value = ''
@@ -213,6 +244,7 @@ const submitReject = async () => {
         </div>
 
         <div class="actions">
+          <button class="primary-btn" @click="openCreate">新增需求</button>
           <button class="primary-btn" @click="handleSearch">查询</button>
           <button class="default-btn" @click="handleReset">重置</button>
         </div>
@@ -273,6 +305,8 @@ const submitReject = async () => {
               <td>{{ fmtTime(item.createdAt) }}</td>
               <td>
                 <div class="operation">
+                  <button @click="openEdit(item)">编辑</button>
+                  <span>|</span>
                   <button @click="openDetail(item)">查看</button>
                   <template v-if="item.status === 'pending_review'">
                     <span>|</span>
@@ -438,6 +472,33 @@ const submitReject = async () => {
 
     </div>
 
+
+    <div v-if="formVisible" class="modal-mask" @click.self="formVisible = false">
+      <div class="modal form-modal">
+        <div class="modal-header"><h3>{{ formMode === 'create' ? '新增需求' : '编辑需求' }}</h3><button type="button" @click="formVisible = false">×</button></div>
+        <div class="modal-body form-content">
+          <p v-if="formLoading" class="modal-tip">加载中…</p>
+          <template v-else>
+            <label>需求标题 *</label><input v-model="demandForm.title" />
+            <label>需求描述 *</label><textarea v-model="demandForm.description" rows="4"></textarea>
+            <div class="form-grid">
+              <div><label>所属机构</label><input v-model="demandForm.orgName" /></div>
+              <div><label>地区</label><input v-model="demandForm.region" /></div>
+              <div><label>分类</label><input v-model="demandForm.categoryName" /></div>
+              <div><label>合作方式（逗号分隔）</label><input v-model="demandForm.coopModeText" placeholder="技术合作，成果转让" /></div>
+              <div><label>预算下限（万元）</label><input v-model.number="demandForm.budgetMinWan" type="number" min="0" /></div>
+              <div><label>预算上限（万元）</label><input v-model.number="demandForm.budgetMaxWan" type="number" min="0" /></div>
+              <div><label>联系人</label><input v-model="demandForm.contactName" /></div>
+              <div><label>联系电话</label><input v-model="demandForm.contactPhone" /></div>
+            </div>
+            <label>标签（逗号分隔）</label><input v-model="demandForm.tagsText" placeholder="AI，智能制造" />
+            <label class="checkbox-label"><input v-model="demandForm.budgetNegotiable" type="checkbox" /> 预算可议</label>
+            <p v-if="formError" class="error-text">{{ formError }}</p>
+          </template>
+        </div>
+        <div class="modal-footer"><button class="plain-btn" :disabled="formSaving" @click="formVisible = false">取消</button><button class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand">{{ formSaving ? '保存中…' : '保存' }}</button></div>
+      </div>
+    </div>
 
     <div v-if="auditVisible" class="modal-mask" @click.self="closeAudit">
 
@@ -1025,5 +1086,48 @@ tbody tr:hover {
   margin: 10px 0 0;
   color: #ed5663;
   font-size: 13px;
+}
+
+.form-modal {
+  width: 720px;
+}
+
+.form-content label {
+  display: block;
+  margin: 0 0 6px;
+  color: #344154;
+  font-size: 13px;
+}
+
+.form-content input,
+.form-content textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 9px 10px;
+  border: 1px solid #dce4ee;
+  border-radius: 5px;
+  font: inherit;
+}
+
+.form-content textarea {
+  resize: vertical;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+}
+
+.checkbox-label input {
+  width: auto;
+  margin: 0;
 }
 </style>

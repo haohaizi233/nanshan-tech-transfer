@@ -1,0 +1,93 @@
+# Test your FastAPI endpoints
+
+GET http://127.0.0.1:8787/
+Accept: application/json
+
+###
+
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "admin",
+  "password": "Admin@2026"
+}
+
+###
+
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NTA2MjU4LCJleHAiOjE3ODg1MTM0NTh9.IoHQL669jpU352TS21lDY33IokLolhrFh7G8aYOQ1Ec
+Content-Type: application/json
+
+{
+  "title": "后台新增成果测试-20260904",
+  "maturityLevel": "02_lab",
+  "pricingMode": "negotiable",
+  "techIntro": "用于测试后台新增成果接口",
+  "sourceOrgName": "南山测试机构",
+  "applicationFields": ["人工智能", "智能制造"],
+  "inventorRefs": [
+    {
+      "name": "测试发明人",
+      "orgName": "南山测试机构",
+      "personType": "first_inventor",
+      "sortOrder": 1
+    }
+  ]
+}
+
+###
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements?keyword=后台新增成果测试-20260904
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NTA2MjU4LCJleHAiOjE3ODg1MTM0NTh9.IoHQL669jpU352TS21lDY33IokLolhrFh7G8aYOQ1Ec
+Accept: application/json
+
+###
+PATCH http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements/123
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NTA2MjU4LCJleHAiOjE3ODg1MTM0NTh9.IoHQL669jpU352TS21lDY33IokLolhrFh7G8aYOQ1Ec
+Content-Type: application/json
+
+{
+  "version": 1,
+  "title": "后台新增成果测试-已编辑",
+  "pricingMode": "transfer",
+  "priceMinWan": 20,
+  "priceMaxWan": 50
+}
+
+###
+
+###
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/demands
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NTA2MjU4LCJleHAiOjE3ODg1MTM0NTh9.IoHQL669jpU352TS21lDY33IokLolhrFh7G8aYOQ1Ec
+Content-Type: application/json
+
+{
+  "title": "后台新增需求测试-20260904",
+  "description": "用于验证后台新增需求接口。",
+  "region": "深圳市南山区",
+  "orgName": "后台测试企业",
+  "orgIntro": "用于接口测试的企业信息。",
+  "categoryName": "人工智能",
+  "coopMode": ["技术合作", "成果转让"],
+  "budgetMinWan": 10,
+  "budgetMaxWan": 30,
+  "budgetNegotiable": false,
+  "expectDeadline": "2026-12-31",
+  "contactName": "测试联系人",
+  "contactPhone": "13800138000",
+  "tags": ["AI", "测试"]
+}
+
+###
+PATCH http://127.0.0.1:8787/api/tech-transfer/v1/admin/demands/282
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NTA2MjU4LCJleHAiOjE3ODg1MTM0NTh9.IoHQL669jpU352TS21lDY33IokLolhrFh7G8aYOQ1Ec
+Content-Type: application/json
+
+{
+  "version": 1,
+  "title": "后台新增需求测试-已编辑",
+  "budgetMinWan": 20,
+  "budgetMaxWan": 50,
+  "tags": ["AI", "已编辑"]
+}

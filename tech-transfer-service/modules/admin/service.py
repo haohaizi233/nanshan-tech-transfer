@@ -20,6 +20,21 @@ from core.errors import (
 )
 from modules.audit.service import record as audit_record
 
+from core.errors import achievement_not_found
+from modules.achievement.service import (
+    _parse_upsert_body,
+    _validate_refs,
+    _sync_inventors,
+)
+
+from core.errors import demand_not_found
+from modules.demand.service import (
+    _parse_upsert_body as _parse_demand_upsert_body,
+    _resolve_name_refs as _resolve_demand_name_refs,
+    _sync_tags as _sync_demand_tags,
+    _validate_refs as _validate_demand_refs,
+)
+
 
 def _page_args(args) -> tuple[int, int]:
     try:
@@ -1138,3 +1153,395 @@ def get_user_admin(user_id: int) -> dict:
         "favoriteCount": int(stat["fav_count"]),
     }
     return item
+
+def _admin_owner_user_id(cur, admin_user: dict, body: dict) -> int:
+    """后台录入时可指定归属用户；未指定则归属当前管理员。"""
+    raw_owner_id = body.get("ownerUserId", admin_user["userId"])
+
+    try:
+        owner_user_id = int(raw_owner_id)
+    except (ValueError, TypeError):
+        raise bad_request("ownerUserId 必须是整数")
+
+    cur.execute(
+        """
+        SELECT id
+        FROM app_user
+        WHERE id = %s
+          AND status = 'active'
+          AND deleted_at IS NULL
+        """,
+        (owner_user_id,),
+    )
+    if not cur.fetchone():
+        raise bad_request("ownerUserId 不存在或已禁用")
+
+    return owner_user_id
+
+
+def create_achievement_admin(
+    admin_user: dict,
+    body: dict,
+    request_id=None,
+) -> dict:
+    """
+    管理员新增成果。
+
+    默认状态为 draft；后续仍通过 submit + approve 流程发布。
+    允许 ownerUserId 指定归属人；未传时归属当前管理员。
+    """
+    fields, inventor_refs = _parse_upsert_body(body, partial=False)
+
+    min_price = fields.get("price_min_wan")
+    max_price = fields.get("price_max_wan")
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise bad_request("priceMinWan 不能大于 priceMaxWan")
+
+    with get_cursor(commit=True) as cur:
+        owner_user_id = _admin_owner_user_id(cur, admin_user, body)
+        _validate_refs(cur, fields)
+
+        cur.execute(
+            """
+            INSERT INTO achievement
+                (
+                    owner_user_id,
+                    title,
+                    category_id,
+                    org_id,
+                    source_org_name,
+                    tech_intro,
+                    tech_route,
+                    maturity_level,
+                    maturity_desc,
+                    application_fields,
+                    innovation_points,
+                    pricing_mode,
+                    price_min_wan,
+                    price_max_wan,
+                    contact_name,
+                    contact_title,
+                    contact_phone,
+                    contact_email,
+                    contact_wechat,
+                    status
+                )
+            VALUES
+                (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, 'draft'
+                )
+            RETURNING id
+            """,
+            (
+                owner_user_id,
+                fields.get("title"),
+                fields.get("category_id"),
+                fields.get("org_id"),
+                fields.get("source_org_name"),
+                fields.get("tech_intro"),
+                fields.get("tech_route"),
+                fields.get("maturity_level"),
+                fields.get("maturity_desc"),
+                fields.get("application_fields"),
+                fields.get("innovation_points"),
+                fields.get("pricing_mode"),
+                fields.get("price_min_wan"),
+                fields.get("price_max_wan"),
+                fields.get("contact_name"),
+                fields.get("contact_title"),
+                fields.get("contact_phone"),
+                fields.get("contact_email"),
+                fields.get("contact_wechat"),
+            ),
+        )
+        ach_id = cur.fetchone()["id"]
+
+        if inventor_refs:
+            _sync_inventors(cur, ach_id, inventor_refs)
+
+        # cur=cur：成果写入和审计日志处于同一个事务
+        audit_record(
+            "achievement.admin_create",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
+            details={
+                "title": fields.get("title"),
+                "ownerUserId": owner_user_id,
+                "status": "draft",
+            },
+            request_id=request_id,
+            cur=cur,
+        )
+
+    return get_achievement_admin(ach_id)
+
+
+def update_achievement_admin(
+    admin_user: dict,
+    ach_id: int,
+    body: dict,
+    request_id=None,
+) -> dict:
+    """
+    管理员编辑任意未删除成果。
+
+    不允许通过编辑接口直接变更 owner、status、审核信息；
+    status 仍应由审核/上下架接口处理。
+    """
+    fields, inventor_refs = _parse_upsert_body(body, partial=True)
+
+    version = body.get("version")
+    if not isinstance(version, int) or version < 1:
+        raise bad_request("编辑成果必须携带正整数 version")
+
+    if not fields and inventor_refs is None:
+        raise bad_request("没有可更新的成果字段")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            SELECT id, version, price_min_wan, price_max_wan
+            FROM achievement
+            WHERE id = %s
+              AND deleted_at IS NULL
+            """,
+            (ach_id,),
+        )
+        current = cur.fetchone()
+
+        if not current:
+            raise achievement_not_found()
+
+        _validate_refs(cur, fields)
+
+        # PATCH 只传其中一个报价时，也要同已有值一起校验范围。
+        min_price = fields.get("price_min_wan", current.get("price_min_wan"))
+        max_price = fields.get("price_max_wan", current.get("price_max_wan"))
+
+        if min_price is not None and max_price is not None:
+            if float(min_price) > float(max_price):
+                raise bad_request("priceMinWan 不能大于 priceMaxWan")
+
+        set_clauses = [f"{column}=%s" for column in fields]
+        set_clauses.append("version=version+1")
+
+        cur.execute(
+            f"""
+            UPDATE achievement
+            SET {", ".join(set_clauses)}
+            WHERE id = %s
+              AND version = %s
+              AND deleted_at IS NULL
+            """,
+            list(fields.values()) + [ach_id, version],
+        )
+
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+
+        # 传 [] 表示清空发明人；没传 inventorRefs 则不处理。
+        if inventor_refs is not None:
+            _sync_inventors(cur, ach_id, inventor_refs)
+
+        audit_record(
+            "achievement.admin_update",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
+            details={"updatedFields": list(fields.keys())},
+            request_id=request_id,
+            cur=cur,
+        )
+
+    return get_achievement_admin(ach_id)
+
+# ── 后台需求新增 / 编辑 ─────────────────────────────────────
+
+def create_demand_admin(
+    admin_user: dict,
+    body: dict,
+    request_id=None,
+) -> dict:
+    """
+    管理员新增需求。
+
+    默认状态为 draft；后续仍经过 submit + approve 才发布。
+    可传 ownerUserId 指定需求归属人；未传时归属当前管理员。
+    """
+    fields, tags = _parse_demand_upsert_body(body, partial=False)
+
+    min_budget = fields.get("budget_min_wan")
+    max_budget = fields.get("budget_max_wan")
+    if min_budget is not None and max_budget is not None:
+        if min_budget > max_budget:
+            raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
+
+    with get_cursor(commit=True) as cur:
+        owner_user_id = _admin_owner_user_id(cur, admin_user, body)
+
+        # orgName / categoryName 自动转换或创建对应机构、分类。
+        _resolve_demand_name_refs(cur, fields)
+        _validate_demand_refs(cur, fields)
+
+        cur.execute(
+            """
+            INSERT INTO demand
+                (
+                    owner_user_id,
+                    title,
+                    category_id,
+                    org_id,
+                    description,
+                    region,
+                    coop_mode,
+                    budget_min_wan,
+                    budget_max_wan,
+                    budget_negotiable,
+                    expect_deadline,
+                    deadline_desc,
+                    contact_name,
+                    contact_title,
+                    contact_phone,
+                    contact_email,
+                    contact_wechat,
+                    status
+                )
+            VALUES
+                (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, 'draft'
+                )
+            RETURNING id
+            """,
+            (
+                owner_user_id,
+                fields.get("title"),
+                fields.get("category_id"),
+                fields.get("org_id"),
+                fields.get("description"),
+                fields.get("region"),
+                fields.get("coop_mode"),
+                fields.get("budget_min_wan"),
+                fields.get("budget_max_wan"),
+                fields.get("budget_negotiable", False),
+                fields.get("expect_deadline"),
+                fields.get("deadline_desc"),
+                fields.get("contact_name"),
+                fields.get("contact_title"),
+                fields.get("contact_phone"),
+                fields.get("contact_email"),
+                fields.get("contact_wechat"),
+            ),
+        )
+        demand_id = cur.fetchone()["id"]
+
+        if tags is not None:
+            _sync_demand_tags(cur, demand_id, tags)
+
+        audit_record(
+            "demand.admin_create",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
+            details={
+                "title": fields.get("title"),
+                "ownerUserId": owner_user_id,
+                "status": "draft",
+            },
+            request_id=request_id,
+            cur=cur,
+        )
+
+    return get_demand_admin(demand_id)
+
+
+def update_demand_admin(
+    admin_user: dict,
+    demand_id: int,
+    body: dict,
+    request_id=None,
+) -> dict:
+    """
+    管理员编辑任意未删除需求。
+
+    不允许用该接口直接修改 owner、status、审核结果。
+    status 仍由审核、取消、关闭等专用接口处理。
+    """
+    fields, tags = _parse_demand_upsert_body(body, partial=True)
+
+    version = body.get("version")
+    if not isinstance(version, int) or version < 1:
+        raise bad_request("编辑需求必须携带正整数 version")
+
+    if not fields and tags is None:
+        raise bad_request("没有可更新的需求字段")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            SELECT id, version, budget_min_wan, budget_max_wan
+            FROM demand
+            WHERE id = %s
+              AND deleted_at IS NULL
+            """,
+            (demand_id,),
+        )
+        current = cur.fetchone()
+
+        if not current:
+            raise demand_not_found()
+
+        # orgName / categoryName 在这里转成真正的 ID。
+        _resolve_demand_name_refs(cur, fields)
+        _validate_demand_refs(cur, fields)
+
+        # PATCH 只传一个预算字段时，仍与数据库中的另一个预算字段一起校验。
+        min_budget = fields.get("budget_min_wan", current.get("budget_min_wan"))
+        max_budget = fields.get("budget_max_wan", current.get("budget_max_wan"))
+
+        if min_budget is not None and max_budget is not None:
+            if float(min_budget) > float(max_budget):
+                raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
+
+        set_clauses = [f"{column}=%s" for column in fields]
+        set_clauses.append("version=version+1")
+
+        cur.execute(
+            f"""
+            UPDATE demand
+            SET {", ".join(set_clauses)}
+            WHERE id = %s
+              AND version = %s
+              AND deleted_at IS NULL
+            """,
+            list(fields.values()) + [demand_id, version],
+        )
+
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+
+        # 传 tags: [] 表示清空标签；不传 tags 则不改标签。
+        if tags is not None:
+            _sync_demand_tags(cur, demand_id, tags)
+
+        audit_record(
+            "demand.admin_update",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
+            details={"updatedFields": list(fields.keys())},
+            request_id=request_id,
+            cur=cur,
+        )
+
+    return get_demand_admin(demand_id)
