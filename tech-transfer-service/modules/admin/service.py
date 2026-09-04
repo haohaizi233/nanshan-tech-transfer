@@ -706,7 +706,7 @@ LEFT JOIN achievement a ON ci.target_type = 'achievement' AND ci.target_id = a.i
 
 _COOP_LIST_SQL = """
 SELECT ci.id, ci.initiator_user_id, ci.target_type, ci.target_id,
-       ci.target_owner_user_id, ci.message, ci.status, ci.version,
+       ci.target_owner_user_id, ci.intent_type, ci.message, ci.status, ci.version,
        ci.created_at, ci.accepted_at, ci.confirmed_at, ci.completed_at, ci.closed_at,
        iu.user_no AS initiator_user_no, ip.display_name AS initiator_name,
        tu.user_no AS target_owner_user_no, tp.display_name AS target_owner_name,
@@ -726,6 +726,7 @@ def _coop_admin_item(r):
         "targetType": r["target_type"],
         "targetId": r["target_id"],
         "targetTitle": r.get("target_title"),
+        "intentType": r.get("intent_type"),
         "message": r.get("message"),
         "status": r["status"],
         "version": r["version"],

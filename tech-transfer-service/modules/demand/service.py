@@ -19,7 +19,9 @@ from core.errors import (
     demand_forbidden,
     demand_not_found,
 )
+from core.masking import mask_contact
 from modules.audit.service import record as audit_record
+from modules.cooperation.service import has_accepted_intent
 
 # 状态流转表（06 §5.5 权限矩阵）
 TRANSITIONS = {
@@ -272,12 +274,6 @@ def _sync_tags(cur, demand_id: int, tag_names):
 
 # ── 行转 DTO ─────────────────────────────────────────────────
 
-def _mask_phone(phone):
-    if not phone or len(phone) < 8:
-        return phone or None
-    return phone[:3] + "****" + phone[-4:]
-
-
 def _parse_json(raw):
     if raw and isinstance(raw, str):
         try:
@@ -288,6 +284,7 @@ def _parse_json(raw):
 
 
 def _row_to_summary(row, tags, user_id):
+    is_owner = row["owner_user_id"] == user_id
     return {
         "id": row["id"],
         "title": row["title"],
@@ -301,25 +298,43 @@ def _row_to_summary(row, tags, user_id):
         "categoryName": row.get("category_name"),
         "tags": tags.get(row["id"], []),
         "status": row["status"],
-        "isMine": row["owner_user_id"] == user_id,
+        "isMine": is_owner,
+        "version": row.get("version"),
+        # 审核反馈仅返回给本人，公开列表与其他用户不暴露原因。
+        "rejectReason": row.get("reject_reason") if is_owner else None,
+        "viewCount": int(row.get("view_count") or 0),
         "publishedAt": row["published_at"].strftime("%Y-%m-%d %H:%M") if row.get("published_at") else None,
     }
 
 
-def _row_to_detail(row, tags, user_id):
+def _row_to_detail(row, tags, user_id, contact_visible=False):
     is_owner = row["owner_user_id"] == user_id
     detail = _row_to_summary(row, tags, user_id)
+    # 联系方式：仅发布方本人或已被接受的对接（accepted/confirmed/completed）可见明文，
+    # 其余查看者（含未登录游客）一律脱敏 —— 防止绕过平台私下联系。
+    if contact_visible:
+        contact = {
+            "contactName": row.get("contact_name"),
+            "contactTitle": row.get("contact_title"),
+            "contactPhone": row.get("contact_phone"),
+            "contactEmail": row.get("contact_email"),
+            "contactWechat": row.get("contact_wechat"),
+        }
+    else:
+        contact = mask_contact({
+            "contactName": row.get("contact_name"),
+            "contactTitle": row.get("contact_title"),
+            "contactPhone": row.get("contact_phone"),
+            "contactEmail": row.get("contact_email"),
+            "contactWechat": row.get("contact_wechat"),
+        })
     detail.update({
         "version": row["version"],
         "rejectReason": row.get("reject_reason") if is_owner else None,
         "description": row["description"],
         "expectDeadline": str(row["expect_deadline"]) if row.get("expect_deadline") else None,
         "orgIntro": row.get("org_intro"),
-        "contactName": row.get("contact_name"),
-        "contactTitle": row.get("contact_title"),
-        "contactPhone": row["contact_phone"] if is_owner else _mask_phone(row.get("contact_phone")),
-        "contactEmail": row.get("contact_email"),
-        "contactWechat": row.get("contact_wechat"),
+        **contact,
     })
     return detail
 
@@ -407,15 +422,33 @@ def _get_demand_row(cur, demand_id: int):
 
 
 def get_demand_detail(demand_id: int, user_id: int):
-    with get_cursor() as cur:
+    with get_cursor(commit=True) as cur:
         row = _get_demand_row(cur, demand_id)
         if not row:
             raise demand_not_found()
         if row["status"] != "published" and row["owner_user_id"] != user_id:
             # 防探测：非公开需求对非 owner 一律 404
             raise demand_not_found()
+
+        # 草稿/驳回等非公开内容不计入浏览量；已发布内容在同一事务中原子累加。
+        if row["status"] == "published":
+            cur.execute(
+                """
+                UPDATE demand
+                SET view_count = view_count + 1
+                WHERE id=%s AND status='published' AND deleted_at IS NULL
+                RETURNING view_count
+                """,
+                (demand_id,),
+            )
+            row["view_count"] = (cur.fetchone() or {}).get("view_count", 0)
+
         tags = _load_tags(cur, [demand_id])
-    return _row_to_detail(row, tags, user_id)
+        contact_visible = (
+            row["owner_user_id"] == user_id
+            or has_accepted_intent(cur, "demand", demand_id, user_id)
+        )
+    return _row_to_detail(row, tags, user_id, contact_visible)
 
 
 # ── 写操作 ───────────────────────────────────────────────────

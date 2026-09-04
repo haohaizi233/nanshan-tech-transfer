@@ -36,7 +36,7 @@ def achievements_categories(user: dict = Depends(identity)):
 
 @router.get("/achievements/{ach_id}", summary="成果详情（防探测：非 published 非 owner 返回 null）")
 def achievement_detail(ach_id: int, user: dict = Depends(identity)):
-    detail = get_achievement_detail(ach_id)
+    detail = get_achievement_detail(ach_id, user["userId"])
     if not detail:
         return success(None, "成果不存在或未发布")
     return success(detail)

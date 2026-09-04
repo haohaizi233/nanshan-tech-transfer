@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -26,7 +27,8 @@ def _get_profile(cur, user_id: int) -> dict:
     cur.execute(
         """
         SELECT up.user_id, up.display_name, up.user_type, up.phone, up.email,
-               up.org_id, up.org_title, up.version
+               up.org_id, up.org_title, up.version,
+               up.subject_type, up.business_capabilities
         FROM user_profile up
         WHERE up.user_id = %s
         """,
@@ -39,6 +41,20 @@ def _get_org_name(cur, org_id: Optional[int]) -> Optional[str]:
     if not org_id:
         return None
     return None
+
+
+def _parse_capabilities(raw) -> list:
+    """business_capabilities JSONB → list[str]；异常值一律归为空（画像字段不参与权限，宽松处理）"""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    return [str(x) for x in raw if isinstance(x, (str, int))]
 
 
 def build_user_response(cur, user_id: int) -> dict:
@@ -56,6 +72,8 @@ def build_user_response(cur, user_id: int) -> dict:
         "userNo": user["user_no"],
         "displayName": profile["display_name"] if profile else None,
         "userType": profile["user_type"] if profile else None,
+        "subjectType": profile["subject_type"] if profile else None,
+        "businessCapabilities": _parse_capabilities(profile.get("business_capabilities")) if profile else [],
         "phone": profile["phone"] if profile else None,
         "email": profile["email"] if profile else None,
         "orgId": profile["org_id"] if profile else None,

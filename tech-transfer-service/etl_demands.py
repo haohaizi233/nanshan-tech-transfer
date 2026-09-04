@@ -15,9 +15,7 @@ Architecture source: 05-data-model-design.md §12.2（演示数据字段映射�
 """
 import json
 
-import pymysql
-
-from db import _get_pool
+from db import transaction
 
 # 演示需求归属 dev-user-002（app_user 2）：与前端 mock 票据身份 dev-user-001 区分，
 # 保证本地演示时"浏览他人需求 + 发起对接"与"我发布的需求"两条链路同时可用
@@ -95,13 +93,13 @@ def get_or_create(cur, table, code, name):
     row = cur.fetchone()
     if row:
         return row["id"]
-    cur.execute(f"INSERT INTO {table} (code, name) VALUES (%s, %s)", (code, name))
-    return cur.lastrowid
+    cur.execute(f"INSERT INTO {table} (code, name) VALUES (%s, %s) RETURNING id", (code, name))
+    return cur.fetchone()["id"]
 
 
 def main():
-    conn = _get_pool()
-    try:
+    # 整批原子写入：任一条失败全部回滚，不留半批演示数据
+    with transaction() as conn:
         with conn.cursor() as cur:
             for demo in DEMO_DEMANDS:
                 cur.execute(
@@ -119,10 +117,10 @@ def main():
                     org_id = org_row["id"]
                 else:
                     cur.execute(
-                        "INSERT INTO organization (org_name, intro, region) VALUES (%s, %s, %s)",
+                        "INSERT INTO organization (org_name, intro, region) VALUES (%s, %s, %s) RETURNING id",
                         (demo["company"], demo["companyIntro"], demo["location"]),
                     )
-                    org_id = cur.lastrowid
+                    org_id = cur.fetchone()["id"]
 
                 # category / tag（industry 首段=分类，次段=标签）
                 industry_parts = [p.strip() for p in demo["industry"].split("·")]
@@ -143,6 +141,7 @@ def main():
                          contact_email, contact_wechat, status, published_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                             'published', NOW())
+                    RETURNING id
                     """,
                     (
                         DEMO_OWNER_USER_ID, org_id, demo["title"], category_id,
@@ -152,10 +151,10 @@ def main():
                         demo["email"], demo["wechat"],
                     ),
                 )
-                demand_id = cur.lastrowid
+                demand_id = cur.fetchone()["id"]
                 for tag_id in tag_ids:
                     cur.execute(
-                        "INSERT IGNORE INTO demand_tag_relation (demand_id, tag_id) VALUES (%s, %s)",
+                        "INSERT INTO demand_tag_relation (demand_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         (demand_id, tag_id),
                     )
                 print(f"inserted: {demo['title']} (id={demand_id}, org={demo['company']})")
@@ -164,9 +163,6 @@ def main():
                 "SELECT COUNT(*) AS c FROM demand WHERE status='published' AND deleted_at IS NULL"
             )
             print("published demands:", cur.fetchone()["c"])
-        conn.commit()
-    finally:
-        conn.close()
 
 
 if __name__ == "__main__":

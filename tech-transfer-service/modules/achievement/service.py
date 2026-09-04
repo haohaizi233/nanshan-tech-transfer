@@ -18,7 +18,9 @@ from core.errors import (
     achievement_forbidden,
     achievement_not_found,
 )
+from core.masking import mask_contact
 from modules.audit.service import record as audit_record
+from modules.cooperation.service import has_accepted_intent
 
 MATURITY_LEVELS = ("01_idea", "02_lab", "03_pilot_ready", "04_pilot_done", "05_mass_ready")
 PRICING_MODES = ("negotiable", "license", "transfer", "cooperation", "other")
@@ -131,8 +133,22 @@ def list_achievements(args):
     }
 
 
-def get_achievement_detail(ach_id: int):
-    with get_cursor() as cur:
+def get_achievement_detail(ach_id: int, user_id=None):
+    # 详情访问量以 SQL 自增实现，避免并发访问时发生“读-改-写”丢失。
+    # 仅已发布且未删除的成果可进入该路径。
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            UPDATE achievement
+            SET view_count = view_count + 1
+            WHERE id=%s AND status='published' AND deleted_at IS NULL
+            RETURNING view_count
+            """,
+            (ach_id,),
+        )
+        if not cur.fetchone():
+            return None
+
         cur.execute(
             """
             SELECT a.*, c.name AS category_name, c.code AS category_code
@@ -145,6 +161,11 @@ def get_achievement_detail(ach_id: int):
         row = cur.fetchone()
         if not row:
             return None
+
+        # 联系方式：仅发布方本人或已被接受的对接（accepted/confirmed/completed）可见明文
+        contact_visible = (
+            user_id is not None and row.get("owner_user_id") == user_id
+        ) or has_accepted_intent(cur, "achievement", ach_id, user_id)
 
         cur.execute(
             """
@@ -176,6 +197,15 @@ def get_achievement_detail(ach_id: int):
     elif innovations is None:
         innovations = []
 
+    raw_contact = {
+        "contactName": row.get("contact_name"),
+        "contactTitle": row.get("contact_title"),
+        "contactPhone": row.get("contact_phone"),
+        "contactEmail": row.get("contact_email"),
+        "contactWechat": row.get("contact_wechat"),
+    }
+    contact = raw_contact if contact_visible else mask_contact(raw_contact)
+
     return {
         "id": row["id"],
         "title": row["title"],
@@ -191,11 +221,7 @@ def get_achievement_detail(ach_id: int):
         "pricingMode": row.get("pricing_mode"),
         "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") else None,
         "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") else None,
-        "contactName": row.get("contact_name"),
-        "contactTitle": row.get("contact_title"),
-        "contactPhone": row.get("contact_phone"),
-        "contactEmail": row.get("contact_email"),
-        "contactWechat": row.get("contact_wechat"),
+        **contact,
         "viewCount": row.get("view_count", 0),
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
         "inventors": [
@@ -649,7 +675,7 @@ def list_my_achievements(user_id: int, args):
             SELECT a.id, a.title, a.source_org_name, a.tech_intro, a.status,
                    a.maturity_level, a.maturity_desc, a.application_fields,
                    a.pricing_mode, a.price_min_wan, a.price_max_wan,
-                   a.view_count, a.published_at, a.version,
+                   a.view_count, a.published_at, a.version, a.reject_reason,
                    c.name AS category_name, c.code AS category_code
             FROM achievement a
             LEFT JOIN achievement_category c ON a.category_id=c.id
@@ -697,6 +723,7 @@ def _my_list_item(row):
         "viewCount": row.get("view_count", 0),
         "status": row.get("status"),
         "version": row.get("version"),
+        "rejectReason": row.get("reject_reason"),
         "isMine": True,
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
     }

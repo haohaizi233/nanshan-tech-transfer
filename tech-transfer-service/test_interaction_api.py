@@ -177,6 +177,11 @@ resp = requests.post(f"{BASE}/cooperations", headers=h_a, json={
 }, timeout=10)
 check("目标不存在404", resp.status_code == 404)
 
+# 对接已发起（pending，未被接受）时联系方式仍脱敏
+resp = requests.get(f"{BASE}/demands/{d1}", headers=h_a, timeout=10)
+check("pending(未被接受)联系方式仍脱敏", resp.json()["data"]["contactPhone"] == "136****7777",
+      f"got {resp.json().get('data', {}).get('contactPhone')}")
+
 # 未发布目标（B 再建一条 draft）
 resp = requests.post(f"{BASE}/demands", headers=h_b, json={
     "title": "测试需求-草稿不可对接", "description": "x",
@@ -209,6 +214,11 @@ check("发起方accept被拒403", resp.status_code == 403 and resp.json()["code"
 
 resp = requests.post(f"{BASE}/cooperations/{iid1}/accept", headers=h_d, json={"version": 1}, timeout=10)
 check("非参与方accept=404", resp.status_code == 404)
+
+# 无关用户（同未登录游客视角）查看联系方式一律脱敏
+resp = requests.get(f"{BASE}/demands/{d1}", headers=h_d, timeout=10)
+check("无关用户联系方式脱敏", resp.json()["data"]["contactPhone"] == "136****7777",
+      f"got {resp.json().get('data', {}).get('contactPhone')}")
 print()
 
 # ═════════════════════════════════════════════════════════════
@@ -226,6 +236,13 @@ check("B接受200", resp.status_code == 200, f"got {resp.status_code} {resp.text
 check("status=accepted", resp.json()["data"]["status"] == "accepted")
 check("acceptedAt有值", bool(resp.json()["data"]["acceptedAt"]))
 check("version=2", resp.json()["data"]["version"] == 2)
+
+# 对接被接受后，发起方 A 可见完整联系方式（脱敏解锁）
+resp = requests.get(f"{BASE}/demands/{d1}", headers=h_a, timeout=10)
+check("对接接受后发起方联系方式明文", resp.json()["data"]["contactPhone"] == "13600007777",
+      f"got {resp.json().get('data', {}).get('contactPhone')}")
+check("对接接受后发起方联系人明文", resp.json()["data"]["contactName"] == "测试联系人",
+      f"got {resp.json().get('data', {}).get('contactName')}")
 
 # accept 副作用：同目标（d1）其他 pending 意向自动拒绝
 resp = requests.get(f"{BASE}/cooperations/{iid3}", headers=h_c, timeout=10)

@@ -178,6 +178,15 @@ def list_my_favorites(user_id: int, args):
             summary = _target_summary(cur, target_type, row["target_id"])
             if summary:
                 item["targetSummary"] = summary
+            else:
+                # 目标已被硬删除（如测试清理直删 DB）：仍嵌入占位摘要，
+                # 兑现「已下线目标仍返回并标注，不静默丢失收藏」契约
+                item["targetSummary"] = {
+                    "title": None,
+                    "orgName": None,
+                    "status": "deleted",
+                    "desc": "",
+                }
             list_items.append(item)
 
     return {

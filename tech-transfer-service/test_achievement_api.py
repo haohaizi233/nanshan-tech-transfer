@@ -31,7 +31,8 @@ print(f"[0] Bootstrap OK, token acquired\n")
 resp = requests.get(f"{BASE}/achievements", headers=headers, timeout=10)
 data = resp.json()["data"]
 check("列表返回200", resp.status_code == 200)
-check("total=223", data["total"] == 223, f"got {data['total']}")
+total_first = data["total"]
+check("total>=223（导入演示数据，另含审核演示残留）", data["total"] >= 223, f"got {data['total']}")
 check("默认page=1", data["page"] == 1)
 check("默认pageSize=10", data["pageSize"] == 10)
 check("totalPages=23", data["totalPages"] == 23, f"got {data['totalPages']}")
@@ -83,6 +84,10 @@ check("详情有maturityLevel", bool(detail.get("maturityLevel")))
 check("详情有inventors", isinstance(detail.get("inventors"), list) and len(detail["inventors"]) > 0)
 check("详情有applicationFields", isinstance(detail.get("applicationFields"), list))
 check("详情有innovationPoints", isinstance(detail.get("innovationPoints"), list))
+# 联系方式脱敏：非 owner 且无已接受对接（原始值 13828858818 / 孙天夫 / tf.sun@siat.ac.cn）
+check("非owner电话脱敏", detail.get("contactPhone") == "138****8818", f"got {detail.get('contactPhone')}")
+check("非owner联系人脱敏", detail.get("contactName") == "孙**", f"got {detail.get('contactName')}")
+check("非owner邮箱脱敏", detail.get("contactEmail") == "tf****@siat.ac.cn", f"got {detail.get('contactEmail')}")
 print()
 
 # ── 7. 不存在的成果 ─────────────────────────────────────────
@@ -122,7 +127,7 @@ print()
 resp = requests.get(f"{BASE}/achievements?page=999", headers=headers, timeout=10)
 data = resp.json()["data"]
 check("超出页数返回空list", data["list"] == [])
-check("但total仍=223", data["total"] == 223)
+check("但total与首页一致", data["total"] == total_first)
 print()
 
 print(f"=== 成果 API 测试完成: {PASS} passed, {FAIL} failed ===")

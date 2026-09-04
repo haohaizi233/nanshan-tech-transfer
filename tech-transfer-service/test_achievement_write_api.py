@@ -185,6 +185,16 @@ check("rejected可编辑=200", r.status_code == 200, f"got {r.status_code}: {r.t
 r = requests.post(f"{BASE}/achievements/{a2['id']}/submit", headers=h_c, json={"version": 4}, timeout=10)
 check("rejected重新submit=200", r.status_code == 200, r.text[:100])
 
+# A3: 已驳回的成果必须在“我发布的成果”列表中看到管理员原因
+r = requests.post(f"{BASE}/achievements", headers=h_c, json={
+    "title": "成果写接口-审核反馈", "maturityLevel": "02_lab", "pricingMode": "negotiable",
+}, timeout=10)
+a3 = r.json()["data"]
+r = requests.post(f"{BASE}/achievements/{a3['id']}/submit", headers=h_c, json={"version": 1}, timeout=10)
+check("A3 submit=200", r.status_code == 200, r.text[:100])
+r = requests.post(f"{BASE}/admin/achievements/{a3['id']}/reject", headers=h_admin, json={"version": 2, "reason": "请补充应用场景"}, timeout=10)
+check("A3 admin reject=200", r.status_code == 200, r.text[:100])
+
 # ── 7. /me/achievements ─────────────────────────────────────
 print("[7] me/achievements")
 r = requests.get(f"{BASE}/me/achievements", headers=h_c, timeout=10)
@@ -193,6 +203,8 @@ check("列表=200", r.status_code == 200)
 check("含全状态", any(x["status"] == "offline" for x in d["list"]) and any(x["status"] == "pending_review" for x in d["list"]), [x["status"] for x in d["list"]])
 check("isMine=true", all(x["isMine"] for x in d["list"]))
 check("summary含version", all("version" in x for x in d["list"]))
+rejected_a3 = next((x for x in d["list"] if x["id"] == a3["id"]), None)
+check("驳回成果列表回显管理员原因", rejected_a3 and rejected_a3.get("rejectReason") == "请补充应用场景", rejected_a3)
 r = requests.get(f"{BASE}/me/achievements?status=pending_review", headers=h_c, timeout=10)
 d2 = r.json()["data"]
 check("status过滤", all(x["status"] == "pending_review" for x in d2["list"]) and len(d2["list"]) >= 1, [x["status"] for x in d2["list"]])

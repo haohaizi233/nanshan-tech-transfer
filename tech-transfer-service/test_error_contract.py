@@ -205,12 +205,12 @@ client = TestClient(app_module.app, raise_server_exceptions=False)
 inproc_token = sign_access_token(2, "local-dev-user-002", ["user"])
 H = {"Authorization": f"Bearer {inproc_token}"}
 _ORIG = demand_route.get_demand_detail
-_ORIG_CONN = db_module._get_thread_conn
+_ORIG_CONN = db_module._acquire_conn
 
 
 def _restore():
     demand_route.get_demand_detail = _ORIG
-    db_module._get_thread_conn = _ORIG_CONN
+    db_module._acquire_conn = _ORIG_CONN
 
 
 print("\n[12] 未捕获异常 → 500 固定文案，无泄露")
@@ -236,7 +236,7 @@ def _broken_conn():
     raise psycopg2.OperationalError(_db_msg)
 
 
-db_module._get_thread_conn = _broken_conn
+db_module._acquire_conn = _broken_conn
 try:
     resp = client.get(f"{API}/demands/1", headers=H)
 finally:

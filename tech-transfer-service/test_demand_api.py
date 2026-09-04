@@ -66,8 +66,10 @@ cleanup_test_demands()
 # ── 0. 两个用户登录 ─────────────────────────────────────────
 token_a, user_a = bootstrap("local-dev-ticket-test-demand-a")
 token_b, user_b = bootstrap("local-dev-ticket-test-demand-b")
+token_admin, user_admin = bootstrap("local-dev-ticket-dev-user-001")
 headers_a = {"Authorization": f"Bearer {token_a}"}
 headers_b = {"Authorization": f"Bearer {token_b}"}
+headers_admin = {"Authorization": f"Bearer {token_admin}"}
 print(f"[0] User A (userId={user_a['userId']}) / User B (userId={user_b['userId']})\n")
 
 # ── 1. 公开需求列表（演示数据 3 条）──────────────────────────
@@ -110,6 +112,10 @@ check("详情有orgIntro", bool(detail.get("orgIntro")))
 check("详情有deadlineDesc", bool(detail.get("deadlineDesc")))
 check("详情有tags", isinstance(detail.get("tags"), list) and len(detail["tags"]) > 0)
 check("非owner手机号脱敏", detail.get("contactPhone") == "138****1111", f"got {detail.get('contactPhone')}")
+check("非owner联系人姓名脱敏", detail.get("contactName") == "王**", f"got {detail.get('contactName')}")
+check("非owner邮箱脱敏", detail.get("contactEmail") == "wa****@sz-smart.cn", f"got {detail.get('contactEmail')}")
+check("非owner微信号脱敏", detail.get("contactWechat") == "sz****g", f"got {detail.get('contactWechat')}")
+check("非owner职务保留", detail.get("contactTitle") == "技术负责人", f"got {detail.get('contactTitle')}")
 check("非owner看不到rejectReason", detail.get("rejectReason") is None)
 print()
 
@@ -317,6 +323,21 @@ resp = requests.get(f"{BASE}/me/demands", headers=headers_a, timeout=10)
 data = resp.json()["data"]
 check("/me/demands返回200", resp.status_code == 200)
 check("/me/demands只含本人需求", data["total"] >= 2 and all(i["isMine"] for i in data["list"]))
+
+# 审核结果必须在本人发布列表回显，不能只在详情页可见。
+resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
+    "title": "测试需求-审核反馈", "description": "用于验证管理员驳回原因在本人列表回显。",
+}, timeout=10)
+feedback_demand = resp.json()["data"]
+resp = requests.post(f"{BASE}/demands/{feedback_demand['id']}/submit", headers=headers_a,
+                     json={"version": 1}, timeout=10)
+check("审核反馈需求提交成功", resp.status_code == 200, resp.text[:100])
+resp = requests.post(f"{BASE}/admin/demands/{feedback_demand['id']}/reject", headers=headers_admin,
+                     json={"version": 2, "reason": "请补充项目预算"}, timeout=10)
+check("管理员驳回需求成功", resp.status_code == 200, resp.text[:100])
+resp = requests.get(f"{BASE}/me/demands", headers=headers_a, timeout=10)
+feedback_row = next((item for item in resp.json()["data"]["list"] if item["id"] == feedback_demand["id"]), None)
+check("驳回需求列表回显管理员原因", feedback_row and feedback_row.get("rejectReason") == "请补充项目预算", feedback_row)
 
 resp = requests.get(f"{BASE}/me/demands?status=cancelled", headers=headers_a, timeout=10)
 data = resp.json()["data"]

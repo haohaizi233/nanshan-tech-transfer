@@ -1,3 +1,5 @@
+from psycopg2.extras import Json
+
 from db import get_cursor
 from modules.identity.service import build_user_response
 from core.errors import BizError, TT_COMMON_40902, bad_request
@@ -8,14 +10,58 @@ def get_my_profile(user_id: int) -> dict:
         return build_user_response(cur, user_id)
 
 
+# 主体类型：相对稳定的属性，仅画像/推荐用，不作权限门禁
+SUBJECT_TYPES = (
+    "enterprise",
+    "university",
+    "research_institute",
+    "team",
+    "service_org",
+    "investment_org",
+    "individual",
+    "other",
+)
+
+# 合作方向：可多选的画像标签，仅用于推荐与首页内容排序
+CAPABILITY_TYPES = (
+    "seek_technology",
+    "publish_demand",
+    "provide_achievement",
+    "joint_rnd",
+    "provide_service",
+    "investment",
+)
+
 FIELD_MAP = {
     "displayName": "display_name",
     "userType": "user_type",
+    "subjectType": "subject_type",
     "phone": "phone",
     "email": "email",
     "orgId": "org_id",
     "orgTitle": "org_title",
 }
+
+
+def _normalize_capabilities(raw):
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        raise bad_request("businessCapabilities 必须是数组")
+    if not isinstance(raw, list):
+        raise bad_request("businessCapabilities 必须是数组")
+    vals = []
+    for v in raw:
+        v = str(v).strip()
+        if not v:
+            continue
+        if v not in CAPABILITY_TYPES:
+            raise bad_request(
+                f"businessCapabilities 仅允许: {', '.join(CAPABILITY_TYPES)}"
+            )
+        if v not in vals:
+            vals.append(v)
+    return vals
 
 
 def update_my_profile(user_id: int, body: dict) -> dict:
@@ -43,6 +89,19 @@ def update_my_profile(user_id: int, body: dict) -> dict:
             raise bad_request(
                 f"userType 必须为: {', '.join(sorted(allowed_types))}"
             )
+
+    if "subject_type" in fields and fields["subject_type"] is not None:
+        if fields["subject_type"] not in SUBJECT_TYPES:
+            raise bad_request(
+                f"subjectType 必须为: {', '.join(SUBJECT_TYPES)}"
+            )
+
+    if "businessCapabilities" in body:
+        capabilities = _normalize_capabilities(body.get("businessCapabilities"))
+        if capabilities:
+            fields["business_capabilities"] = Json(capabilities)
+        else:
+            fields["business_capabilities"] = None
 
     if not fields:
         raise bad_request("没有可更新的字段")

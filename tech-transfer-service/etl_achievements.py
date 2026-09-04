@@ -226,7 +226,8 @@ def generate_223_achievements():
             "contact_phone": phone,
             "contact_email": f"{email_prefix}@example.edu.cn",
             "contact_wechat": f"tech_{idx:03d}",
-            "view_count": random.randint(0, 5000),
+            # 浏览量由详情接口在真实访问时原子累计；导入数据不得伪造热度。
+            "view_count": 0,
             "published_at": pub_date.strftime("%Y-%m-%d %H:%M:%S"),
         })
 

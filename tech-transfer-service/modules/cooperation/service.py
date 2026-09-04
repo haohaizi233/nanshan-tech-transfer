@@ -27,6 +27,30 @@ from modules.audit.service import record as audit_record
 
 TARGET_TYPES = ("achievement", "demand")
 ACTIVE_STATUSES = ("pending", "accepted", "confirmed")
+# 对接被接受及之后的终态 —— 联系方式解锁阈值（脱敏用）
+ACCEPTED_STATUSES = ("accepted", "confirmed", "completed")
+
+# 合作意向：由用户每次发起对接时选择，与账号主体类型/合作方向画像完全解耦
+# （主体类型/画像仅用于推荐，见 user_profile.subject_type / business_capabilities）
+INTENT_TYPES = {
+    "demand": (
+        "provide_solution",     # 提供技术方案
+        "provide_achievement",  # 提供现有成果
+        "joint_rnd",            # 联合研发
+        "provide_service",      # 提供技术服务
+        "investment",           # 投融资支持
+        "other",                # 其他
+    ),
+    "achievement": (
+        "purchase",             # 技术购买
+        "license",              # 技术许可
+        "joint_rnd",            # 联合研发
+        "commercialization",    # 成果转化
+        "pilot_validation",     # 场景验证
+        "investment",           # 投融资
+        "other",                # 其他
+    ),
+}
 
 # op → (允许的前置状态, 目标状态, 允许角色, 时间戳列, 事件类型)
 TRANSITIONS = {
@@ -41,6 +65,39 @@ TRANSITIONS = {
 def _validate_target_type(target_type: str):
     if target_type not in TARGET_TYPES:
         raise bad_request(f"targetType 必须是 {'/'.join(TARGET_TYPES)}")
+
+
+def _validate_intent_type(target_type: str, intent_type):
+    """合作意向按目标类型校验；None/空串放行（兼容不带意向的历史调用方）"""
+    if intent_type is None or intent_type == "":
+        return None
+    intent_type = str(intent_type).strip()
+    allowed = INTENT_TYPES[target_type]
+    if intent_type not in allowed:
+        raise bad_request(
+            f"intentType 必须是 {'/'.join(allowed)}（目标为 {target_type}）"
+        )
+    return intent_type
+
+
+def has_accepted_intent(cur, target_type: str, target_id: int, user_id) -> bool:
+    """该用户作为发起方、且已被目标方接受的对接是否存在（accepted/confirmed/completed）。
+
+    联系方式脱敏判断：目标方接受对接后，发起方才可查看目标方完整联系方式。
+    """
+    if user_id is None:
+        return False
+    cur.execute(
+        """
+        SELECT 1 FROM cooperation_intent
+        WHERE target_type=%s AND target_id=%s
+          AND initiator_user_id=%s
+          AND status IN ('accepted', 'confirmed', 'completed')
+        LIMIT 1
+        """,
+        (target_type, target_id, user_id),
+    )
+    return cur.fetchone() is not None
 
 
 def _load_target(cur, target_type: str, target_id: int):
@@ -96,6 +153,7 @@ def _row_to_intent(row, user_id: int):
         "targetType": row["target_type"],
         "targetId": row["target_id"],
         "targetOwnerUserId": row["target_owner_user_id"],
+        "intentType": row.get("intent_type"),
         "message": row.get("message"),
         "status": row["status"],
         "version": row["version"],
@@ -149,6 +207,8 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
     except (ValueError, TypeError):
         raise bad_request("targetId 必须是整数")
 
+    intent_type = _validate_intent_type(target_type, body.get("intentType"))
+
     message = body.get("message")
     if message is not None:
         message = str(message).strip()[:1000] or None
@@ -175,11 +235,13 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
         cur.execute(
             """
             INSERT INTO cooperation_intent
-                (initiator_user_id, target_type, target_id, target_owner_user_id, message)
-            VALUES (%s, %s, %s, %s, %s)
+                (initiator_user_id, target_type, target_id, target_owner_user_id,
+                 intent_type, message)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (user_id, target_type, target_id, target["owner_user_id"], message),
+            (user_id, target_type, target_id, target["owner_user_id"],
+             intent_type, message),
         )
         intent_id = cur.fetchone()["id"]
         _insert_event(cur, intent_id, "created", None, "pending",
