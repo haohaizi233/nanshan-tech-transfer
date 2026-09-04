@@ -30,8 +30,12 @@ const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 const getBudget = item => item.budget || (item.budgetNegotiable ? '面议' : '-')
 const getSubmitter = item => item.submitterName || item.submitterUserNo || '-'
 
-const filters = reactive({ keyword: '', status: '' })
-const appliedFilters = reactive({ keyword: '', status: '' })
+const filters = reactive({ keyword: '', status: '', categoryCode: '' })
+const appliedFilters = reactive({ keyword: '', status: '', categoryCode: '' })
+const categoryOptions = ref([])
+const formCategories = ref([])
+const ownerUsers = ref([])
+const organizations = ref([])
 
 const loading = ref(false)
 const loadError = ref('')
@@ -49,7 +53,8 @@ const fetchList = async () => {
         page: currentPage.value,
         pageSize: pageSize.value,
         keyword: appliedFilters.keyword.trim(),
-        status: appliedFilters.status
+        status: appliedFilters.status,
+        categoryCode: appliedFilters.categoryCode
       }
     })
     tableData.value = data.list || []
@@ -63,7 +68,28 @@ const fetchList = async () => {
   }
 }
 
-onMounted(fetchList)
+const loadCategoryOptions = async () => {
+  try {
+    // 后端暂未提供需求分类字典接口，因此从后台需求列表提取真实已使用分类。
+    const data = await api('/admin/demands', { params: { page: 1, pageSize: 50 } })
+    const unique = new Map()
+    ;(data.list || []).forEach(item => {
+      if (item.categoryCode && item.categoryName) unique.set(item.categoryCode, item.categoryName)
+    })
+    categoryOptions.value = [...unique].map(([code, name]) => ({ code, name }))
+  } catch {
+    // 分类加载失败不影响需求列表和其他筛选项。
+    categoryOptions.value = []
+  }
+}
+
+onMounted(() => {
+  fetchList()
+  loadCategoryOptions()
+  api('/admin/demand-categories').then(data => { formCategories.value = data || [] }).catch(() => { formCategories.value = [] })
+  api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } }).then(data => { ownerUsers.value = data.list || [] }).catch(() => { ownerUsers.value = [] })
+  api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
+})
 
 const handleSearch = () => {
   Object.assign(appliedFilters, filters)
@@ -72,8 +98,8 @@ const handleSearch = () => {
 }
 
 const handleReset = () => {
-  Object.assign(filters, { keyword: '', status: '' })
-  Object.assign(appliedFilters, { keyword: '', status: '' })
+  Object.assign(filters, { keyword: '', status: '', categoryCode: '' })
+  Object.assign(appliedFilters, { keyword: '', status: '', categoryCode: '' })
   currentPage.value = 1
   fetchList()
 }
@@ -139,20 +165,25 @@ const formLoading = ref(false)
 const formSaving = ref(false)
 const formError = ref('')
 const editingId = ref(null)
-const demandForm = reactive({ title: '', description: '', region: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
+const demandForm = reactive({ title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
+const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => Number(user.orgId) === Number(demandForm.orgId)))
 
 const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
-const resetDemandForm = () => Object.assign(demandForm, { title: '', description: '', region: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
+const resetDemandForm = () => Object.assign(demandForm, { title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
 const openCreate = () => { formMode.value = 'create'; editingId.value = null; formError.value = ''; resetDemandForm(); formVisible.value = true }
 const openEdit = async item => {
   resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formError.value = ''; formLoading.value = true; formVisible.value = true
   try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
 }
 const saveDemand = async () => {
+  if (formMode.value === 'create' && (!demandForm.categoryId || !demandForm.orgId || !demandForm.ownerUserId)) { formError.value = '请依次选择分类、所属机构和归属用户'; return }
   if (!demandForm.title.trim() || !demandForm.description.trim()) { formError.value = '请填写需求标题和需求描述'; return }
   formSaving.value = true; formError.value = ''
   try {
     const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable }
+    if (demandForm.categoryId) body.categoryId = Number(demandForm.categoryId)
+    if (demandForm.orgId) body.orgId = Number(demandForm.orgId)
+    if (demandForm.ownerUserId) body.ownerUserId = Number(demandForm.ownerUserId)
     const optionalTextFields = { region: demandForm.region, orgName: demandForm.orgName, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: demandForm.contactPhone }
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (demandForm.coopModeText.trim()) body.coopMode = splitText(demandForm.coopModeText)
@@ -239,6 +270,16 @@ const submitReject = async () => {
             <option value="">全部</option>
             <option v-for="item in statusOptions" :key="item.value" :value="item.value">
               {{ item.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <label>分类</label>
+          <select v-model="filters.categoryCode">
+            <option value="">全部分类</option>
+            <option v-for="item in categoryOptions" :key="item.code" :value="item.code">
+              {{ item.name }}
             </option>
           </select>
         </div>
@@ -482,9 +523,10 @@ const submitReject = async () => {
             <label>需求标题 *</label><input v-model="demandForm.title" />
             <label>需求描述 *</label><textarea v-model="demandForm.description" rows="4"></textarea>
             <div class="form-grid">
-              <div><label>所属机构</label><input v-model="demandForm.orgName" /></div>
+              <div><label>所属机构 *</label><select v-model="demandForm.orgId" @change="demandForm.ownerUserId = ''"><option value="">请选择机构</option><option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option></select></div>
               <div><label>地区</label><input v-model="demandForm.region" /></div>
-              <div><label>分类</label><input v-model="demandForm.categoryName" /></div>
+              <div><label>分类 *</label><select v-model="demandForm.categoryId"><option value="">请选择分类</option><option v-for="item in formCategories" :key="item.id" :value="item.id">{{ item.name }}</option></select></div>
+              <div><label>归属用户 *</label><select v-model="demandForm.ownerUserId" :disabled="!demandForm.orgId"><option value="">请先选择机构</option><option v-for="item in usersForSelectedOrg" :key="item.userId" :value="item.userId">{{ item.displayName || item.userNo }}</option></select></div>
               <div><label>合作方式（逗号分隔）</label><input v-model="demandForm.coopModeText" placeholder="技术合作，成果转让" /></div>
               <div><label>预算下限（万元）</label><input v-model.number="demandForm.budgetMinWan" type="number" min="0" /></div>
               <div><label>预算上限（万元）</label><input v-model.number="demandForm.budgetMaxWan" type="number" min="0" /></div>
@@ -563,9 +605,9 @@ const submitReject = async () => {
 
 .filters {
   display: grid;
-  grid-template-columns: 1.5fr 1fr auto;
+  grid-template-columns: minmax(260px, 1fr) 220px 170px auto;
   align-items: end;
-  gap: 25px;
+  gap: 16px;
 }
 
 .filter-item label {
@@ -595,6 +637,7 @@ const submitReject = async () => {
 .actions {
   display: flex;
   gap: 12px;
+  white-space: nowrap;
 }
 
 .primary-btn,
@@ -1100,6 +1143,7 @@ tbody tr:hover {
 }
 
 .form-content input,
+.form-content select,
 .form-content textarea {
   box-sizing: border-box;
   width: 100%;

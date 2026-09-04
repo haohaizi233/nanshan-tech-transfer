@@ -11,6 +11,8 @@ import { api } from '../../api/client'
 const achievements = ref([])
 
 const categories = ref([])
+const ownerUsers = ref([])
+const organizations = ref([])
 
 const statusOptions = [
   { value: 'draft', label: '草稿' },
@@ -62,7 +64,7 @@ const formSaving = ref(false)
 const formError = ref('')
 const editingId = ref(null)
 const achievementForm = reactive({
-  title: '', categoryId: '', sourceOrgName: '', techIntro: '', techRoute: '',
+  title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
   maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
   priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
   applicationFieldsText: '', inventorNamesText: '', version: null,
@@ -244,9 +246,18 @@ const openView = item => {
   fetchDetail(item.id)
 }
 
+const fetchOwnerUsers = async () => {
+  try {
+    const data = await api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } })
+    ownerUsers.value = data.list || []
+  } catch { ownerUsers.value = [] }
+}
+
+const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => Number(user.orgId) === Number(achievementForm.orgId)))
+
 const resetAchievementForm = () => {
   Object.assign(achievementForm, {
-    title: '', categoryId: '', sourceOrgName: '', techIntro: '', techRoute: '',
+    title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
     maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
     priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
     applicationFieldsText: '', inventorNamesText: '', version: null,
@@ -291,6 +302,10 @@ const openEdit = async item => {
 }
 
 const saveAchievement = async () => {
+  if (formMode.value === 'create' && (!achievementForm.categoryId || !achievementForm.orgId || !achievementForm.ownerUserId)) {
+    formError.value = '请依次选择分类、所属机构和归属用户'
+    return
+  }
   if (!achievementForm.title.trim()) {
     formError.value = '请输入成果名称'
     return
@@ -308,6 +323,8 @@ const saveAchievement = async () => {
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (formMode.value === 'create' || achievementForm.applicationFieldsText.trim()) body.applicationFields = splitText(achievementForm.applicationFieldsText)
     if (achievementForm.categoryId) body.categoryId = Number(achievementForm.categoryId)
+    if (achievementForm.orgId) body.orgId = Number(achievementForm.orgId)
+    if (achievementForm.ownerUserId) body.ownerUserId = Number(achievementForm.ownerUserId)
     if (achievementForm.priceMinWan !== '') body.priceMinWan = Number(achievementForm.priceMinWan)
     if (achievementForm.priceMaxWan !== '') body.priceMaxWan = Number(achievementForm.priceMaxWan)
     const inventors = splitText(achievementForm.inventorNamesText)
@@ -555,6 +572,8 @@ const exportData = async () => {
 onMounted(() => {
   fetchList()
   fetchCategories()
+  fetchOwnerUsers()
+  api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
 })
 </script>
 
@@ -894,8 +913,9 @@ onMounted(() => {
           <p v-if="formLoading" class="modal-state">加载中…</p>
           <template v-else>
             <label>成果名称 *</label><input v-model="achievementForm.title" />
-            <label>分类（新建时可选）</label><select v-model="achievementForm.categoryId"><option value="">不修改/不选择</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
-            <label>来源机构</label><input v-model="achievementForm.sourceOrgName" />
+            <label>分类 *</label><select v-model="achievementForm.categoryId"><option value="">请选择分类</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+            <label>所属机构 *</label><select v-model="achievementForm.orgId" @change="achievementForm.ownerUserId = ''"><option value="">请选择机构</option><option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+            <label>归属用户 *</label><select v-model="achievementForm.ownerUserId" :disabled="!achievementForm.orgId"><option value="">请先选择机构</option><option v-for="item in usersForSelectedOrg" :key="item.userId" :value="item.userId">{{ item.displayName || item.userNo }}</option></select>
             <label>技术简介</label><textarea v-model="achievementForm.techIntro" rows="4"></textarea>
             <div class="form-grid"><div><label>成熟度 *</label><select v-model="achievementForm.maturityLevel"><option value="01_idea">概念阶段</option><option value="02_lab">实验室验证</option><option value="03_pilot_ready">可中试</option><option value="04_pilot_done">中试完成</option><option value="05_mass_ready">量产准备</option></select></div><div><label>定价方式 *</label><select v-model="achievementForm.pricingMode"><option value="negotiable">面议</option><option value="license">许可</option><option value="transfer">转让</option><option value="cooperation">合作</option><option value="other">其他</option></select></div></div>
             <div class="form-grid"><div><label>最低报价（万元）</label><input v-model="achievementForm.priceMinWan" type="number" min="0" /></div><div><label>最高报价（万元）</label><input v-model="achievementForm.priceMaxWan" type="number" min="0" /></div></div>

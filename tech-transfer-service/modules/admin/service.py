@@ -48,6 +48,27 @@ def _page_args(args) -> tuple[int, int]:
     return page, page_size
 
 
+def list_demand_categories_admin() -> list[dict]:
+    """后台需求录入使用的受控分类字典。"""
+    with get_cursor() as cur:
+        cur.execute("SELECT id, code, name FROM demand_category ORDER BY sort_order, id")
+        return [{"id": row["id"], "code": row["code"], "name": row["name"]} for row in (cur.fetchall() or [])]
+
+
+def list_content_organizations_admin() -> list[dict]:
+    """后台内容录入使用的已启用来源机构。"""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, org_name
+            FROM organization
+            WHERE status = 'active' AND deleted_at IS NULL
+            ORDER BY org_name, id
+            """
+        )
+        return [{"id": row["id"], "name": row["org_name"]} for row in (cur.fetchall() or [])]
+
+
 # ── 审核队列 ────────────────────────────────────────────────
 
 def achievements_review_queue(args) -> dict:
@@ -1071,7 +1092,7 @@ LEFT JOIN organization o ON p.org_id = o.id
 
 _USER_LIST_SQL = """
 SELECT u.id, u.user_no, u.status, u.created_at, u.updated_at,
-       p.display_name, p.user_type, p.phone, p.email, p.org_title,
+       p.display_name, p.user_type, p.phone, p.email, p.org_id, p.org_title,
        o.org_name,
        (SELECT COALESCE(array_agg(ur.role_code ORDER BY ur.role_code), ARRAY[]::varchar[])
           FROM user_role ur WHERE ur.user_id = u.id) AS roles
@@ -1087,6 +1108,7 @@ def _user_admin_item(r):
         "userType": (r.get("user_type") or "").strip(),
         "phone": (r.get("phone") or "").strip(),
         "email": (r.get("email") or "").strip(),
+        "orgId": r.get("org_id"),
         "orgName": r.get("org_name"),
         "orgTitle": (r.get("org_title") or "").strip(),
         "roles": list(r.get("roles") or []),
@@ -1154,9 +1176,11 @@ def get_user_admin(user_id: int) -> dict:
     }
     return item
 
-def _admin_owner_user_id(cur, admin_user: dict, body: dict) -> int:
-    """后台录入时可指定归属用户；未指定则归属当前管理员。"""
-    raw_owner_id = body.get("ownerUserId", admin_user["userId"])
+def _admin_owner_user_id(cur, body: dict, org_id: int) -> int:
+    """后台代录必须指定归属用户，且用户必须绑定所选机构。"""
+    raw_owner_id = body.get("ownerUserId")
+    if raw_owner_id is None:
+        raise bad_request("后台录入必须选择内容归属用户")
 
     try:
         owner_user_id = int(raw_owner_id)
@@ -1165,16 +1189,18 @@ def _admin_owner_user_id(cur, admin_user: dict, body: dict) -> int:
 
     cur.execute(
         """
-        SELECT id
-        FROM app_user
-        WHERE id = %s
-          AND status = 'active'
-          AND deleted_at IS NULL
+        SELECT u.id
+        FROM app_user u
+        JOIN user_profile p ON p.user_id = u.id
+        WHERE u.id = %s
+          AND u.status = 'active'
+          AND u.deleted_at IS NULL
+          AND p.org_id = %s
         """,
-        (owner_user_id,),
+        (owner_user_id, org_id),
     )
     if not cur.fetchone():
-        raise bad_request("ownerUserId 不存在或已禁用")
+        raise bad_request("归属用户不存在、已禁用，或未绑定所选机构")
 
     return owner_user_id
 
@@ -1198,7 +1224,12 @@ def create_achievement_admin(
         raise bad_request("priceMinWan 不能大于 priceMaxWan")
 
     with get_cursor(commit=True) as cur:
-        owner_user_id = _admin_owner_user_id(cur, admin_user, body)
+        org_id = fields.get("org_id")
+        if org_id is None:
+            raise bad_request("后台录入必须选择所属机构")
+        if fields.get("category_id") is None:
+            raise bad_request("后台录入必须选择成果分类")
+        owner_user_id = _admin_owner_user_id(cur, body, org_id)
         _validate_refs(cur, fields)
 
         cur.execute(
@@ -1383,7 +1414,12 @@ def create_demand_admin(
             raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
 
     with get_cursor(commit=True) as cur:
-        owner_user_id = _admin_owner_user_id(cur, admin_user, body)
+        org_id = fields.get("org_id")
+        if org_id is None:
+            raise bad_request("后台录入必须选择所属机构")
+        if fields.get("category_id") is None:
+            raise bad_request("后台录入必须选择需求分类")
+        owner_user_id = _admin_owner_user_id(cur, body, org_id)
 
         # orgName / categoryName 自动转换或创建对应机构、分类。
         _resolve_demand_name_refs(cur, fields)

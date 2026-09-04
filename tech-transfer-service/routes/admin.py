@@ -22,9 +22,21 @@ from modules.admin.service import (
     update_achievement_admin,
     create_demand_admin,
     update_demand_admin,
+    list_demand_categories_admin,
+    list_content_organizations_admin,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
+
+
+@router.get("/admin/demand-categories")
+def admin_demand_categories(admin: dict = Depends(admin_identity)):
+    return success(list_demand_categories_admin())
+
+
+@router.get("/admin/content-organizations")
+def admin_content_organizations(admin: dict = Depends(admin_identity)):
+    return success(list_content_organizations_admin())
 
 
 @router.get("/admin/achievements")
