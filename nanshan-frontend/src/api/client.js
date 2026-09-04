@@ -105,7 +105,11 @@ export async function api(path, { method = 'GET', body, params, skipAuthRefresh 
     if (newToken) {
       resp = await request(buildHeaders())
     } else {
+      // 会话彻底失效（refresh 也无效/缺失）：清空并回登录页重新认证
       clearSession()
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.assign('/login')
+      }
     }
   }
 

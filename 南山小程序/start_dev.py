@@ -6,14 +6,14 @@
     uni-app (Vue3) ──┬── mp-weixin（微信开发者工具）──┐
                      └── H5（HBuilderX dev server）──┤
                                                     ├── FastAPI :8787 ── PostgreSQL
-                                     Admin Web(未来) ─┘
+                                    Admin Web(未来) ─┘
                           frpc 隧道 ── 43.138.138.200:8076(API)/8077(H5)
 
 用法：
-  python start_dev.py                     # 默认 = FastAPI + 微信小程序 + frp 外网隧道
-  python start_dev.py --weixin            # FastAPI + 微信小程序 + 隧道
-  python start_dev.py --h5                # FastAPI + H5 + 隧道
-  python start_dev.py --all               # FastAPI + 微信 + H5 + 隧道
+  python start_dev.py                     # 默认全部拉起 = FastAPI + 微信 + H5 + frp 隧道（同 --all）
+  python start_dev.py --all               # FastAPI + 微信 + H5 + 隧道（与默认相同）
+  python start_dev.py --weixin            # FastAPI + 仅微信小程序 + 隧道
+  python start_dev.py --h5                # FastAPI + 仅 H5 + 隧道
   python start_dev.py --no-tunnel         # 关闭 frp 外网隧道（纯本地联调）
   python start_dev.py --backend-only      # 仅 FastAPI（+ 隧道）
   python start_dev.py --frontend-only --weixin|h5|all   # 仅前端，不起后端
@@ -605,10 +605,21 @@ def frpc_process_running():
 
 
 def spawn_frpc(frpc_exe, frpc_toml):
-    """拉起 frpc 并注册为启动器托管进程（Ctrl+C 时一并终止）。"""
+    """拉起 frpc 并注册为启动器托管进程（Ctrl+C 时一并终止）。
+
+    frpc 须直连 frps（43.138.138.200:7000），不能走本机系统代理（mihomo / clash-verge
+    等），否则代理节点/规则一变隧道即中断。这里清除代理环境变量，确保 frpc 直连。
+    """
+    env = os.environ.copy()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    env["NO_PROXY"] = "*"
+    env["no_proxy"] = "*"
     proc = subprocess.Popen(
         [str(frpc_exe), "-c", str(frpc_toml)],
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+        env=env,
     )
     register_process("tunnel", proc)
     return proc
@@ -950,20 +961,19 @@ def main():
 
     install_lifecycle_handlers()
 
-    # 解析 Runtime 目标（默认保持既有习惯：FastAPI + 微信）
+    # 解析 Runtime 目标（默认全部拉起：FastAPI + 微信 + H5 + 隧道）
     runtimes = set()
     if args.backend_only:
         runtimes = set()
     elif args.all:
         runtimes = {FrontendRuntime.WEIXIN, FrontendRuntime.H5}
-    elif args.weixin:
+    elif args.weixin and not args.h5:
         runtimes = {FrontendRuntime.WEIXIN}
-    elif args.h5:
+    elif args.h5 and not args.weixin:
         runtimes = {FrontendRuntime.H5}
-    elif not args.frontend_only:
-        runtimes = {FrontendRuntime.WEIXIN}
     else:
-        runtimes = {FrontendRuntime.WEIXIN}  # --frontend-only 不带 runtime 参数时默认微信
+        # 无参数（默认）或 --weixin --h5 同时给：等价 --all
+        runtimes = {FrontendRuntime.WEIXIN, FrontendRuntime.H5}
 
     need_backend = not args.frontend_only
 

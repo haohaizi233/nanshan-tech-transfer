@@ -77,28 +77,47 @@ app.include_router(admin_ops_router)
 app.include_router(file_router)
 
 
-# ── Vue 后台管理静态托管（nanshan-frontend/dist → /admin）────
-# 构建产物存在才挂载：cd nanshan-frontend && npm run build
-# 同源直连 API（前端 BASE 为相对路径 /api/tech-transfer/v1），免代理免 CORS
-# 与 API admin 路由（/api/tech-transfer/v1/admin/...）无前缀冲突
+# ── Vue 后台管理静态托管（nanshan-frontend/dist）────────────
+# 路由约定与 SPA 一致（vite/vue-router base 均为 '/'）：
+#   页面路径 /login、/register、/admin/* 一律回 index.html（history 路由刷新不 404）
+#   静态资源挂 /assets（资源名带内容 hash 可长缓存），另挂 /admin/assets 兼容旧缓存页
+# 同源直连 API（前端 BASE 为相对路径 /api/tech-transfer/v1），免代理免 CORS；
+# 不使用根级 catch-all，避免吞掉 /api/* 的 404 错误契约
 _admin_dist = Path(__file__).resolve().parent.parent / "nanshan-frontend" / "dist"
 
 if (_admin_dist / "index.html").is_file():
-    app.mount(
-        "/admin/assets",
-        StaticFiles(directory=_admin_dist / "assets"),
-        name="admin-assets",
-    )
+    _assets_dir = _admin_dist / "assets"
 
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
+        app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets-legacy")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/login", include_in_schema=False)
+    @app.get("/register", include_in_schema=False)
     @app.get("/admin", include_in_schema=False)
     @app.get("/admin/{full_path:path}", include_in_schema=False)
     def admin_spa(full_path: str = ""):
-        # 静态文件命中即返回（favicon 等），其余一律回 index.html（SPA history 路由）
+        # /admin/ 下的静态文件（favicon 等）命中即返回，其余一律回 index.html
         if full_path:
             candidate = (_admin_dist / full_path).resolve()
             if candidate.is_file() and _admin_dist in candidate.parents:
                 return FileResponse(candidate)
-        return FileResponse(_admin_dist / "index.html")
+        # index.html 不缓存：避免旧页面引用已失效的资源 hash 导致白屏
+        return FileResponse(
+            _admin_dist / "index.html", headers={"Cache-Control": "no-cache"}
+        )
+
+    # 根级静态文件（favicon / icons）
+    for _static_name in ("favicon.svg", "icons.svg"):
+        if (_admin_dist / _static_name).is_file():
+
+            def _serve_static(file_name: str = _static_name):
+                return FileResponse(_admin_dist / file_name)
+
+            app.add_api_route(
+                f"/{_static_name}", _serve_static, methods=["GET"], include_in_schema=False
+            )
 
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────

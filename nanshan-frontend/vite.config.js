@@ -3,9 +3,8 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  // base '/admin/'：构建产物由 FastAPI 托管在 /admin 下（公网走 8076 API 入口，同源免代理）
-  // dev 模式 URL 相应变为 http://localhost:5273/admin/login
-  base: '/admin/',
+  // base '/'：与 vue-router（createWebHistory()）一致，
+  // 页面路径为 /login、/admin/*，由 FastAPI 对这些路径回 index.html（刷新不 404）
   plugins: [vue()],
   server: {
     port: 5273,

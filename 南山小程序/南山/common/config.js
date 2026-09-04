@@ -19,10 +19,13 @@
  */
 
 import { API_BASE as LOCAL_API_BASE, APP_ENV } from '../config/local.env.js'
+import { resolveH5ApiBase } from './api-base.js'
 
 // #ifdef H5
-const PRODUCTION_ENVS = ['staging', 'production']
-export const API_BASE = PRODUCTION_ENVS.includes(APP_ENV) ? '' : (LOCAL_API_BASE || 'http://127.0.0.1:8787')
+export const API_BASE = resolveH5ApiBase({
+	appEnv: APP_ENV,
+	localApiBase: LOCAL_API_BASE,
+})
 // #endif
 
 // #ifndef H5

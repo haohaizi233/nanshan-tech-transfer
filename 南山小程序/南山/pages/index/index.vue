@@ -183,6 +183,7 @@
 	import { getAchievements, formatAchPrice } from '../../common/achievement-api.js'
 	import { getDemands, toDemandCard } from '../../common/demand-api.js'
 	import { addFavorite, removeFavorite, getFavoriteIdSet } from '../../common/interaction-api.js'
+	import { retryRequest } from '../../common/request-retry.js'
 
 	export default {
 		data() {
@@ -258,7 +259,7 @@
 
 				// 需求列表（真实 API）
 				try {
-					const data = await getDemands({ page: 1, pageSize: 10 })
+					const data = await retryRequest(() => getDemands({ page: 1, pageSize: 10 }))
 					this.demandList = (data.list || []).map((item) => {
 						const card = toDemandCard(item)
 						return {
@@ -275,7 +276,7 @@
 
 				// 成果列表（真实 API）
 				try {
-					const data = await getAchievements({ page: 1, pageSize: 10 })
+					const data = await retryRequest(() => getAchievements({ page: 1, pageSize: 10 }))
 					this.resultList = (data.list || []).map((item) => ({
 						id: String(item.id),
 						title: item.title,
