@@ -1,8 +1,12 @@
 <script setup>
-import { reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+
+import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
 
 const form = reactive({
   username: '',
@@ -10,11 +14,26 @@ const form = reactive({
   remember: false
 })
 
-const handleLogin = () => {
-  console.log('登录数据：', form)
+const loading = ref(false)
+const errorMsg = ref('')
 
-  // 暂时不校验账号密码
-  router.push('/admin/overview')
+const handleLogin = async () => {
+  if (!form.username || !form.password) {
+    errorMsg.value = '请输入账号和密码'
+    return
+  }
+
+  loading.value = true
+  errorMsg.value = ''
+
+  try {
+    await authStore.login(form.username.trim(), form.password)
+    router.push(route.query.redirect || '/admin/overview')
+  } catch (err) {
+    errorMsg.value = err.message || '登录失败，请稍后再试'
+  } finally {
+    loading.value = false
+  }
 }
 
 const goRegister = () => {
@@ -146,9 +165,14 @@ const goRegister = () => {
             <button
               class="login-button"
               type="submit"
+              :disabled="loading"
             >
-              登录
+              {{ loading ? '登录中…' : '登录' }}
             </button>
+
+            <p v-if="errorMsg" class="login-error">
+              {{ errorMsg }}
+            </p>
           </form>
 
           <div class="register-row">
@@ -474,6 +498,13 @@ const goRegister = () => {
   margin-top: 30px;
   color: #a0a9b8;
   font-size: 12px;
+}
+
+.login-error {
+  margin: 14px 0 0;
+  color: #e5484d;
+  font-size: 13px;
+  text-align: center;
 }
 
 .background-decoration {

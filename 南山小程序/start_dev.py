@@ -10,12 +10,12 @@
                           frpc 隧道 ── 43.138.138.200:8076(API)/8077(H5)
 
 用法：
-  python start_dev.py                     # 默认 = FastAPI + 微信小程序
-  python start_dev.py --weixin            # FastAPI + 微信小程序
-  python start_dev.py --h5                # FastAPI + H5
-  python start_dev.py --all               # FastAPI + 微信 + H5
-  python start_dev.py --h5 --tunnel       # FastAPI + H5 + frp 外网隧道（外网可访问）
-  python start_dev.py --backend-only      # 仅 FastAPI
+  python start_dev.py                     # 默认 = FastAPI + 微信小程序 + frp 外网隧道
+  python start_dev.py --weixin            # FastAPI + 微信小程序 + 隧道
+  python start_dev.py --h5                # FastAPI + H5 + 隧道
+  python start_dev.py --all               # FastAPI + 微信 + H5 + 隧道
+  python start_dev.py --no-tunnel         # 关闭 frp 外网隧道（纯本地联调）
+  python start_dev.py --backend-only      # 仅 FastAPI（+ 隧道）
   python start_dev.py --frontend-only --weixin|h5|all   # 仅前端，不起后端
   python start_dev.py --h5 --lan          # H5 + FastAPI 局域网模式（输出 LAN 地址）
   python start_dev.py --doctor            # 环境诊断，只检测不启动
@@ -29,7 +29,7 @@
     Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI / frpc）。
   - 8787 已有健康的南山 FastAPI 时自动复用，退出启动器不会终止它。
   - 外网转发使用 frp（frpc.toml：serverAddr + 8076→8787 + 8077→5173），
-    --tunnel 由本启动器拉起 frpc 并做外网端到端健康验证；
+    默认随启动器一起拉起 frpc 并做外网端到端健康验证（--no-tunnel 关闭）；
     frpc 目录检测顺序：FRPC_HOME 环境变量 > 桌面 frp* 扫描。
   - 启动器 spawn 的后端进程退出时（如崩溃）keep-alive 循环会自动重启。
 """
@@ -604,58 +604,81 @@ def frpc_process_running():
     return "frpc.exe" in out.lower()
 
 
+def spawn_frpc(frpc_exe, frpc_toml):
+    """拉起 frpc 并注册为启动器托管进程（Ctrl+C 时一并终止）。"""
+    proc = subprocess.Popen(
+        [str(frpc_exe), "-c", str(frpc_toml)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+    )
+    register_process("tunnel", proc)
+    return proc
+
+
 def run_tunnel():
-    """启动 frpc 并做外网端到端验证。返回 True/False。
+    """启动 frpc 并做外网端到端验证。返回 (True/False, tunnel_info|None)。
 
     复用条件：隧道 API 入口已健康（无论 frpc 是谁启动的）。
     验证标准：GET http://{server}:{api_remote}/api/health 返回 code=0。
+    frpc 已在运行但隧道暂不健康时（本地后端刚启动/未启动）等待恢复，不重复拉起。
     """
     frpc_exe, frpc_toml, source = find_frpc()
     if frpc_exe is None:
         error("未找到 frpc（需含 frpc.exe + frpc.toml 的目录；可设置 FRPC_HOME 环境变量）")
-        return False
+        return False, None
     ok(f"frpc：{frpc_exe}（{source}）")
 
     server, pairs = parse_frpc_config(frpc_toml)
     if not server or BACKEND_PORT not in pairs:
         error(f"frpc.toml 缺少 serverAddr 或 {BACKEND_PORT} 的代理映射，无法建隧道")
-        return False
+        return False, None
     api_remote = pairs[BACKEND_PORT]
     h5_remote = pairs.get(H5_PORT)
     api_tunnel = f"http://{server}:{api_remote}"
     h5_tunnel = f"http://{server}:{h5_remote}" if h5_remote else None
+    info = {"server": server, "pairs": pairs, "frpc_exe": frpc_exe,
+            "frpc_toml": frpc_toml, "api_tunnel": api_tunnel, "h5_tunnel": h5_tunnel}
 
     healthy, body = tunnel_api_healthy(server, api_remote)
     if healthy:
         ok(f"检测到隧道已就绪，复用现有 frpc：{api_tunnel}")
         if h5_tunnel:
             print(f"  H5 外网入口：{h5_tunnel}")
-        return True
+        return True, info
+
+    if frpc_process_running():
+        # frpc 在跑但隧道暂不健康：多半是本地后端未就绪，等待恢复而非重复拉起
+        for _ in range(10):
+            healthy, _body = tunnel_api_healthy(server, api_remote)
+            if healthy:
+                ok(f"隧道已恢复健康，复用现有 frpc：{api_tunnel}")
+                if h5_tunnel:
+                    print(f"  H5 外网入口：{h5_tunnel}")
+                return True, info
+            time.sleep(1)
+        warn(f"frpc 进程在运行但 {api_tunnel} 10s 内未恢复健康（本地后端未启动？），跳过隧道")
+        return False, None
 
     mappings = f"{BACKEND_PORT}→{api_remote}"
     if h5_remote:
         mappings += f"，{H5_PORT}→{h5_remote}"
     print(f"  启动 frpc（{server}）：{mappings}")
-    proc = subprocess.Popen(
-        [str(frpc_exe), "-c", str(frpc_toml)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-    )
-    register_process("tunnel", proc)
+    spawn_frpc(frpc_exe, frpc_toml)
 
     deadline = time.time() + 30
     while time.time() < deadline:
-        if proc.poll() is not None:
+        proc = managed_processes.get("tunnel")
+        if proc is not None and proc.poll() is not None:
             error("frpc 进程异常退出（常见原因：auth.token 失效 / 服务器不可达 / 远端端口被占）")
-            return False
+            return False, None
         healthy, body = tunnel_api_healthy(server, api_remote)
         if healthy:
             ok(f"隧道已就绪：{api_tunnel}/api/health")
             if h5_tunnel:
                 print(f"  H5 外网入口：{h5_tunnel}（需 H5 dev server 运行中）")
-            return True
+            return True, info
         time.sleep(1)
     error(f"frpc 已启动但 {api_tunnel} 30s 内未通过健康检查")
-    return False
+    return False, None
 
 
 # ── Doctor / Status ───────────────────────────────────────────
@@ -690,7 +713,7 @@ def run_doctor():
     check("微信开发者工具 CLI", WECHAT_DEVTOOLS_DEFAULT.exists(), str(WECHAT_DEVTOOLS_DEFAULT))
 
     frpc_exe, frpc_toml, frpc_source = find_frpc()
-    check("frpc（--tunnel）", frpc_exe is not None,
+    check("frpc（外网隧道）", frpc_exe is not None,
           f"{frpc_toml}（{frpc_source}）" if frpc_exe else "未找到（不影响本地联调，仅外网隧道需要）")
     if frpc_toml:
         server, pairs = parse_frpc_config(frpc_toml)
@@ -792,7 +815,7 @@ def run_status():
     elif frpc_process_running():
         print(f"  Tunnel      DEGRADED frpc 进程在跑但 {api_tunnel} 不健康（本地后端未启动？）")
     else:
-        print(f"  Tunnel      STOPPED  frpc 未运行（--tunnel 启动）")
+        print("  Tunnel      STOPPED  frpc 未运行（start_dev.py 默认随启动器拉起）")
     if H5_PORT in pairs:
         h5_tunnel = f"http://{server}:{pairs[H5_PORT]}"
         reachable, st = fetch_url_status(h5_tunnel, timeout=4)
@@ -865,11 +888,14 @@ def print_summary(runtimes, lan, tunnel_urls=None):
         print("Tunnel（外网入口，经 frp 转发本机）")
         for label, url in tunnel_urls:
             print(f"  {label:13} {url}")
-        print("  前端 API_BASE 已指向外网隧道地址（common/config.js local.env.js）")
     print()
-    print("真机调试（微信小程序）：")
+    print("真机调试（微信小程序，改 config/local.env.js 的 API_BASE）：")
+    print("  模拟器/本地  http://127.0.0.1:8787（默认，无需修改）")
     if lan_ips:
-        print(f"  需将 common/config.js 的 API_BASE 改为 http://{lan_ips[0]}:{BACKEND_PORT}（模拟器用 127.0.0.1）")
+        print(f"  同一 WiFi    http://{lan_ips[0]}:{BACKEND_PORT}")
+    api_tunnel_url = next((u for label, u in tunnel_urls if label == "API"), None) if tunnel_urls else None
+    if api_tunnel_url:
+        print(f"  外网（frp）  {api_tunnel_url}")
     print("=" * 60)
 
 
@@ -881,7 +907,10 @@ def parse_args():
     parser.add_argument("--weixin", action="store_true", help="FastAPI + 微信小程序 Runtime")
     parser.add_argument("--h5", action="store_true", help="FastAPI + H5 Runtime")
     parser.add_argument("--all", action="store_true", help="FastAPI + 微信 + H5")
-    parser.add_argument("--tunnel", action="store_true", help="启动 frpc 外网隧道（frpc.toml：8076→8787 / 8077→5173）并做端到端健康验证")
+    parser.add_argument("--tunnel", dest="tunnel", action="store_true", default=True,
+                        help="启动 frpc 外网隧道（默认开启；frpc.toml：8076→8787 / 8077→5173）并做端到端健康验证")
+    parser.add_argument("--no-tunnel", dest="tunnel", action="store_false",
+                        help="不启动 frp 外网隧道（纯本地联调）")
     parser.add_argument("--lan", action="store_true", help="局域网模式：FastAPI 绑定 0.0.0.0，输出 LAN 地址")
     parser.add_argument("--doctor", action="store_true", help="环境诊断，只检测不启动")
     parser.add_argument("--status", action="store_true", help="查看当前运行状态，不启动")
@@ -1002,36 +1031,39 @@ def main():
         else:
             status["h5"] = "FAIL"
 
-    # [6/6] frp 外网隧道
+    # [6/6] frp 外网隧道（默认开启，--no-tunnel 关闭）
     tunnel_urls = None
+    tunnel_info = None
     print("[6/6] frp 外网隧道")
     if args.tunnel:
         if not need_backend and not fetch_health()[0]:
             warn("后端未运行（--frontend-only），隧道 API 端点将不可用")
-        if run_tunnel():
+        tunnel_ok, tunnel_info = run_tunnel()
+        if tunnel_ok:
             status["tunnel"] = "READY"
-            frpc_exe, frpc_toml, _ = find_frpc()
-            server, pairs = parse_frpc_config(frpc_toml)
             tunnel_urls = []
-            if pairs.get(BACKEND_PORT):
-                tunnel_urls.append(("API", f"http://{server}:{pairs[BACKEND_PORT]}"))
-            if pairs.get(H5_PORT):
-                tunnel_urls.append(("H5", f"http://{server}:{pairs[H5_PORT]}"))
+            if tunnel_info["pairs"].get(BACKEND_PORT):
+                tunnel_urls.append(("API", tunnel_info["api_tunnel"]))
+            if tunnel_info["pairs"].get(H5_PORT):
+                tunnel_urls.append(("H5", tunnel_info["h5_tunnel"]))
         else:
             status["tunnel"] = "FAIL"
     else:
-        skip("未启用（--tunnel 可开启外网入口 8076/8077）")
+        skip("已关闭（--no-tunnel）")
 
     print_summary(runtimes, args.lan, tunnel_urls)
 
-    # 结果判定
+    # 结果判定：核心组件失败即退出；仅隧道失败不影响本地联调（--strict 除外）
     failed = [k for k, v in status.items() if v == "FAIL"]
     if failed:
-        if (args.all or args.tunnel) and not args.strict:
-            print(f"  状态：PARTIAL（{', '.join(failed)} 失败，其余就绪）")
-        else:
-            error(f"启动失败：{', '.join(failed)}")
+        core_failed = [k for k in failed if k != "tunnel"]
+        if core_failed:
+            error(f"启动失败：{', '.join(core_failed)}")
             return 1
+        if args.strict:
+            error(f"严格模式：{', '.join(failed)} 失败")
+            return 1
+        print(f"  状态：PARTIAL（{', '.join(failed)} 失败，本地联调不受影响）")
 
     print("READY")
     print()
@@ -1039,6 +1071,7 @@ def main():
     if status.get("tunnel") == "READY":
         print("  外网访问需保持本启动器运行（frpc 由其托管）")
 
+    tunnel_restarts = 0
     try:
         while True:
             time.sleep(5)
@@ -1051,6 +1084,21 @@ def main():
                 except SystemExit as e:
                     error(f"后端重启失败：{e}")
                     return 1
+            # frpc watchdog：仅看护本启动器 spawn 的 frpc，最多重启 3 次
+            tproc = managed_processes.get("tunnel")
+            if tproc is not None and tproc.poll() is not None and tunnel_info is not None:
+                if tunnel_restarts >= 3:
+                    warn("frpc 反复退出，不再自动重启（外网入口不可用，本地联调不受影响）")
+                    managed_processes.pop("tunnel", None)
+                else:
+                    tunnel_restarts += 1
+                    warn(f"检测到 frpc 进程退出，5s 后自动重启（第 {tunnel_restarts}/3 次）...")
+                    time.sleep(5)
+                    try:
+                        new_proc = spawn_frpc(tunnel_info["frpc_exe"], tunnel_info["frpc_toml"])
+                        ok(f"frpc 已重启（PID {new_proc.pid}）")
+                    except Exception as e:
+                        warn(f"frpc 重启失败：{e}")
     except KeyboardInterrupt:
         pass
     finally:

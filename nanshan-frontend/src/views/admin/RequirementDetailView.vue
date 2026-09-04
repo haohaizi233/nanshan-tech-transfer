@@ -1,1049 +1,331 @@
 <script setup>
-import {
-  computed,
-  onMounted,
-  reactive,
-  ref
-} from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { api } from '../../api/client'
 
-import {
-  useRoute,
-  useRouter
-} from 'vue-router'
+const route = useRoute()
+const router = useRouter()
 
-import {
-  useRequirementStore
-} from '../../stores/requirement'
+const loading = ref(false)
+const loadError = ref('')
+const detail = ref(null)
 
-const route =
-  useRoute()
+const submitting = ref(false)
+const actionError = ref('')
+const rejectVisible = ref(false)
+const rejectReason = ref('')
 
-const router =
-  useRouter()
+const statusClassMap = {
+  draft: 'draft',
+  pending_review: 'pending',
+  published: 'published',
+  matched: 'matched',
+  closed: 'closed',
+  cancelled: 'cancelled',
+  rejected: 'rejected'
+}
 
-const store =
-  useRequirementStore()
+const getStatusClass = status => statusClassMap[status] || 'draft'
+const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
-const activeTab =
-  ref('attachment')
-
-const editVisible =
-  ref(false)
-
-const requirement =
-  computed(() => {
-    return store.getById(
-      route.params.id
-    )
-  })
-
-const editForm =
-  reactive({
-    title: '',
-    budget: '',
-    cooperation: '',
-    summary: ''
-  })
-
-onMounted(() => {
-  if (
-    route.query.action ===
-    'audit'
-  ) {
-    setTimeout(() => {
-      document
-        .querySelector(
-          '.action-bar'
-        )
-        ?.scrollIntoView({
-          behavior: 'smooth'
-        })
-    }, 100)
-  }
+const budgetText = computed(() => {
+  if (!detail.value) return '-'
+  return detail.value.budget || (detail.value.budgetNegotiable ? '面议' : '-')
 })
 
+const submitterText = computed(() => {
+  if (!detail.value) return '-'
+  return detail.value.submitterName || detail.value.submitterUserNo || '-'
+})
+
+const fetchDetail = async () => {
+  loading.value = true
+  loadError.value = ''
+  try {
+    detail.value = await api('/admin/demands/' + route.params.id)
+  } catch (err) {
+    detail.value = null
+    loadError.value = err.message || '加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(fetchDetail)
+
 const goBack = () => {
-  router.push(
-    '/admin/requirements'
-  )
+  router.push('/admin/requirements')
 }
 
-const toggleFavorite =
-  () => {
-    store.toggleFavorite(
-      requirement.value.id
-    )
+const approve = async () => {
+  if (!detail.value || submitting.value) return
+  submitting.value = true
+  actionError.value = ''
+  try {
+    await api(`/admin/demands/${detail.value.id}/approve`, {
+      method: 'POST',
+      body: { version: detail.value.version }
+    })
+    fetchDetail()
+  } catch (err) {
+    actionError.value = err.message || '操作失败'
+  } finally {
+    submitting.value = false
   }
-
-const share =
-  async () => {
-    const url =
-      window.location.href
-
-    try {
-      await navigator
-        .clipboard
-        .writeText(url)
-
-      window.alert(
-        '详情链接已复制'
-      )
-    } catch {
-      window.alert(
-        url
-      )
-    }
-  }
-
-const printPage = () => {
-  window.print()
 }
 
-const approve = () => {
-  const result =
-    window.confirm(
-      '确定审核通过该需求吗？'
-    )
-
-  if (!result) return
-
-  store.approve(
-    requirement.value.id
-  )
-
-  window.alert(
-    '审核通过'
-  )
+const openReject = () => {
+  rejectReason.value = ''
+  actionError.value = ''
+  rejectVisible.value = true
 }
 
-const reject = () => {
-  const result =
-    window.confirm(
-      '确定驳回该需求吗？'
-    )
-
-  if (!result) return
-
-  store.reject(
-    requirement.value.id
-  )
-
-  window.alert(
-    '需求已驳回'
-  )
+const closeReject = () => {
+  if (submitting.value) return
+  rejectVisible.value = false
 }
 
-const openEdit =
-  () => {
-    Object.assign(
-      editForm,
-      {
-        title:
-          requirement.value.title,
-
-        budget:
-          requirement.value.budget,
-
-        cooperation:
-          requirement.value.cooperation,
-
-        summary:
-          requirement.value.summary
-      }
-    )
-
-    editVisible.value =
-      true
+const submitReject = async () => {
+  if (!detail.value || submitting.value) return
+  if (!rejectReason.value.trim()) {
+    actionError.value = '请填写驳回原因'
+    return
   }
-
-const saveEdit =
-  () => {
-    if (
-      !editForm.title.trim()
-    ) {
-      window.alert(
-        '请输入需求标题'
-      )
-
-      return
-    }
-
-    store.updateRequirement(
-      requirement.value.id,
-      {
-        title:
-          editForm.title,
-
-        budget:
-          editForm.budget,
-
-        cooperation:
-          editForm.cooperation,
-
-        summary:
-          editForm.summary
-      }
-    )
-
-    editVisible.value =
-      false
+  submitting.value = true
+  actionError.value = ''
+  try {
+    await api(`/admin/demands/${detail.value.id}/reject`, {
+      method: 'POST',
+      body: { version: detail.value.version, reason: rejectReason.value.trim() }
+    })
+    rejectVisible.value = false
+    fetchDetail()
+  } catch (err) {
+    actionError.value = err.message || '操作失败'
+  } finally {
+    submitting.value = false
   }
-
-const downloadAttachment =
-  attachment => {
-    const text = `
-附件名称：${attachment.name}
-需求编号：${requirement.value.id}
-需求名称：${requirement.value.title}
-
-当前为前端演示附件。
-后续接入后端文件服务后，
-这里可以直接下载真实 PDF 文件。
-`
-
-    const blob =
-      new Blob(
-        [text],
-        {
-          type:
-            'text/plain;charset=utf-8'
-        }
-      )
-
-    const url =
-      URL.createObjectURL(
-        blob
-      )
-
-    const link =
-      document.createElement(
-        'a'
-      )
-
-    link.href = url
-
-    link.download =
-      attachment.name
-        .replace(
-          '.pdf',
-          '.txt'
-        )
-
-    link.click()
-
-    URL.revokeObjectURL(
-      url
-    )
-  }
-
-const timeline =
-  computed(() => {
-    const approved =
-      requirement.value
-        .auditStatus ===
-      '已通过'
-
-    const rejected =
-      requirement.value
-        .auditStatus ===
-      '已驳回'
-
-    return [
-      {
-        name: '草稿',
-        status: 'done',
-        time:
-          '2025-05-20 16:20',
-        operator:
-          '张伟 创建'
-      },
-
-      {
-        name: '已提交',
-        status: 'done',
-        time:
-          '2025-05-21 10:30',
-        operator:
-          '张伟 提交'
-      },
-
-      {
-        name:
-          rejected
-            ? '已驳回'
-            : approved
-              ? '审核完成'
-              : '审核中',
-
-        status:
-          approved ||
-          rejected
-            ? 'done'
-            : 'current',
-
-        time:
-          approved ||
-          rejected
-            ? '刚刚'
-            : '2025-05-21 11:05',
-
-        operator:
-          '管理员 受理'
-      },
-
-      {
-        name: '已通过',
-
-        status:
-          approved
-            ? 'done'
-            : 'waiting',
-
-        time:
-          approved
-            ? '刚刚'
-            : '待审核',
-
-        operator: ''
-      },
-
-      {
-        name: '已发布',
-
-        status:
-          approved
-            ? 'done'
-            : 'waiting',
-
-        time:
-          approved
-            ? '刚刚'
-            : '待发布',
-
-        operator: ''
-      }
-    ]
-  })
+}
 </script>
 
 <template>
-  <div
-    v-if="requirement"
-    class="detail-page"
-  >
+  <div class="detail-page">
 
-    <div class="back-row">
-      <button
-        @click="goBack"
-      >
-        ‹ 返回
-      </button>
+    <div v-if="loading" class="state-block">加载中…</div>
+
+    <div v-else-if="loadError" class="state-block">
+      <p class="state-error">{{ loadError }}</p>
+      <div class="state-actions">
+        <button class="primary-btn" @click="fetchDetail">重试</button>
+        <button class="back-btn" @click="goBack">返回列表</button>
+      </div>
     </div>
 
+    <template v-else-if="detail">
 
-    <div class="title-row">
-
-      <div>
-        <h1>
-          {{ requirement.title }}
-        </h1>
-
-        <div class="title-meta">
-
-          <span
-            class="review-status"
-          >
-            {{
-              requirement.status
-            }}
-          </span>
-
-          <span>
-            发布时间：
-            {{
-              requirement.publishedAt
-            }}
-          </span>
-
-          <span>
-            浏览量：
-            {{ requirement.views }}
-          </span>
-
-        </div>
+      <div class="back-row">
+        <button @click="goBack">‹ 返回</button>
       </div>
 
 
-      <div class="top-actions">
-
-        <button
-          @click="
-            toggleFavorite
-          "
-        >
-          ☆
-          {{
-            requirement.favorite
-              ? '已收藏'
-              : '收藏'
-          }}
-        </button>
-
-        <button
-          @click="share"
-        >
-          ⤴ 分享
-        </button>
-
-        <button
-          @click="
-            printPage
-          "
-        >
-          ▣ 打印
-        </button>
-
-      </div>
-
-    </div>
-
-
-    <section class="summary-card">
-
-      <div class="summary-item">
-        <div class="summary-icon blue">
-          ▤
-        </div>
+      <div class="title-row">
 
         <div>
-          <label>
-            需求编号
-          </label>
+          <h1>{{ detail.title }}</h1>
 
-          <strong>
-            {{
-              requirement.id
-            }}
-          </strong>
-        </div>
-      </div>
-
-
-      <div class="summary-item">
-        <div class="summary-icon green">
-          ▦
-        </div>
-
-        <div>
-          <label>
-            发布单位
-          </label>
-
-          <strong>
-            {{
-              requirement.organization
-            }}
-          </strong>
-
-          <small
-            v-if="
-              requirement.certified
-            "
-          >
-            已认证
-          </small>
-        </div>
-      </div>
-
-
-      <div class="summary-item">
-        <div class="summary-icon purple">
-          ⚙
-        </div>
-
-        <div>
-          <label>
-            所属行业
-          </label>
-
-          <strong>
-            {{
-              requirement.industry
-            }}
-          </strong>
-        </div>
-      </div>
-
-
-      <div class="summary-item">
-        <div class="summary-icon orange">
-          ◷
-        </div>
-
-        <div>
-          <label>
-            发布时间
-          </label>
-
-          <strong>
-            {{
-              requirement.publishedAt
-            }}
-          </strong>
-        </div>
-      </div>
-
-
-      <div class="summary-item">
-        <div class="summary-icon yellow">
-          ◫
-        </div>
-
-        <div>
-          <label>
-            预算范围
-          </label>
-
-          <strong>
-            {{
-              requirement.budget
-            }}
-          </strong>
-        </div>
-      </div>
-
-
-      <div class="summary-item">
-        <div class="summary-icon blue">
-          ◆
-        </div>
-
-        <div>
-          <label>
-            合作方式
-          </label>
-
-          <strong>
-            {{
-              requirement.cooperation
-            }}
-          </strong>
-        </div>
-      </div>
-
-    </section>
-
-
-    <div class="main-grid">
-
-      <section class="detail-card">
-
-        <h2>
-          需求详情
-        </h2>
-
-        <div class="detail-section">
-
-          <h3>
-            <i></i>
-            需求概述
-          </h3>
-
-          <p>
-            {{
-              requirement.summary
-            }}
-          </p>
-
-        </div>
-
-
-        <div class="detail-section">
-
-          <h3>
-            <i></i>
-            具体需求
-          </h3>
-
-          <ol>
-            <li
-              v-for="
-                item
-                in requirement.requirements
-              "
-              :key="item"
-            >
-              {{ item }}
-            </li>
-          </ol>
-
-        </div>
-
-
-        <div class="detail-section">
-
-          <h3>
-            <i></i>
-            技术指标
-          </h3>
-
-          <ul>
-            <li
-              v-for="
-                item
-                in requirement.indicators
-              "
-              :key="item"
-            >
-              {{ item }}
-            </li>
-          </ul>
-
-        </div>
-
-
-        <div class="detail-section">
-
-          <h3>
-            <i></i>
-            联系方式
-          </h3>
-
-          <div class="contact-grid">
-
-            <span>
-              联系人：
-              {{
-                requirement.contact.name
-              }}
+          <div class="title-meta">
+            <span class="status-badge" :class="getStatusClass(detail.status)">
+              {{ detail.statusLabel || detail.status }}
             </span>
 
-            <span>
-              联系电话：
-              {{
-                requirement.contact.phone
-              }}
-            </span>
+            <span>提交时间：{{ fmtTime(detail.createdAt) }}</span>
 
-            <span>
-              邮箱：
-              {{
-                requirement.contact.email
-              }}
-            </span>
-
-            <span class="full">
-              地址：
-              {{
-                requirement.contact.address
-              }}
-            </span>
-
+            <span v-if="detail.publishedAt">发布时间：{{ fmtTime(detail.publishedAt) }}</span>
           </div>
+        </div>
 
+      </div>
+
+
+      <section class="summary-card">
+
+        <div class="summary-item">
+          <div class="summary-icon blue">▤</div>
+          <div>
+            <label>分类</label>
+            <strong>{{ detail.categoryName || '-' }}</strong>
+          </div>
+        </div>
+
+        <div class="summary-item">
+          <div class="summary-icon green">▦</div>
+          <div>
+            <label>所属机构</label>
+            <strong :title="detail.orgName">{{ detail.orgName || '-' }}</strong>
+          </div>
+        </div>
+
+        <div class="summary-item">
+          <div class="summary-icon purple">⌖</div>
+          <div>
+            <label>地区</label>
+            <strong>{{ detail.region || '-' }}</strong>
+          </div>
+        </div>
+
+        <div class="summary-item">
+          <div class="summary-icon yellow">◫</div>
+          <div>
+            <label>预算</label>
+            <strong>{{ budgetText }}</strong>
+          </div>
+        </div>
+
+        <div class="summary-item">
+          <div class="summary-icon blue">◆</div>
+          <div>
+            <label>合作方式</label>
+            <strong>{{ detail.coopMode || '-' }}</strong>
+          </div>
+        </div>
+
+        <div class="summary-item">
+          <div class="summary-icon orange">◷</div>
+          <div>
+            <label>提交人</label>
+            <strong>{{ submitterText }}</strong>
+          </div>
         </div>
 
       </section>
 
 
-      <section class="timeline-card">
+      <div class="main-grid">
 
-        <h2>
-          需求状态
-        </h2>
+        <section class="detail-card">
 
-        <div class="timeline">
+          <h2>需求详情</h2>
 
-          <div
-            v-for="
-              item in timeline
-            "
-            :key="item.name"
-            class="timeline-item"
-            :class="
-              item.status
-            "
-          >
-
-            <div class="timeline-left">
-
-              <span
-                class="timeline-dot"
-              >
-                {{
-                  item.status ===
-                  'done'
-                    ? '✓'
-                    : ''
-                }}
-              </span>
-
-              <span
-                class="timeline-line"
-              ></span>
-
-            </div>
-
-
-            <div
-              class="timeline-content"
-            >
-
-              <strong>
-                {{ item.name }}
-              </strong>
-
-              <div>
-                {{ item.time }}
-              </div>
-
-              <small>
-                {{ item.operator }}
-              </small>
-
-            </div>
-
+          <div class="detail-section">
+            <h3><i></i>需求描述</h3>
+            <p class="pre-line">{{ detail.description || '-' }}</p>
           </div>
 
+          <div class="detail-section">
+            <h3><i></i>标签</h3>
+            <div v-if="detail.tags && detail.tags.length" class="tag-list">
+              <span v-for="tag in detail.tags" :key="tag" class="tag">{{ tag }}</span>
+            </div>
+            <p v-else>-</p>
+          </div>
+
+          <div class="detail-section">
+            <h3><i></i>联系方式</h3>
+            <div class="contact-grid">
+              <span>联系人：{{ detail.contactName || '-' }}</span>
+              <span>职务：{{ detail.contactTitle || '-' }}</span>
+              <span>联系电话：{{ detail.contactPhone || '-' }}</span>
+              <span>邮箱：{{ detail.contactEmail || '-' }}</span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h3><i></i>机构简介</h3>
+            <p class="pre-line">{{ detail.orgIntro || '-' }}</p>
+          </div>
+
+        </section>
+
+        <section class="side-card">
+
+          <h2>状态信息</h2>
+
+          <div class="info-rows">
+            <div class="info-row">
+              <label>需求编号</label>
+              <span>{{ detail.id }}</span>
+            </div>
+            <div class="info-row">
+              <label>状态</label>
+              <span>{{ detail.statusLabel || detail.status }}</span>
+            </div>
+            <div class="info-row">
+              <label>提交时间</label>
+              <span>{{ fmtTime(detail.createdAt) }}</span>
+            </div>
+            <div class="info-row">
+              <label>更新时间</label>
+              <span>{{ fmtTime(detail.updatedAt) }}</span>
+            </div>
+            <div v-if="detail.publishedAt" class="info-row">
+              <label>发布时间</label>
+              <span>{{ fmtTime(detail.publishedAt) }}</span>
+            </div>
+          </div>
+
+          <div v-if="detail.status === 'rejected'" class="reject-reason">
+            <label>驳回原因</label>
+            <p>{{ detail.rejectReason || '-' }}</p>
+          </div>
+
+        </section>
+
+      </div>
+
+
+      <section class="action-bar">
+
+        <div class="action-buttons">
+          <template v-if="detail.status === 'pending_review'">
+            <button class="approve-btn" :disabled="submitting" @click="approve">
+              {{ submitting ? '提交中…' : '✓ 审核通过' }}
+            </button>
+
+            <button class="reject-btn" :disabled="submitting" @click="openReject">
+              × 审核驳回
+            </button>
+          </template>
+
+          <button class="back-btn" @click="goBack">↶ 返回列表</button>
         </div>
+
+        <p v-if="actionError && !rejectVisible" class="action-error">{{ actionError }}</p>
 
       </section>
 
-    </div>
 
+      <div v-if="rejectVisible" class="modal-mask" @click.self="closeReject">
 
-    <section class="records-card">
+        <div class="modal">
 
-      <div class="tabs">
+          <div class="modal-header">
+            <h3>审核驳回</h3>
+            <button @click="closeReject">×</button>
+          </div>
 
-        <button
-          :class="{
-            active:
-              activeTab ===
-              'attachment'
-          }"
-          @click="
-            activeTab =
-              'attachment'
-          "
-        >
-          附件信息
-        </button>
-
-        <button
-          :class="{
-            active:
-              activeTab ===
-              'audit'
-          }"
-          @click="
-            activeTab =
-              'audit'
-          "
-        >
-          审核记录
-          （{{
-            requirement
-              .auditRecords
-              .length
-          }}）
-        </button>
-
-        <button
-          :class="{
-            active:
-              activeTab ===
-              'docking'
-          }"
-          @click="
-            activeTab =
-              'docking'
-          "
-        >
-          对接记录
-          （{{
-            requirement
-              .dockingRecords
-              .length
-          }}）
-        </button>
-
-      </div>
-
-
-      <div
-        v-if="
-          activeTab ===
-          'attachment'
-        "
-        class="tab-content"
-      >
-
-        <div
-          v-for="
-            item
-            in requirement.attachments
-          "
-          :key="item.id"
-          class="attachment-row"
-        >
-
-          <span
-            class="pdf-icon"
-          >
-            PDF
-          </span>
-
-          <strong>
-            {{ item.name }}
-          </strong>
-
-          <span>
-            {{ item.size }}
-          </span>
-
-          <span>
-            {{ item.uploadedAt }}
-          </span>
-
-          <span>
-            {{ item.uploader }}
-          </span>
-
-          <button
-            @click="
-              downloadAttachment(
-                item
-              )
-            "
-          >
-            ⇩ 下载
-          </button>
-
-        </div>
-
-        <div
-          v-if="
-            !requirement
-              .attachments.length
-          "
-          class="empty-record"
-        >
-          暂无附件
-        </div>
-
-      </div>
-
-
-      <div
-        v-else-if="
-          activeTab ===
-          'audit'
-        "
-        class="tab-content"
-      >
-
-        <div
-          v-for="
-            record
-            in requirement.auditRecords
-          "
-          :key="record.id"
-          class="record-row"
-        >
-
-          <strong>
-            {{ record.action }}
-          </strong>
-
-          <span>
-            {{ record.operator }}
-          </span>
-
-          <span>
-            {{ record.time }}
-          </span>
-
-          <span>
-            {{ record.remark }}
-          </span>
-
-        </div>
-
-      </div>
-
-
-      <div
-        v-else
-        class="tab-content"
-      >
-
-        <div
-          v-if="
-            !requirement
-              .dockingRecords
-              .length
-          "
-          class="empty-record"
-        >
-          暂无对接记录
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <section class="action-bar">
-
-      <button
-        class="approve-btn"
-        @click="approve"
-      >
-        ✓ 审核通过
-      </button>
-
-      <button
-        class="reject-btn"
-        @click="reject"
-      >
-        × 审核驳回
-      </button>
-
-      <button
-        class="edit-btn"
-        @click="
-          openEdit
-        "
-      >
-        ✎ 编辑
-      </button>
-
-      <button
-        class="back-btn"
-        @click="goBack"
-      >
-        ↶ 返回
-      </button>
-
-    </section>
-
-
-    <div
-      v-if="editVisible"
-      class="modal-mask"
-      @click.self="
-        editVisible = false
-      "
-    >
-
-      <div class="modal">
-
-        <div class="modal-header">
-
-          <h3>
-            编辑需求
-          </h3>
-
-          <button
-            @click="
-              editVisible = false
-            "
-          >
-            ×
-          </button>
-
-        </div>
-
-
-        <div class="edit-form">
-
-          <label>
-            需求标题
-
-            <input
-              v-model="
-                editForm.title
-              "
-            />
-          </label>
-
-          <label>
-            预算范围
-
-            <input
-              v-model="
-                editForm.budget
-              "
-            />
-          </label>
-
-          <label>
-            合作方式
-
-            <input
-              v-model="
-                editForm.cooperation
-              "
-            />
-          </label>
-
-          <label class="full">
-            需求概述
-
+          <div class="modal-body">
+            <label class="reject-label">驳回原因（必填）</label>
             <textarea
-              v-model="
-                editForm.summary
-              "
-              rows="6"
+              v-model="rejectReason"
+              rows="5"
+              placeholder="请填写驳回原因，将反馈给需求提交人"
             ></textarea>
-          </label>
+            <p v-if="actionError" class="error-text">{{ actionError }}</p>
+          </div>
 
-        </div>
-
-
-        <div class="modal-footer">
-
-          <button
-            class="back-btn"
-            @click="
-              editVisible = false
-            "
-          >
-            取消
-          </button>
-
-          <button
-            class="approve-btn"
-            @click="
-              saveEdit
-            "
-          >
-            保存
-          </button>
+          <div class="modal-footer">
+            <button class="back-btn" :disabled="submitting" @click="closeReject">取消</button>
+            <button class="reject-btn" :disabled="submitting" @click="submitReject">
+              {{ submitting ? '提交中…' : '确认驳回' }}
+            </button>
+          </div>
 
         </div>
 
       </div>
 
-    </div>
+    </template>
 
-  </div>
-
-
-  <div
-    v-else
-    class="not-found"
-  >
-    <h2>
-      未找到该需求
-    </h2>
-
-    <button
-      @click="goBack"
-    >
-      返回需求列表
-    </button>
   </div>
 </template>
 
@@ -1054,6 +336,48 @@ const timeline =
 
 button {
   cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.state-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 320px;
+  border: 1px solid #e8edf4;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 2px 14px rgba(40, 72, 110, 0.06);
+  color: #8b96a5;
+  font-size: 14px;
+}
+
+.state-error {
+  margin: 0;
+  color: #ed5663;
+}
+
+.state-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.state-actions button {
+  height: 40px;
+  padding: 0 26px;
+  border-radius: 5px;
+}
+
+.primary-btn {
+  border: 1px solid #1677ff;
+  background: #1677ff;
+  color: white;
 }
 
 .back-row {
@@ -1088,25 +412,43 @@ button {
   font-size: 12px;
 }
 
-.review-status {
+.status-badge {
+  display: inline-flex;
+  align-items: center;
   padding: 4px 9px;
   border-radius: 4px;
+  font-size: 12px;
+}
+
+.status-badge.pending {
+  background: #edf4ff;
+  color: #317dea;
+}
+
+.status-badge.published {
   background: #e9faf1;
   color: #27b878;
 }
 
-.top-actions {
-  display: flex;
-  gap: 12px;
+.status-badge.matched {
+  background: #f0edff;
+  color: #7a64f6;
 }
 
-.top-actions button {
-  height: 38px;
-  padding: 0 18px;
-  border: 1px solid #dce4ee;
-  border-radius: 5px;
-  background: white;
-  color: #3f4c60;
+.status-badge.draft,
+.status-badge.closed {
+  background: #f0f2f5;
+  color: #8994a3;
+}
+
+.status-badge.cancelled {
+  background: #fff1e4;
+  color: #ff8c25;
+}
+
+.status-badge.rejected {
+  background: #fff0f2;
+  color: #ed5663;
 }
 
 .summary-card {
@@ -1116,8 +458,7 @@ button {
   border: 1px solid #e8edf4;
   border-radius: 10px;
   background: white;
-  box-shadow:
-    0 2px 14px rgba(40, 72, 110, 0.06);
+  box-shadow: 0 2px 14px rgba(40, 72, 110, 0.06);
 }
 
 .summary-item {
@@ -1187,15 +528,6 @@ button {
   text-overflow: ellipsis;
 }
 
-.summary-item small {
-  display: inline-block;
-  margin-top: 3px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: #e9f3ff;
-  color: #287bea;
-}
-
 .main-grid {
   display: grid;
   grid-template-columns: minmax(0, 2.2fr) minmax(310px, 0.8fr);
@@ -1204,24 +536,22 @@ button {
 }
 
 .detail-card,
-.timeline-card,
-.records-card,
+.side-card,
 .action-bar {
   border: 1px solid #e8edf4;
   border-radius: 10px;
   background: white;
-  box-shadow:
-    0 2px 14px rgba(40, 72, 110, 0.06);
+  box-shadow: 0 2px 14px rgba(40, 72, 110, 0.06);
 }
 
 .detail-card,
-.timeline-card {
+.side-card {
   min-height: 420px;
   padding: 20px 23px;
 }
 
 .detail-card h2,
-.timeline-card h2 {
+.side-card h2 {
   margin: 0 0 17px;
   color: #223044;
   font-size: 17px;
@@ -1259,199 +589,112 @@ button {
   line-height: 1.9;
 }
 
-.detail-section ol,
-.detail-section ul {
-  margin: 0;
-  padding-left: 21px;
+.pre-line {
+  white-space: pre-line;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  padding: 3px 10px;
+  border-radius: 3px;
+  background: #edf4ff;
+  color: #2f7de1;
+  font-size: 12px;
 }
 
 .contact-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 11px 25px;
   color: #515e70;
   font-size: 13px;
 }
 
-.contact-grid .full {
-  grid-column: 1 / -1;
+.info-rows {
+  padding: 4px 0 10px;
 }
 
-.timeline {
-  padding: 10px 0 10px 7px;
-}
-
-.timeline-item {
-  display: grid;
-  grid-template-columns: 25px 1fr;
-  min-height: 74px;
-}
-
-.timeline-left {
-  position: relative;
-}
-
-.timeline-dot {
-  position: relative;
-  z-index: 2;
+.info-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 17px;
-  height: 17px;
-  border: 2px solid #cfd6df;
-  border-radius: 50%;
-  background: white;
-  color: white;
-  font-size: 10px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px dashed #edf1f5;
+  font-size: 13px;
 }
 
-.timeline-line {
-  position: absolute;
-  left: 8px;
-  top: 17px;
-  bottom: 0;
-  width: 1px;
-  background: #dce3eb;
+.info-row:last-child {
+  border-bottom: 0;
 }
 
-.timeline-item:last-child .timeline-line {
-  display: none;
+.info-row label {
+  flex: none;
+  color: #7d8897;
 }
 
-.timeline-item.done .timeline-dot {
-  border-color: #20b875;
-  background: #20b875;
+.info-row span {
+  overflow: hidden;
+  color: #344154;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.timeline-item.current .timeline-dot {
-  border: 5px solid #1677ff;
-  box-shadow: 0 0 0 3px #e5f0ff;
-}
-
-.timeline-content strong {
-  color: #3b485b;
-  font-size: 14px;
-}
-
-.timeline-item.current .timeline-content strong {
-  color: #1677ff;
-}
-
-.timeline-content div {
-  margin-top: 7px;
-  color: #8995a5;
-  font-size: 12px;
-}
-
-.timeline-content small {
-  display: block;
-  margin-top: 4px;
-  color: #8995a5;
-}
-
-.timeline-item.waiting {
-  opacity: 0.55;
-}
-
-.records-card {
+.reject-reason {
   margin-top: 14px;
+  padding: 12px 15px;
+  border-radius: 8px;
+  background: #fff0f2;
 }
 
-.tabs {
-  display: flex;
-  height: 47px;
-  padding-left: 18px;
-  border-bottom: 1px solid #e8edf4;
-}
-
-.tabs button {
-  position: relative;
-  padding: 0 19px;
-  border: 0;
-  background: transparent;
-  color: #556174;
-}
-
-.tabs button.active {
-  color: #1677ff;
-  font-weight: 600;
-}
-
-.tabs button.active::after {
-  position: absolute;
-  right: 10px;
-  bottom: 0;
-  left: 10px;
-  height: 2px;
-  background: #1677ff;
-  content: "";
-}
-
-.tab-content {
-  min-height: 58px;
-}
-
-.attachment-row {
-  display: grid;
-  grid-template-columns: 45px 1.6fr 110px 170px 100px 80px;
-  align-items: center;
-  min-height: 58px;
-  padding: 0 20px;
-  color: #596577;
+.reject-reason label {
+  display: block;
+  margin-bottom: 5px;
+  color: #ed5663;
   font-size: 12px;
 }
 
-.pdf-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 31px;
-  height: 34px;
-  border-radius: 3px;
-  background: #ef4652;
-  color: white;
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.attachment-row button {
-  border: 1px solid #7bb5ff;
-  border-radius: 4px;
-  background: white;
-  color: #1677ff;
-}
-
-.record-row {
-  display: grid;
-  grid-template-columns: 130px 120px 180px 1fr;
-  gap: 15px;
-  min-height: 54px;
-  padding: 16px 22px;
-  border-bottom: 1px solid #edf1f5;
-  color: #647083;
-  font-size: 12px;
-}
-
-.empty-record {
-  padding: 24px;
-  color: #9ba5b3;
-  text-align: center;
+.reject-reason p {
+  margin: 0;
+  color: #d9455f;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-line;
 }
 
 .action-bar {
   display: flex;
-  justify-content: center;
-  gap: 22px;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 14px;
   padding: 20px;
 }
 
-.action-bar button {
+.action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+}
+
+.action-buttons button {
   width: 195px;
   height: 48px;
   border-radius: 5px;
   font-size: 15px;
+}
+
+.action-error {
+  margin: 0;
+  color: #ed5663;
+  font-size: 13px;
+  text-align: center;
 }
 
 .approve-btn {
@@ -1464,12 +707,6 @@ button {
   border: 1px solid #f04451;
   background: #f04451;
   color: white;
-}
-
-.edit-btn {
-  border: 1px solid #68a8ff;
-  background: white;
-  color: #1677ff;
 }
 
 .back-btn {
@@ -1492,8 +729,7 @@ button {
   width: 620px;
   border-radius: 10px;
   background: white;
-  box-shadow:
-    0 20px 70px rgba(20, 40, 70, 0.2);
+  box-shadow: 0 20px 70px rgba(20, 40, 70, 0.2);
 }
 
 .modal-header {
@@ -1516,44 +752,37 @@ button {
   font-size: 24px;
 }
 
-.edit-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  padding: 25px;
+.modal-body {
+  padding: 25px 24px 10px;
 }
 
-.edit-form label {
-  color: #5e6979;
-  font-size: 13px;
+.reject-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #283447;
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.edit-form input,
-.edit-form textarea {
+.modal-body textarea {
   width: 100%;
-  margin-top: 8px;
-  padding: 0 12px;
-  outline: none;
+  padding: 10px 12px;
   border: 1px solid #dce4ee;
   border-radius: 5px;
-}
-
-.edit-form input {
-  height: 42px;
-}
-
-.edit-form textarea {
-  padding-top: 10px;
+  outline: none;
   resize: vertical;
+  font-size: 13px;
+  font-family: inherit;
 }
 
-.edit-form input:focus,
-.edit-form textarea:focus {
+.modal-body textarea:focus {
   border-color: #1677ff;
 }
 
-.edit-form .full {
-  grid-column: 1 / -1;
+.error-text {
+  margin: 10px 0 0;
+  color: #ed5663;
+  font-size: 13px;
 }
 
 .modal-footer {
@@ -1570,14 +799,8 @@ button {
   border-radius: 5px;
 }
 
-.not-found {
-  padding: 100px;
-  text-align: center;
-}
-
 @media print {
   .back-row,
-  .top-actions,
   .action-bar,
   .admin-header,
   .sidebar {

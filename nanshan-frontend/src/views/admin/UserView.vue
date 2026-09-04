@@ -1,451 +1,224 @@
 <script setup>
 import {
   computed,
+  onMounted,
   reactive,
   ref
 } from 'vue'
 
-import {
-  useUserStore
-} from '../../stores/user'
+import { api } from '../../api/client'
 
-import {
-  userTypes,
-  userStatuses
-} from '../../mock/users'
+const STATUS_OPTIONS = [
+  { value: 'active', label: '正常' },
+  { value: 'disabled', label: '禁用' }
+]
 
-const store =
-  useUserStore()
+const USER_TYPE_LABELS = {
+  investor: '投资人',
+  researcher: '科研人员',
+  enterprise: '企业用户',
+  org: '机构用户'
+}
 
-const filters =
-  reactive({
-    keyword: '',
-    type: '',
-    status: '',
-    startDate: '',
-    endDate: ''
-  })
+const typeLabel = v => USER_TYPE_LABELS[v] || v || '未填写'
 
-const applied =
-  reactive({
-    keyword: '',
-    type: '',
-    status: '',
-    startDate: '',
-    endDate: ''
-  })
+const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
-const currentPage =
-  ref(1)
+const filters = reactive({
+  keyword: '',
+  status: ''
+})
 
-const pageSize =
-  ref(10)
+const applied = reactive({
+  keyword: '',
+  status: ''
+})
 
-const modalVisible =
-  ref(false)
+const currentPage = ref(1)
+const pageSize = ref(10)
 
-const modalMode =
-  ref('view')
+const rows = ref([])
+const total = ref(0)
+const totalPages = ref(1)
+const loading = ref(false)
+const loadError = ref('')
 
-const currentUser =
-  ref(null)
+const modalVisible = ref(false)
+const modalLoading = ref(false)
+const modalError = ref('')
+const currentUser = ref(null)
 
-const form =
-  reactive({
-    username: '',
-    type: '',
-    phone: '',
-    organization: '',
-    status: ''
-  })
+const exporting = ref(false)
 
-const filteredData =
-  computed(() => {
-    const keyword =
-      applied.keyword
-        .trim()
-        .toLowerCase()
+const pages = computed(() => {
+  const count = totalPages.value
 
-    return store.users.filter(
-      item => {
-        const matchKeyword =
-          !keyword ||
-          item.username
-            .toLowerCase()
-            .includes(keyword) ||
-          item.phone.includes(
-            keyword
-          ) ||
-          item.organization
-            .toLowerCase()
-            .includes(keyword)
+  if (count <= 7) {
+    return Array.from({ length: count }, (_, index) => index + 1)
+  }
 
-        const matchType =
-          !applied.type ||
-          item.type ===
-            applied.type
+  if (currentPage.value <= 4) {
+    return [1, 2, 3, 4, 5, '...', count]
+  }
 
-        const matchStatus =
-          !applied.status ||
-          item.status ===
-            applied.status
+  if (currentPage.value >= count - 3) {
+    return [1, '...', count - 4, count - 3, count - 2, count - 1, count]
+  }
 
-        const date =
-          item.registeredAt
-            .slice(0, 10)
+  return [1, '...', currentPage.value - 1, currentPage.value, currentPage.value + 1, '...', count]
+})
 
-        const matchStart =
-          !applied.startDate ||
-          date >=
-            applied.startDate
-
-        const matchEnd =
-          !applied.endDate ||
-          date <=
-            applied.endDate
-
-        return (
-          matchKeyword &&
-          matchType &&
-          matchStatus &&
-          matchStart &&
-          matchEnd
-        )
+async function loadList() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const data = await api('/admin/users', {
+      params: {
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        keyword: applied.keyword.trim(),
+        status: applied.status
       }
-    )
-  })
+    })
+    rows.value = data.list || []
+    total.value = data.total || 0
+    totalPages.value = data.totalPages || Math.max(1, Math.ceil(total.value / pageSize.value))
+  } catch (err) {
+    rows.value = []
+    total.value = 0
+    totalPages.value = 1
+    loadError.value = err.message || '加载失败'
+  } finally {
+    loading.value = false
+  }
+}
 
-const total =
-  computed(
-    () =>
-      filteredData.value.length
-  )
-
-const totalPages =
-  computed(() =>
-    Math.max(
-      1,
-      Math.ceil(
-        total.value /
-        pageSize.value
-      )
-    )
-  )
-
-const tableData =
-  computed(() => {
-    const start =
-      (
-        currentPage.value -
-        1
-      ) *
-      pageSize.value
-
-    return filteredData.value.slice(
-      start,
-      start +
-      pageSize.value
-    )
-  })
-
-const pages =
-  computed(() => {
-    const count =
-      totalPages.value
-
-    if (count <= 7) {
-      return Array.from(
-        { length: count },
-        (_, index) =>
-          index + 1
-      )
-    }
-
-    return [
-      1,
-      2,
-      3,
-      4,
-      5,
-      '...',
-      count
-    ]
-  })
+onMounted(loadList)
 
 const search = () => {
-  Object.assign(
-    applied,
-    filters
-  )
-
+  Object.assign(applied, filters)
   currentPage.value = 1
+  loadList()
 }
 
 const reset = () => {
-  Object.assign(
-    filters,
-    {
-      keyword: '',
-      type: '',
-      status: '',
-      startDate: '',
-      endDate: ''
-    }
-  )
-
-  Object.assign(
-    applied,
-    filters
-  )
-
+  Object.assign(filters, { keyword: '', status: '' })
+  Object.assign(applied, { keyword: '', status: '' })
   currentPage.value = 1
+  loadList()
 }
 
-const openView = user => {
-  currentUser.value = user
-  modalMode.value = 'view'
+const changePage = page => {
+  if (page === '...') return
+  if (page < 1 || page > totalPages.value) return
+  currentPage.value = page
+  loadList()
+}
+
+const handlePageSizeChange = () => {
+  currentPage.value = 1
+  loadList()
+}
+
+const openView = async user => {
   modalVisible.value = true
+  modalLoading.value = true
+  modalError.value = ''
+  try {
+    currentUser.value = await api(`/admin/users/${user.userId}`)
+  } catch (err) {
+    currentUser.value = null
+    modalError.value = err.message || '加载失败'
+  } finally {
+    modalLoading.value = false
+  }
 }
 
-const openEdit = user => {
-  currentUser.value = user
-
-  Object.assign(
-    form,
-    {
-      username:
-        user.username,
-      type:
-        user.type,
-      phone:
-        user.phone,
-      organization:
-        user.organization,
-      status:
-        user.status
-    }
-  )
-
-  modalMode.value = 'edit'
-  modalVisible.value = true
-}
-
-const save = () => {
-  store.update(
-    currentUser.value.id,
-    { ...form }
-  )
-
+const closeModal = () => {
   modalVisible.value = false
 }
 
-const toggleStatus = user => {
-  const action =
-    user.status === '禁用'
-      ? '启用'
-      : '禁用'
+const escapeCsv = value => `"${String(value ?? '').replaceAll('"', '""')}"`
 
-  if (
-    !window.confirm(
-      `确定${action}用户“${user.username}”吗？`
-    )
-  ) {
-    return
-  }
+const exportData = async () => {
+  exporting.value = true
+  try {
+    const all = []
+    for (let page = 1; page <= 20; page++) {
+      const data = await api('/admin/users', {
+        params: {
+          page,
+          pageSize: 50,
+          keyword: applied.keyword.trim(),
+          status: applied.status
+        }
+      })
+      all.push(...(data.list || []))
+      if (page >= (data.totalPages || 1)) break
+    }
 
-  store.toggleStatus(
-    user.id
-  )
-}
-
-const exportData = () => {
-  const rows = [
-    [
-      'ID',
-      '用户名',
-      '用户类型',
-      '手机号',
-      '所属企业/单位',
-      '状态',
-      '注册时间',
-      '最近登录'
-    ],
-
-    ...filteredData.value.map(
-      user => [
-        user.id,
-        user.username,
-        user.type,
+    const csv = [
+      ['ID', '用户编号', '姓名', '用户类型', '手机号', '邮箱', '所属机构', '职务', '角色', '状态', '注册时间'],
+      ...all.map(user => [
+        user.userId,
+        user.userNo,
+        user.displayName,
+        typeLabel(user.userType),
         user.phone,
-        user.organization,
-        user.status,
-        user.registeredAt,
-        user.lastLogin
-      ]
-    )
-  ]
+        user.email,
+        user.orgName,
+        user.orgTitle,
+        (user.roles || []).join('/'),
+        user.status === 'active' ? '正常' : user.status,
+        fmtTime(user.createdAt)
+      ])
+    ].map(row => row.map(escapeCsv).join(',')).join('\n')
 
-  const csv =
-    rows
-      .map(
-        row =>
-          row
-            .map(
-              value =>
-                `"${String(
-                  value ?? ''
-                ).replaceAll(
-                  '"',
-                  '""'
-                )}"`
-            )
-            .join(',')
-      )
-      .join('\n')
-
-  const blob =
-    new Blob(
-      [
-        '\uFEFF' +
-        csv
-      ],
-      {
-        type:
-          'text/csv;charset=utf-8'
-      }
-    )
-
-  const url =
-    URL.createObjectURL(
-      blob
-    )
-
-  const link =
-    document.createElement(
-      'a'
-    )
-
-  link.href = url
-  link.download =
-    '用户列表.csv'
-
-  link.click()
-
-  URL.revokeObjectURL(
-    url
-  )
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = '用户列表.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    loadError.value = err.message || '导出失败'
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 
 <template>
   <div class="user-page">
-
     <section class="filter-card">
-
       <div class="filter-row">
-
         <div class="filter-item keyword">
-
-          <label>
-            关键词
-          </label>
-
+          <label>关键词</label>
           <input
             v-model="filters.keyword"
-            placeholder="请输入用户名/手机号/企业名称"
+            placeholder="请输入用户编号/姓名/机构名称"
             @keyup.enter="search"
           />
-
         </div>
 
         <div class="filter-item">
-
-          <label>
-            用户类型
-          </label>
-
-          <select
-            v-model="filters.type"
-          >
-
+          <label>状态</label>
+          <select v-model="filters.status">
             <option value="">
               全部
             </option>
-
             <option
-              v-for="
-                item in userTypes
-              "
-              :key="item"
-              :value="item"
+              v-for="item in STATUS_OPTIONS"
+              :key="item.value"
+              :value="item.value"
             >
-              {{ item }}
+              {{ item.label }}
             </option>
-
           </select>
-
-        </div>
-
-        <div class="filter-item">
-
-          <label>
-            状态
-          </label>
-
-          <select
-            v-model="filters.status"
-          >
-
-            <option value="">
-              全部
-            </option>
-
-            <option
-              v-for="
-                item in userStatuses
-              "
-              :key="item"
-              :value="item"
-            >
-              {{ item }}
-            </option>
-
-          </select>
-
-        </div>
-
-        <div class="filter-item date-item">
-
-          <label>
-            注册时间
-          </label>
-
-          <div class="date-range">
-
-            <input
-              v-model="
-                filters.startDate
-              "
-              type="date"
-            />
-
-            <span>
-              至
-            </span>
-
-            <input
-              v-model="
-                filters.endDate
-              "
-              type="date"
-            />
-
-          </div>
-
         </div>
 
         <div class="actions">
-
           <button
             class="primary-btn"
             @click="search"
@@ -462,160 +235,124 @@ const exportData = () => {
 
           <button
             class="outline-btn"
+            :disabled="exporting"
             @click="exportData"
           >
-            ⇩ 导出
+            {{ exporting ? '导出中…' : '⇩ 导出' }}
           </button>
-
         </div>
-
       </div>
-
     </section>
 
-
     <section class="table-card">
-
       <table>
-
         <thead>
-
           <tr>
             <th>ID</th>
-            <th>用户名</th>
+            <th>用户编号</th>
+            <th>姓名</th>
             <th>用户类型</th>
             <th>手机号</th>
             <th>所属企业/单位</th>
+            <th>角色</th>
             <th>状态</th>
             <th>注册时间</th>
-            <th>最近登录</th>
             <th>操作</th>
           </tr>
-
         </thead>
 
         <tbody>
-
           <tr
-            v-for="
-              user in tableData
-            "
-            :key="user.id"
+            v-for="user in rows"
+            :key="user.userId"
           >
+            <td>{{ user.userId }}</td>
+
+            <td>{{ user.userNo }}</td>
+
+            <td>{{ user.displayName || '-' }}</td>
 
             <td>
-              {{ user.id }}
-            </td>
-
-            <td>
-              {{ user.username }}
-            </td>
-
-            <td>
-
-              <span
-                class="user-type"
-                :class="user.type"
-              >
-                {{ user.type }}
+              <span class="user-type">
+                {{ typeLabel(user.userType) }}
               </span>
-
             </td>
+
+            <td>{{ user.phone || '-' }}</td>
+
+            <td
+              class="organization"
+              :title="user.orgName"
+            >
+              {{ user.orgName || '-' }}
+            </td>
+
+            <td>{{ (user.roles || []).join(' / ') || '-' }}</td>
 
             <td>
-              {{ user.phone }}
-            </td>
-
-            <td class="organization">
-              {{ user.organization }}
-            </td>
-
-            <td>
-
               <span
                 class="user-status"
-                :class="user.status"
+                :class="user.status === 'active' ? '正常' : '禁用'"
               >
-                {{ user.status }}
+                {{ user.status === 'active' ? '正常' : user.status }}
               </span>
-
             </td>
 
-            <td>
-              {{ user.registeredAt }}
-            </td>
+            <td>{{ fmtTime(user.createdAt) }}</td>
 
             <td>
-              {{
-                user.lastLogin ||
-                '—'
-              }}
-            </td>
-
-            <td>
-
               <div class="operation">
-
-                <button
-                  @click="
-                    openView(user)
-                  "
-                >
+                <button @click="openView(user)">
                   查看
                 </button>
-
-                <span>|</span>
-
-                <button
-                  @click="
-                    openEdit(user)
-                  "
-                >
-                  编辑
-                </button>
-
-                <span>|</span>
-
-                <button
-                  :class="{
-                    enable:
-                      user.status ===
-                      '禁用'
-                  }"
-                  @click="
-                    toggleStatus(user)
-                  "
-                >
-                  {{
-                    user.status ===
-                    '禁用'
-                      ? '启用'
-                      : '禁用'
-                  }}
-                </button>
-
               </div>
-
             </td>
-
           </tr>
 
-        </tbody>
+          <tr v-if="loading">
+            <td
+              colspan="10"
+              class="state-row"
+            >
+              加载中…
+            </td>
+          </tr>
 
+          <tr v-else-if="loadError">
+            <td
+              colspan="10"
+              class="state-row error"
+            >
+              {{ loadError }}
+
+              <button
+                class="retry-btn"
+                @click="loadList"
+              >
+                重试
+              </button>
+            </td>
+          </tr>
+
+          <tr v-else-if="rows.length === 0">
+            <td
+              colspan="10"
+              class="state-row"
+            >
+              暂无符合条件的用户
+            </td>
+          </tr>
+        </tbody>
       </table>
 
-
       <div class="pagination">
-
         <span>
           共 {{ total }} 条
         </span>
 
         <select
           v-model="pageSize"
-          @change="
-            currentPage = 1
-          "
+          @change="handlePageSizeChange"
         >
           <option :value="10">
             10条/页
@@ -627,274 +364,154 @@ const exportData = () => {
         </select>
 
         <button
-          :disabled="
-            currentPage === 1
-          "
-          @click="
-            currentPage--
-          "
+          :disabled="currentPage === 1"
+          @click="changePage(currentPage - 1)"
         >
           ‹
         </button>
 
         <template
-          v-for="
-            (page, index)
-            in pages
-          "
-          :key="
-            `${page}-${index}`
-          "
+          v-for="(page, index) in pages"
+          :key="`${page}-${index}`"
         >
-
           <span
-            v-if="
-              page === '...'
-            "
+            v-if="page === '...'"
+            class="ellipsis"
           >
             ...
           </span>
 
           <button
             v-else
-            :class="{
-              active:
-                currentPage === page
-            }"
-            @click="
-              currentPage = page
-            "
+            :class="{ active: currentPage === page }"
+            @click="changePage(page)"
           >
             {{ page }}
           </button>
-
         </template>
 
         <button
-          :disabled="
-            currentPage ===
-            totalPages
-          "
-          @click="
-            currentPage++
-          "
+          :disabled="currentPage === totalPages"
+          @click="changePage(currentPage + 1)"
         >
           ›
         </button>
-
       </div>
-
     </section>
-
 
     <div
       v-if="modalVisible"
       class="modal-mask"
-      @click.self="
-        modalVisible = false
-      "
+      @click.self="closeModal"
     >
-
       <div class="modal">
-
         <div class="modal-header">
+          <h3>用户详情</h3>
 
-          <h3>
-            {{
-              modalMode === 'view'
-                ? '用户详情'
-                : '编辑用户'
-            }}
-          </h3>
-
-          <button
-            @click="
-              modalVisible = false
-            "
-          >
+          <button @click="closeModal">
             ×
           </button>
-
         </div>
 
-
-        <div
-          v-if="
-            modalMode === 'view'
-          "
-          class="detail-grid"
-        >
-
-          <div>
-            <label>用户ID</label>
-            <strong>
-              {{ currentUser.id }}
-            </strong>
+        <div class="detail-grid">
+          <div
+            v-if="modalLoading"
+            class="full state-text"
+          >
+            加载中…
           </div>
 
-          <div>
-            <label>用户名</label>
-            <strong>
-              {{ currentUser.username }}
-            </strong>
+          <div
+            v-else-if="modalError"
+            class="full state-text error"
+          >
+            {{ modalError }}
           </div>
 
-          <div>
-            <label>用户类型</label>
-            <strong>
-              {{ currentUser.type }}
-            </strong>
-          </div>
+          <template v-else-if="currentUser">
+            <div>
+              <label>用户ID</label>
+              <strong>{{ currentUser.userId }}</strong>
+            </div>
 
-          <div>
-            <label>手机号</label>
-            <strong>
-              {{ currentUser.phone }}
-            </strong>
-          </div>
+            <div>
+              <label>用户编号</label>
+              <strong>{{ currentUser.userNo }}</strong>
+            </div>
 
-          <div class="full">
-            <label>所属单位</label>
-            <strong>
-              {{ currentUser.organization }}
-            </strong>
-          </div>
+            <div>
+              <label>姓名</label>
+              <strong>{{ currentUser.displayName || '-' }}</strong>
+            </div>
 
-          <div>
-            <label>状态</label>
-            <strong>
-              {{ currentUser.status }}
-            </strong>
-          </div>
+            <div>
+              <label>用户类型</label>
+              <strong>{{ typeLabel(currentUser.userType) }}</strong>
+            </div>
 
-          <div>
-            <label>最近登录</label>
-            <strong>
-              {{
-                currentUser.lastLogin ||
-                '暂无'
-              }}
-            </strong>
-          </div>
+            <div>
+              <label>手机号</label>
+              <strong>{{ currentUser.phone || '-' }}</strong>
+            </div>
 
+            <div>
+              <label>邮箱</label>
+              <strong>{{ currentUser.email || '-' }}</strong>
+            </div>
+
+            <div class="full">
+              <label>所属单位</label>
+              <strong>{{ currentUser.orgName || '-' }}{{ currentUser.orgTitle ? `（${currentUser.orgTitle}）` : '' }}</strong>
+            </div>
+
+            <div>
+              <label>角色</label>
+              <strong>{{ (currentUser.roles || []).join(' / ') || '-' }}</strong>
+            </div>
+
+            <div>
+              <label>注册时间</label>
+              <strong>{{ fmtTime(currentUser.createdAt) }}</strong>
+            </div>
+
+            <div class="full">
+              <label>业务统计</label>
+
+              <div class="stat-boxes">
+                <div class="stat-box">
+                  <strong>{{ currentUser.statistics?.achievementCount ?? 0 }}</strong>
+                  <span>发布成果</span>
+                </div>
+
+                <div class="stat-box">
+                  <strong>{{ currentUser.statistics?.demandCount ?? 0 }}</strong>
+                  <span>发布需求</span>
+                </div>
+
+                <div class="stat-box">
+                  <strong>{{ currentUser.statistics?.cooperationCount ?? 0 }}</strong>
+                  <span>合作意向</span>
+                </div>
+
+                <div class="stat-box">
+                  <strong>{{ currentUser.statistics?.favoriteCount ?? 0 }}</strong>
+                  <span>收藏</span>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
-
-
-        <div
-          v-else
-          class="form-grid"
-        >
-
-          <label>
-            用户名
-
-            <input
-              v-model="
-                form.username
-              "
-            />
-          </label>
-
-          <label>
-            用户类型
-
-            <select
-              v-model="
-                form.type
-              "
-            >
-
-              <option
-                v-for="
-                  item in userTypes
-                "
-                :key="item"
-                :value="item"
-              >
-                {{ item }}
-              </option>
-
-            </select>
-          </label>
-
-          <label>
-            手机号
-
-            <input
-              v-model="
-                form.phone
-              "
-            />
-          </label>
-
-          <label>
-            用户状态
-
-            <select
-              v-model="
-                form.status
-              "
-            >
-
-              <option
-                v-for="
-                  item
-                  in userStatuses
-                "
-                :key="item"
-                :value="item"
-              >
-                {{ item }}
-              </option>
-
-            </select>
-          </label>
-
-          <label class="full">
-            所属企业/单位
-
-            <input
-              v-model="
-                form.organization
-              "
-            />
-          </label>
-
-        </div>
-
 
         <div class="modal-footer">
-
           <button
             class="default-btn"
-            @click="
-              modalVisible = false
-            "
+            @click="closeModal"
           >
-            {{
-              modalMode ===
-              'view'
-                ? '关闭'
-                : '取消'
-            }}
+            关闭
           </button>
-
-          <button
-            v-if="
-              modalMode === 'edit'
-            "
-            class="primary-btn"
-            @click="save"
-          >
-            保存
-          </button>
-
         </div>
-
       </div>
-
     </div>
-
   </div>
 </template>
 
@@ -919,10 +536,8 @@ const exportData = () => {
 .filter-row {
   display: grid;
   grid-template-columns:
-    1.3fr
-    0.8fr
-    0.75fr
     1.4fr
+    0.8fr
     auto;
   align-items: end;
   gap: 24px;
@@ -938,9 +553,7 @@ const exportData = () => {
 
 .filter-item input,
 .filter-item select,
-.pagination select,
-.form-grid input,
-.form-grid select {
+.pagination select {
   width: 100%;
   height: 42px;
   padding: 0 13px;
@@ -948,16 +561,6 @@ const exportData = () => {
   border-radius: 5px;
   outline: none;
   background: white;
-}
-
-.date-range {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.date-range input {
-  min-width: 0;
 }
 
 .actions {
@@ -991,6 +594,11 @@ const exportData = () => {
   color: #1677ff;
 }
 
+.outline-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .table-card {
   margin-top: 14px;
   overflow-x: auto;
@@ -1019,11 +627,11 @@ th {
 }
 
 th:nth-child(1) {
-  width: 105px;
+  width: 70px;
 }
 
 th:nth-child(2) {
-  width: 95px;
+  width: 130px;
 }
 
 th:nth-child(3) {
@@ -1031,24 +639,27 @@ th:nth-child(3) {
 }
 
 th:nth-child(4) {
-  width: 120px;
+  width: 100px;
 }
 
 th:nth-child(5) {
-  width: 220px;
+  width: 125px;
 }
 
-th:nth-child(6) {
-  width: 85px;
+th:nth-child(7) {
+  width: 105px;
 }
 
-th:nth-child(7),
 th:nth-child(8) {
-  width: 170px;
+  width: 75px;
 }
 
 th:nth-child(9) {
-  width: 150px;
+  width: 145px;
+}
+
+th:nth-child(10) {
+  width: 80px;
 }
 
 tbody tr:hover {
@@ -1066,31 +677,17 @@ tbody tr:hover {
   display: inline-flex;
   padding: 5px 9px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
-.user-type.企业用户 {
+.user-type {
   background: #eaf3ff;
   color: #1677ff;
-}
-
-.user-type.科研人员 {
-  background: #f1edff;
-  color: #765eee;
-}
-
-.user-type.机构用户 {
-  background: #fff1df;
-  color: #f0931e;
 }
 
 .user-status.正常 {
   background: #e9faf1;
   color: #20b875;
-}
-
-.user-status.待审 {
-  background: #fff4de;
-  color: #ed9b23;
 }
 
 .user-status.禁用 {
@@ -1110,16 +707,36 @@ tbody tr:hover {
   color: #1677ff;
 }
 
-.operation button:last-child {
-  color: #ef5360;
+.operation button:hover {
+  text-decoration: underline;
 }
 
-.operation button.enable {
-  color: #20b875;
+.state-row {
+  height: 120px;
+  color: #97a1b0;
+  text-align: center;
 }
 
-.operation span {
-  color: #d5dce5;
+.state-row.error {
+  color: #ef4f5d;
+}
+
+.retry-btn {
+  margin-left: 12px;
+  padding: 4px 14px;
+  border: 1px solid #ef4f5d;
+  border-radius: 4px;
+  background: white;
+  color: #ef4f5d;
+}
+
+.state-text {
+  color: #97a1b0;
+  font-size: 14px;
+}
+
+.state-text.error {
+  color: #ef4f5d;
 }
 
 .pagination {
@@ -1155,6 +772,10 @@ tbody tr:hover {
   opacity: 0.4;
 }
 
+.ellipsis {
+  padding: 0 4px;
+}
+
 .modal-mask {
   position: fixed;
   z-index: 800;
@@ -1168,6 +789,8 @@ tbody tr:hover {
 
 .modal {
   width: 650px;
+  max-height: 82vh;
+  overflow-y: auto;
   border-radius: 10px;
   background: white;
   box-shadow:
@@ -1194,8 +817,7 @@ tbody tr:hover {
   font-size: 24px;
 }
 
-.detail-grid,
-.form-grid {
+.detail-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 22px;
@@ -1211,20 +833,38 @@ tbody tr:hover {
 
 .detail-grid strong {
   color: #3c495c;
-}
-
-.form-grid label {
-  color: #526073;
-  font-size: 13px;
-}
-
-.form-grid input,
-.form-grid select {
-  margin-top: 8px;
+  font-weight: 500;
 }
 
 .full {
   grid-column: 1 / -1;
+}
+
+.stat-boxes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 0;
+  border: 1px solid #e8edf4;
+  border-radius: 8px;
+  background: #f8fafd;
+}
+
+.stat-box strong {
+  color: #1677ff;
+  font-size: 20px;
+}
+
+.stat-box span {
+  color: #7d8898;
+  font-size: 12px;
 }
 
 .modal-footer {

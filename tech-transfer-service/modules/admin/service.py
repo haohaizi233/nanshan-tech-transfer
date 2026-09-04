@@ -1,4 +1,4 @@
-"""
+﻿"""
 admin 服务层（P0-3/P0-4）—— 管理审核
 
 Architecture source: 04-backend-domain-design.md §5.4, 06-api-design.md §15 admin 组
@@ -10,6 +10,8 @@ Architecture source: 04-backend-domain-design.md §5.4, 06-api-design.md §15 ad
 - 通知入队（notification 模块）一期未实现，副作用仅审计留痕
 - 队列项含提交人与提交时间（06 §15）
 """
+import json
+
 from db import get_cursor
 from core.errors import (
     BizError, bad_request, conflict,
@@ -350,6 +352,16 @@ def dashboard_summary() -> dict:
             """
         )
         r = cur.fetchone()
+        cur.execute(
+            "SELECT status, COUNT(*) AS c FROM achievement "
+            "WHERE deleted_at IS NULL GROUP BY status"
+        )
+        ach_status = {row["status"]: int(row["c"]) for row in (cur.fetchall() or [])}
+        cur.execute(
+            "SELECT status, COUNT(*) AS c FROM demand "
+            "WHERE deleted_at IS NULL GROUP BY status"
+        )
+        dmd_status = {row["status"]: int(row["c"]) for row in (cur.fetchall() or [])}
 
     pending_total = int(r["pending_achievements"]) + int(r["pending_demands"])
     return {
@@ -361,6 +373,74 @@ def dashboard_summary() -> dict:
         "pendingDemands": int(r["pending_demands"]),
         "pendingTotal": pending_total,
         "institutions": int(r["institutions"]),
+        "achievementStatusCounts": ach_status,
+        "demandStatusCounts": dmd_status,
+    }
+
+
+def dashboard_trend(days) -> dict:
+    """GET /admin/dashboard/trend?days= —— 近 N 日每日新增（用户/成果/需求），无数据补 0。"""
+    try:
+        days = int(days)
+    except (ValueError, TypeError):
+        days = 7
+    days = max(1, min(90, days))
+
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'MM-DD') AS day,
+                   COUNT(*) AS c
+            FROM app_user
+            WHERE created_at >= CURRENT_TIMESTAMP - make_interval(days => %s)
+                  AND deleted_at IS NULL
+            GROUP BY 1
+            """,
+            (days - 1,),
+        )
+        users = {row["day"]: int(row["c"]) for row in (cur.fetchall() or [])}
+        cur.execute(
+            """
+            SELECT to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'MM-DD') AS day,
+                   COUNT(*) AS c
+            FROM achievement
+            WHERE created_at >= CURRENT_TIMESTAMP - make_interval(days => %s)
+                  AND deleted_at IS NULL
+            GROUP BY 1
+            """,
+            (days - 1,),
+        )
+        achievements = {row["day"]: int(row["c"]) for row in (cur.fetchall() or [])}
+        cur.execute(
+            """
+            SELECT to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'MM-DD') AS day,
+                   COUNT(*) AS c
+            FROM demand
+            WHERE created_at >= CURRENT_TIMESTAMP - make_interval(days => %s)
+                  AND deleted_at IS NULL
+            GROUP BY 1
+            """,
+            (days - 1,),
+        )
+        demands = {row["day"]: int(row["c"]) for row in (cur.fetchall() or [])}
+
+    from datetime import date, timedelta
+
+    today = date.today()
+    labels, users_seq, ach_seq, dmd_seq = [], [], [], []
+    for i in range(days - 1, -1, -1):
+        day = today - timedelta(days=i)
+        key = day.strftime("%m-%d")
+        labels.append(key)
+        users_seq.append(users.get(key, 0))
+        ach_seq.append(achievements.get(key, 0))
+        dmd_seq.append(demands.get(key, 0))
+    return {
+        "days": days,
+        "labels": labels,
+        "users": users_seq,
+        "achievements": ach_seq,
+        "demands": dmd_seq,
     }
 
 
@@ -684,6 +764,285 @@ def get_cooperation_admin(intent_id: int) -> dict:
         }
         for e in events
     ]
+    return detail
+
+
+# ── P0-5 成果/需求全量管理列表（后台管理页数据源，任意状态可读） ──
+
+_ACH_STATUS_LABELS = {
+    "draft": "草稿", "pending_review": "待审核",
+    "published": "已发布", "offline": "已下架", "rejected": "已驳回",
+}
+_DMD_STATUS_LABELS = {
+    "draft": "草稿", "pending_review": "待审核",
+    "published": "已发布", "matched": "对接中",
+    "closed": "已关闭", "rejected": "已驳回",
+}
+
+
+def _ach_admin_item(r) -> dict:
+    status = r["status"]
+    return {
+        "id": r["id"],
+        "title": r["title"],
+        "status": status,
+        "statusLabel": _ACH_STATUS_LABELS.get(status, status),
+        "version": r["version"],
+        "categoryName": r.get("category_name"),
+        "categoryCode": r.get("category_code"),
+        "orgName": r.get("source_org_name"),
+        "submitterUserNo": r.get("submitter_user_no"),
+        "submitterName": r.get("submitter_name"),
+        "viewCount": int(r.get("view_count") or 0),
+        "techIntro": (r.get("tech_intro") or "")[:120],
+        "rejectReason": r.get("reject_reason"),
+        "publishedAt": r["published_at"].isoformat() if r.get("published_at") else None,
+        "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
+        "updatedAt": r["updated_at"].isoformat() if r.get("updated_at") else None,
+    }
+
+
+def list_achievements_admin(args) -> dict:
+    """GET /admin/achievements —— 全量成果列表（status/categoryCode/keyword 过滤 + 分页）。"""
+    page, page_size = _page_args(args)
+    status = (args.get("status") or "").strip()
+    category_code = (args.get("categoryCode") or "").strip()
+    keyword = (args.get("keyword") or "").strip()
+
+    where = ["a.deleted_at IS NULL"]
+    params = []
+    if status:
+        where.append("a.status = %s")
+        params.append(status)
+    if category_code:
+        where.append("c.code = %s")
+        params.append(category_code)
+    if keyword:
+        like = f"%{keyword}%"
+        where.append("(a.title ILIKE %s OR a.source_org_name ILIKE %s)")
+        params.extend([like, like])
+    where_sql = " WHERE " + " AND ".join(where)
+
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM achievement a
+            LEFT JOIN achievement_category c ON a.category_id = c.id
+            {where_sql}
+            """,
+            params,
+        )
+        total = int(cur.fetchone()["c"])
+        offset = (page - 1) * page_size
+        cur.execute(
+            f"""
+            SELECT a.id, a.title, a.status, a.version, a.tech_intro, a.source_org_name,
+                   a.view_count, a.reject_reason, a.published_at, a.created_at, a.updated_at,
+                   c.name AS category_name, c.code AS category_code,
+                   u.user_no AS submitter_user_no, p.display_name AS submitter_name
+            FROM achievement a
+            LEFT JOIN achievement_category c ON a.category_id = c.id
+            LEFT JOIN app_user u ON a.owner_user_id = u.id
+            LEFT JOIN user_profile p ON u.id = p.user_id
+            {where_sql}
+            ORDER BY a.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            params + [page_size, offset],
+        )
+        rows = cur.fetchall() or []
+    return _page_of(rows, page, page_size, total, _ach_admin_item)
+
+
+def get_achievement_admin(ach_id: int) -> dict:
+    """GET /admin/achievements/{id} —— 成果详情（任意状态，含发明人与审核信息）。"""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT a.*, c.name AS category_name, c.code AS category_code,
+                   u.user_no AS submitter_user_no, p.display_name AS submitter_name
+            FROM achievement a
+            LEFT JOIN achievement_category c ON a.category_id = c.id
+            LEFT JOIN app_user u ON a.owner_user_id = u.id
+            LEFT JOIN user_profile p ON u.id = p.user_id
+            WHERE a.id = %s AND a.deleted_at IS NULL
+            """,
+            (ach_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise bad_request("成果不存在")
+        cur.execute(
+            """
+            SELECT i.name, i.org_name, ai.sort_order, ai.contribution
+            FROM achievement_inventor ai
+            JOIN inventor i ON ai.inventor_id = i.id
+            WHERE ai.achievement_id = %s
+            ORDER BY ai.sort_order
+            """,
+            (ach_id,),
+        )
+        inventors = cur.fetchall() or []
+
+    detail = _ach_admin_item(row)
+    detail.update({
+        "techIntro": row.get("tech_intro"),
+        "maturityLevel": row.get("maturity_level"),
+        "maturityDesc": row.get("maturity_desc"),
+        "contactName": row.get("contact_name"),
+        "contactPhone": row.get("contact_phone"),
+        "contactEmail": row.get("contact_email"),
+        "inventors": [
+            {
+                "name": inv["name"],
+                "orgName": inv.get("org_name"),
+                "contribution": inv.get("contribution"),
+            }
+            for inv in inventors
+        ],
+    })
+    innovations = row.get("innovation_points")
+    if innovations and isinstance(innovations, str):
+        try:
+            innovations = json.loads(innovations)
+        except (ValueError, TypeError):
+            innovations = []
+    detail["innovationPoints"] = innovations if isinstance(innovations, list) else []
+    return detail
+
+
+def _dmd_admin_item(r) -> dict:
+    status = r["status"]
+    budget = None
+    if r.get("budget_min_wan") is not None or r.get("budget_max_wan") is not None:
+        lo = r.get("budget_min_wan")
+        hi = r.get("budget_max_wan")
+        if lo is not None and hi is not None:
+            budget = f"{int(lo)}万-{int(hi)}万元"
+        elif lo is not None:
+            budget = f"{int(lo)}万元以上"
+        else:
+            budget = f"{int(hi)}万元以内"
+    return {
+        "id": r["id"],
+        "title": r["title"],
+        "status": status,
+        "statusLabel": _DMD_STATUS_LABELS.get(status, status),
+        "version": r["version"],
+        "categoryName": r.get("category_name"),
+        "categoryCode": r.get("category_code"),
+        "orgName": r.get("org_name"),
+        "region": r.get("region"),
+        "budget": budget,
+        "budgetNegotiable": bool(r.get("budget_negotiable")),
+        "submitterUserNo": r.get("submitter_user_no"),
+        "submitterName": r.get("submitter_name"),
+        "rejectReason": r.get("reject_reason"),
+        "publishedAt": r["published_at"].isoformat() if r.get("published_at") else None,
+        "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
+        "updatedAt": r["updated_at"].isoformat() if r.get("updated_at") else None,
+    }
+
+
+def list_demands_admin(args) -> dict:
+    """GET /admin/demands —— 全量需求列表（status/categoryCode/keyword 过滤 + 分页）。"""
+    page, page_size = _page_args(args)
+    status = (args.get("status") or "").strip()
+    category_code = (args.get("categoryCode") or "").strip()
+    keyword = (args.get("keyword") or "").strip()
+
+    where = ["d.deleted_at IS NULL"]
+    params = []
+    if status:
+        where.append("d.status = %s")
+        params.append(status)
+    if category_code:
+        where.append("dc.code = %s")
+        params.append(category_code)
+    if keyword:
+        like = f"%{keyword}%"
+        where.append("(d.title ILIKE %s OR o.org_name ILIKE %s)")
+        params.extend([like, like])
+    where_sql = " WHERE " + " AND ".join(where)
+
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM demand d
+            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN demand_category dc ON d.category_id = dc.id
+            {where_sql}
+            """,
+            params,
+        )
+        total = int(cur.fetchone()["c"])
+        offset = (page - 1) * page_size
+        cur.execute(
+            f"""
+            SELECT d.id, d.title, d.status, d.version, d.region,
+                   d.budget_min_wan, d.budget_max_wan, d.budget_negotiable,
+                   d.reject_reason, d.published_at, d.created_at, d.updated_at,
+                   o.org_name, dc.name AS category_name, dc.code AS category_code,
+                   u.user_no AS submitter_user_no, p.display_name AS submitter_name
+            FROM demand d
+            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN demand_category dc ON d.category_id = dc.id
+            LEFT JOIN app_user u ON d.owner_user_id = u.id
+            LEFT JOIN user_profile p ON u.id = p.user_id
+            {where_sql}
+            ORDER BY d.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            params + [page_size, offset],
+        )
+        rows = cur.fetchall() or []
+    return _page_of(rows, page, page_size, total, _dmd_admin_item)
+
+
+def get_demand_admin(demand_id: int) -> dict:
+    """GET /admin/demands/{id} —— 需求详情（任意状态，含联系方式与标签）。"""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT d.*, o.org_name, o.intro AS org_intro,
+                   dc.name AS category_name, dc.code AS category_code,
+                   u.user_no AS submitter_user_no, p.display_name AS submitter_name
+            FROM demand d
+            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN demand_category dc ON d.category_id = dc.id
+            LEFT JOIN app_user u ON d.owner_user_id = u.id
+            LEFT JOIN user_profile p ON u.id = p.user_id
+            WHERE d.id = %s AND d.deleted_at IS NULL
+            """,
+            (demand_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            code, message, status = TT_DMD_40401
+            raise BizError(code, message, status)
+        cur.execute(
+            """
+            SELECT t.name FROM demand_tag_relation r
+            JOIN demand_tag t ON r.tag_id = t.id
+            WHERE r.demand_id = %s ORDER BY t.id
+            """,
+            (demand_id,),
+        )
+        tags = [r["name"] for r in (cur.fetchall() or [])]
+
+    detail = _dmd_admin_item(row)
+    detail.update({
+        "description": row.get("description"),
+        "coopMode": row.get("coop_mode"),
+        "orgIntro": row.get("org_intro"),
+        "tags": tags,
+        "contactName": row.get("contact_name"),
+        "contactTitle": row.get("contact_title"),
+        "contactPhone": row.get("contact_phone"),
+        "contactEmail": row.get("contact_email"),
+    })
     return detail
 
 

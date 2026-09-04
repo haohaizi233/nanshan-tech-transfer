@@ -3,6 +3,7 @@ import {
   createWebHistory
 } from 'vue-router'
 
+import { getToken } from '../api/client'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
 
@@ -188,6 +189,15 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach(to => {
+  if (to.path.startsWith('/admin') && !getToken()) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (to.path === '/login' && getToken()) {
+    return { path: '/admin/overview' }
+  }
 })
 
 export default router

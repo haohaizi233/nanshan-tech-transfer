@@ -1,145 +1,172 @@
 <script setup>
 import {
   computed,
+  onMounted,
   reactive,
   ref,
 } from 'vue'
 
-import {
-  initialAchievements,
-  achievementCategories,
-  achievementStatuses,
-  achievementAuditStatuses,
-} from '../../mock/achievements'
+import { api } from '../../api/client'
 
-const achievements = ref(
-  initialAchievements.map(item => ({ ...item }))
-)
+const achievements = ref([])
+
+const categories = ref([])
+
+const statusOptions = [
+  { value: 'draft', label: '草稿' },
+  { value: 'pending_review', label: '待审核' },
+  { value: 'published', label: '已发布' },
+  { value: 'offline', label: '已下架' },
+  { value: 'rejected', label: '已驳回' },
+]
 
 const filters = reactive({
   keyword: '',
-  category: '',
+  categoryCode: '',
   status: '',
-  auditStatus: '',
-  startDate: '',
-  endDate: '',
 })
 
 const appliedFilters = reactive({
   keyword: '',
-  category: '',
+  categoryCode: '',
   status: '',
-  auditStatus: '',
-  startDate: '',
-  endDate: '',
 })
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const total = ref(0)
+const totalPages = ref(1)
+
+const loading = ref(false)
+const loadError = ref('')
+
+const exporting = ref(false)
 
 const modalVisible = ref(false)
 const modalMode = ref('view')
-const currentAchievement = ref(null)
 
-const editForm = reactive({
-  id: '',
-  name: '',
-  category: '',
-  organization: '',
-  publisher: '',
-  status: '审核中',
-  auditStatus: '待审核',
-  description: '',
-})
+const viewId = ref('')
+const viewDetail = ref(null)
+const viewLoading = ref(false)
+const viewError = ref('')
 
-const copyFilters = () => {
-  Object.assign(appliedFilters, filters)
+const auditItem = ref(null)
+const rejectReason = ref('')
+const auditError = ref('')
+const auditSubmitting = ref(false)
+
+const fmtTime = v =>
+  v ? String(v).replace('T', ' ').slice(0, 16) : '-'
+
+const fmtCount = v =>
+  v === null || v === undefined
+    ? '-'
+    : Number(v).toLocaleString()
+
+const getStatusClass = status =>
+  ({
+    published: 'published',
+    pending_review: 'reviewing',
+    offline: 'offline',
+    rejected: 'rejected',
+    draft: 'draft',
+  }[status] || '')
+
+const fetchList = async () => {
+  loading.value = true
+  loadError.value = ''
+
+  try {
+    const data = await api('/admin/achievements', {
+      params: {
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        keyword: appliedFilters.keyword.trim(),
+        categoryCode: appliedFilters.categoryCode,
+        status: appliedFilters.status,
+      },
+    })
+
+    const list = (data && data.list) || []
+    const pages = (data && data.totalPages) || 1
+
+    if (list.length === 0 && currentPage.value > pages) {
+      currentPage.value = pages
+      return fetchList()
+    }
+
+    achievements.value = list
+    total.value = (data && data.total) || 0
+    totalPages.value = pages
+  } catch (err) {
+    achievements.value = []
+    total.value = 0
+    totalPages.value = 1
+    loadError.value = err.message || '加载失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
+}
+
+const fetchCategories = async () => {
+  try {
+    const data = await api('/achievements/categories')
+
+    categories.value = (Array.isArray(data) ? data : [])
+      .slice()
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+  } catch {
+    categories.value = []
+  }
 }
 
 const handleSearch = () => {
-  copyFilters()
+  Object.assign(appliedFilters, filters)
+
   currentPage.value = 1
+
+  fetchList()
 }
 
 const handleReset = () => {
   Object.assign(filters, {
     keyword: '',
-    category: '',
+    categoryCode: '',
     status: '',
-    auditStatus: '',
-    startDate: '',
-    endDate: '',
   })
 
-  copyFilters()
+  Object.assign(appliedFilters, {
+    keyword: '',
+    categoryCode: '',
+    status: '',
+  })
 
   currentPage.value = 1
+
+  fetchList()
 }
 
-const filteredAchievements = computed(() => {
-  const keyword =
-    appliedFilters.keyword.trim().toLowerCase()
+const changePage = page => {
+  if (page === '...') return
 
-  return achievements.value.filter(item => {
-    const matchKeyword =
-      !keyword ||
-      item.name.toLowerCase().includes(keyword) ||
-      item.id.toLowerCase().includes(keyword)
+  if (
+    page < 1 ||
+    page > totalPages.value ||
+    page === currentPage.value
+  ) {
+    return
+  }
 
-    const matchCategory =
-      !appliedFilters.category ||
-      item.category === appliedFilters.category
+  currentPage.value = page
 
-    const matchStatus =
-      !appliedFilters.status ||
-      item.status === appliedFilters.status
+  fetchList()
+}
 
-    const matchAudit =
-      !appliedFilters.auditStatus ||
-      item.auditStatus === appliedFilters.auditStatus
+const handlePageSizeChange = () => {
+  currentPage.value = 1
 
-    const itemDate =
-      item.createdAt.slice(0, 10)
-
-    const matchStartDate =
-      !appliedFilters.startDate ||
-      itemDate >= appliedFilters.startDate
-
-    const matchEndDate =
-      !appliedFilters.endDate ||
-      itemDate <= appliedFilters.endDate
-
-    return (
-      matchKeyword &&
-      matchCategory &&
-      matchStatus &&
-      matchAudit &&
-      matchStartDate &&
-      matchEndDate
-    )
-  })
-})
-
-const total = computed(
-  () => filteredAchievements.value.length
-)
-
-const totalPages = computed(() => {
-  return Math.max(
-    1,
-    Math.ceil(total.value / pageSize.value)
-  )
-})
-
-const tableData = computed(() => {
-  const start =
-    (currentPage.value - 1) * pageSize.value
-
-  return filteredAchievements.value.slice(
-    start,
-    start + pageSize.value
-  )
-})
+  fetchList()
+}
 
 const visiblePages = computed(() => {
   const count = totalPages.value
@@ -178,198 +205,149 @@ const visiblePages = computed(() => {
   ]
 })
 
-const changePage = page => {
-  if (page === '...') return
+const fetchDetail = async id => {
+  viewLoading.value = true
+  viewError.value = ''
 
-  if (page < 1 || page > totalPages.value) {
-    return
+  try {
+    viewDetail.value = await api(
+      '/admin/achievements/' + id
+    )
+  } catch (err) {
+    viewError.value = err.message || '加载失败，请稍后重试'
+  } finally {
+    viewLoading.value = false
   }
-
-  currentPage.value = page
-}
-
-const handlePageSizeChange = () => {
-  currentPage.value = 1
-}
-
-const getStatusClass = status => {
-  return {
-    已发布: 'published',
-    审核中: 'reviewing',
-    已下架: 'offline',
-  }[status]
-}
-
-const getAuditClass = status => {
-  return {
-    已通过: 'approved',
-    待审核: 'pending',
-    已驳回: 'rejected',
-  }[status]
 }
 
 const openView = item => {
   modalMode.value = 'view'
-  currentAchievement.value = { ...item }
   modalVisible.value = true
+
+  viewId.value = item.id
+  viewDetail.value = null
+  viewError.value = ''
+
+  fetchDetail(item.id)
 }
 
-const fillEditForm = item => {
-  Object.assign(editForm, {
-    id: item.id,
-    name: item.name,
-    category: item.category,
-    organization: item.organization,
-    publisher: item.publisher,
-    status: item.status,
-    auditStatus: item.auditStatus,
-    description: item.description || '',
-  })
-}
+const inventorNames = computed(() => {
+  const list =
+    (viewDetail.value && viewDetail.value.inventors) || []
 
-const openEdit = item => {
-  modalMode.value = 'edit'
-  currentAchievement.value = item
+  const names = list
+    .map(inventor => inventor && inventor.name)
+    .filter(Boolean)
 
-  fillEditForm(item)
+  return names.length ? names.join('、') : '-'
+})
 
-  modalVisible.value = true
-}
+const innovationPoints = computed(() => {
+  const list =
+    viewDetail.value && viewDetail.value.innovationPoints
 
-const openCreate = () => {
-  modalMode.value = 'create'
-  currentAchievement.value = null
+  return Array.isArray(list) ? list.filter(Boolean) : []
+})
 
-  Object.assign(editForm, {
-    id: '',
-    name: '',
-    category: '',
-    organization: '',
-    publisher: '',
-    status: '审核中',
-    auditStatus: '待审核',
-    description: '',
-  })
+const contactText = computed(() => {
+  const detail = viewDetail.value
 
-  modalVisible.value = true
-}
+  if (!detail) return '-'
+
+  const parts = [
+    detail.contactName,
+    detail.contactPhone,
+    detail.contactEmail,
+  ].filter(Boolean)
+
+  return parts.length ? parts.join(' / ') : '-'
+})
 
 const openAudit = item => {
   modalMode.value = 'audit'
-  currentAchievement.value = item
+  auditItem.value = item
+  rejectReason.value = ''
+  auditError.value = ''
+
   modalVisible.value = true
 }
 
 const closeModal = () => {
+  if (modalMode.value === 'audit' && auditSubmitting.value) {
+    return
+  }
+
   modalVisible.value = false
 }
 
-const saveAchievement = () => {
-  if (!editForm.name.trim()) {
-    window.alert('请输入成果名称')
+const handleApprove = async () => {
+  if (!auditItem.value || auditSubmitting.value) return
+
+  auditSubmitting.value = true
+  auditError.value = ''
+
+  try {
+    await api(
+      `/admin/achievements/${auditItem.value.id}/approve`,
+      {
+        method: 'POST',
+        body: {
+          version: auditItem.value.version,
+        },
+      }
+    )
+
+    modalVisible.value = false
+
+    fetchList()
+  } catch (err) {
+    auditError.value = err.message || '操作失败，请稍后重试'
+  } finally {
+    auditSubmitting.value = false
+  }
+}
+
+const handleReject = async () => {
+  if (!auditItem.value || auditSubmitting.value) return
+
+  if (!rejectReason.value.trim()) {
+    auditError.value = '请填写驳回原因'
     return
   }
 
-  if (!editForm.category) {
-    window.alert('请选择成果分类')
-    return
-  }
+  auditSubmitting.value = true
+  auditError.value = ''
 
-  if (modalMode.value === 'create') {
-    const now = new Date()
+  try {
+    await api(
+      `/admin/achievements/${auditItem.value.id}/reject`,
+      {
+        method: 'POST',
+        body: {
+          version: auditItem.value.version,
+          reason: rejectReason.value.trim(),
+        },
+      }
+    )
 
-    achievements.value.unshift({
-      id:
-        editForm.id ||
-        `ACH${Date.now()}`,
+    modalVisible.value = false
 
-      name: editForm.name,
-      category: editForm.category,
-      organization: editForm.organization,
-      publisher: editForm.publisher || '管理员',
-      status: editForm.status,
-      auditStatus: editForm.auditStatus,
-      views: 0,
-      favorites: 0,
-
-      createdAt:
-        `${now.getFullYear()}-${String(
-          now.getMonth() + 1
-        ).padStart(2, '0')}-${String(
-          now.getDate()
-        ).padStart(2, '0')} ` +
-        `${String(
-          now.getHours()
-        ).padStart(2, '0')}:${String(
-          now.getMinutes()
-        ).padStart(2, '0')}`,
-
-      description: editForm.description,
-    })
-
-    currentPage.value = 1
-  } else {
-    const item = currentAchievement.value
-
-    Object.assign(item, {
-      name: editForm.name,
-      category: editForm.category,
-      organization: editForm.organization,
-      publisher: editForm.publisher,
-      status: editForm.status,
-      auditStatus: editForm.auditStatus,
-      description: editForm.description,
-    })
-  }
-
-  closeModal()
-}
-
-const approveAchievement = () => {
-  currentAchievement.value.auditStatus =
-    '已通过'
-
-  currentAchievement.value.status =
-    '已发布'
-
-  closeModal()
-}
-
-const rejectAchievement = () => {
-  currentAchievement.value.auditStatus =
-    '已驳回'
-
-  currentAchievement.value.status =
-    '已下架'
-
-  closeModal()
-}
-
-const toggleOnline = item => {
-  if (item.status === '已发布') {
-    const confirmed =
-      window.confirm(
-        `确定要下架《${item.name}》吗？`
-      )
-
-    if (!confirmed) return
-
-    item.status = '已下架'
-  } else {
-    item.status = '已发布'
+    fetchList()
+  } catch (err) {
+    auditError.value = err.message || '操作失败，请稍后重试'
+  } finally {
+    auditSubmitting.value = false
   }
 }
 
 const downloadAchievement = item => {
   const content = [
     `成果编号：${item.id}`,
-    `成果名称：${item.name}`,
-    `所属分类：${item.category}`,
-    `发布单位：${item.organization}`,
-    `发布者：${item.publisher}`,
-    `状态：${item.status}`,
-    `审核状态：${item.auditStatus}`,
-    `成果简介：${item.description || ''}`,
+    `成果名称：${item.title}`,
+    `所属分类：${item.categoryName || '-'}`,
+    `发布单位：${item.orgName || '-'}`,
+    `状态：${item.statusLabel || '-'}`,
+    `成果简介：${item.techIntro || ''}`,
   ].join('\n')
 
   const blob = new Blob(
@@ -384,81 +362,103 @@ const downloadAchievement = item => {
   const link = document.createElement('a')
 
   link.href = url
-  link.download = `${item.name}.txt`
+  link.download = `${item.title}.txt`
 
   link.click()
 
   URL.revokeObjectURL(url)
 }
 
-const exportData = () => {
-  const header = [
-    'ID',
-    '成果名称',
-    '所属分类',
-    '发布单位',
-    '发布者',
-    '状态',
-    '审核状态',
-    '浏览量',
-    '收藏数',
-    '创建时间',
-  ]
+const exportData = async () => {
+  if (exporting.value) return
 
-  const rows =
-    filteredAchievements.value.map(item => [
+  exporting.value = true
+
+  try {
+    const size = 50
+    const rows = []
+
+    for (let page = 1; page <= 20; page += 1) {
+      const data = await api('/admin/achievements', {
+        params: {
+          page,
+          pageSize: size,
+          keyword: appliedFilters.keyword.trim(),
+          categoryCode: appliedFilters.categoryCode,
+          status: appliedFilters.status,
+        },
+      })
+
+      const list = (data && data.list) || []
+
+      rows.push(...list)
+
+      if (list.length < size) break
+
+      if (data.total && rows.length >= data.total) break
+    }
+
+    const header = [
+      'ID',
+      '成果名称',
+      '所属分类',
+      '发布单位',
+      '提交人',
+      '状态',
+      '浏览量',
+      '创建时间',
+    ]
+
+    const body = rows.map(item => [
       item.id,
-      item.name,
-      item.category,
-      item.organization,
-      item.publisher,
-      item.status,
-      item.auditStatus,
-      item.views,
-      item.favorites,
-      item.createdAt,
+      item.title,
+      item.categoryName || '-',
+      item.orgName || '-',
+      item.submitterName || item.submitterUserNo || '-',
+      item.statusLabel || '-',
+      item.viewCount ?? 0,
+      fmtTime(item.createdAt),
     ])
 
-  const escapeCsv = value => {
-    const text = String(value ?? '')
-      .replaceAll('"', '""')
+    const escapeCsv = value => {
+      const text = String(value ?? '')
+        .replaceAll('"', '""')
 
-    return `"${text}"`
-  }
-
-  const csv = [
-    header,
-    ...rows,
-  ]
-    .map(row =>
-      row
-        .map(escapeCsv)
-        .join(',')
-    )
-    .join('\n')
-
-  const blob = new Blob(
-    ['\uFEFF' + csv],
-    {
-      type:
-        'text/csv;charset=utf-8',
+      return `"${text}"`
     }
-  )
 
-  const url =
-    URL.createObjectURL(blob)
+    const csv = [header, ...body]
+      .map(row => row.map(escapeCsv).join(','))
+      .join('\n')
 
-  const link =
-    document.createElement('a')
+    const blob = new Blob(
+      ['\uFEFF' + csv],
+      {
+        type: 'text/csv;charset=utf-8',
+      }
+    )
 
-  link.href = url
-  link.download =
-    '成果列表.csv'
+    const url = URL.createObjectURL(blob)
 
-  link.click()
+    const link = document.createElement('a')
 
-  URL.revokeObjectURL(url)
+    link.href = url
+    link.download = '成果列表.csv'
+
+    link.click()
+
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    window.alert(`导出失败：${err.message || '请稍后重试'}`)
+  } finally {
+    exporting.value = false
+  }
 }
+
+onMounted(() => {
+  fetchList()
+  fetchCategories()
+})
 </script>
 
 <template>
@@ -481,17 +481,17 @@ const exportData = () => {
         <div class="filter-item">
           <label>分类</label>
 
-          <select v-model="filters.category">
+          <select v-model="filters.categoryCode">
             <option value="">
               请选择分类
             </option>
 
             <option
-              v-for="item in achievementCategories"
-              :key="item"
-              :value="item"
+              v-for="item in categories"
+              :key="item.code"
+              :value="item.code"
             >
-              {{ item }}
+              {{ item.name }}
             </option>
           </select>
         </div>
@@ -505,49 +505,13 @@ const exportData = () => {
             </option>
 
             <option
-              v-for="item in achievementStatuses"
-              :key="item"
-              :value="item"
+              v-for="item in statusOptions"
+              :key="item.value"
+              :value="item.value"
             >
-              {{ item }}
+              {{ item.label }}
             </option>
           </select>
-        </div>
-
-        <div class="filter-item">
-          <label>审核状态</label>
-
-          <select v-model="filters.auditStatus">
-            <option value="">
-              请选择审核状态
-            </option>
-
-            <option
-              v-for="item in achievementAuditStatuses"
-              :key="item"
-              :value="item"
-            >
-              {{ item }}
-            </option>
-          </select>
-        </div>
-
-        <div class="filter-item date-filter">
-          <label>发布时间</label>
-
-          <div class="date-range">
-            <input
-              v-model="filters.startDate"
-              type="date"
-            />
-
-            <span>至</span>
-
-            <input
-              v-model="filters.endDate"
-              type="date"
-            />
-          </div>
         </div>
 
         <div class="filter-actions">
@@ -571,18 +535,11 @@ const exportData = () => {
         <div class="right-actions">
           <button
             type="button"
-            class="outline-primary"
-            @click="openCreate"
-          >
-            ＋ 新增成果
-          </button>
-
-          <button
-            type="button"
             class="default-button"
+            :disabled="exporting"
             @click="exportData"
           >
-            ⇩ 导出
+            {{ exporting ? '导出中…' : '⇩ 导出' }}
           </button>
         </div>
 
@@ -603,11 +560,9 @@ const exportData = () => {
               </th>
               <th>所属分类</th>
               <th>发布单位/团队</th>
-              <th>发布者</th>
+              <th>提交人</th>
               <th>状态</th>
-              <th>审核状态</th>
               <th>浏览量</th>
-              <th>收藏数</th>
               <th>创建时间</th>
               <th class="operation-column">
                 操作
@@ -617,140 +572,135 @@ const exportData = () => {
 
           <tbody>
 
-            <tr
-              v-for="item in tableData"
-              :key="item.id"
-            >
-              <td>
-                {{ item.id }}
+            <tr v-if="loading">
+              <td colspan="9" class="empty">
+                加载中…
               </td>
+            </tr>
 
-              <td
-                class="achievement-name"
-                :title="item.name"
-              >
-                {{ item.name }}
-              </td>
-
-              <td>
-                {{ item.category }}
-              </td>
-
-              <td
-                class="organization"
-                :title="item.organization"
-              >
-                {{ item.organization }}
-              </td>
-
-              <td>
-                {{ item.publisher }}
-              </td>
-
-              <td>
-                <span
-                  class="status"
-                  :class="
-                    getStatusClass(item.status)
-                  "
-                >
-                  <i></i>
-
-                  {{ item.status }}
-                </span>
-              </td>
-
-              <td>
-                <span
-                  class="audit-status"
-                  :class="
-                    getAuditClass(
-                      item.auditStatus
-                    )
-                  "
-                >
-                  {{ item.auditStatus }}
-                </span>
-              </td>
-
-              <td>
-                {{
-                  item.views.toLocaleString()
-                }}
-              </td>
-
-              <td>
-                {{ item.favorites }}
-              </td>
-
-              <td class="created-time">
-                {{ item.createdAt }}
-              </td>
-
-              <td>
-                <div class="operation-buttons">
+            <tr v-else-if="loadError">
+              <td colspan="9" class="error-cell">
+                <div class="table-error">
+                  <p>{{ loadError }}</p>
 
                   <button
                     type="button"
-                    @click="openView(item)"
+                    class="retry-button"
+                    @click="fetchList"
                   >
-                    查看
+                    重试
                   </button>
-
-                  <span>|</span>
-
-                  <button
-                    type="button"
-                    @click="openEdit(item)"
-                  >
-                    编辑
-                  </button>
-
-                  <span>|</span>
-
-                  <button
-                    type="button"
-                    @click="openAudit(item)"
-                  >
-                    审核
-                  </button>
-
-                  <span>|</span>
-
-                  <button
-                    type="button"
-                    @click="toggleOnline(item)"
-                  >
-                    {{
-                      item.status === '已发布'
-                        ? '下架'
-                        : '上架'
-                    }}
-                  </button>
-
-                  <span>|</span>
-
-                  <button
-                    type="button"
-                    @click="
-                      downloadAchievement(item)
-                    "
-                  >
-                    下载
-                  </button>
-
                 </div>
               </td>
             </tr>
 
-            <tr v-if="tableData.length === 0">
-              <td
-                colspan="11"
-                class="empty"
+            <template v-else>
+
+              <tr
+                v-for="item in achievements"
+                :key="item.id"
               >
-                暂无符合条件的成果
-              </td>
-            </tr>
+                <td>
+                  {{ item.id }}
+                </td>
+
+                <td
+                  class="achievement-name"
+                  :title="item.title"
+                >
+                  {{ item.title }}
+                </td>
+
+                <td>
+                  {{ item.categoryName || '-' }}
+                </td>
+
+                <td
+                  class="organization"
+                  :title="item.orgName"
+                >
+                  {{ item.orgName || '-' }}
+                </td>
+
+                <td>
+                  {{
+                    item.submitterName ||
+                      item.submitterUserNo ||
+                      '-'
+                  }}
+                </td>
+
+                <td>
+                  <span
+                    class="status"
+                    :class="
+                      getStatusClass(item.status)
+                    "
+                  >
+                    <i></i>
+
+                    {{ item.statusLabel }}
+                  </span>
+                </td>
+
+                <td>
+                  {{ fmtCount(item.viewCount) }}
+                </td>
+
+                <td class="created-time">
+                  {{ fmtTime(item.createdAt) }}
+                </td>
+
+                <td>
+                  <div class="operation-buttons">
+
+                    <button
+                      type="button"
+                      @click="openView(item)"
+                    >
+                      查看
+                    </button>
+
+                    <span>|</span>
+
+                    <button
+                      v-if="
+                        item.status === 'pending_review'
+                      "
+                      type="button"
+                      @click="openAudit(item)"
+                    >
+                      审核
+                    </button>
+
+                    <span
+                      v-if="
+                        item.status === 'pending_review'
+                      "
+                    >
+                      |
+                    </span>
+
+                    <button
+                      type="button"
+                      @click="
+                        downloadAchievement(item)
+                      "
+                    >
+                      下载
+                    </button>
+
+                  </div>
+                </td>
+              </tr>
+
+              <tr v-if="achievements.length === 0">
+                <td colspan="9" class="empty">
+                  暂无符合条件的成果
+                </td>
+              </tr>
+
+            </template>
 
           </tbody>
         </table>
@@ -850,11 +800,7 @@ const exportData = () => {
             {{
               modalMode === 'view'
                 ? '成果详情'
-                : modalMode === 'create'
-                  ? '新增成果'
-                  : modalMode === 'edit'
-                    ? '编辑成果'
-                    : '成果审核'
+                : '成果审核'
             }}
           </h3>
 
@@ -872,175 +818,127 @@ const exportData = () => {
           v-if="modalMode === 'view'"
           class="detail-content"
         >
-          <div>
-            <label>成果编号</label>
-            <p>
-              {{ currentAchievement.id }}
-            </p>
+          <div v-if="viewLoading" class="modal-state">
+            加载中…
           </div>
 
-          <div>
-            <label>成果名称</label>
-            <p>
-              {{ currentAchievement.name }}
-            </p>
-          </div>
+          <div
+            v-else-if="viewError"
+            class="modal-state error"
+          >
+            <p>{{ viewError }}</p>
 
-          <div>
-            <label>所属分类</label>
-            <p>
-              {{ currentAchievement.category }}
-            </p>
-          </div>
-
-          <div>
-            <label>发布单位</label>
-            <p>
-              {{
-                currentAchievement.organization
-              }}
-            </p>
-          </div>
-
-          <div>
-            <label>发布者</label>
-            <p>
-              {{ currentAchievement.publisher }}
-            </p>
-          </div>
-
-          <div>
-            <label>当前状态</label>
-            <p>
-              {{ currentAchievement.status }}
-            </p>
-          </div>
-
-          <div class="full">
-            <label>成果简介</label>
-            <p>
-              {{
-                currentAchievement.description
-              }}
-            </p>
-          </div>
-        </div>
-
-
-        <div
-          v-else-if="
-            modalMode === 'create' ||
-            modalMode === 'edit'
-          "
-          class="edit-form"
-        >
-
-          <div class="modal-form-item">
-            <label>成果编号</label>
-
-            <input
-              v-model="editForm.id"
-              :disabled="
-                modalMode === 'edit'
-              "
-              placeholder="自动生成或手动填写"
-            />
-          </div>
-
-          <div class="modal-form-item">
-            <label>成果名称 *</label>
-
-            <input
-              v-model="editForm.name"
-              placeholder="请输入成果名称"
-            />
-          </div>
-
-          <div class="modal-form-item">
-            <label>所属分类 *</label>
-
-            <select
-              v-model="editForm.category"
+            <button
+              type="button"
+              class="retry-button"
+              @click="fetchDetail(viewId)"
             >
-              <option value="">
-                请选择
-              </option>
+              重试
+            </button>
+          </div>
 
-              <option
-                v-for="item in achievementCategories"
-                :key="item"
-                :value="item"
+          <template v-else-if="viewDetail">
+
+            <div>
+              <label>成果编号</label>
+              <p>
+                {{ viewDetail.id }}
+              </p>
+            </div>
+
+            <div>
+              <label>成果名称</label>
+              <p>
+                {{ viewDetail.title }}
+              </p>
+            </div>
+
+            <div>
+              <label>所属分类</label>
+              <p>
+                {{ viewDetail.categoryName || '-' }}
+              </p>
+            </div>
+
+            <div>
+              <label>发布单位</label>
+              <p>
+                {{ viewDetail.orgName || '-' }}
+              </p>
+            </div>
+
+            <div>
+              <label>提交人</label>
+              <p>
+                {{
+                  viewDetail.submitterName ||
+                    viewDetail.submitterUserNo ||
+                    '-'
+                }}
+              </p>
+            </div>
+
+            <div>
+              <label>状态</label>
+              <p>
+                {{ viewDetail.statusLabel || '-' }}
+              </p>
+            </div>
+
+            <div>
+              <label>成熟度</label>
+              <p>
+                {{ viewDetail.maturityLevel || '-' }}
+              </p>
+            </div>
+
+            <div>
+              <label>浏览量</label>
+              <p>
+                {{ fmtCount(viewDetail.viewCount) }}
+              </p>
+            </div>
+
+            <div>
+              <label>发明人</label>
+              <p>
+                {{ inventorNames }}
+              </p>
+            </div>
+
+            <div>
+              <label>联系方式</label>
+              <p>
+                {{ contactText }}
+              </p>
+            </div>
+
+            <div class="full">
+              <label>创新点</label>
+
+              <ul
+                v-if="innovationPoints.length"
+                class="point-list"
               >
-                {{ item }}
-              </option>
-            </select>
-          </div>
+                <li
+                  v-for="(point, index) in innovationPoints"
+                  :key="index"
+                >
+                  {{ point }}
+                </li>
+              </ul>
 
-          <div class="modal-form-item">
-            <label>发布单位/团队</label>
+              <p v-else>-</p>
+            </div>
 
-            <input
-              v-model="
-                editForm.organization
-              "
-            />
-          </div>
+            <div class="full">
+              <label>成果简介</label>
+              <p>
+                {{ viewDetail.techIntro || '-' }}
+              </p>
+            </div>
 
-          <div class="modal-form-item">
-            <label>发布者</label>
-
-            <input
-              v-model="
-                editForm.publisher
-              "
-            />
-          </div>
-
-          <div class="modal-form-item">
-            <label>状态</label>
-
-            <select
-              v-model="editForm.status"
-            >
-              <option
-                v-for="item in achievementStatuses"
-                :key="item"
-                :value="item"
-              >
-                {{ item }}
-              </option>
-            </select>
-          </div>
-
-          <div class="modal-form-item">
-            <label>审核状态</label>
-
-            <select
-              v-model="
-                editForm.auditStatus
-              "
-            >
-              <option
-                v-for="item in achievementAuditStatuses"
-                :key="item"
-                :value="item"
-              >
-                {{ item }}
-              </option>
-            </select>
-          </div>
-
-          <div class="modal-form-item full">
-            <label>成果简介</label>
-
-            <textarea
-              v-model="
-                editForm.description
-              "
-              rows="5"
-            ></textarea>
-          </div>
-
+          </template>
         </div>
 
 
@@ -1049,22 +947,35 @@ const exportData = () => {
           class="audit-content"
         >
           <div class="audit-name">
-            {{
-              currentAchievement.name
-            }}
+            {{ auditItem.title }}
           </div>
 
           <p>
-            当前审核状态：
+            当前状态：
             <strong>
-              {{
-                currentAchievement.auditStatus
-              }}
+              {{ auditItem.statusLabel }}
             </strong>
           </p>
 
           <p class="audit-tip">
-            请确认该成果内容是否符合平台发布要求。
+            请确认该成果内容是否符合平台发布要求，驳回时需填写原因。
+          </p>
+
+          <div class="modal-form-item">
+            <label>驳回原因 *</label>
+
+            <textarea
+              v-model="rejectReason"
+              rows="4"
+              placeholder="请填写驳回原因"
+            ></textarea>
+          </div>
+
+          <p
+            v-if="auditError"
+            class="audit-error"
+          >
+            {{ auditError }}
           </p>
         </div>
 
@@ -1074,21 +985,12 @@ const exportData = () => {
           <button
             type="button"
             class="default-button"
+            :disabled="
+              modalMode === 'audit' && auditSubmitting
+            "
             @click="closeModal"
           >
             取消
-          </button>
-
-          <button
-            v-if="
-              modalMode === 'create' ||
-              modalMode === 'edit'
-            "
-            type="button"
-            class="primary-button"
-            @click="saveAchievement"
-          >
-            保存
           </button>
 
           <template
@@ -1097,7 +999,8 @@ const exportData = () => {
             <button
               type="button"
               class="reject-button"
-              @click="rejectAchievement"
+              :disabled="auditSubmitting"
+              @click="handleReject"
             >
               审核驳回
             </button>
@@ -1105,9 +1008,8 @@ const exportData = () => {
             <button
               type="button"
               class="primary-button"
-              @click="
-                approveAchievement
-              "
+              :disabled="auditSubmitting"
+              @click="handleApprove"
             >
               审核通过
             </button>
@@ -1146,7 +1048,7 @@ const exportData = () => {
     1.35fr
     1fr
     1fr
-    1fr
+    auto
     auto;
 
   align-items: end;
@@ -1185,38 +1087,18 @@ const exportData = () => {
   border-color: #1677ff;
 }
 
-.date-filter {
-  grid-column: 1 / 3;
-}
-
-.date-range {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.date-range input {
-  min-width: 0;
-}
-
 .filter-actions,
 .right-actions {
   display: flex;
   gap: 12px;
 }
 
-.filter-actions {
-  grid-column: 4;
-}
-
 .right-actions {
-  grid-column: 5;
   justify-content: flex-end;
 }
 
 .primary-button,
 .default-button,
-.outline-primary,
 .reject-button {
   height: 40px;
   padding: 0 25px;
@@ -1245,20 +1127,17 @@ const exportData = () => {
   color: #1677ff;
 }
 
-.outline-primary {
-  border: 1px solid #9ac6ff;
-  background: white;
-  color: #1677ff;
-}
-
-.outline-primary:hover {
-  background: #eff6ff;
-}
-
 .reject-button {
   border: 1px solid #ff5964;
   background: white;
   color: #ef4350;
+}
+
+.primary-button:disabled,
+.default-button:disabled,
+.reject-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .table-card {
@@ -1272,7 +1151,7 @@ const exportData = () => {
 
 table {
   width: 100%;
-  min-width: 1330px;
+  min-width: 1150px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -1312,7 +1191,7 @@ th:nth-child(4) {
 }
 
 th:nth-child(5) {
-  width: 70px;
+  width: 110px;
 }
 
 th:nth-child(6) {
@@ -1320,20 +1199,15 @@ th:nth-child(6) {
 }
 
 th:nth-child(7) {
-  width: 95px;
-}
-
-th:nth-child(8),
-th:nth-child(9) {
   width: 70px;
 }
 
-th:nth-child(10) {
+th:nth-child(8) {
   width: 135px;
 }
 
 .operation-column {
-  width: 205px;
+  width: 150px;
 }
 
 tbody tr:hover {
@@ -1385,26 +1259,26 @@ tbody tr:hover {
   background: #f25763;
 }
 
-.audit-status {
-  display: inline-flex;
-  padding: 5px 10px;
+.status.rejected {
+  padding: 5px 8px;
   border-radius: 4px;
-  font-size: 12px;
+  background: #fff0f2;
+  color: #f25763;
 }
 
-.audit-status.approved {
-  background: #e9faf1;
-  color: #26b676;
+.status.rejected i {
+  background: #f25763;
 }
 
-.audit-status.pending {
-  background: #fff3dd;
-  color: #ee982c;
+.status.draft {
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: #f1f3f7;
+  color: #86909c;
 }
 
-.audit-status.rejected {
-  background: #ffecef;
-  color: #ef4f5d;
+.status.draft i {
+  background: #86909c;
 }
 
 .created-time {
@@ -1438,6 +1312,31 @@ tbody tr:hover {
   height: 180px;
   color: #a0a9b5;
   text-align: center;
+}
+
+.table-error {
+  padding: 34px 0;
+  color: #ef4350;
+  text-align: center;
+}
+
+.table-error p {
+  margin: 0 0 14px;
+}
+
+.retry-button {
+  height: 34px;
+  padding: 0 20px;
+  border: 1px solid #dce4ee;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #4c596a;
+  font-size: 13px;
+}
+
+.retry-button:hover {
+  border-color: #9fc6ff;
+  color: #1677ff;
 }
 
 .pagination {
@@ -1484,8 +1383,6 @@ tbody tr:hover {
 }
 
 
-/* 弹窗 */
-
 .modal-mask {
   position: fixed;
   z-index: 500;
@@ -1527,8 +1424,7 @@ tbody tr:hover {
   font-size: 25px;
 }
 
-.detail-content,
-.edit-form {
+.detail-content {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 22px;
@@ -1553,6 +1449,29 @@ tbody tr:hover {
   grid-column: 1 / -1;
 }
 
+.point-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #344153;
+  line-height: 1.8;
+}
+
+.modal-state {
+  grid-column: 1 / -1;
+  padding: 40px 0;
+  color: #8b96a5;
+  font-size: 14px;
+  text-align: center;
+}
+
+.modal-state.error {
+  color: #ef4350;
+}
+
+.modal-state .retry-button {
+  margin-top: 14px;
+}
+
 .modal textarea {
   height: auto;
   padding-top: 10px;
@@ -1574,6 +1493,16 @@ tbody tr:hover {
   color: #8b96a5;
 }
 
+.audit-content .modal-form-item {
+  margin-top: 20px;
+}
+
+.audit-error {
+  margin: 14px 0 0;
+  color: #ef4350;
+  font-size: 13px;
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -1585,22 +1514,13 @@ tbody tr:hover {
 @media (max-width: 1500px) {
   .filter-grid {
     grid-template-columns:
-      1.3fr
+      1.2fr
       1fr
       1fr
-      1fr;
-  }
+      auto
+      auto;
 
-  .date-filter {
-    grid-column: 1 / 3;
-  }
-
-  .filter-actions {
-    grid-column: 3;
-  }
-
-  .right-actions {
-    grid-column: 4;
+    gap: 18px 20px;
   }
 }
 </style>

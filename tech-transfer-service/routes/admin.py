@@ -14,14 +14,28 @@ from modules.admin.service import (
     review_achievement,
     review_demand,
     list_audit_logs,
+    list_achievements_admin,
+    get_achievement_admin,
+    list_demands_admin,
+    get_demand_admin,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
 
 
+@router.get("/admin/achievements")
+def admin_achievements_list(request: Request, admin: dict = Depends(admin_identity)):
+    return success(list_achievements_admin(request.query_params))
+
+
 @router.get("/admin/achievements/review-queue")
 def admin_ach_queue(request: Request, admin: dict = Depends(admin_identity)):
     return success(achievements_review_queue(request.query_params))
+
+
+@router.get("/admin/achievements/{ach_id}")
+def admin_achievement_detail(ach_id: int, admin: dict = Depends(admin_identity)):
+    return success(get_achievement_admin(ach_id))
 
 
 @router.post("/admin/achievements/{ach_id}/approve")
@@ -38,9 +52,19 @@ def admin_ach_reject(ach_id: int, body: dict = Depends(json_body), admin: dict =
     return success(review_achievement(admin, ach_id, body, request_id=get_request_id()))
 
 
+@router.get("/admin/demands")
+def admin_demands_list(request: Request, admin: dict = Depends(admin_identity)):
+    return success(list_demands_admin(request.query_params))
+
+
 @router.get("/admin/demands/review-queue")
 def admin_dmd_queue(request: Request, admin: dict = Depends(admin_identity)):
     return success(demands_review_queue(request.query_params))
+
+
+@router.get("/admin/demands/{demand_id}")
+def admin_demand_detail(demand_id: int, admin: dict = Depends(admin_identity)):
+    return success(get_demand_admin(demand_id))
 
 
 @router.post("/admin/demands/{demand_id}/approve")

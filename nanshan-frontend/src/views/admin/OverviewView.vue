@@ -1,56 +1,245 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import {
-  statistics,
-  trendMap,
-  achievementStatus,
-  requirementStatus,
-  todoList,
-  activityList
-} from '../../mock/dashboard'
+import { api } from '../../api/client'
 
 const router = useRouter()
 
-const trendDays = ref(7)
+const fmtTime = (v) => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
+const fmtNum = (v) => (v === null || v === undefined || v === '' ? '-' : Number(v).toLocaleString())
 
-const currentTrend = computed(() => {
-  return trendMap[trendDays.value]
-})
-
-const statRouteMap = {
-  users: '/admin/users',
-  achievements: '/admin/achievements',
-  requirements: '/admin/requirements',
-  cooperation: '/admin/cooperation',
-  pending: '/admin/achievements'
+const ACTION_LABELS = {
+  'achievement.approve': '通过成果审核',
+  'achievement.reject': '驳回成果',
+  'achievement.submit': '提交成果',
+  'achievement.create': '创建成果',
+  'achievement.update': '更新成果',
+  'achievement.offline': '下架成果',
+  'demand.approve': '通过需求审核',
+  'demand.reject': '驳回需求',
+  'demand.submit': '提交需求',
+  'demand.create': '创建需求',
+  'demand.update': '更新需求',
+  'demand.cancel': '取消需求',
+  'demand.close': '关闭需求',
+  'institution.create': '新增机构',
+  'institution.update': '更新机构',
+  'institution.online': '上架机构',
+  'institution.offline': '下架机构'
 }
 
-const handleStatClick = (item) => {
-  const path = statRouteMap[item.key]
+const actionLabel = (action) => ACTION_LABELS[action] || action || '-'
 
-  if (path) {
-    router.push(path)
+const RESOURCE_DOT_COLORS = {
+  achievement: '#3f8cff',
+  demand: '#f7a42f',
+  institution: '#2bc39f'
+}
+
+const ACHIEVEMENT_STATUS_META = [
+  { key: 'draft', name: '草稿', color: '#b6bfca' },
+  { key: 'pending_review', name: '待审核', color: '#3f8cff' },
+  { key: 'published', name: '已发布', color: '#2bc39f' },
+  { key: 'offline', name: '已下架', color: '#f7a42f' },
+  { key: 'rejected', name: '已驳回', color: '#f0565f' }
+]
+
+const DEMAND_STATUS_META = [
+  { key: 'draft', name: '草稿', color: '#b6bfca' },
+  { key: 'pending_review', name: '待审核', color: '#3f8cff' },
+  { key: 'published', name: '已发布', color: '#2bc39f' },
+  { key: 'matched', name: '对接中', color: '#8d68ed' },
+  { key: 'closed', name: '已关闭', color: '#98a3b3' },
+  { key: 'cancelled', name: '已取消', color: '#f7a42f' },
+  { key: 'rejected', name: '已驳回', color: '#f0565f' }
+]
+
+const summary = ref(null)
+const summaryLoading = ref(false)
+const summaryError = ref('')
+
+const loadSummary = async () => {
+  summaryLoading.value = true
+  summaryError.value = ''
+
+  try {
+    summary.value = await api('/admin/dashboard/summary')
+  } catch (error) {
+    summary.value = null
+    summaryError.value = error.message || '数据概览加载失败'
+  } finally {
+    summaryLoading.value = false
   }
 }
 
-const goPage = (path) => {
-  router.push(path)
+const statCards = computed(() => {
+  const s = summary.value
+
+  return [
+    {
+      key: 'users',
+      label: '用户总数',
+      value: s?.users,
+      icon: 'user',
+      color: 'blue',
+      route: '/admin/users',
+      sub: ''
+    },
+    {
+      key: 'achievements',
+      label: '成果总数',
+      value: s?.achievements,
+      icon: 'achievement',
+      color: 'green',
+      route: '/admin/achievements',
+      sub: ''
+    },
+    {
+      key: 'demands',
+      label: '需求总数',
+      value: s?.demands,
+      icon: 'requirement',
+      color: 'orange',
+      route: '/admin/requirements',
+      sub: ''
+    },
+    {
+      key: 'cooperations',
+      label: '合作意向',
+      value: s?.cooperations,
+      icon: 'cooperation',
+      color: 'purple',
+      route: '/admin/cooperation',
+      sub: ''
+    },
+    {
+      key: 'pending',
+      label: '待审核',
+      value: s?.pendingTotal,
+      icon: 'pending',
+      color: 'yellow',
+      route: '/admin/achievements',
+      sub: s ? `成果 ${s.pendingAchievements ?? 0} · 需求 ${s.pendingDemands ?? 0}` : ''
+    }
+  ]
+})
+
+const pendingCount = computed(() => summary.value?.pendingTotal ?? 0)
+
+const buildStatusView = (counts, meta, summaryTotal) => {
+  const list = meta
+    .map((item) => ({ ...item, value: Number(counts?.[item.key] ?? 0) }))
+    .filter((item) => item.value > 0)
+
+  const countsSum = list.reduce((sum, item) => sum + item.value, 0)
+  const total = countsSum === summaryTotal ? countsSum : summaryTotal
+
+  return { list, total, countsSum }
 }
 
-const createPolylinePoints = (values) => {
-  const width = 450
-  const startX = 52
-  const startY = 188
-  const maxValue = 500
+const achievementStatusView = computed(() =>
+  buildStatusView(
+    summary.value?.achievementStatusCounts,
+    ACHIEVEMENT_STATUS_META,
+    Number(summary.value?.achievements ?? 0)
+  )
+)
 
-  const step = width / (values.length - 1)
+const demandStatusView = computed(() =>
+  buildStatusView(
+    summary.value?.demandStatusCounts,
+    DEMAND_STATUS_META,
+    Number(summary.value?.demands ?? 0)
+  )
+)
+
+const percentOf = (count, total) => (total ? `${((count / total) * 100).toFixed(1)}%` : '0%')
+
+const buildDonut = (list, countsSum) => {
+  if (!list.length || !countsSum) {
+    return '#e8edf4'
+  }
+
+  let current = 0
+
+  const parts = list.map((item) => {
+    const start = (current / countsSum) * 100
+    current += item.value
+    const end = (current / countsSum) * 100
+
+    return `${item.color} ${start}% ${end}%`
+  })
+
+  return `conic-gradient(${parts.join(',')})`
+}
+
+const achievementDonut = computed(() =>
+  buildDonut(achievementStatusView.value.list, achievementStatusView.value.countsSum)
+)
+
+const requirementDonut = computed(() =>
+  buildDonut(demandStatusView.value.list, demandStatusView.value.countsSum)
+)
+
+const trendDays = ref(7)
+const trend = ref(null)
+const trendLoading = ref(false)
+const trendError = ref('')
+
+const loadTrend = async () => {
+  trendLoading.value = true
+  trendError.value = ''
+
+  try {
+    trend.value = await api('/admin/dashboard/trend', {
+      params: { days: trendDays.value }
+    })
+  } catch (error) {
+    trend.value = null
+    trendError.value = error.message || '趋势数据加载失败'
+  } finally {
+    trendLoading.value = false
+  }
+}
+
+watch(trendDays, () => {
+  loadTrend()
+})
+
+const trendLabels = computed(() => trend.value?.labels ?? [])
+
+const trendMax = computed(() => {
+  const values = [
+    ...(trend.value?.users ?? []),
+    ...(trend.value?.achievements ?? []),
+    ...(trend.value?.demands ?? [])
+  ]
+
+  return Math.ceil(Math.max(10, ...values) / 10) * 10
+})
+
+const yLabels = computed(() =>
+  [1, 0.75, 0.5, 0.25, 0].map((rate) => Math.round(trendMax.value * rate))
+)
+
+const labelGap = computed(() => Math.max(1, Math.ceil(trendLabels.value.length / 12)))
+
+const labelStepX = computed(() =>
+  trendLabels.value.length > 1 ? 450 / (trendLabels.value.length - 1) : 0
+)
+
+const createPolylinePoints = (values) => {
+  if (!values.length) {
+    return ''
+  }
+
+  const step = values.length > 1 ? 450 / (values.length - 1) : 0
 
   return values
     .map((value, index) => {
-      const x = startX + step * index
-      const y = startY - (value / maxValue) * 168
+      const x = 52 + step * index
+      const y = 188 - (value / trendMax.value) * 168
 
       return `${x},${y}`
     })
@@ -58,90 +247,136 @@ const createPolylinePoints = (values) => {
 }
 
 const createPointList = (values) => {
-  const width = 450
-  const startX = 52
-  const startY = 188
-  const maxValue = 500
+  if (!values.length) {
+    return []
+  }
 
-  const step = width / (values.length - 1)
+  const step = values.length > 1 ? 450 / (values.length - 1) : 0
 
-  return values.map((value, index) => {
-    return {
-      x: startX + step * index,
-      y: startY - (value / maxValue) * 168,
-      value
-    }
-  })
+  return values.map((value, index) => ({
+    x: 52 + step * index,
+    y: 188 - (value / trendMax.value) * 168,
+    value
+  }))
 }
 
-const userPoints = computed(() => {
-  return createPolylinePoints(currentTrend.value.users)
-})
+const userPoints = computed(() => createPolylinePoints(trend.value?.users ?? []))
+const achievementPoints = computed(() => createPolylinePoints(trend.value?.achievements ?? []))
+const requirementPoints = computed(() => createPolylinePoints(trend.value?.demands ?? []))
+const userCircles = computed(() => createPointList(trend.value?.users ?? []))
+const achievementCircles = computed(() => createPointList(trend.value?.achievements ?? []))
+const requirementCircles = computed(() => createPointList(trend.value?.demands ?? []))
 
-const achievementPoints = computed(() => {
-  return createPolylinePoints(
-    currentTrend.value.achievements
-  )
-})
+const achievementQueue = ref([])
+const demandQueue = ref([])
+const todoLoading = ref(false)
+const todoError = ref('')
 
-const requirementPoints = computed(() => {
-  return createPolylinePoints(
-    currentTrend.value.requirements
-  )
-})
+const loadTodo = async () => {
+  todoLoading.value = true
+  todoError.value = ''
 
-const userCircles = computed(() => {
-  return createPointList(currentTrend.value.users)
-})
+  try {
+    const [achievements, demands] = await Promise.all([
+      api('/admin/achievements/review-queue', { params: { page: 1, pageSize: 5 } }),
+      api('/admin/demands/review-queue', { params: { page: 1, pageSize: 5 } })
+    ])
 
-const achievementCircles = computed(() => {
-  return createPointList(
-    currentTrend.value.achievements
-  )
-})
+    achievementQueue.value = achievements?.list ?? []
+    demandQueue.value = demands?.list ?? []
+  } catch (error) {
+    achievementQueue.value = []
+    demandQueue.value = []
+    todoError.value = error.message || '待办数据加载失败'
+  } finally {
+    todoLoading.value = false
+  }
+}
 
-const requirementCircles = computed(() => {
-  return createPointList(
-    currentTrend.value.requirements
-  )
-})
+const todoItems = computed(() =>
+  [
+    ...achievementQueue.value.map((item) => ({
+      id: `achievement-${item.id}`,
+      text: item.title,
+      tag: '成果待审',
+      tagClass: 'blue',
+      iconClass: 'blue',
+      time: fmtTime(item.submittedAt),
+      route: '/admin/achievements'
+    })),
+    ...demandQueue.value.map((item) => ({
+      id: `demand-${item.id}`,
+      text: item.title,
+      tag: '需求待审',
+      tagClass: 'orange',
+      iconClass: 'orange',
+      time: fmtTime(item.submittedAt),
+      route: '/admin/requirements'
+    }))
+  ].slice(0, 5)
+)
 
-const achievementDonut = computed(() => {
-  let current = 0
+const activityLogs = ref([])
+const activityLoading = ref(false)
+const activityError = ref('')
 
-  const parts = achievementStatus.map((item) => {
-    const start = current
-    current += Number(item.percent.replace('%', ''))
+const loadActivity = async () => {
+  activityLoading.value = true
+  activityError.value = ''
 
-    return `${item.color} ${start}% ${current}%`
-  })
+  try {
+    const data = await api('/admin/audit-logs', { params: { page: 1, pageSize: 8 } })
 
-  return `conic-gradient(${parts.join(',')})`
-})
+    activityLogs.value = data?.list ?? []
+  } catch (error) {
+    activityLogs.value = []
+    activityError.value = error.message || '动态数据加载失败'
+  } finally {
+    activityLoading.value = false
+  }
+}
 
-const requirementDonut = computed(() => {
-  let current = 0
+const activityItems = computed(() =>
+  activityLogs.value.slice(0, 8).map((item) => ({
+    id: item.id,
+    color: RESOURCE_DOT_COLORS[item.resourceType] || '#98a3b3',
+    text: `${item.actorUserNo || '系统'} ${actionLabel(item.action)}`,
+    time: fmtTime(item.createdAt)
+  }))
+)
 
-  const parts = requirementStatus.map((item) => {
-    const start = current
-    current += Number(item.percent.replace('%', ''))
+const goPage = (path) => {
+  router.push(path)
+}
 
-    return `${item.color} ${start}% ${current}%`
-  })
-
-  return `conic-gradient(${parts.join(',')})`
+onMounted(() => {
+  loadSummary()
+  loadTrend()
+  loadTodo()
+  loadActivity()
 })
 </script>
 
 <template>
   <div class="overview-page">
+    <div v-if="summaryError" class="error-banner">
+      <span>数据概览加载失败：{{ summaryError }}</span>
+
+      <button
+        type="button"
+        @click="loadSummary"
+      >
+        重试
+      </button>
+    </div>
+
     <section class="statistics-grid">
       <button
-        v-for="item in statistics"
+        v-for="item in statCards"
         :key="item.key"
         type="button"
         class="stat-card"
-        @click="handleStatClick(item)"
+        @click="goPage(item.route)"
       >
         <div
           class="stat-icon"
@@ -238,22 +473,14 @@ const requirementDonut = computed(() => {
           </div>
 
           <div class="stat-value">
-            {{ item.value }}
+            {{ fmtNum(item.value) }}
           </div>
 
-          <div class="stat-change">
-            较上周
-
-            <span
-              :class="
-                item.trend === 'up'
-                  ? 'trend-up'
-                  : 'trend-down'
-              "
-            >
-              {{ item.trend === 'up' ? '↑' : '↓' }}
-              {{ item.change }}
-            </span>
+          <div
+            v-if="item.sub"
+            class="stat-change"
+          >
+            {{ item.sub }}
           </div>
         </div>
       </button>
@@ -285,174 +512,196 @@ const requirementDonut = computed(() => {
           </select>
         </div>
 
-        <div class="chart-legend">
-          <span>
-            <i class="legend-dot blue"></i>
-            新增用户
-          </span>
-
-          <span>
-            <i class="legend-dot green"></i>
-            新增成果
-          </span>
-
-          <span>
-            <i class="legend-dot orange"></i>
-            新增需求
-          </span>
+        <div
+          v-if="trendLoading"
+          class="panel-state"
+        >
+          加载中…
         </div>
 
-        <svg
-          class="trend-chart"
-          viewBox="0 0 540 230"
-          preserveAspectRatio="none"
+        <div
+          v-else-if="trendError"
+          class="panel-state error"
         >
-          <g
-            stroke="#edf1f5"
-            stroke-width="1"
+          <span>{{ trendError }}</span>
+
+          <button
+            type="button"
+            @click="loadTrend"
           >
-            <line
-              x1="52"
-              y1="20"
-              x2="502"
-              y2="20"
-            />
+            重试
+          </button>
+        </div>
 
-            <line
-              x1="52"
-              y1="62"
-              x2="502"
-              y2="62"
-            />
+        <template v-else>
+          <div class="chart-legend">
+            <span>
+              <i class="legend-dot blue"></i>
+              新增用户
+            </span>
 
-            <line
-              x1="52"
-              y1="104"
-              x2="502"
-              y2="104"
-            />
+            <span>
+              <i class="legend-dot green"></i>
+              新增成果
+            </span>
 
-            <line
-              x1="52"
-              y1="146"
-              x2="502"
-              y2="146"
-            />
+            <span>
+              <i class="legend-dot orange"></i>
+              新增需求
+            </span>
+          </div>
 
-            <line
-              x1="52"
-              y1="188"
-              x2="502"
-              y2="188"
-            />
-          </g>
-
-          <g
-            class="chart-axis"
-            font-size="11"
+          <svg
+            class="trend-chart"
+            viewBox="0 0 540 230"
+            preserveAspectRatio="none"
           >
-            <text x="15" y="24">
-              500
-            </text>
-
-            <text x="15" y="66">
-              400
-            </text>
-
-            <text x="15" y="108">
-              300
-            </text>
-
-            <text x="15" y="150">
-              200
-            </text>
-
-            <text x="15" y="192">
-              100
-            </text>
-          </g>
-
-          <polyline
-            :points="userPoints"
-            fill="none"
-            stroke="#2f80f7"
-            stroke-width="2"
-          />
-
-          <polyline
-            :points="achievementPoints"
-            fill="none"
-            stroke="#2bc39f"
-            stroke-width="2"
-          />
-
-          <polyline
-            :points="requirementPoints"
-            fill="none"
-            stroke="#f7a42f"
-            stroke-width="2"
-          />
-
-          <g
-            fill="#ffffff"
-            stroke="#2f80f7"
-            stroke-width="2"
-          >
-            <circle
-              v-for="point in userCircles"
-              :key="`user-${point.x}`"
-              :cx="point.x"
-              :cy="point.y"
-              r="3"
-            />
-          </g>
-
-          <g
-            fill="#ffffff"
-            stroke="#2bc39f"
-            stroke-width="2"
-          >
-            <circle
-              v-for="point in achievementCircles"
-              :key="`achievement-${point.x}`"
-              :cx="point.x"
-              :cy="point.y"
-              r="3"
-            />
-          </g>
-
-          <g
-            fill="#ffffff"
-            stroke="#f7a42f"
-            stroke-width="2"
-          >
-            <circle
-              v-for="point in requirementCircles"
-              :key="`requirement-${point.x}`"
-              :cx="point.x"
-              :cy="point.y"
-              r="3"
-            />
-          </g>
-
-          <g class="chart-axis">
-            <text
-              v-for="(label, index) in currentTrend.labels"
-              :key="label"
-              :x="
-                52 +
-                (450 /
-                  (currentTrend.labels.length - 1)) *
-                  index
-              "
-              y="217"
-              text-anchor="middle"
-              font-size="10"
+            <g
+              stroke="#edf1f5"
+              stroke-width="1"
             >
-              {{ label }}
-            </text>
-          </g>
-        </svg>
+              <line
+                x1="52"
+                y1="20"
+                x2="502"
+                y2="20"
+              />
+
+              <line
+                x1="52"
+                y1="62"
+                x2="502"
+                y2="62"
+              />
+
+              <line
+                x1="52"
+                y1="104"
+                x2="502"
+                y2="104"
+              />
+
+              <line
+                x1="52"
+                y1="146"
+                x2="502"
+                y2="146"
+              />
+
+              <line
+                x1="52"
+                y1="188"
+                x2="502"
+                y2="188"
+              />
+            </g>
+
+            <g
+              class="chart-axis"
+              font-size="11"
+            >
+              <text x="15" y="24">
+                {{ yLabels[0] }}
+              </text>
+
+              <text x="15" y="66">
+                {{ yLabels[1] }}
+              </text>
+
+              <text x="15" y="108">
+                {{ yLabels[2] }}
+              </text>
+
+              <text x="15" y="150">
+                {{ yLabels[3] }}
+              </text>
+
+              <text x="15" y="192">
+                {{ yLabels[4] }}
+              </text>
+            </g>
+
+            <polyline
+              :points="userPoints"
+              fill="none"
+              stroke="#2f80f7"
+              stroke-width="2"
+            />
+
+            <polyline
+              :points="achievementPoints"
+              fill="none"
+              stroke="#2bc39f"
+              stroke-width="2"
+            />
+
+            <polyline
+              :points="requirementPoints"
+              fill="none"
+              stroke="#f7a42f"
+              stroke-width="2"
+            />
+
+            <g
+              fill="#ffffff"
+              stroke="#2f80f7"
+              stroke-width="2"
+            >
+              <circle
+                v-for="point in userCircles"
+                :key="`user-${point.x}`"
+                :cx="point.x"
+                :cy="point.y"
+                r="3"
+              />
+            </g>
+
+            <g
+              fill="#ffffff"
+              stroke="#2bc39f"
+              stroke-width="2"
+            >
+              <circle
+                v-for="point in achievementCircles"
+                :key="`achievement-${point.x}`"
+                :cx="point.x"
+                :cy="point.y"
+                r="3"
+              />
+            </g>
+
+            <g
+              fill="#ffffff"
+              stroke="#f7a42f"
+              stroke-width="2"
+            >
+              <circle
+                v-for="point in requirementCircles"
+                :key="`requirement-${point.x}`"
+                :cx="point.x"
+                :cy="point.y"
+                r="3"
+              />
+            </g>
+
+            <g class="chart-axis">
+              <template
+                v-for="(label, index) in trendLabels"
+                :key="`label-${index}`"
+              >
+                <text
+                  v-if="index % labelGap === 0"
+                  :x="52 + labelStepX * index"
+                  y="217"
+                  text-anchor="middle"
+                  font-size="10"
+                >
+                  {{ label }}
+                </text>
+              </template>
+            </g>
+          </svg>
+        </template>
       </div>
 
       <div class="panel distribution-panel">
@@ -474,44 +723,60 @@ const requirementDonut = computed(() => {
           </button>
         </div>
 
-        <div class="distribution-content">
-          <div
-            class="donut-chart"
-            :style="{
-              background: achievementDonut
-            }"
-          >
-            <div class="donut-hole"></div>
-          </div>
+        <div
+          v-if="summaryLoading"
+          class="panel-state"
+        >
+          加载中…
+        </div>
 
-          <div class="distribution-list">
+        <template v-else>
+          <div class="distribution-content">
             <div
-              v-for="item in achievementStatus"
-              :key="item.name"
-              class="distribution-item"
+              class="donut-chart"
+              :style="{
+                background: achievementDonut
+              }"
             >
-              <div class="distribution-name">
+              <div class="donut-hole">
                 <span
-                  class="distribution-dot"
-                  :style="{
-                    background: item.color
-                  }"
-                ></span>
-
-                {{ item.name }}
+                  v-if="!achievementStatusView.list.length"
+                  class="donut-empty"
+                >
+                  暂无数据
+                </span>
               </div>
+            </div>
 
-              <span>
-                {{ item.value.toLocaleString() }}
-                （{{ item.percent }}）
-              </span>
+            <div class="distribution-list">
+              <div
+                v-for="item in achievementStatusView.list"
+                :key="item.key"
+                class="distribution-item"
+              >
+                <div class="distribution-name">
+                  <span
+                    class="distribution-dot"
+                    :style="{
+                      background: item.color
+                    }"
+                  ></span>
+
+                  {{ item.name }}
+                </div>
+
+                <span>
+                  {{ item.value.toLocaleString() }}
+                  （{{ percentOf(item.value, achievementStatusView.total) }}）
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="distribution-total">
-          总计：3,256
-        </div>
+          <div class="distribution-total">
+            总计：{{ achievementStatusView.total.toLocaleString() }}
+          </div>
+        </template>
       </div>
 
       <div class="panel distribution-panel">
@@ -533,44 +798,60 @@ const requirementDonut = computed(() => {
           </button>
         </div>
 
-        <div class="distribution-content">
-          <div
-            class="donut-chart"
-            :style="{
-              background: requirementDonut
-            }"
-          >
-            <div class="donut-hole"></div>
-          </div>
+        <div
+          v-if="summaryLoading"
+          class="panel-state"
+        >
+          加载中…
+        </div>
 
-          <div class="distribution-list">
+        <template v-else>
+          <div class="distribution-content">
             <div
-              v-for="item in requirementStatus"
-              :key="item.name"
-              class="distribution-item"
+              class="donut-chart"
+              :style="{
+                background: requirementDonut
+              }"
             >
-              <div class="distribution-name">
+              <div class="donut-hole">
                 <span
-                  class="distribution-dot"
-                  :style="{
-                    background: item.color
-                  }"
-                ></span>
-
-                {{ item.name }}
+                  v-if="!demandStatusView.list.length"
+                  class="donut-empty"
+                >
+                  暂无数据
+                </span>
               </div>
+            </div>
 
-              <span>
-                {{ item.value.toLocaleString() }}
-                （{{ item.percent }}）
-              </span>
+            <div class="distribution-list">
+              <div
+                v-for="item in demandStatusView.list"
+                :key="item.key"
+                class="distribution-item"
+              >
+                <div class="distribution-name">
+                  <span
+                    class="distribution-dot"
+                    :style="{
+                      background: item.color
+                    }"
+                  ></span>
+
+                  {{ item.name }}
+                </div>
+
+                <span>
+                  {{ item.value.toLocaleString() }}
+                  （{{ percentOf(item.value, demandStatusView.total) }}）
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="distribution-total">
-          总计：2,187
-        </div>
+          <div class="distribution-total">
+            总计：{{ demandStatusView.total.toLocaleString() }}
+          </div>
+        </template>
       </div>
     </section>
 
@@ -581,7 +862,7 @@ const requirementDonut = computed(() => {
             待办事项
 
             <span class="todo-count">
-              6
+              {{ pendingCount }}
             </span>
           </div>
 
@@ -594,9 +875,40 @@ const requirementDonut = computed(() => {
           </button>
         </div>
 
-        <div class="todo-list">
+        <div
+          v-if="todoLoading"
+          class="panel-state"
+        >
+          加载中…
+        </div>
+
+        <div
+          v-else-if="todoError"
+          class="panel-state error"
+        >
+          <span>{{ todoError }}</span>
+
+          <button
+            type="button"
+            @click="loadTodo"
+          >
+            重试
+          </button>
+        </div>
+
+        <div
+          v-else-if="!todoItems.length"
+          class="panel-state"
+        >
+          暂无待办事项
+        </div>
+
+        <div
+          v-else
+          class="todo-list"
+        >
           <div
-            v-for="item in todoList"
+            v-for="item in todoItems"
             :key="item.id"
             class="todo-item"
           >
@@ -665,9 +977,40 @@ const requirementDonut = computed(() => {
           </button>
         </div>
 
-        <div class="activity-list">
+        <div
+          v-if="activityLoading"
+          class="panel-state"
+        >
+          加载中…
+        </div>
+
+        <div
+          v-else-if="activityError"
+          class="panel-state error"
+        >
+          <span>{{ activityError }}</span>
+
+          <button
+            type="button"
+            @click="loadActivity"
+          >
+            重试
+          </button>
+        </div>
+
+        <div
+          v-else-if="!activityItems.length"
+          class="panel-state"
+        >
+          暂无动态
+        </div>
+
+        <div
+          v-else
+          class="activity-list"
+        >
           <div
-            v-for="item in activityList"
+            v-for="item in activityItems"
             :key="item.id"
             class="activity-item"
           >
@@ -706,6 +1049,85 @@ const requirementDonut = computed(() => {
   background: #ffffff;
   box-shadow:
     0 2px 14px rgba(40, 72, 110, 0.07);
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  margin-bottom: 13px;
+  padding: 11px 16px;
+
+  border: 1px solid #ffd6d9;
+  border-radius: 9px;
+
+  background: #fff1f2;
+
+  color: #d93a44;
+
+  font-size: 13px;
+}
+
+.error-banner button {
+  flex-shrink: 0;
+
+  height: 30px;
+  padding: 0 16px;
+
+  border: 1px solid #d93a44;
+  border-radius: 5px;
+
+  background: #ffffff;
+
+  color: #d93a44;
+
+  font-size: 12px;
+}
+
+.error-banner button:hover {
+  background: #d93a44;
+
+  color: #ffffff;
+}
+
+.panel-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  height: 220px;
+
+  color: #9aa5b5;
+
+  font-size: 12px;
+}
+
+.panel-state.error {
+  gap: 12px;
+
+  color: #e5484d;
+}
+
+.panel-state.error button {
+  height: 28px;
+  padding: 0 14px;
+
+  border: 1px solid #e5484d;
+  border-radius: 4px;
+
+  background: #ffffff;
+
+  color: #e5484d;
+
+  font-size: 12px;
+}
+
+.panel-state.error button:hover {
+  background: #e5484d;
+
+  color: #ffffff;
 }
 
 .statistics-grid {
@@ -838,16 +1260,6 @@ const requirementDonut = computed(() => {
   color: #8a95a4;
 
   font-size: 12px;
-}
-
-.trend-up {
-  margin-left: 5px;
-  color: #ff4c56;
-}
-
-.trend-down {
-  margin-left: 5px;
-  color: #20b875;
 }
 
 .charts-grid {
@@ -992,9 +1404,19 @@ const requirementDonut = computed(() => {
   position: absolute;
   inset: 35px;
 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
   border-radius: 50%;
 
   background: #ffffff;
+}
+
+.donut-empty {
+  color: #98a3b3;
+
+  font-size: 11px;
 }
 
 .distribution-list {
@@ -1058,7 +1480,6 @@ const requirementDonut = computed(() => {
 
 .list-panel {
   height: 332px;
-
   padding: 18px;
 }
 
@@ -1092,7 +1513,7 @@ const requirementDonut = computed(() => {
     34px
     minmax(0, 1fr)
     72px
-    70px
+    104px
     60px;
 
   align-items: center;
@@ -1201,6 +1622,7 @@ const requirementDonut = computed(() => {
   color: #9aa5b5;
 
   text-align: right;
+  white-space: nowrap;
 }
 
 .process-button {
@@ -1226,12 +1648,12 @@ const requirementDonut = computed(() => {
   grid-template-columns:
     13px
     minmax(0, 1fr)
-    72px;
+    104px;
 
   align-items: center;
   gap: 7px;
 
-  height: 48px;
+  height: 32px;
 
   border-top: 1px solid #f0f3f7;
 
@@ -1262,6 +1684,7 @@ const requirementDonut = computed(() => {
   color: #9aa5b5;
 
   text-align: right;
+  white-space: nowrap;
 }
 
 @media (max-width: 1450px) {

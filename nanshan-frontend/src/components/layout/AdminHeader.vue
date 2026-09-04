@@ -2,6 +2,8 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { useAuthStore } from '../../stores/auth'
+
 defineProps({
   collapsed: {
     type: Boolean,
@@ -13,8 +15,11 @@ const emit = defineEmits(['toggle'])
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const showUserMenu = ref(false)
+
+const displayName = computed(() => authStore.displayName)
 
 const pageMap = {
   '/admin/overview': {
@@ -84,8 +89,9 @@ const toggleUserMenu = () => {
   showUserMenu.value = !showUserMenu.value
 }
 
-const logout = () => {
+const logout = async () => {
   showUserMenu.value = false
+  await authStore.logout()
   router.push('/login')
 }
 </script>
@@ -122,6 +128,7 @@ const logout = () => {
       <button
         type="button"
         class="notification-button"
+        title="通知（开发中）"
       >
         <svg
           viewBox="0 0 24 24"
@@ -134,10 +141,6 @@ const logout = () => {
 
           <path d="M10 21h4" />
         </svg>
-
-        <span class="notification-count">
-          12
-        </span>
       </button>
 
       <div class="vertical-line"></div>
@@ -154,7 +157,7 @@ const logout = () => {
           </div>
 
           <span class="username">
-            管理员
+            {{ displayName }}
           </span>
 
           <span

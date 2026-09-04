@@ -1,227 +1,141 @@
 <script setup>
-import {
-  computed,
-  reactive,
-  ref
-} from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { api } from '../../api/client'
 
-import {
-  useRouter
-} from 'vue-router'
+const router = useRouter()
 
-import {
-  useCooperationStore
-} from '../../stores/cooperation'
+const STATUS_OPTIONS = [
+  { value: 'pending', label: '待处理' },
+  { value: 'accepted', label: '已受理' },
+  { value: 'confirmed', label: '已确认' },
+  { value: 'completed', label: '已完成' },
+  { value: 'rejected', label: '已拒绝' },
+  { value: 'cancelled', label: '已取消' }
+]
 
-import {
-  cooperationStatuses,
-  cooperationTypes
-} from '../../mock/cooperations'
+const STATUS_META = {
+  pending: { label: '待处理', cls: 'pending' },
+  accepted: { label: '已受理', cls: 'accepted' },
+  confirmed: { label: '已确认', cls: 'confirmed' },
+  completed: { label: '已完成', cls: 'completed' },
+  rejected: { label: '已拒绝', cls: 'rejected' },
+  cancelled: { label: '已取消', cls: 'cancelled' }
+}
 
-const router =
-  useRouter()
+const TYPE_META = {
+  achievement: { label: '成果', cls: 'blue' },
+  demand: { label: '需求', cls: 'orange' }
+}
 
-const store =
-  useCooperationStore()
+const statusLabel = status => STATUS_META[status]?.label || status || '-'
+const statusClass = status => STATUS_META[status]?.cls || 'unknown'
+const typeLabel = type => TYPE_META[type]?.label || type || '-'
+const typeClass = type => TYPE_META[type]?.cls || ''
 
-const filters =
-  reactive({
-    keyword: '',
-    type: '',
-    status: ''
-  })
+const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
-const appliedFilters =
-  reactive({
-    keyword: '',
-    type: '',
-    status: ''
-  })
+const truncate = (value, len = 40) => {
+  if (!value) return '-'
+  const text = String(value)
+  return text.length > len ? `${text.slice(0, len)}…` : text
+}
 
-const currentPage =
-  ref(1)
+const filters = reactive({
+  keyword: '',
+  status: ''
+})
 
-const pageSize =
-  ref(10)
+const appliedFilters = reactive({
+  keyword: '',
+  status: ''
+})
 
-const handleSearch =
-  () => {
-    Object.assign(
-      appliedFilters,
-      filters
-    )
+const loading = ref(false)
+const loadError = ref('')
+const rows = ref([])
+const total = ref(0)
+const totalPages = ref(1)
+const currentPage = ref(1)
+const pageSize = ref(10)
 
-    currentPage.value = 1
-  }
-
-const handleReset =
-  () => {
-    Object.assign(
-      filters,
-      {
-        keyword: '',
-        type: '',
-        status: ''
-      }
-    )
-
-    Object.assign(
-      appliedFilters,
-      filters
-    )
-
-    currentPage.value = 1
-  }
-
-const filteredData =
-  computed(() => {
-    const keyword =
-      appliedFilters
-        .keyword
-        .trim()
-        .toLowerCase()
-
-    return store.cooperations.filter(
-      item => {
-        const matchKeyword =
-          !keyword ||
-          item.id
-            .toLowerCase()
-            .includes(keyword) ||
-          item.initiator
-            .toLowerCase()
-            .includes(keyword) ||
-          item.target
-            .toLowerCase()
-            .includes(keyword)
-
-        const matchType =
-          !appliedFilters.type ||
-          item.type ===
-            appliedFilters.type
-
-        const matchStatus =
-          !appliedFilters.status ||
-          item.status ===
-            appliedFilters.status
-
-        return (
-          matchKeyword &&
-          matchType &&
-          matchStatus
-        )
-      }
-    )
-  })
-
-const total =
-  computed(
-    () =>
-      filteredData.value.length
-  )
-
-const totalPages =
-  computed(() => {
-    return Math.max(
-      1,
-      Math.ceil(
-        total.value /
-        pageSize.value
-      )
-    )
-  })
-
-const tableData =
-  computed(() => {
-    const start =
-      (
-        currentPage.value -
-        1
-      ) *
-      pageSize.value
-
-    return filteredData.value.slice(
-      start,
-      start + pageSize.value
-    )
-  })
-
-const pages =
-  computed(() => {
-    const count =
-      totalPages.value
-
-    if (count <= 7) {
-      return Array.from(
-        {
-          length: count
-        },
-        (_, index) =>
-          index + 1
-      )
-    }
-
-    return [
-      1,
-      2,
-      3,
-      4,
-      5,
-      '...',
-      count
-    ]
-  })
-
-const goPage =
-  page => {
-    if (
-      page === '...'
-    ) return
-
-    currentPage.value =
-      page
-  }
-
-const goDetail =
-  item => {
-    router.push({
-      name:
-        'cooperation-detail',
-
+const fetchList = async () => {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const data = await api('/admin/cooperations', {
       params: {
-        id: item.id
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        status: appliedFilters.status,
+        keyword: appliedFilters.keyword.trim()
       }
     })
+    rows.value = data.list || []
+    total.value = data.total || 0
+    totalPages.value = Math.max(1, data.totalPages || Math.ceil(total.value / pageSize.value))
+  } catch (err) {
+    loadError.value = err.message || '加载失败'
+    rows.value = []
+    total.value = 0
+    totalPages.value = 1
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(fetchList)
+
+const handleSearch = () => {
+  Object.assign(appliedFilters, filters)
+  currentPage.value = 1
+  fetchList()
+}
+
+const handleReset = () => {
+  Object.assign(filters, {
+    keyword: '',
+    status: ''
+  })
+  Object.assign(appliedFilters, filters)
+  currentPage.value = 1
+  fetchList()
+}
+
+const pages = computed(() => {
+  const count = totalPages.value
+
+  if (count <= 7) {
+    return Array.from({ length: count }, (_, index) => index + 1)
   }
 
-const handleProcess =
-  item => {
-    router.push({
-      name:
-        'cooperation-detail',
-
-      params: {
-        id: item.id
-      },
-
-      query: {
-        action:
-          'process'
-      }
-    })
+  if (currentPage.value <= 4) {
+    return [1, 2, 3, 4, 5, '...', count]
   }
 
-const getStatusClass =
-  status => {
-    return {
-      待处理: 'pending',
-      已接受: 'accepted',
-      已确认: 'confirmed',
-      已完成: 'completed',
-      已归档: 'archived',
-      已拒绝: 'rejected'
-    }[status]
+  if (currentPage.value >= count - 3) {
+    return [1, '...', count - 4, count - 3, count - 2, count - 1, count]
   }
+
+  return [1, '...', currentPage.value - 1, currentPage.value, currentPage.value + 1, '...', count]
+})
+
+const goPage = page => {
+  if (page === '...' || page < 1 || page > totalPages.value) return
+  if (page === currentPage.value) return
+
+  currentPage.value = page
+  fetchList()
+}
+
+const handlePageSizeChange = () => {
+  currentPage.value = 1
+  fetchList()
+}
+
+const goDetail = item => {
+  router.push('/admin/cooperation/' + item.id)
+}
 </script>
 
 <template>
@@ -238,46 +152,10 @@ const getStatusClass =
           </label>
 
           <input
-            v-model="
-              filters.keyword
-            "
-            placeholder="请输入意向编号、发起人或对接对象"
-            @keyup.enter="
-              handleSearch
-            "
+            v-model="filters.keyword"
+            placeholder="请输入留言、双方姓名或目标标题"
+            @keyup.enter="handleSearch"
           />
-
-        </div>
-
-
-        <div class="filter-item">
-
-          <label>
-            对接类型
-          </label>
-
-          <select
-            v-model="
-              filters.type
-            "
-          >
-
-            <option value="">
-              全部
-            </option>
-
-            <option
-              v-for="
-                item
-                in cooperationTypes
-              "
-              :key="item"
-              :value="item"
-            >
-              {{ item }}
-            </option>
-
-          </select>
 
         </div>
 
@@ -288,25 +166,18 @@ const getStatusClass =
             当前状态
           </label>
 
-          <select
-            v-model="
-              filters.status
-            "
-          >
+          <select v-model="filters.status">
 
             <option value="">
               全部
             </option>
 
             <option
-              v-for="
-                item
-                in cooperationStatuses
-              "
-              :key="item"
-              :value="item"
+              v-for="item in STATUS_OPTIONS"
+              :key="item.value"
+              :value="item.value"
             >
-              {{ item }}
+              {{ item.label }}
             </option>
 
           </select>
@@ -318,18 +189,14 @@ const getStatusClass =
 
           <button
             class="primary-btn"
-            @click="
-              handleSearch
-            "
+            @click="handleSearch"
           >
             查询
           </button>
 
           <button
             class="default-btn"
-            @click="
-              handleReset
-            "
+            @click="handleReset"
           >
             重置
           </button>
@@ -348,26 +215,79 @@ const getStatusClass =
         <thead>
 
           <tr>
-            <th>意向编号</th>
+            <th>意向 ID</th>
             <th>发起人</th>
-            <th>对接对象</th>
-            <th>对接类型</th>
-            <th>联系人</th>
-            <th>提交时间</th>
+            <th>合作目标</th>
+            <th>目标持有方</th>
+            <th>留言</th>
             <th>状态</th>
-            <th>对接专员</th>
+            <th>发起时间</th>
             <th>操作</th>
           </tr>
 
         </thead>
 
-        <tbody>
+        <tbody v-if="loading">
+
+          <tr>
+
+            <td
+              colspan="8"
+              class="table-state"
+            >
+              加载中…
+            </td>
+
+          </tr>
+
+        </tbody>
+
+
+        <tbody v-else-if="loadError">
+
+          <tr>
+
+            <td colspan="8">
+
+              <div class="table-error">
+
+                <span>
+                  {{ loadError }}
+                </span>
+
+                <button @click="fetchList">
+                  重试
+                </button>
+
+              </div>
+
+            </td>
+
+          </tr>
+
+        </tbody>
+
+
+        <tbody v-else-if="!rows.length">
+
+          <tr>
+
+            <td
+              colspan="8"
+              class="table-state"
+            >
+              暂无数据
+            </td>
+
+          </tr>
+
+        </tbody>
+
+
+        <tbody v-else>
 
           <tr
-            v-for="
-              item
-              in tableData
-            "
+            v-for="item in rows"
             :key="item.id"
           >
 
@@ -375,76 +295,66 @@ const getStatusClass =
               {{ item.id }}
             </td>
 
+            <td class="text-ellipsis">
+              {{ item.initiatorName || item.initiatorUserNo || '-' }}
+            </td>
+
+            <td>
+
+              <div class="target-cell">
+
+                <span
+                  class="type-badge"
+                  :class="typeClass(item.targetType)"
+                >
+                  {{ typeLabel(item.targetType) }}
+                </span>
+
+                <span
+                  class="text-ellipsis"
+                  :title="item.targetTitle || ''"
+                >
+                  {{ item.targetTitle || '-' }}
+                </span>
+
+              </div>
+
+            </td>
+
+            <td class="text-ellipsis">
+              {{ item.targetOwnerName || item.targetOwnerUserNo || '-' }}
+            </td>
+
             <td
               class="text-ellipsis"
+              :title="item.message || ''"
             >
-              {{ item.initiator }}
-            </td>
-
-            <td
-              class="text-ellipsis"
-            >
-              {{ item.target }}
-            </td>
-
-            <td>
-              {{ item.type }}
-            </td>
-
-            <td>
-              {{ item.contactName }}
-            </td>
-
-            <td>
-              {{ item.submittedAt }}
+              {{ truncate(item.message, 40) }}
             </td>
 
             <td>
 
               <span
                 class="status-tag"
-                :class="
-                  getStatusClass(
-                    item.status
-                  )
-                "
+                :class="statusClass(item.status)"
               >
                 <i></i>
 
-                {{ item.status }}
+                {{ statusLabel(item.status) }}
               </span>
 
             </td>
 
             <td>
-              {{
-                item.specialist ||
-                '待分配'
-              }}
+              {{ fmtTime(item.createdAt) }}
             </td>
 
             <td>
 
               <div class="operation">
 
-                <button
-                  @click="
-                    goDetail(item)
-                  "
-                >
+                <button @click="goDetail(item)">
                   查看
-                </button>
-
-                <span>|</span>
-
-                <button
-                  @click="
-                    handleProcess(
-                      item
-                    )
-                  "
-                >
-                  处理
                 </button>
 
               </div>
@@ -465,12 +375,8 @@ const getStatusClass =
         </span>
 
         <select
-          v-model="
-            pageSize
-          "
-          @change="
-            currentPage = 1
-          "
+          v-model="pageSize"
+          @change="handlePageSizeChange"
         >
 
           <option :value="10">
@@ -485,31 +391,20 @@ const getStatusClass =
 
 
         <button
-          :disabled="
-            currentPage === 1
-          "
-          @click="
-            currentPage--
-          "
+          :disabled="currentPage === 1"
+          @click="goPage(currentPage - 1)"
         >
           ‹
         </button>
 
 
         <template
-          v-for="
-            (page, index)
-            in pages
-          "
-          :key="
-            `${page}-${index}`
-          "
+          v-for="(page, index) in pages"
+          :key="`${page}-${index}`"
         >
 
           <span
-            v-if="
-              page === '...'
-            "
+            v-if="page === '...'"
           >
             ...
           </span>
@@ -521,9 +416,7 @@ const getStatusClass =
                 currentPage ===
                 page
             }"
-            @click="
-              goPage(page)
-            "
+            @click="goPage(page)"
           >
             {{ page }}
           </button>
@@ -536,9 +429,7 @@ const getStatusClass =
             currentPage ===
             totalPages
           "
-          @click="
-            currentPage++
-          "
+          @click="goPage(currentPage + 1)"
         >
           ›
         </button>
@@ -572,8 +463,7 @@ const getStatusClass =
 .filter-row {
   display: grid;
   grid-template-columns:
-    1.6fr
-    1fr
+    1.8fr
     1fr
     auto;
   align-items: end;
@@ -635,7 +525,7 @@ const getStatusClass =
 
 table {
   width: 100%;
-  min-width: 1260px;
+  min-width: 1180px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -656,36 +546,31 @@ th {
 }
 
 th:nth-child(1) {
-  width: 150px;
+  width: 140px;
 }
 
-th:nth-child(2),
+th:nth-child(2) {
+  width: 130px;
+}
+
 th:nth-child(3) {
-  width: 190px;
+  width: 240px;
 }
 
 th:nth-child(4) {
-  width: 110px;
-}
-
-th:nth-child(5) {
-  width: 90px;
+  width: 140px;
 }
 
 th:nth-child(6) {
-  width: 170px;
+  width: 100px;
 }
 
 th:nth-child(7) {
-  width: 105px;
+  width: 160px;
 }
 
 th:nth-child(8) {
-  width: 105px;
-}
-
-th:nth-child(9) {
-  width: 120px;
+  width: 90px;
 }
 
 tbody tr:hover {
@@ -696,6 +581,57 @@ tbody tr:hover {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.table-state {
+  color: #8995a5;
+  text-align: center;
+}
+
+.table-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #ef5260;
+}
+
+.table-error button {
+  height: 32px;
+  padding: 0 16px;
+  border: 1px solid #ef5260;
+  border-radius: 5px;
+  background: white;
+  color: #ef5260;
+}
+
+.target-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.target-cell .text-ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+
+.type-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.type-badge.blue {
+  background: #eaf3ff;
+  color: #1677ff;
+}
+
+.type-badge.orange {
+  background: #fff5e6;
+  color: #ec961d;
 }
 
 .status-tag {
@@ -713,41 +649,39 @@ tbody tr:hover {
 }
 
 .status-tag.pending {
-  background: #fff5e6;
-  color: #ec961d;
-}
-
-.status-tag.pending i {
-  background: #f5a623;
-}
-
-.status-tag.accepted,
-.status-tag.confirmed {
   background: #eaf3ff;
   color: #1677ff;
 }
 
-.status-tag.accepted i,
-.status-tag.confirmed i {
+.status-tag.pending i {
   background: #1677ff;
 }
 
-.status-tag.completed {
+.status-tag.accepted {
   background: #e9faf1;
   color: #20b875;
 }
 
-.status-tag.completed i {
+.status-tag.accepted i {
   background: #20b875;
 }
 
-.status-tag.archived {
-  background: #eff1f4;
-  color: #768294;
+.status-tag.confirmed {
+  background: #f3edff;
+  color: #7b5cd6;
 }
 
-.status-tag.archived i {
-  background: #768294;
+.status-tag.confirmed i {
+  background: #7b5cd6;
+}
+
+.status-tag.completed {
+  background: #e3f6ec;
+  color: #0e8f63;
+}
+
+.status-tag.completed i {
+  background: #0e8f63;
 }
 
 .status-tag.rejected {
@@ -757,6 +691,17 @@ tbody tr:hover {
 
 .status-tag.rejected i {
   background: #ef5260;
+}
+
+.status-tag.cancelled,
+.status-tag.unknown {
+  background: #eff1f4;
+  color: #768294;
+}
+
+.status-tag.cancelled i,
+.status-tag.unknown i {
+  background: #768294;
 }
 
 .operation {

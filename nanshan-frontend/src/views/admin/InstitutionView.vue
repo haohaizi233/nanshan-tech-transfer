@@ -1,287 +1,200 @@
 <script setup>
 import {
   computed,
+  onMounted,
   reactive,
-  ref,
-  watch
+  ref
 } from 'vue'
 
-import {
-  useInstitutionStore
-} from '../../stores/institution'
+import { api } from '../../api/client'
 
-import {
-  institutionTypes,
-  institutionStatuses
-} from '../../mock/institutions'
+const KIND_OPTIONS = [
+  { value: 'platform', label: '平台' },
+  { value: 'invest', label: '投资机构' },
+  { value: 'service', label: '服务机构' }
+]
 
-const store =
-  useInstitutionStore()
+const STATUS_OPTIONS = [
+  { value: 'active', label: '已上架' },
+  { value: 'disabled', label: '已下架' }
+]
 
-const filters =
-  reactive({
-    keyword: '',
-    type: '',
-    status: ''
-  })
+const kindLabel = item => {
+  if (item.kind === 'platform') {
+    return item.platformTypeKey === 'poc' ? '平台·验证' : item.platformTypeKey === 'pilot' ? '平台·中试' : '平台'
+  }
+  return { invest: '投资机构', service: '服务机构' }[item.kind] || '未分类'
+}
 
-const applied =
-  reactive({
-    keyword: '',
-    type: '',
-    status: ''
-  })
+const kindClass = item => ({
+  platform: 'tag-platform',
+  invest: 'tag-invest',
+  service: 'tag-service'
+}[item.kind] || 'tag-none')
 
-const selectedIds =
-  ref([])
+const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
-const currentPage =
-  ref(1)
+const filters = reactive({
+  keyword: '',
+  kind: '',
+  status: ''
+})
 
-const pageSize =
-  ref(10)
+const applied = reactive({
+  keyword: '',
+  kind: '',
+  status: ''
+})
 
-const modalVisible =
-  ref(false)
+const currentPage = ref(1)
+const pageSize = ref(10)
 
-const modalMode =
-  ref('view')
+const rows = ref([])
+const total = ref(0)
+const totalPages = ref(1)
+const loading = ref(false)
+const loadError = ref('')
+const actionError = ref('')
 
-const currentItem =
-  ref(null)
+const modalVisible = ref(false)
+const modalMode = ref('view')
+const modalLoading = ref(false)
+const modalError = ref('')
+const saving = ref(false)
+const currentItem = ref(null)
 
-const form =
-  reactive({
-    id: '',
-    name: '',
-    type: '',
-    contact: '',
-    phone: '',
-    region: '',
-    status: '已上架'
-  })
+const form = reactive({
+  kind: 'platform',
+  name: '',
+  intro: '',
+  label: '',
+  sortOrder: 0,
+  contact: '',
+  phone: '',
+  unit: ''
+})
 
-const filteredData =
-  computed(() => {
-    const keyword =
-      applied.keyword
-        .trim()
-        .toLowerCase()
+const pages = computed(() => {
+  const count = totalPages.value
 
-    return store.institutions.filter(
-      item => {
-        const keywordMatch =
-          !keyword ||
-          item.name
-            .toLowerCase()
-            .includes(keyword) ||
-          item.contact
-            .toLowerCase()
-            .includes(keyword) ||
-          item.phone
-            .toLowerCase()
-            .includes(keyword)
+  if (count <= 7) {
+    return Array.from({ length: count }, (_, index) => index + 1)
+  }
 
-        const typeMatch =
-          !applied.type ||
-          item.type === applied.type
+  if (currentPage.value <= 4) {
+    return [1, 2, 3, 4, 5, '...', count]
+  }
 
-        const statusMatch =
-          !applied.status ||
-          item.status ===
-            applied.status
+  if (currentPage.value >= count - 3) {
+    return [1, '...', count - 4, count - 3, count - 2, count - 1, count]
+  }
 
-        return (
-          keywordMatch &&
-          typeMatch &&
-          statusMatch
-        )
+  return [1, '...', currentPage.value - 1, currentPage.value, currentPage.value + 1, '...', count]
+})
+
+async function loadList() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const data = await api('/admin/institutions', {
+      params: {
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        keyword: applied.keyword.trim(),
+        kind: applied.kind,
+        status: applied.status
       }
-    )
-  })
-
-const total =
-  computed(
-    () =>
-      filteredData.value.length
-  )
-
-const totalPages =
-  computed(() =>
-    Math.max(
-      1,
-      Math.ceil(
-        total.value /
-        pageSize.value
-      )
-    )
-  )
-
-const tableData =
-  computed(() => {
-    const start =
-      (
-        currentPage.value - 1
-      ) *
-      pageSize.value
-
-    return filteredData.value.slice(
-      start,
-      start + pageSize.value
-    )
-  })
-
-const pages =
-  computed(() => {
-    const count =
-      totalPages.value
-
-    if (count <= 7) {
-      return Array.from(
-        { length: count },
-        (_, index) => index + 1
-      )
-    }
-
-    if (
-      currentPage.value <= 4
-    ) {
-      return [
-        1,
-        2,
-        3,
-        4,
-        5,
-        '...',
-        count
-      ]
-    }
-
-    return [
-      1,
-      '...',
-      currentPage.value - 1,
-      currentPage.value,
-      currentPage.value + 1,
-      '...',
-      count
-    ]
-  })
-
-const allCurrentSelected =
-  computed(() => {
-    if (
-      !tableData.value.length
-    ) {
-      return false
-    }
-
-    return tableData.value.every(
-      item =>
-        selectedIds.value.includes(
-          item.id
-        )
-    )
-  })
-
-const handleSearch = () => {
-  Object.assign(
-    applied,
-    filters
-  )
-
-  currentPage.value = 1
-  selectedIds.value = []
-}
-
-const reset = () => {
-  Object.assign(
-    filters,
-    {
-      keyword: '',
-      type: '',
-      status: ''
-    }
-  )
-
-  Object.assign(
-    applied,
-    filters
-  )
-
-  currentPage.value = 1
-  selectedIds.value = []
-}
-
-const toggleSelectAll = event => {
-  if (
-    event.target.checked
-  ) {
-    const ids =
-      tableData.value.map(
-        item => item.id
-      )
-
-    selectedIds.value = [
-      ...new Set([
-        ...selectedIds.value,
-        ...ids
-      ])
-    ]
-  } else {
-    const currentIds =
-      tableData.value.map(
-        item => item.id
-      )
-
-    selectedIds.value =
-      selectedIds.value.filter(
-        id =>
-          !currentIds.includes(id)
-      )
+    })
+    rows.value = data.list || []
+    total.value = data.total || 0
+    totalPages.value = data.totalPages || Math.max(1, Math.ceil(total.value / pageSize.value))
+  } catch (err) {
+    rows.value = []
+    total.value = 0
+    totalPages.value = 1
+    loadError.value = err.message || '加载失败'
+  } finally {
+    loading.value = false
   }
 }
 
-const openView = item => {
-  currentItem.value = item
+onMounted(loadList)
+
+const handleSearch = () => {
+  Object.assign(applied, filters)
+  currentPage.value = 1
+  loadList()
+}
+
+const reset = () => {
+  Object.assign(filters, { keyword: '', kind: '', status: '' })
+  Object.assign(applied, { keyword: '', kind: '', status: '' })
+  currentPage.value = 1
+  loadList()
+}
+
+const changePage = page => {
+  if (page === '...') return
+  if (page < 1 || page > totalPages.value) return
+  currentPage.value = page
+  loadList()
+}
+
+const handlePageSizeChange = () => {
+  currentPage.value = 1
+  loadList()
+}
+
+const openView = async item => {
   modalMode.value = 'view'
   modalVisible.value = true
+  modalLoading.value = true
+  modalError.value = ''
+  try {
+    currentItem.value = await api(`/admin/institutions/${item.id}`)
+  } catch (err) {
+    currentItem.value = null
+    modalError.value = err.message || '加载失败'
+  } finally {
+    modalLoading.value = false
+  }
 }
 
 const fillForm = item => {
-  Object.assign(
-    form,
-    item
-  )
+  Object.assign(form, {
+    kind: item.kind || 'platform',
+    name: item.name || '',
+    intro: item.intro || '',
+    label: item.label || '',
+    sortOrder: item.sortOrder || 0,
+    contact: item.contact || '',
+    phone: item.phone || '',
+    unit: item.unit || ''
+  })
 }
 
 const openEdit = item => {
-  currentItem.value = item
-
-  fillForm(item)
-
   modalMode.value = 'edit'
+  currentItem.value = item
+  modalError.value = ''
+  fillForm(item)
   modalVisible.value = true
 }
 
 const openCreate = () => {
-  currentItem.value = null
-
-  Object.assign(
-    form,
-    {
-      id: '',
-      name: '',
-      type: '',
-      contact: '',
-      phone: '',
-      region:
-        '广东省 深圳市 南山区',
-      status: '已上架'
-    }
-  )
-
   modalMode.value = 'create'
+  currentItem.value = null
+  modalError.value = ''
+  Object.assign(form, {
+    kind: 'platform',
+    name: '',
+    intro: '',
+    label: '',
+    sortOrder: 0,
+    contact: '',
+    phone: '',
+    unit: ''
+  })
   modalVisible.value = true
 }
 
@@ -289,345 +202,158 @@ const closeModal = () => {
   modalVisible.value = false
 }
 
-const save = () => {
+const save = async () => {
   if (!form.name.trim()) {
-    window.alert(
-      '请输入机构名称'
-    )
+    modalError.value = '请输入机构名称'
     return
   }
 
-  if (!form.type) {
-    window.alert(
-      '请选择机构类型'
-    )
-    return
-  }
-
-  if (
-    modalMode.value ===
-    'create'
-  ) {
-    store.add({
-      ...form,
-
-      id:
-        form.id ||
-        String(
-          Date.now()
-        ).slice(-8),
-
-      createdAt:
-        new Date()
-          .toLocaleString(
-            'zh-CN',
-            {
-              hour12: false
-            }
-          )
-    })
-
-    currentPage.value = 1
-  } else {
-    store.update(
-      currentItem.value.id,
-      {
-        name: form.name,
-        type: form.type,
-        contact: form.contact,
-        phone: form.phone,
-        region: form.region,
-        status: form.status
-      }
-    )
-  }
-
-  closeModal()
-}
-
-const toggleStatus = item => {
-  const action =
-    item.status === '已上架'
-      ? '下架'
-      : '上架'
-
-  if (
-    !window.confirm(
-      `确定${action}机构《${item.name}》吗？`
-    )
-  ) {
-    return
-  }
-
-  store.toggleStatus(
-    item.id
-  )
-}
-
-const removeItem = item => {
-  if (
-    !window.confirm(
-      `确定删除机构《${item.name}》吗？`
-    )
-  ) {
-    return
-  }
-
-  store.remove(
-    item.id
-  )
-
-  selectedIds.value =
-    selectedIds.value.filter(
-      id => id !== item.id
-    )
-}
-
-const batchAction = event => {
-  const action =
-    event.target.value
-
-  event.target.value = ''
-
-  if (!action) return
-
-  if (
-    selectedIds.value.length === 0
-  ) {
-    window.alert(
-      '请先选择机构'
-    )
-
-    return
-  }
-
-  if (
-    action === 'online'
-  ) {
-    store.batchStatus(
-      selectedIds.value,
-      '已上架'
-    )
-  }
-
-  if (
-    action === 'offline'
-  ) {
-    store.batchStatus(
-      selectedIds.value,
-      '已下架'
-    )
-  }
-
-  if (
-    action === 'delete'
-  ) {
-    if (
-      !window.confirm(
-        `确定删除已选择的 ${selectedIds.value.length} 个机构吗？`
-      )
-    ) {
-      return
+  saving.value = true
+  modalError.value = ''
+  try {
+    const body = {
+      name: form.name.trim(),
+      intro: form.intro.trim(),
+      label: form.label.trim(),
+      sortOrder: Number(form.sortOrder) || 0
+    }
+    if (form.kind === 'platform') {
+      body.contact = form.contact.trim()
+      body.phone = form.phone.trim()
+      body.unit = form.unit.trim()
     }
 
-    store.batchRemove(
-      selectedIds.value
-    )
-  }
+    if (modalMode.value === 'create') {
+      body.kind = form.kind
+      await api('/admin/institutions', { method: 'POST', body })
+      currentPage.value = 1
+    } else {
+      await api(`/admin/institutions/${currentItem.value.id}`, { method: 'PATCH', body })
+    }
 
-  selectedIds.value = []
+    closeModal()
+    loadList()
+  } catch (err) {
+    modalError.value = err.message || '保存失败'
+  } finally {
+    saving.value = false
+  }
 }
 
-const escapeCsv =
-  value => {
-    return `"${String(
-      value ?? ''
-    ).replaceAll(
-      '"',
-      '""'
-    )}"`
+const toggleStatus = async item => {
+  const goingOnline = item.status !== 'active'
+  const action = goingOnline ? '上架' : '下架'
+
+  if (!window.confirm(`确定${action}机构《${item.name}》吗？`)) {
+    return
   }
 
-const exportData = () => {
-  const rows = [
-    [
-      'ID',
-      '机构名称',
-      '机构类型',
-      '联系人',
-      '联系电话',
-      '地区',
-      '状态',
-      '创建时间'
-    ],
+  actionError.value = ''
+  try {
+    await api(`/admin/institutions/${item.id}/${goingOnline ? 'online' : 'offline'}`, { method: 'POST' })
+    loadList()
+  } catch (err) {
+    actionError.value = err.message || '操作失败'
+  }
+}
 
-    ...filteredData.value.map(
-      item => [
+const exporting = ref(false)
+
+const escapeCsv = value => `"${String(value ?? '').replaceAll('"', '""')}"`
+
+const exportData = async () => {
+  exporting.value = true
+  actionError.value = ''
+  try {
+    const all = []
+    for (let page = 1; page <= 20; page++) {
+      const data = await api('/admin/institutions', {
+        params: {
+          page,
+          pageSize: 50,
+          keyword: applied.keyword.trim(),
+          kind: applied.kind,
+          status: applied.status
+        }
+      })
+      all.push(...(data.list || []))
+      if (page >= (data.totalPages || 1)) break
+    }
+
+    const csv = [
+      ['ID', '机构名称', '机构类型', '标签', '简介', '状态', '更新时间'],
+      ...all.map(item => [
         item.id,
         item.name,
-        item.type,
-        item.contact,
-        item.phone,
-        item.region,
-        item.status,
-        item.createdAt
-      ]
-    )
-  ]
+        kindLabel(item),
+        item.label,
+        item.intro,
+        item.status === 'active' ? '已上架' : '已下架',
+        fmtTime(item.updatedAt)
+      ])
+    ].map(row => row.map(escapeCsv).join(',')).join('\n')
 
-  const csv =
-    rows
-      .map(
-        row =>
-          row
-            .map(escapeCsv)
-            .join(',')
-      )
-      .join('\n')
-
-  const blob =
-    new Blob(
-      [
-        '\uFEFF' +
-        csv
-      ],
-      {
-        type:
-          'text/csv;charset=utf-8'
-      }
-    )
-
-  const url =
-    URL.createObjectURL(
-      blob
-    )
-
-  const link =
-    document.createElement(
-      'a'
-    )
-
-  link.href = url
-  link.download =
-    '机构列表.csv'
-
-  link.click()
-
-  URL.revokeObjectURL(
-    url
-  )
-}
-
-const importInput =
-  ref(null)
-
-const openImport = () => {
-  importInput.value?.click()
-}
-
-const importFile = event => {
-  const file =
-    event.target.files?.[0]
-
-  if (!file) return
-
-  window.alert(
-    `已选择文件：${file.name}\n当前阶段先完成文件选择入口，第 11 阶段再补 CSV 数据解析。`
-  )
-
-  event.target.value = ''
-}
-
-watch(
-  pageSize,
-  () => {
-    currentPage.value = 1
-    selectedIds.value = []
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = '机构列表.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    actionError.value = err.message || '导出失败'
+  } finally {
+    exporting.value = false
   }
-)
+}
 </script>
 
 <template>
   <div class="institution-page">
-
     <section class="filter-card">
-
       <div class="filter-row">
-
         <div class="filter-item keyword">
-
-          <label>
-            关键词
-          </label>
-
+          <label>关键词</label>
           <input
             v-model="filters.keyword"
-            placeholder="请输入机构名称、联系人或手机号"
-            @keyup.enter="
-              handleSearch
-            "
+            placeholder="请输入机构名称、标签或简介关键词"
+            @keyup.enter="handleSearch"
           />
-
         </div>
 
         <div class="filter-item">
-
-          <label>
-            机构类型
-          </label>
-
-          <select
-            v-model="filters.type"
-          >
-
+          <label>机构类型</label>
+          <select v-model="filters.kind">
             <option value="">
               请选择机构类型
             </option>
-
             <option
-              v-for="
-                item in institutionTypes
-              "
-              :key="item"
-              :value="item"
+              v-for="item in KIND_OPTIONS"
+              :key="item.value"
+              :value="item.value"
             >
-              {{ item }}
+              {{ item.label }}
             </option>
-
           </select>
-
         </div>
 
         <div class="filter-item">
-
-          <label>
-            状态
-          </label>
-
-          <select
-            v-model="filters.status"
-          >
-
+          <label>状态</label>
+          <select v-model="filters.status">
             <option value="">
               请选择状态
             </option>
-
             <option
-              v-for="
-                item in institutionStatuses
-              "
-              :key="item"
-              :value="item"
+              v-for="item in STATUS_OPTIONS"
+              :key="item.value"
+              :value="item.value"
             >
-              {{ item }}
+              {{ item.label }}
             </option>
-
           </select>
-
         </div>
 
         <div class="filter-actions">
-
           <button
             class="primary-btn"
             @click="handleSearch"
@@ -648,560 +374,421 @@ watch(
           >
             ＋ 新增机构
           </button>
-
         </div>
-
       </div>
-
     </section>
 
-
     <section class="table-card">
-
       <div class="table-wrapper">
-
         <table>
-
           <thead>
             <tr>
-
-              <th class="check-col">
-
-                <input
-                  type="checkbox"
-                  :checked="
-                    allCurrentSelected
-                  "
-                  @change="
-                    toggleSelectAll
-                  "
-                />
-
-              </th>
-
               <th>ID</th>
               <th>机构名称</th>
               <th>机构类型</th>
-              <th>联系人</th>
-              <th>联系电话</th>
-              <th>地区</th>
+              <th>标签</th>
+              <th>简介</th>
+              <th>排序</th>
               <th>状态</th>
-              <th>创建时间</th>
+              <th>更新时间</th>
               <th>操作</th>
-
             </tr>
           </thead>
 
           <tbody>
-
             <tr
-              v-for="
-                item in tableData
-              "
+              v-for="item in rows"
               :key="item.id"
             >
+              <td>{{ item.id }}</td>
 
-              <td>
-
-                <input
-                  v-model="
-                    selectedIds
-                  "
-                  type="checkbox"
-                  :value="item.id"
-                />
-
-              </td>
-
-              <td>
-                {{ item.id }}
-              </td>
-
-              <td class="name-cell">
-                {{ item.name }}
+              <td
+                class="name-cell"
+                :title="item.name"
+              >
+                {{ item.name || '-' }}
               </td>
 
               <td>
                 <span
                   class="type-tag"
-                  :class="item.type"
+                  :class="kindClass(item)"
                 >
-                  {{ item.type }}
+                  {{ kindLabel(item) }}
                 </span>
               </td>
 
-              <td>
-                {{ item.contact }}
+              <td
+                class="label-cell"
+                :title="item.label"
+              >
+                {{ item.label || '-' }}
               </td>
 
-              <td>
-                {{ item.phone }}
+              <td
+                class="intro-cell"
+                :title="item.intro"
+              >
+                {{ item.intro || '-' }}
               </td>
 
-              <td>
-                {{ item.region }}
-              </td>
+              <td>{{ item.sortOrder }}</td>
 
               <td>
-
                 <span
                   class="status"
                   :class="{
-                    online:
-                      item.status ===
-                      '已上架',
-                    offline:
-                      item.status ===
-                      '已下架'
+                    online: item.status === 'active',
+                    offline: item.status !== 'active'
                   }"
                 >
-
                   <i></i>
 
-                  {{ item.status }}
-
+                  {{ item.status === 'active' ? '已上架' : '已下架' }}
                 </span>
+              </td>
 
+              <td class="time-cell">
+                {{ fmtTime(item.updatedAt) }}
               </td>
 
               <td>
-                {{ item.createdAt }}
-              </td>
-
-              <td>
-
                 <div class="operation">
-
-                  <button
-                    @click="
-                      openView(item)
-                    "
-                  >
+                  <button @click="openView(item)">
                     查看
                   </button>
 
                   <span>|</span>
 
-                  <button
-                    @click="
-                      openEdit(item)
-                    "
-                  >
+                  <button @click="openEdit(item)">
                     编辑
                   </button>
 
                   <span>|</span>
 
-                  <button
-                    @click="
-                      toggleStatus(item)
-                    "
-                  >
-                    {{
-                      item.status ===
-                      '已上架'
-                        ? '下架'
-                        : '上架'
-                    }}
+                  <button @click="toggleStatus(item)">
+                    {{ item.status === 'active' ? '下架' : '上架' }}
                   </button>
-
-                  <span>|</span>
-
-                  <button
-                    class="danger"
-                    @click="
-                      removeItem(item)
-                    "
-                  >
-                    删除
-                  </button>
-
                 </div>
-
               </td>
-
             </tr>
 
+            <tr v-if="loading">
+              <td
+                colspan="9"
+                class="state-row"
+              >
+                加载中…
+              </td>
+            </tr>
+
+            <tr v-else-if="loadError">
+              <td
+                colspan="9"
+                class="state-row error"
+              >
+                {{ loadError }}
+
+                <button
+                  class="retry-btn"
+                  @click="loadList"
+                >
+                  重试
+                </button>
+              </td>
+            </tr>
+
+            <tr v-else-if="rows.length === 0">
+              <td
+                colspan="9"
+                class="state-row"
+              >
+                暂无符合条件的机构
+              </td>
+            </tr>
           </tbody>
-
         </table>
-
       </div>
 
-
-      <div class="batch-row">
-
-        <div class="batch-left">
-
-          <label>
-            <input
-              type="checkbox"
-              :checked="
-                allCurrentSelected
-              "
-              @change="
-                toggleSelectAll
-              "
-            />
-
-            全选
-          </label>
-
-          <select
-            @change="
-              batchAction
-            "
-          >
-
-            <option value="">
-              批量操作
-            </option>
-
-            <option value="online">
-              批量上架
-            </option>
-
-            <option value="offline">
-              批量下架
-            </option>
-
-            <option value="delete">
-              批量删除
-            </option>
-
-          </select>
-
-          <span>
-            已选择
-            {{ selectedIds.length }}
-            项
-          </span>
-
-        </div>
-
-
-        <div class="batch-right">
-
-          <button
-            class="outline-btn"
-            @click="exportData"
-          >
-            ⇩ 导出数据
-          </button>
-
-          <button
-            class="primary-btn"
-            @click="openImport"
-          >
-            ⇧ 批量导入
-          </button>
-
-          <input
-            ref="importInput"
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            hidden
-            @change="importFile"
-          />
-
-        </div>
-
+      <div
+        v-if="actionError"
+        class="action-error"
+      >
+        {{ actionError }}
       </div>
 
+      <div class="batch-right">
+        <button
+          class="outline-btn"
+          :disabled="exporting"
+          @click="exportData"
+        >
+          {{ exporting ? '导出中…' : '⇩ 导出数据' }}
+        </button>
+      </div>
 
       <div class="pagination">
-
         <span>
           共 {{ total }} 条
         </span>
 
         <select
           v-model="pageSize"
+          @change="handlePageSizeChange"
         >
           <option :value="10">
             10条/页
           </option>
-
           <option :value="20">
             20条/页
           </option>
-
           <option :value="50">
             50条/页
           </option>
         </select>
 
         <button
-          :disabled="
-            currentPage === 1
-          "
-          @click="
-            currentPage--
-          "
+          :disabled="currentPage === 1"
+          @click="changePage(currentPage - 1)"
         >
           ‹
         </button>
 
         <template
-          v-for="
-            (page, index)
-            in pages
-          "
-          :key="
-            `${page}-${index}`
-          "
+          v-for="(page, index) in pages"
+          :key="`${page}-${index}`"
         >
-
           <span
-            v-if="
-              page === '...'
-            "
+            v-if="page === '...'"
+            class="ellipsis"
           >
             ...
           </span>
 
           <button
             v-else
-            :class="{
-              active:
-                currentPage === page
-            }"
-            @click="
-              currentPage = page
-            "
+            :class="{ active: currentPage === page }"
+            @click="changePage(page)"
           >
             {{ page }}
           </button>
-
         </template>
 
         <button
-          :disabled="
-            currentPage ===
-            totalPages
-          "
-          @click="
-            currentPage++
-          "
+          :disabled="currentPage === totalPages"
+          @click="changePage(currentPage + 1)"
         >
           ›
         </button>
-
       </div>
-
     </section>
-
 
     <div
       v-if="modalVisible"
       class="modal-mask"
-      @click.self="
-        closeModal
-      "
+      @click.self="closeModal"
     >
-
       <div class="modal">
-
         <div class="modal-header">
-
           <h3>
-            {{
-              modalMode === 'view'
-                ? '机构详情'
-                : modalMode === 'create'
-                  ? '新增机构'
-                  : '编辑机构'
-            }}
+            {{ modalMode === 'view' ? '机构详情' : modalMode === 'create' ? '新增机构' : '编辑机构' }}
           </h3>
 
-          <button
-            @click="closeModal"
-          >
+          <button @click="closeModal">
             ×
           </button>
-
         </div>
-
 
         <div
-          v-if="
-            modalMode === 'view'
-          "
+          v-if="modalMode === 'view'"
           class="detail-grid"
         >
+          <template v-if="modalLoading">
+            <div class="full state-text">
+              加载中…
+            </div>
+          </template>
 
-          <div>
-            <label>机构编号</label>
-            <strong>
-              {{ currentItem.id }}
-            </strong>
-          </div>
+          <template v-else-if="modalError">
+            <div class="full state-text error">
+              {{ modalError }}
+            </div>
+          </template>
 
-          <div>
-            <label>机构名称</label>
-            <strong>
-              {{ currentItem.name }}
-            </strong>
-          </div>
+          <template v-else-if="currentItem">
+            <div>
+              <label>机构编号</label>
+              <strong>{{ currentItem.id }}</strong>
+            </div>
 
-          <div>
-            <label>机构类型</label>
-            <strong>
-              {{ currentItem.type }}
-            </strong>
-          </div>
+            <div>
+              <label>机构名称</label>
+              <strong>{{ currentItem.name || '-' }}</strong>
+            </div>
 
-          <div>
-            <label>联系人</label>
-            <strong>
-              {{ currentItem.contact }}
-            </strong>
-          </div>
+            <div>
+              <label>机构类型</label>
+              <strong>{{ kindLabel(currentItem) }}</strong>
+            </div>
 
-          <div>
-            <label>联系电话</label>
-            <strong>
-              {{ currentItem.phone }}
-            </strong>
-          </div>
+            <div>
+              <label>状态</label>
+              <strong>{{ currentItem.status === 'active' ? '已上架' : '已下架' }}</strong>
+            </div>
 
-          <div>
-            <label>状态</label>
-            <strong>
-              {{ currentItem.status }}
-            </strong>
-          </div>
+            <div>
+              <label>标签</label>
+              <strong>{{ currentItem.label || '-' }}</strong>
+            </div>
 
-          <div class="full">
-            <label>所在地区</label>
-            <strong>
-              {{ currentItem.region }}
-            </strong>
-          </div>
+            <div>
+              <label>排序</label>
+              <strong>{{ currentItem.sortOrder }}</strong>
+            </div>
 
+            <template v-if="currentItem.kind === 'platform'">
+              <div>
+                <label>依托单位</label>
+                <strong>{{ currentItem.unit || '-' }}</strong>
+              </div>
+
+              <div>
+                <label>平台类型</label>
+                <strong>{{ { poc: '验证平台', pilot: '中试平台', other: '其他' }[currentItem.platformTypeKey] || '-' }}</strong>
+              </div>
+
+              <div>
+                <label>联系人</label>
+                <strong>{{ currentItem.contact || '-' }}</strong>
+              </div>
+
+              <div>
+                <label>联系电话</label>
+                <strong>{{ currentItem.phone || '-' }}</strong>
+              </div>
+            </template>
+
+            <div class="full">
+              <label>简介</label>
+              <strong>{{ currentItem.intro || '-' }}</strong>
+            </div>
+
+            <div
+              v-if="currentItem.detailInfo"
+              class="full"
+            >
+              <label>详细信息</label>
+              <strong>{{ currentItem.detailInfo }}</strong>
+            </div>
+
+            <div class="full">
+              <label>更新时间</label>
+              <strong>{{ fmtTime(currentItem.updatedAt) }}</strong>
+            </div>
+          </template>
         </div>
-
 
         <div
           v-else
           class="form-grid"
         >
-
           <label>
             机构名称 *
 
             <input
               v-model="form.name"
+              placeholder="请输入机构名称"
             />
           </label>
 
-          <label>
+          <label v-if="modalMode === 'create'">
             机构类型 *
 
-            <select
-              v-model="form.type"
-            >
-
-              <option value="">
-                请选择
-              </option>
-
+            <select v-model="form.kind">
               <option
-                v-for="
-                  item
-                  in institutionTypes
-                "
-                :key="item"
-                :value="item"
+                v-for="item in KIND_OPTIONS"
+                :key="item.value"
+                :value="item.value"
               >
-                {{ item }}
+                {{ item.label }}
               </option>
-
             </select>
           </label>
 
           <label>
-            联系人
+            标签
 
             <input
-              v-model="
-                form.contact
-              "
+              v-model="form.label"
+              placeholder="如：概念验证、投融资"
             />
           </label>
 
           <label>
-            联系电话
+            排序
 
             <input
-              v-model="
-                form.phone
-              "
+              v-model.number="form.sortOrder"
+              type="number"
             />
           </label>
+
+          <template v-if="form.kind === 'platform'">
+            <label>
+              依托单位
+
+              <input v-model="form.unit" />
+            </label>
+
+            <label>
+              联系人
+
+              <input v-model="form.contact" />
+            </label>
+
+            <label>
+              联系电话
+
+              <input v-model="form.phone" />
+            </label>
+          </template>
 
           <label class="full">
-            所在地区
+            简介
 
-            <input
-              v-model="
-                form.region
-              "
-            />
+            <textarea
+              v-model="form.intro"
+              rows="4"
+            ></textarea>
           </label>
-
-          <label>
-            状态
-
-            <select
-              v-model="
-                form.status
-              "
-            >
-              <option value="已上架">
-                已上架
-              </option>
-
-              <option value="已下架">
-                已下架
-              </option>
-            </select>
-
-          </label>
-
         </div>
 
+        <div
+          v-if="modalError && modalMode !== 'view'"
+          class="modal-error"
+        >
+          {{ modalError }}
+        </div>
 
         <div class="modal-footer">
-
           <button
             class="default-btn"
             @click="closeModal"
           >
-            {{
-              modalMode ===
-              'view'
-                ? '关闭'
-                : '取消'
-            }}
+            {{ modalMode === 'view' ? '关闭' : '取消' }}
           </button>
 
           <button
-            v-if="
-              modalMode !== 'view'
-            "
+            v-if="modalMode !== 'view'"
             class="primary-btn"
+            :disabled="saving"
             @click="save"
           >
-            保存
+            {{ saving ? '保存中…' : '保存' }}
           </button>
-
         </div>
-
       </div>
-
     </div>
-
   </div>
 </template>
 
@@ -1241,10 +828,10 @@ watch(
 
 .filter-item input,
 .filter-item select,
-.batch-row select,
 .pagination select,
 .form-grid input,
-.form-grid select {
+.form-grid select,
+.form-grid textarea {
   width: 100%;
   height: 42px;
   padding: 0 13px;
@@ -1254,10 +841,17 @@ watch(
   background: white;
 }
 
+.form-grid textarea {
+  height: auto;
+  padding-top: 10px;
+  resize: vertical;
+}
+
 .filter-item input:focus,
 .filter-item select:focus,
 .form-grid input:focus,
-.form-grid select:focus {
+.form-grid select:focus,
+.form-grid textarea:focus {
   border-color: #1677ff;
 }
 
@@ -1280,6 +874,11 @@ watch(
   color: white;
 }
 
+.primary-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .default-btn {
   border: 1px solid #dce4ee;
   background: white;
@@ -1292,6 +891,11 @@ watch(
   color: #1677ff;
 }
 
+.outline-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .table-card {
   margin-top: 14px;
 }
@@ -1302,7 +906,7 @@ watch(
 
 table {
   width: 100%;
-  min-width: 1300px;
+  min-width: 1240px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -1322,44 +926,36 @@ th {
   font-weight: 600;
 }
 
-.check-col {
-  width: 48px;
+th:nth-child(1) {
+  width: 70px;
 }
 
 th:nth-child(2) {
-  width: 75px;
+  width: 220px;
 }
 
 th:nth-child(3) {
-  width: 210px;
+  width: 110px;
 }
 
 th:nth-child(4) {
   width: 110px;
 }
 
-th:nth-child(5) {
-  width: 90px;
-}
-
 th:nth-child(6) {
-  width: 120px;
+  width: 65px;
 }
 
 th:nth-child(7) {
-  width: 220px;
+  width: 90px;
 }
 
 th:nth-child(8) {
-  width: 95px;
+  width: 145px;
 }
 
 th:nth-child(9) {
-  width: 170px;
-}
-
-th:nth-child(10) {
-  width: 180px;
+  width: 150px;
 }
 
 tbody tr:hover {
@@ -1367,35 +963,45 @@ tbody tr:hover {
 }
 
 .name-cell {
+  overflow: hidden;
   font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.label-cell,
+.intro-cell,
+.time-cell {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .type-tag {
   display: inline-block;
   padding: 5px 9px;
   border-radius: 4px;
+  white-space: nowrap;
+}
+
+.type-tag.tag-platform {
   background: #eaf3ff;
   color: #1677ff;
 }
 
-.type-tag.服务机构 {
-  background: #e9faf8;
-  color: #24b6a2;
-}
-
-.type-tag.银行 {
+.type-tag.tag-invest {
   background: #fff3e2;
   color: #ee991f;
 }
 
-.type-tag.高校 {
-  background: #f1edff;
-  color: #7d64ee;
+.type-tag.tag-service {
+  background: #e9faf8;
+  color: #24b6a2;
 }
 
-.type-tag.研究院 {
-  background: #edf4ff;
-  color: #427ce2;
+.type-tag.tag-none {
+  background: #eef1f5;
+  color: #7b8494;
 }
 
 .status {
@@ -1431,37 +1037,48 @@ tbody tr:hover {
   color: #1677ff;
 }
 
-.operation .danger {
-  color: #ef5360;
+.operation button:hover {
+  text-decoration: underline;
 }
 
 .operation span {
   color: #d4dbe4;
 }
 
-.batch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 64px;
-  padding: 0 25px;
-  border-bottom: 1px solid #edf1f5;
+.state-row {
+  height: 120px;
+  color: #97a1b0;
+  text-align: center;
 }
 
-.batch-left,
+.state-row.error {
+  color: #ef4f5d;
+}
+
+.retry-btn {
+  margin-left: 12px;
+  padding: 4px 14px;
+  border: 1px solid #ef4f5d;
+  border-radius: 4px;
+  background: white;
+  color: #ef4f5d;
+}
+
+.action-error,
+.modal-error {
+  padding: 10px 25px;
+  color: #ef4f5d;
+  font-size: 13px;
+}
+
 .batch-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 17px;
-}
-
-.batch-left select {
-  width: 125px;
-}
-
-.batch-left span {
-  color: #909baa;
-  font-size: 13px;
+  min-height: 64px;
+  padding: 0 25px;
+  border-bottom: 1px solid #edf1f5;
 }
 
 .pagination {
@@ -1497,6 +1114,10 @@ tbody tr:hover {
   opacity: 0.4;
 }
 
+.ellipsis {
+  padding: 0 4px;
+}
+
 .modal-mask {
   position: fixed;
   z-index: 800;
@@ -1509,6 +1130,8 @@ tbody tr:hover {
 
 .modal {
   width: 650px;
+  max-height: 82vh;
+  overflow-y: auto;
   border-radius: 10px;
   background: white;
   box-shadow:
@@ -1553,6 +1176,18 @@ tbody tr:hover {
 .detail-grid strong {
   color: #3c495c;
   font-size: 14px;
+  font-weight: 500;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.state-text {
+  color: #97a1b0;
+  font-size: 14px;
+}
+
+.state-text.error {
+  color: #ef4f5d;
 }
 
 .form-grid label {
@@ -1561,7 +1196,8 @@ tbody tr:hover {
 }
 
 .form-grid input,
-.form-grid select {
+.form-grid select,
+.form-grid textarea {
   margin-top: 8px;
 }
 
