@@ -36,6 +36,7 @@
 
 import argparse
 import atexit
+import hashlib
 import importlib.util
 import ipaddress
 import json
@@ -47,6 +48,7 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
 import urllib.error
 import urllib.request
 from enum import Enum
@@ -55,6 +57,8 @@ from shutil import which
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND_DIR = ROOT / "南山"
+ADMIN_FRONTEND_DIR = ROOT.parent / "nanshan-frontend"
+ADMIN_DIST_INDEX = ADMIN_FRONTEND_DIR / "dist" / "index.html"
 CONFIG_JS = FRONTEND_DIR / "common" / "config.js"
 API_SERVER_DIR = ROOT.parent / "tech-transfer-service"
 BACKEND_URL = "http://127.0.0.1:8787"
@@ -74,6 +78,68 @@ TUNNEL_API_PORT = 8076   # 远端 API 入口（→ 本地 8787，实际以 frpc.
 TUNNEL_H5_PORT = 8077    # 远端 H5 入口（→ 本地 5173，实际以 frpc.toml 解析为准）
 
 DEMO_RE = re.compile(r"(USE_CAPITAL_DEMO\s*=\s*)(true|false)")
+
+
+# ── 前端构建新鲜度 ───────────────────────────────────────────
+def output_is_stale(source_files, output_file):
+    """产物缺失或任一源码比产物新时返回 True。"""
+    if not output_file.is_file():
+        return True
+    try:
+        output_mtime = output_file.stat().st_mtime_ns
+    except OSError:
+        return True
+    for source in source_files:
+        try:
+            if source.is_file() and source.stat().st_mtime_ns > output_mtime:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _source_files(root, root_files=(), source_dirs=()):
+    """收集会影响前端产物的源码，忽略构建产物和依赖目录。"""
+    files = [root / name for name in root_files]
+    ignored = {"node_modules", "dist", "unpackage", ".git", ".vite"}
+    for relative_dir in source_dirs:
+        directory = root / relative_dir
+        if not directory.is_dir():
+            continue
+        for path in directory.rglob("*"):
+            if path.is_file() and not any(part in ignored for part in path.parts):
+                files.append(path)
+    return files
+
+
+def h5_source_files():
+    return _source_files(
+        FRONTEND_DIR,
+        root_files=("App.vue", "main.js", "manifest.json", "pages.json"),
+        source_dirs=("pages", "packageA", "subpackages", "common", "components", "static"),
+    )
+
+
+def admin_source_files():
+    return _source_files(
+        ADMIN_FRONTEND_DIR,
+        root_files=("index.html", "vite.config.js", "package.json", "package-lock.json"),
+        source_dirs=("src", "public"),
+    )
+
+
+def _h5_state_file():
+    project_key = hashlib.sha1(str(FRONTEND_DIR).encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"nanshan-h5-{project_key}.stamp"
+
+
+def h5_needs_restart():
+    """首次接管或源码比上次确认的 H5 运行版本新时，要求重启 watcher。"""
+    return output_is_stale(h5_source_files(), _h5_state_file())
+
+
+def mark_h5_current():
+    _h5_state_file().write_text(str(time.time_ns()), encoding="utf-8")
 
 
 # ── 日志 ─────────────────────────────────────────────────────
@@ -473,12 +539,36 @@ def run_weixin(hbx_cli):
 
 
 # ── H5 Runtime ───────────────────────────────────────────────
+def stop_h5_server():
+    """停止绑定本项目专用 H5 端口的 watcher，给最新源码的编译留出端口。"""
+    pid = port_pid(H5_PORT)
+    if not pid:
+        return True
+    print(f"  检测到旧 H5 watcher（PID={pid}），正在重启以加载最新源码 ...")
+    try:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=15)
+    except Exception as e:
+        error(f"停止旧 H5 watcher 失败：{e}")
+        return False
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if not port_listening(H5_PORT):
+            return True
+        time.sleep(0.5)
+    error(f"旧 H5 watcher（PID={pid}）未在 15s 内释放端口 {H5_PORT}")
+    return False
+
+
 def run_h5(hbx_cli, lan):
     print("  调用 HBuilderX 编译并运行 H5 dev server ...")
     print(f"  H5 dev 端口：{H5_PORT}（manifest.json h5.devServer.port）")
     if port_listening(H5_PORT):
-        ok(f"检测到 {H5_URL} 已在运行，复用现有 H5 dev server")
-        return True
+        if not h5_needs_restart():
+            ok(f"检测到 {H5_URL} 已运行，源码未变化，复用现有 H5 dev server")
+            return True
+        warn("检测到小程序 H5 源码更新，重新编译 H5 dev server")
+        if not stop_h5_server():
+            return False
 
     proc, _, _ = spawn_cli_watch(
         [str(hbx_cli), "launch", "web", "--project", str(FRONTEND_DIR)],
@@ -494,6 +584,7 @@ def run_h5(hbx_cli, lan):
         return False
 
     ok(f"H5 已就绪：{H5_URL}")
+    mark_h5_current()
     lan_ips = get_lan_ips()
     if lan:
         print("  局域网访问：")
@@ -523,6 +614,31 @@ def wait_h5_ready(timeout=300):
                 pass
         time.sleep(1)
     return False
+
+
+# ── 后台管理 H5（静态构建）──────────────────────────────────
+def ensure_admin_h5_current():
+    """后台公网页由 FastAPI 托管 dist，源码变更时必须先重新 vite build。"""
+    print("  检查后台管理 H5 构建产物（nanshan-frontend/dist）...")
+    if not output_is_stale(admin_source_files(), ADMIN_DIST_INDEX):
+        ok("后台管理 H5 构建产物为最新，复用 dist")
+        return True
+
+    npm = which("npm.cmd") or which("npm")
+    if not npm:
+        error("后台管理 H5 需要 npm，但未在 PATH 中找到 npm")
+        return False
+    warn("检测到后台管理 H5 源码更新，正在执行 npm run build ...")
+    try:
+        ret = subprocess.run([npm, "run", "build"], cwd=ADMIN_FRONTEND_DIR, timeout=300)
+    except Exception as e:
+        error(f"后台管理 H5 构建失败：{e}")
+        return False
+    if ret.returncode != 0 or not ADMIN_DIST_INDEX.is_file():
+        error("后台管理 H5 构建失败，未替换现有 dist")
+        return False
+    ok("后台管理 H5 已重新构建；公网 /admin/* 将读取最新 dist")
+    return True
 
 
 # ── frp 隧道（--tunnel） ─────────────────────────────────────
@@ -1009,6 +1125,11 @@ def main():
         check_db_config()
     else:
         skip("跳过后端（--frontend-only）")
+
+    # 公网后台由 FastAPI 静态托管 nanshan-frontend/dist；构建必须在后端启动前完成。
+    print("[3.5/6] 检查后台管理 H5")
+    if not ensure_admin_h5_current():
+        return 1
 
     # [4/6] 启动 FastAPI（唯一实例，8787 三分支）
     print("[4/6] 启动 FastAPI 后端")
