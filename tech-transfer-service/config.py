@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "postgres123"  # 本地开发默认值；staging/production 必须由环境提供
     DB_NAME: str = "tech_transfer"
 
+    # ── DB 连接池（T007：psycopg2 ThreadedConnectionPool，进程内）──
+    # 规模约束：uvicorn worker 数 × DB_POOL_MAX ≤ PostgreSQL max_connections；
+    # 本地默认单 worker，min=2/max=10 相对 PG 默认 max_connections=100 余量充足
+    DB_POOL_MIN: int = 2
+    DB_POOL_MAX: int = 10
+    DB_CONNECT_TIMEOUT: int = 5  # 秒；防止 DB 不可用时 connect 长时间挂起
+
     # ── 存量资本库（MySQL，仅 tools/etl_institutions.py 过渡期使用）──
     CAPITAL_DB_HOST: str = "127.0.0.1"
     CAPITAL_DB_PORT: int = 3306
@@ -133,6 +140,21 @@ class Settings(BaseSettings):
                     pass
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
+
+    @field_validator("DB_POOL_MIN", "DB_POOL_MAX", "DB_CONNECT_TIMEOUT")
+    @classmethod
+    def _validate_pool_sizes(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("DB 连接池参数必须 >= 1")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_pool_order(self):
+        if self.DB_POOL_MIN > self.DB_POOL_MAX:
+            raise ValueError(
+                f"DB_POOL_MIN({self.DB_POOL_MIN}) 不能大于 DB_POOL_MAX({self.DB_POOL_MAX})"
+            )
+        return self
 
     # ── 环境判定 ────────────────────────────────────────────
     @property

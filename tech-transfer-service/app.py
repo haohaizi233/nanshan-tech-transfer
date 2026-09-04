@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -22,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from config import assert_environment, settings
 from core.response import set_request_id, get_request_id
 from core.exception_handlers import configure_logging, register_exception_handlers
-from db import get_cursor
+from db import close_pool, get_cursor, init_pool
 from routes.auth import router as auth_router
 from routes.me import router as me_router
 from routes.achievement import router as achievement_router
@@ -43,6 +44,16 @@ configure_logging()
 # staging/production 关闭，避免对外暴露接口面
 _docs_enabled = settings.is_local
 
+
+# ── DB 连接池生命周期（T007）────────────────────────────────
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # 启动即建池（DB 不可用时降级为空池懒填充，不阻塞服务）
+    init_pool()
+    yield
+    close_pool()
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="南山科转通 —— 统一后端（成果/需求/对接/机构/AI/Admin）",
@@ -50,6 +61,7 @@ app = FastAPI(
     docs_url="/docs" if _docs_enabled else None,
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
+    lifespan=lifespan,
 )
 
 # CORS 白名单来自 Settings（CORS_ORIGINS）；
