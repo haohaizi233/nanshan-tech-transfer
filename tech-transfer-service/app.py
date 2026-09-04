@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from config import assert_environment, settings
 from core.response import set_request_id, get_request_id
@@ -73,6 +75,30 @@ app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(admin_ops_router)
 app.include_router(file_router)
+
+
+# ── Vue 后台管理静态托管（nanshan-frontend/dist → /admin）────
+# 构建产物存在才挂载：cd nanshan-frontend && npm run build
+# 同源直连 API（前端 BASE 为相对路径 /api/tech-transfer/v1），免代理免 CORS
+# 与 API admin 路由（/api/tech-transfer/v1/admin/...）无前缀冲突
+_admin_dist = Path(__file__).resolve().parent.parent / "nanshan-frontend" / "dist"
+
+if (_admin_dist / "index.html").is_file():
+    app.mount(
+        "/admin/assets",
+        StaticFiles(directory=_admin_dist / "assets"),
+        name="admin-assets",
+    )
+
+    @app.get("/admin", include_in_schema=False)
+    @app.get("/admin/{full_path:path}", include_in_schema=False)
+    def admin_spa(full_path: str = ""):
+        # 静态文件命中即返回（favicon 等），其余一律回 index.html（SPA history 路由）
+        if full_path:
+            candidate = (_admin_dist / full_path).resolve()
+            if candidate.is_file() and _admin_dist in candidate.parents:
+                return FileResponse(candidate)
+        return FileResponse(_admin_dist / "index.html")
 
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────
@@ -142,3 +168,4 @@ if __name__ == "__main__":
         port=settings.PORT,
         reload=settings.DEBUG or settings.is_local,
     )
+

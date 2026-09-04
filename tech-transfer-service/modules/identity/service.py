@@ -5,6 +5,7 @@ from db import get_cursor
 from modules.identity.context import IdentityContext
 from modules.identity.provider import ExternalIdentity
 from core.jwt_utils import sign_access_token, sign_refresh_token
+from core.password import verify_password
 
 
 def _generate_user_no(cur) -> str:
@@ -152,6 +153,69 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
         "user": user,
         "isNewUser": is_new,
     }
+
+
+def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
+    """签发 access/refresh token 并落 auth_session，返回响应 dict（无 user 字段）。"""
+    cur.execute("SELECT user_no, status FROM app_user WHERE id=%s", (user_id,))
+    row = cur.fetchone()
+    user_no = row["user_no"] if row else ""
+
+    access_token = sign_access_token(user_id, user_no, roles)
+    refresh_token, jti = sign_refresh_token(user_id)
+
+    cur.execute(
+        """
+        INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
+        VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '14 days')
+        """,
+        (user_id, jti),
+    )
+    return {
+        "accessToken": access_token,
+        "refreshToken": refresh_token,
+        "expiresIn": 7200,
+    }
+
+
+def password_login_session(username: str, password: str) -> dict:
+    """账号密码登录（user_credential 表真实校验，无宿主票据）。
+
+    用户不存在 / 密码错误返回同一文案（防账号枚举）；
+    账号禁用（credential 或 app_user 任一 disabled）返回独立错误码。
+    """
+    from core.errors import BizError, TT_AUTH_40105, TT_AUTH_40106
+
+    if not username or not password:
+        raise BizError(*TT_AUTH_40105[:2], TT_AUTH_40105[2])
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            SELECT uc.user_id, uc.password_hash, uc.status AS cred_status,
+                   au.status AS user_status
+            FROM user_credential uc
+            JOIN app_user au ON au.id = uc.user_id
+            WHERE uc.username = %s AND au.deleted_at IS NULL
+            """,
+            (username,),
+        )
+        cred = cur.fetchone()
+
+        if cred is None or not verify_password(password, cred["password_hash"]):
+            code, message, status = TT_AUTH_40105
+            raise BizError(code, message, status)
+
+        if cred["cred_status"] != "active" or cred["user_status"] != "active":
+            code, message, status = TT_AUTH_40106
+            raise BizError(code, message, status)
+
+        user_id = cred["user_id"]
+        roles = _get_roles(cur, user_id)
+        result = _issue_session(cur, user_id, roles)
+        result["user"] = build_user_response(cur, user_id)
+        result["isNewUser"] = False
+        return result
 
 
 def refresh_session(refresh_token: str) -> dict:

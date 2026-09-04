@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { api, clearSession, getSavedUser, getToken, saveSession } from '../api/client'
+import {
+  api,
+  clearSession,
+  getRefreshToken,
+  getSavedUser,
+  getToken,
+  saveSession
+} from '../api/client'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(getToken())
@@ -13,15 +20,15 @@ export const useAuthStore = defineStore('auth', () => {
     return (u && (u.displayName || u.userNo)) || '管理员'
   })
 
-  // 本地联调：后端 MockIdentityProvider 票据 = local-dev-ticket-{subject}
-  // dev-user-001 为内置管理员账号
+  // 真实账号密码登录（后端 user_credential 表校验，PBKDF2 哈希）
   async function login(username, password) {
     if (!username || !password) {
       throw new Error('请输入账号和密码')
     }
-    const data = await api('/auth/bootstrap', {
+    const data = await api('/auth/login', {
       method: 'POST',
-      body: { hostCredential: `local-dev-ticket-${username}` }
+      body: { username: username.trim(), password },
+      skipAuthRefresh: true
     })
 
     const roles = (data.user && data.user.roles) || []
@@ -31,11 +38,24 @@ export const useAuthStore = defineStore('auth', () => {
 
     token.value = data.accessToken
     user.value = data.user
-    saveSession(data.accessToken, data.user)
+    saveSession(data.accessToken, data.user, data.refreshToken)
     return data.user
   }
 
   async function logout() {
+    // 吊销后端 refresh 会话（失败不阻塞本地登出）
+    const refreshToken = getRefreshToken()
+    if (refreshToken) {
+      try {
+        await api('/auth/logout', {
+          method: 'POST',
+          body: { refreshToken },
+          skipAuthRefresh: true
+        })
+      } catch {
+        /* 本地照常清理 */
+      }
+    }
     token.value = ''
     user.value = null
     clearSession()
