@@ -1,9 +1,8 @@
 import jwt
 import time
 import uuid
-from config import JWT_SECRET, ACCESS_TOKEN_EXPIRES, REFRESH_TOKEN_EXPIRES_DAYS
 
-_ALGO = "HS256"
+from config import settings
 
 
 def _now():
@@ -17,14 +16,14 @@ def sign_access_token(user_id: int, user_no: str, roles: list[str]) -> str:
         "roles": roles,
         "type": "access",
         "iat": _now(),
-        "exp": _now() + ACCESS_TOKEN_EXPIRES,
+        "exp": _now() + settings.ACCESS_TOKEN_EXPIRES,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=_ALGO)
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
 def sign_refresh_token(user_id: int) -> tuple[str, str]:
     jti = uuid.uuid4().hex
-    expires_in = REFRESH_TOKEN_EXPIRES_DAYS * 86400
+    expires_in = settings.REFRESH_TOKEN_EXPIRES_DAYS * 86400
     payload = {
         "sub": str(user_id),
         "jti": jti,
@@ -32,13 +31,16 @@ def sign_refresh_token(user_id: int) -> tuple[str, str]:
         "iat": _now(),
         "exp": _now() + expires_in,
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=_ALGO)
+    token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
     return token, jti
 
 
 def decode_token(token: str) -> dict:
-    return jwt.decode(token, JWT_SECRET, algorithms=[_ALGO])
+    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
 
 def decode_no_verify_exp(token: str) -> dict:
-    return jwt.decode(token, JWT_SECRET, algorithms=[_ALGO], options={"verify_exp": False})
+    return jwt.decode(
+        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM],
+        options={"verify_exp": False},
+    )

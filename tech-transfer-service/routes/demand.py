@@ -1,4 +1,4 @@
-"""
+﻿"""
 需求路由 —— /demands CRUD + 状态机
 
 Architecture source: openapi.yaml paths /demands, /demands/{id},
@@ -19,7 +19,7 @@ from modules.demand.service import (
     close_demand,
 )
 
-router = APIRouter(prefix="/api/tech-transfer/v1")
+router = APIRouter(prefix="/api/tech-transfer/v1", tags=["demand"])
 
 
 @router.get("/demands")

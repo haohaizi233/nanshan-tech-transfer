@@ -16,7 +16,7 @@ from contextlib import contextmanager
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+from config import settings
 
 _local = threading.local()
 
@@ -25,11 +25,11 @@ def _get_thread_conn():
     conn = getattr(_local, "conn", None)
     if conn is None or conn.closed:
         conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            dbname=DB_NAME,
+            host=settings.DB_HOST,
+            port=settings.DB_PORT,
+            user=settings.DB_USER,
+            password=settings.DB_PASSWORD,
+            dbname=settings.DB_NAME,
             cursor_factory=RealDictCursor,
         )
         _local.conn = conn

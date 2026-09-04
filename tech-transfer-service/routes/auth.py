@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+﻿from fastapi import APIRouter, Depends
 
 from core.response import success
 from core.middleware import json_body
@@ -6,7 +6,7 @@ from core.errors import bootstrap_credential_invalid, BizError, TT_COMMON_40102
 from modules.identity.provider import get_identity_provider
 from modules.identity.service import bootstrap_session, refresh_session, logout_session
 
-router = APIRouter(prefix="/api/tech-transfer/v1/auth")
+router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
 
 
 @router.post("/bootstrap")

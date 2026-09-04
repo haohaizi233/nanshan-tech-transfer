@@ -28,12 +28,19 @@ TT_COMMON_40901 = ("TT_COMMON_40901", "幂等键冲突，请勿重复提交", 40
 TT_COMMON_40902 = ("TT_COMMON_40902", "资源版本冲突（乐观锁）", 409)
 TT_COMMON_42901 = ("TT_COMMON_42901", "请求过于频繁，请稍后再试", 429)
 TT_COMMON_50001 = ("TT_COMMON_50001", "服务内部错误", 500)
+# ── T008 统一异常处理新增（add-only，2026-09-03） ─────────────
+TT_COMMON_40501 = ("TT_COMMON_40501", "请求方法不被允许", 405)
+TT_COMMON_42201 = ("TT_COMMON_42201", "请求参数校验失败", 422)
+TT_COMMON_40903 = ("TT_COMMON_40903", "数据冲突，请勿重复操作", 409)
+TT_COMMON_50301 = ("TT_COMMON_50301", "服务暂时不可用，请稍后再试", 503)
 
 # ── Auth ────────────────────────────────────────────────────
 TT_AUTH_40103 = ("TT_AUTH_40103", "宿主凭证无效", 401)
 TT_AUTH_40104 = ("TT_AUTH_40104", "refresh token 已被吊销", 401)
 
 # ── Achievement ─────────────────────────────────────────────
+TT_ACH_40301 = ("TT_ACH_40301", "非成果所有者", 403)
+TT_ACH_40401 = ("TT_ACH_40401", "成果不存在", 404)
 TT_ACH_40901 = ("TT_ACH_40901", "成果状态不允许此操作", 409)
 
 # ── Demand ──────────────────────────────────────────────────
@@ -52,7 +59,20 @@ TT_COOP_40902 = ("TT_COOP_40902", "已有进行中的对接意向", 409)
 TT_FAV_40401 = ("TT_FAV_40401", "收藏目标不存在或不可见", 404)
 
 # ── AI ──────────────────────────────────────────────────────
+TT_AI_40301 = ("TT_AI_40301", "无权查看该任务", 403)
+TT_AI_40401 = ("TT_AI_40401", "AI 任务不存在", 404)
+TT_AI_42901 = ("TT_AI_42901", "AI 任务创建频率超限", 429)
+TT_AI_50201 = ("TT_AI_50201", "AI Provider 调用失败", 502)
 TT_AI_50301 = ("TT_AI_50301", "AI 服务不可用", 503)
+
+# ── Admin ───────────────────────────────────────────────────
+TT_ADMIN_40301 = ("TT_ADMIN_40301", "非管理员", 403)
+TT_ADMIN_40001 = ("TT_ADMIN_40001", "审核驳回必须填写原因", 400)
+
+# ── Institution（add-only，Release Closure P0-2） ─────────────
+TT_INST_40001 = ("TT_INST_40001", "机构参数无效", 400)
+TT_INST_40401 = ("TT_INST_40401", "机构不存在", 404)
+TT_INST_40901 = ("TT_INST_40901", "机构状态不允许此操作", 409)
 
 # ── Patent ──────────────────────────────────────────────────
 TT_PATENT_50301 = ("TT_PATENT_50301", "专利查询服务不可用", 503)
@@ -60,6 +80,7 @@ TT_PATENT_50301 = ("TT_PATENT_50301", "专利查询服务不可用", 503)
 # ── File ────────────────────────────────────────────────────
 TT_FILE_40001 = ("TT_FILE_40001", "文件格式不支持", 400)
 TT_FILE_40401 = ("TT_FILE_40401", "文件不存在", 404)
+TT_FILE_50201 = ("TT_FILE_50201", "源站文件获取失败", 502)
 
 # ── Convenience constructors ────────────────────────────────
 
@@ -90,6 +111,21 @@ def not_found(msg="资源不存在", details=None):
 
 def demand_not_found(msg="需求不存在", details=None):
     code, message, status = TT_DMD_40401
+    return BizError(code, msg, status, details)
+
+
+def achievement_not_found(msg="成果不存在", details=None):
+    code, message, status = TT_ACH_40401
+    return BizError(code, msg, status, details)
+
+
+def achievement_forbidden(msg="非成果所有者", details=None):
+    code, message, status = TT_ACH_40301
+    return BizError(code, msg, status, details)
+
+
+def achievement_conflict(msg="成果状态不允许此操作", details=None):
+    code, message, status = TT_ACH_40901
     return BizError(code, msg, status, details)
 
 
@@ -140,4 +176,9 @@ def forbidden(msg="无权限访问该资源", details=None):
 
 def ai_unavailable(msg="AI 服务不可用", details=None):
     code, message, status = TT_AI_50301
+    return BizError(code, msg, status, details)
+
+
+def file_upstream_error(msg="源站文件获取失败", details=None):
+    code, message, status = TT_FILE_50201
     return BizError(code, msg, status, details)

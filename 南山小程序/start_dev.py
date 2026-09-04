@@ -5,14 +5,16 @@
 
     uni-app (Vue3) ──┬── mp-weixin（微信开发者工具）──┐
                      └── H5（HBuilderX dev server）──┤
-                                                    ├── FastAPI :8787 ── MySQL
+                                                    ├── FastAPI :8787 ── PostgreSQL
                                      Admin Web(未来) ─┘
+                          frpc 隧道 ── 43.138.138.200:8076(API)/8077(H5)
 
 用法：
   python start_dev.py                     # 默认 = FastAPI + 微信小程序
   python start_dev.py --weixin            # FastAPI + 微信小程序
   python start_dev.py --h5                # FastAPI + H5
   python start_dev.py --all               # FastAPI + 微信 + H5
+  python start_dev.py --h5 --tunnel       # FastAPI + H5 + frp 外网隧道（外网可访问）
   python start_dev.py --backend-only      # 仅 FastAPI
   python start_dev.py --frontend-only --weixin|h5|all   # 仅前端，不起后端
   python start_dev.py --h5 --lan          # H5 + FastAPI 局域网模式（输出 LAN 地址）
@@ -24,9 +26,12 @@
 
 说明：
   - HBuilderX CLI 运行 H5 / 微信均为「HBuilderX owned」进程，启动器不强制关闭它们；
-    Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI）。
+    Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI / frpc）。
   - 8787 已有健康的南山 FastAPI 时自动复用，退出启动器不会终止它。
-  - 内网转发使用 frp：frp 服务端需转发 8787（API）与 5173（H5 dev），本启动器只负责本机。
+  - 外网转发使用 frp（frpc.toml：serverAddr + 8076→8787 + 8077→5173），
+    --tunnel 由本启动器拉起 frpc 并做外网端到端健康验证；
+    frpc 目录检测顺序：FRPC_HOME 环境变量 > 桌面 frp* 扫描。
+  - 启动器 spawn 的后端进程退出时（如崩溃）keep-alive 循环会自动重启。
 """
 
 import argparse
@@ -52,7 +57,6 @@ ROOT = Path(__file__).resolve().parent
 FRONTEND_DIR = ROOT / "南山"
 CONFIG_JS = FRONTEND_DIR / "common" / "config.js"
 API_SERVER_DIR = ROOT.parent / "tech-transfer-service"
-DB_CONFIG = ROOT / "tools" / "szte-crawler" / "db_config.json"
 BACKEND_URL = "http://127.0.0.1:8787"
 HEALTH_URL = BACKEND_URL + "/api/health"
 API_ROOT = BACKEND_URL + "/api/tech-transfer/v1"
@@ -63,6 +67,11 @@ H5_URL = f"http://127.0.0.1:{H5_PORT}"
 HBX_CLI_DEFAULT = Path(r"D:\HBuilderX\HBuilderX.5.15.2026070915\HBuilderX\cli.exe")
 HBX_ROOT_DIRS = [Path(r"D:\HBuilderX"), Path(r"C:\Program Files\HBuilderX")]
 WECHAT_DEVTOOLS_DEFAULT = Path(r"D:\微信开发者工具\微信web开发者工具\cli.bat")
+
+# frp 隧道（frpc.toml：serverAddr + [[proxies]] localPort→remotePort）
+FRPC_SCAN_ROOTS = [Path.home() / "Desktop", Path("D:\\")]
+TUNNEL_API_PORT = 8076   # 远端 API 入口（→ 本地 8787，实际以 frpc.toml 解析为准）
+TUNNEL_H5_PORT = 8077    # 远端 H5 入口（→ 本地 5173，实际以 frpc.toml 解析为准）
 
 DEMO_RE = re.compile(r"(USE_CAPITAL_DEMO\s*=\s*)(true|false)")
 
@@ -271,20 +280,20 @@ def fetch_health(timeout=3):
 
 
 def wait_backend_ready(proc, timeout=30):
-    """轮询 /api/health，真正解析 JSON：区分 FastAPI Ready / MySQL Unavailable。"""
+    """轮询 /api/health，真正解析 JSON：区分 FastAPI Ready / PostgreSQL Unavailable。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if proc is not None and proc.poll() is not None:
-            sys.exit("[FATAL] 后端进程异常退出，请检查上方报错（常见原因：8787 端口被占用 / MySQL 未启动）")
+            sys.exit("[FATAL] 后端进程异常退出，请检查上方报错（常见原因：8787 端口被占用 / PostgreSQL 未启动）")
         http_ok, body = fetch_health(timeout=2)
         if http_ok and body and isinstance(body.get("data"), dict):
             data = body["data"]
             if data.get("status") == "ok" and data.get("database") == "ok":
                 ok(f"FastAPI Ready：{BACKEND_URL}")
-                ok(f"MySQL Ready（appUsers={data.get('appUsers')}）")
+                ok(f"PostgreSQL Ready（appUsers={data.get('appUsers')}）")
                 return True
             if data.get("database") == "unavailable":
-                warn("FastAPI Ready，但 MySQL Unavailable：数据接口会报错")
+                warn("FastAPI Ready，但 PostgreSQL Unavailable：数据接口会报错")
                 warn(f"  原因：{body.get('message', 'unknown')}")
                 return True
         if http_ok and body is None:
@@ -296,10 +305,10 @@ def wait_backend_ready(proc, timeout=30):
 
 
 def ensure_backend_deps():
-    """检查 import 名（fastapi/uvicorn/pymysql/jwt），安装以 requirements.txt 为准。"""
-    missing = [m for m in ("fastapi", "uvicorn", "pymysql", "jwt") if importlib.util.find_spec(m) is None]
+    """检查 import 名（fastapi/uvicorn/psycopg2/jwt），安装以 requirements.txt 为准。"""
+    missing = [m for m in ("fastapi", "uvicorn", "psycopg2", "jwt") if importlib.util.find_spec(m) is None]
     if not missing:
-        ok("后端依赖已就绪（fastapi / uvicorn / pymysql / pyjwt）")
+        ok("后端依赖已就绪（fastapi / uvicorn / psycopg2 / pyjwt）")
         return True
     print(f"  检测到缺少依赖：{', '.join(missing)}，自动安装中（依据 requirements.txt）...")
     env = os.environ.copy()
@@ -317,30 +326,27 @@ def ensure_backend_deps():
 
 
 def check_db_config():
-    if not DB_CONFIG.exists():
-        warn("未找到 db_config.json，后端将无法查询 MySQL")
-        return False
-    cfg = json.loads(DB_CONFIG.read_text(encoding="utf-8"))
-    if not cfg.get("user"):
-        warn("db_config.json 中 user/password 仍为空（脱敏状态）")
-        return False
+    """PostgreSQL 连通性检查（tech_transfer，与后端 config.py 同源：DB_* 环境变量 + 同默认值）。"""
+    cfg = {
+        "host": os.environ.get("DB_HOST", "127.0.0.1"),
+        "port": int(os.environ.get("DB_PORT", "5432")),
+        "user": os.environ.get("DB_USER", "postgres"),
+        "password": os.environ.get("DB_PASSWORD", "postgres123"),
+        "dbname": os.environ.get("DB_NAME", "tech_transfer"),
+    }
     try:
-        import pymysql
+        import psycopg2
 
-        conn = pymysql.connect(
-            host=cfg.get("host", "127.0.0.1"),
-            port=int(cfg.get("port", 3307)),
-            user=cfg["user"],
-            password=cfg.get("password", ""),
-            database=cfg.get("database", "nanshan_capital"),
-            connect_timeout=3,
-        )
+        conn = psycopg2.connect(connect_timeout=3, **cfg)
         conn.close()
-        ok("MySQL 连接正常（nanshan_capital）")
+        ok(f"PostgreSQL 连接正常（{cfg['dbname']}@{cfg['host']}:{cfg['port']}）")
         return True
+    except ImportError:
+        warn("psycopg2 未安装（启动器无法预检数据库；后端启动时会再次校验）")
+        return False
     except Exception as e:
-        warn(f"MySQL 连接失败：{e}")
-        warn("    请确认 MySQL 服务已启动（后端仍会启动，但接口会报错）")
+        warn(f"PostgreSQL 连接失败：{e}")
+        warn("    请确认 postgresql-x64-17 服务已启动（后端仍会启动，但接口会报错）")
         return False
 
 
@@ -354,9 +360,9 @@ def resolve_backend(lan):
     if http_ok and body and isinstance(body.get("data"), dict) and body["data"].get("status") in ("ok", "degraded"):
         ok(f"检测到现有 FastAPI :{BACKEND_PORT}，直接复用")
         if body["data"].get("database") == "ok":
-            ok(f"MySQL Ready（appUsers={body['data'].get('appUsers')}）")
+            ok(f"PostgreSQL Ready（appUsers={body['data'].get('appUsers')}）")
         else:
-            warn("MySQL Unavailable（现有后端）")
+            warn("PostgreSQL Unavailable（现有后端）")
         return None
 
     pid = port_pid(BACKEND_PORT)
@@ -498,8 +504,12 @@ def run_h5(hbx_cli, lan):
     return True
 
 
-def wait_h5_ready(timeout=60):
-    """轮询 H5 dev server 首页直到 HTTP 200（process started ≠ service ready）。"""
+def wait_h5_ready(timeout=300):
+    """轮询 H5 dev server 首页直到 HTTP 200（process started ≠ service ready）。
+
+    首次冷编译（HBuilderX 全量 build）实测可达 1-3 分钟，超时必须远大于此，
+    否则会误杀仍在编译的 watch 进程（热编译后再次启动仅数秒）。
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         if port_listening(H5_PORT):
@@ -512,6 +522,139 @@ def wait_h5_ready(timeout=60):
             except Exception:
                 pass
         time.sleep(1)
+    return False
+
+
+# ── frp 隧道（--tunnel） ─────────────────────────────────────
+def find_frpc():
+    """检测 frpc 目录（须含 frpc.exe + frpc.toml）。
+
+    顺序：FRPC_HOME 环境变量 > 桌面/D 盘 frp* 目录扫描（两层嵌套均尝试）。
+    返回 (frpc_exe|None, frpc_toml|None, 来源)。
+    """
+    env_val = os.environ.get("FRPC_HOME", "").strip('"')
+    if env_val:
+        root = Path(env_val)
+        if (root / "frpc.exe").is_file() and (root / "frpc.toml").is_file():
+            return root / "frpc.exe", root / "frpc.toml", "环境变量 FRPC_HOME"
+        warn(f"FRPC_HOME={env_val} 缺少 frpc.exe / frpc.toml，忽略")
+
+    for scan_root in FRPC_SCAN_ROOTS:
+        if not scan_root.is_dir():
+            continue
+        for d in sorted(scan_root.glob("frp*")):
+            for sub in [d] + list(d.glob("frp*")):
+                if (sub / "frpc.exe").is_file() and (sub / "frpc.toml").is_file():
+                    return sub / "frpc.exe", sub / "frpc.toml", f"扫描 {sub}"
+    return None, None, ""
+
+
+def parse_frpc_config(toml_path):
+    """极简解析 frpc.toml（只取 serverAddr 与 proxies 的 localPort→remotePort 映射）。
+
+    返回 (server_addr|None, {local_port: remote_port})。
+    """
+    text = toml_path.read_text(encoding="utf-8")
+    m = re.search(r'serverAddr\s*=\s*"([^"]+)"', text)
+    server = m.group(1) if m else None
+    pairs = {}
+    for block in re.finditer(r"\[\[proxies\]\](.*?)(?=\n\[\[|\Z)", text, re.S):
+        lp = re.search(r"localPort\s*=\s*(\d+)", block.group(1))
+        rp = re.search(r"remotePort\s*=\s*(\d+)", block.group(1))
+        if lp and rp:
+            pairs[int(lp.group(1))] = int(rp.group(1))
+    return server, pairs
+
+
+def _no_proxy_opener():
+    """外网请求绕过系统代理（Clash 会拦截直连 IP 的 HTTP）。"""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def fetch_url_status(url, timeout=4):
+    """返回 (reachable, http_status)。reachable=False 表示连不上/被重置。"""
+    try:
+        with _no_proxy_opener().open(url, timeout=timeout) as resp:
+            return True, resp.status
+    except urllib.error.HTTPError as e:
+        return True, e.code
+    except Exception:
+        return False, None
+
+
+def tunnel_api_healthy(server, api_remote_port, timeout=4):
+    """通过外网隧道请求 /api/health，返回 (healthy, body)。"""
+    url = f"http://{server}:{api_remote_port}/api/health"
+    try:
+        with _no_proxy_opener().open(url, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("code") == 0, body
+    except Exception:
+        return False, None
+
+
+def frpc_process_running():
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq frpc.exe"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return False
+    return "frpc.exe" in out.lower()
+
+
+def run_tunnel():
+    """启动 frpc 并做外网端到端验证。返回 True/False。
+
+    复用条件：隧道 API 入口已健康（无论 frpc 是谁启动的）。
+    验证标准：GET http://{server}:{api_remote}/api/health 返回 code=0。
+    """
+    frpc_exe, frpc_toml, source = find_frpc()
+    if frpc_exe is None:
+        error("未找到 frpc（需含 frpc.exe + frpc.toml 的目录；可设置 FRPC_HOME 环境变量）")
+        return False
+    ok(f"frpc：{frpc_exe}（{source}）")
+
+    server, pairs = parse_frpc_config(frpc_toml)
+    if not server or BACKEND_PORT not in pairs:
+        error(f"frpc.toml 缺少 serverAddr 或 {BACKEND_PORT} 的代理映射，无法建隧道")
+        return False
+    api_remote = pairs[BACKEND_PORT]
+    h5_remote = pairs.get(H5_PORT)
+    api_tunnel = f"http://{server}:{api_remote}"
+    h5_tunnel = f"http://{server}:{h5_remote}" if h5_remote else None
+
+    healthy, body = tunnel_api_healthy(server, api_remote)
+    if healthy:
+        ok(f"检测到隧道已就绪，复用现有 frpc：{api_tunnel}")
+        if h5_tunnel:
+            print(f"  H5 外网入口：{h5_tunnel}")
+        return True
+
+    mappings = f"{BACKEND_PORT}→{api_remote}"
+    if h5_remote:
+        mappings += f"，{H5_PORT}→{h5_remote}"
+    print(f"  启动 frpc（{server}）：{mappings}")
+    proc = subprocess.Popen(
+        [str(frpc_exe), "-c", str(frpc_toml)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+    )
+    register_process("tunnel", proc)
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            error("frpc 进程异常退出（常见原因：auth.token 失效 / 服务器不可达 / 远端端口被占）")
+            return False
+        healthy, body = tunnel_api_healthy(server, api_remote)
+        if healthy:
+            ok(f"隧道已就绪：{api_tunnel}/api/health")
+            if h5_tunnel:
+                print(f"  H5 外网入口：{h5_tunnel}（需 H5 dev server 运行中）")
+            return True
+        time.sleep(1)
+    error(f"frpc 已启动但 {api_tunnel} 30s 内未通过健康检查")
     return False
 
 
@@ -529,7 +672,7 @@ def run_doctor():
 
     check("Python", sys.version_info >= (3, 10), sys.version.split()[0], fatal=True)
 
-    for mod, pkg in (("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("pymysql", "pymysql"), ("jwt", "PyJWT")):
+    for mod, pkg in (("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("psycopg2", "psycopg2-binary"), ("jwt", "PyJWT")):
         has = importlib.util.find_spec(mod) is not None
         check(f"后端依赖 {pkg}", has, "" if has else f"import {mod} 失败（pip install {pkg}）")
 
@@ -546,23 +689,31 @@ def run_doctor():
 
     check("微信开发者工具 CLI", WECHAT_DEVTOOLS_DEFAULT.exists(), str(WECHAT_DEVTOOLS_DEFAULT))
 
-    if DB_CONFIG.exists():
-        cfg = json.loads(DB_CONFIG.read_text(encoding="utf-8"))
-        check("db_config.json 已配置", bool(cfg.get("user")), str(DB_CONFIG))
-        try:
-            import pymysql
+    frpc_exe, frpc_toml, frpc_source = find_frpc()
+    check("frpc（--tunnel）", frpc_exe is not None,
+          f"{frpc_toml}（{frpc_source}）" if frpc_exe else "未找到（不影响本地联调，仅外网隧道需要）")
+    if frpc_toml:
+        server, pairs = parse_frpc_config(frpc_toml)
+        mapping_detail = "缺少 serverAddr / 8787 映射"
+        if server and pairs:
+            mapping_detail = f"{server}，" + "，".join(f"{lp}→{rp}" for lp, rp in sorted(pairs.items()))
+        check("frpc.toml 代理映射", bool(server) and BACKEND_PORT in pairs, mapping_detail)
 
-            conn = pymysql.connect(
-                host=cfg.get("host", "127.0.0.1"), port=int(cfg.get("port", 3307)),
-                user=cfg.get("user", ""), password=cfg.get("password", ""),
-                database=cfg.get("database", "nanshan_capital"), connect_timeout=3,
-            )
-            conn.close()
-            check("MySQL 连通", True, "nanshan_capital")
-        except Exception as e:
-            check("MySQL 连通", False, str(e))
-    else:
-        check("db_config.json", False, str(DB_CONFIG))
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(
+            host=os.environ.get("DB_HOST", "127.0.0.1"),
+            port=int(os.environ.get("DB_PORT", "5432")),
+            user=os.environ.get("DB_USER", "postgres"),
+            password=os.environ.get("DB_PASSWORD", "postgres123"),
+            dbname=os.environ.get("DB_NAME", "tech_transfer"),
+            connect_timeout=3,
+        )
+        conn.close()
+        check("PostgreSQL 连通", True, "tech_transfer")
+    except Exception as e:
+        check("PostgreSQL 连通", False, str(e))
 
     listening = port_listening(BACKEND_PORT)
     health_ok, body = fetch_health(timeout=2)
@@ -611,18 +762,44 @@ def run_status():
         print(f"  H5          STOPPED  {H5_URL}")
 
     try:
-        import pymysql
+        import psycopg2
 
-        cfg = json.loads(DB_CONFIG.read_text(encoding="utf-8"))
-        conn = pymysql.connect(
-            host=cfg.get("host", "127.0.0.1"), port=int(cfg.get("port", 3307)),
-            user=cfg.get("user", ""), password=cfg.get("password", ""),
-            database=cfg.get("database", "nanshan_capital"), connect_timeout=3,
+        conn = psycopg2.connect(
+            host=os.environ.get("DB_HOST", "127.0.0.1"),
+            port=int(os.environ.get("DB_PORT", "5432")),
+            user=os.environ.get("DB_USER", "postgres"),
+            password=os.environ.get("DB_PASSWORD", "postgres123"),
+            dbname=os.environ.get("DB_NAME", "tech_transfer"),
+            connect_timeout=3,
         )
         conn.close()
-        print("  MySQL       RUNNING  nanshan_capital 可连接")
+        print("  PostgreSQL  RUNNING  tech_transfer 可连接")
     except Exception as e:
-        print(f"  MySQL       DOWN     {e}")
+        print(f"  PostgreSQL  DOWN     {e}")
+
+    frpc_exe, frpc_toml, _ = find_frpc()
+    if frpc_exe is None:
+        print("  Tunnel      N/A      未找到 frpc（--tunnel 不可用）")
+        return True
+    server, pairs = parse_frpc_config(frpc_toml)
+    if not server or BACKEND_PORT not in pairs:
+        print("  Tunnel      N/A      frpc.toml 解析失败（缺 serverAddr / 8787 映射）")
+        return True
+    api_tunnel = f"http://{server}:{pairs[BACKEND_PORT]}"
+    healthy, _body = tunnel_api_healthy(server, pairs[BACKEND_PORT], timeout=4)
+    if healthy:
+        print(f"  Tunnel      RUNNING  {api_tunnel}（外网 API 入口健康）")
+    elif frpc_process_running():
+        print(f"  Tunnel      DEGRADED frpc 进程在跑但 {api_tunnel} 不健康（本地后端未启动？）")
+    else:
+        print(f"  Tunnel      STOPPED  frpc 未运行（--tunnel 启动）")
+    if H5_PORT in pairs:
+        h5_tunnel = f"http://{server}:{pairs[H5_PORT]}"
+        reachable, st = fetch_url_status(h5_tunnel, timeout=4)
+        if reachable and st == 200:
+            print(f"  Tunnel(H5)  RUNNING  {h5_tunnel}")
+        else:
+            print(f"  Tunnel(H5)  OFF      {h5_tunnel}（需 H5 dev server + 隧道运行中）")
     return True
 
 
@@ -653,7 +830,7 @@ def run_build_h5(hbx_cli):
 
 
 # ── 汇总面板 ──────────────────────────────────────────────────
-def print_summary(runtimes, lan):
+def print_summary(runtimes, lan, tunnel_urls=None):
     lan_ips = get_lan_ips()
     print()
     print("=" * 60)
@@ -683,6 +860,12 @@ def print_summary(runtimes, lan):
         print(f"  Local         {H5_URL}")
         if lan_ips:
             print(f"  LAN           http://{lan_ips[0]}:{H5_PORT}")
+    if tunnel_urls:
+        print()
+        print("Tunnel（外网入口，经 frp 转发本机）")
+        for label, url in tunnel_urls:
+            print(f"  {label:13} {url}")
+        print("  前端 API_BASE 已指向外网隧道地址（common/config.js local.env.js）")
     print()
     print("真机调试（微信小程序）：")
     if lan_ips:
@@ -698,6 +881,7 @@ def parse_args():
     parser.add_argument("--weixin", action="store_true", help="FastAPI + 微信小程序 Runtime")
     parser.add_argument("--h5", action="store_true", help="FastAPI + H5 Runtime")
     parser.add_argument("--all", action="store_true", help="FastAPI + 微信 + H5")
+    parser.add_argument("--tunnel", action="store_true", help="启动 frpc 外网隧道（frpc.toml：8076→8787 / 8077→5173）并做端到端健康验证")
     parser.add_argument("--lan", action="store_true", help="局域网模式：FastAPI 绑定 0.0.0.0，输出 LAN 地址")
     parser.add_argument("--doctor", action="store_true", help="环境诊断，只检测不启动")
     parser.add_argument("--status", action="store_true", help="查看当前运行状态，不启动")
@@ -758,8 +942,8 @@ def main():
     print(" 南山科转通 · Multi-Runtime 前后端一键联调")
     print("=" * 60)
 
-    # [1/5] HBuilderX CLI
-    print("[1/5] 检查 HBuilderX CLI")
+    # [1/6] HBuilderX CLI
+    print("[1/6] 检查 HBuilderX CLI")
     hbx_cli, source = None, ""
     if runtimes:
         hbx_cli, source = find_hbx_cli()
@@ -770,15 +954,15 @@ def main():
     else:
         skip("无前端 Runtime 目标")
 
-    # [2/5] Demo 开关
-    print("[2/5] 检查前端联调开关（common/config.js）")
+    # [2/6] Demo 开关
+    print("[2/6] 检查前端联调开关（common/config.js）")
     if runtimes:
         ask_demo_switch()
     else:
         skip("无前端 Runtime 目标")
 
-    # [3/5] 后端环境
-    print("[3/5] 检查后端环境（依赖 / MySQL）")
+    # [3/6] 后端环境
+    print("[3/6] 检查后端环境（依赖 / PostgreSQL）")
     if need_backend:
         deps_ok = ensure_backend_deps()
         if not deps_ok and args.strict:
@@ -787,18 +971,18 @@ def main():
     else:
         skip("跳过后端（--frontend-only）")
 
-    # [4/5] 启动 FastAPI（唯一实例，8787 三分支）
-    print("[4/5] 启动 FastAPI 后端")
+    # [4/6] 启动 FastAPI（唯一实例，8787 三分支）
+    print("[4/6] 启动 FastAPI 后端")
     backend_proc = None
     if need_backend:
         backend_proc = resolve_backend(lan=args.lan)
     else:
         skip("跳过后端（--frontend-only）")
 
-    # [5/5] 启动前端 Runtime
-    print("[5/5] 启动前端 Runtime")
+    # [5/6] 启动前端 Runtime
+    print("[5/6] 启动前端 Runtime")
     status = {"backend": "READY" if (backend_proc is not None or fetch_health()[0]) else "OFF",
-              "weixin": "OFF", "h5": "OFF"}
+              "weixin": "OFF", "h5": "OFF", "tunnel": "OFF"}
 
     if FrontendRuntime.WEIXIN in runtimes:
         if hbx_cli is None:
@@ -818,12 +1002,32 @@ def main():
         else:
             status["h5"] = "FAIL"
 
-    print_summary(runtimes, args.lan)
+    # [6/6] frp 外网隧道
+    tunnel_urls = None
+    print("[6/6] frp 外网隧道")
+    if args.tunnel:
+        if not need_backend and not fetch_health()[0]:
+            warn("后端未运行（--frontend-only），隧道 API 端点将不可用")
+        if run_tunnel():
+            status["tunnel"] = "READY"
+            frpc_exe, frpc_toml, _ = find_frpc()
+            server, pairs = parse_frpc_config(frpc_toml)
+            tunnel_urls = []
+            if pairs.get(BACKEND_PORT):
+                tunnel_urls.append(("API", f"http://{server}:{pairs[BACKEND_PORT]}"))
+            if pairs.get(H5_PORT):
+                tunnel_urls.append(("H5", f"http://{server}:{pairs[H5_PORT]}"))
+        else:
+            status["tunnel"] = "FAIL"
+    else:
+        skip("未启用（--tunnel 可开启外网入口 8076/8077）")
+
+    print_summary(runtimes, args.lan, tunnel_urls)
 
     # 结果判定
     failed = [k for k, v in status.items() if v == "FAIL"]
     if failed:
-        if args.all and not args.strict:
+        if (args.all or args.tunnel) and not args.strict:
             print(f"  状态：PARTIAL（{', '.join(failed)} 失败，其余就绪）")
         else:
             error(f"启动失败：{', '.join(failed)}")
@@ -832,10 +1036,21 @@ def main():
     print("READY")
     print()
     print("  按 Ctrl+C 停止（仅终止本启动器启动的进程；复用的后端 / HBuilderX GUI 不受影响）")
+    if status.get("tunnel") == "READY":
+        print("  外网访问需保持本启动器运行（frpc 由其托管）")
 
     try:
         while True:
-            time.sleep(1)
+            time.sleep(5)
+            # 后端 watchdog：仅看护本启动器 spawn 的后端（复用的不接管）
+            if backend_proc is not None and backend_proc.poll() is not None:
+                warn("检测到后端进程退出，5s 后自动重启 ...")
+                time.sleep(5)
+                try:
+                    backend_proc = start_backend(lan=args.lan)
+                except SystemExit as e:
+                    error(f"后端重启失败：{e}")
+                    return 1
     except KeyboardInterrupt:
         pass
     finally:

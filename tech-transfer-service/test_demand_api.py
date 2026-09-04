@@ -8,7 +8,8 @@
 import json
 import time
 
-import pymysql
+import psycopg2
+import psycopg2.extras
 import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
@@ -35,8 +36,8 @@ def bootstrap(ticket):
 
 def set_status_sql(demand_id, status):
     """测试辅助：直接置状态（模拟未实现的 admin approve），仅供状态机验证"""
-    conn = pymysql.connect(host="127.0.0.1", port=3306, user="root", password="123456",
-                           database="tech_transfer", charset="utf8mb4")
+    conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres",
+                            password="postgres123", dbname="tech_transfer")
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -49,8 +50,8 @@ def set_status_sql(demand_id, status):
 
 def cleanup_test_demands():
     """删除此前运行残留的测试需求（owner 为测试用户 id>3；演示数据 owner=2 保留）"""
-    conn = pymysql.connect(host="127.0.0.1", port=3306, user="root", password="123456",
-                           database="tech_transfer", charset="utf8mb4")
+    conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres",
+                            password="postgres123", dbname="tech_transfer")
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM demand WHERE owner_user_id > 3")
@@ -335,10 +336,10 @@ check("无Token需求详情=401", resp.status_code == 401)
 print()
 
 # ── 13. 审计日志 ───────────────────────────────────────────
-conn = pymysql.connect(host="127.0.0.1", port=3306, user="root", password="123456",
-                       database="tech_transfer", charset="utf8mb4")
+conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres",
+                        password="postgres123", dbname="tech_transfer")
 try:
-    with conn.cursor(pymysql.cursors.DictCursor) as cur:
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             "SELECT action FROM audit_log WHERE resource_type='demand' AND resource_id=%s ORDER BY id",
             (str(demand_id),),

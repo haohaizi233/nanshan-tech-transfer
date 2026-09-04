@@ -9,15 +9,18 @@ Note: Phase B will replace with proper upload/presign flow per OpenAPI.
 由路由层转成 HTTP 响应。
 """
 
+import logging
 import mimetypes
 import re
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
-LOGO_CACHE = Path(__file__).resolve().parent.parent / "cache" / "logos"
+from config import settings
+
+LOGO_CACHE = settings.file_cache_path
 LOGO_CACHE.mkdir(parents=True, exist_ok=True)
-SZTE_FILE_URL = "https://www.szte.com/portalapi/system/file/v1/downloadFile?fileId={file_id}"
 
 
 class FileProxyError(Exception):
@@ -39,10 +42,13 @@ def proxy_file(file_id: str) -> tuple[Path, str]:
             mime = mimetypes.guess_type(str(cached))[0] or "application/octet-stream"
             return cached, mime
 
-    url = SZTE_FILE_URL.format(file_id=fid)
+    source_url = settings.SZTE_FILE_URL
+    _split = urlsplit(source_url)
+    referer = f"{_split.scheme}://{_split.netloc}/"
+    url = source_url.format(file_id=fid)
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://www.szte.com/",
+        "Referer": referer,
         "Accept": "image/*,*/*",
     })
     try:
@@ -50,9 +56,14 @@ def proxy_file(file_id: str) -> tuple[Path, str]:
             content = resp.read()
             ctype = (resp.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip()
     except urllib.error.HTTPError as e:
+        # 源站 HTTP 状态码可安全对外；其余细节不外发
         raise FileProxyError(502, f"源站文件获取失败: HTTP {e.code}")
     except Exception as e:
-        raise FileProxyError(502, f"源站文件获取失败: {e}")
+        # 异常文本（URL/网络栈细节）只进日志，响应用固定文案
+        logging.getLogger("nanshan.error").warning(
+            "file proxy fetch failed file_id=%s err=%r", fid, e
+        )
+        raise FileProxyError(502, "源站文件获取失败")
 
     if not content:
         raise FileProxyError(404, "空文件")

@@ -3,13 +3,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from config import (
-    APP_ENV,
-    AUTH_PROVIDER,
+    settings,
     MOCK_ISSUER,
     MOCK_SUBJECT,
     MOCK_DISPLAY_NAME,
     MOCK_TICKET_PREFIX,
-    PRODUCTION_ENVS,
 )
 from core.errors import BizError, TT_AUTH_40103
 
@@ -50,10 +48,10 @@ class MockIdentityProvider(IdentityProvider):
 
 
 def get_identity_provider() -> IdentityProvider:
-    if AUTH_PROVIDER == "mock":
-        if APP_ENV in PRODUCTION_ENVS:
+    if settings.AUTH_PROVIDER == "mock":
+        if settings.is_production_like:
             raise RuntimeError(
-                f"[FATAL] MockIdentityProvider 不允许在 {APP_ENV} 环境运行"
+                f"[FATAL] MockIdentityProvider 不允许在 {settings.APP_ENV} 环境运行"
             )
         return MockIdentityProvider()
-    raise RuntimeError(f"未实现的 AUTH_PROVIDER: {AUTH_PROVIDER}")
+    raise RuntimeError(f"未实现的 AUTH_PROVIDER: {settings.AUTH_PROVIDER}")

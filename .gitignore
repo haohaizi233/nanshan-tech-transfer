@@ -16,6 +16,11 @@ tech-transfer-service/cache/
 # Logs
 *.log
 
+# Environment files（真实密钥不入库；.env.example 为可提交模板）
+.env
+.env.*
+!.env.example
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,4 +1,4 @@
-"""
+﻿"""
 capital routes — 资本对接只读接口
 
 Architecture source: 06-api-design.md §capital
@@ -14,7 +14,7 @@ from core.response import success
 from core.pagination import parse_page_args
 from modules.capital.service import list_platforms, list_orgs
 
-router = APIRouter()
+router = APIRouter(tags=["capital"])
 
 
 @router.get("/api/platform-base")
@@ -28,12 +28,12 @@ def platform_base_list(request: Request):
 @router.get("/api/invest-orgs")
 def invest_orgs_list(request: Request):
     page, page_size, keyword = parse_page_args(request)
-    data = list_orgs("featured_invest_org", "invest", ["org_name", "intro"], page, page_size, keyword)
+    data = list_orgs("invest", ["org_name", "intro"], page, page_size, keyword)
     return success(data)
 
 
 @router.get("/api/service-orgs")
 def service_orgs_list(request: Request):
     page, page_size, keyword = parse_page_args(request)
-    data = list_orgs("ip_service_org", "bank", ["org_name", "intro", "label"], page, page_size, keyword)
+    data = list_orgs("bank", ["org_name", "intro", "label"], page, page_size, keyword)
     return success(data)

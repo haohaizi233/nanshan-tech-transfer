@@ -8,12 +8,13 @@
        终态后重新发起、事件时间线、/me/cooperations 视角过滤
 依赖：后端已启动（127.0.0.1:8787），005 迁移已执行，etl_demands.py 演示数据在库
 """
-import pymysql
+import psycopg2
+import psycopg2.extras
 import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
-DB = dict(host="127.0.0.1", port=3306, user="root", password="123456",
-          database="tech_transfer", charset="utf8mb4")
+DB = dict(host="127.0.0.1", port=5432, user="postgres", password="postgres123",
+          dbname="tech_transfer")
 PASS = 0
 FAIL = 0
 
@@ -36,7 +37,7 @@ def bootstrap(ticket):
 
 
 def db_exec(sql, params=()):
-    conn = pymysql.connect(**DB)
+    conn = psycopg2.connect(**DB)
     try:
         with conn.cursor() as cur:
             cur.execute(sql, params)
@@ -46,9 +47,9 @@ def db_exec(sql, params=()):
 
 
 def db_query_one(sql, params=()):
-    conn = pymysql.connect(**DB)
+    conn = psycopg2.connect(**DB)
     try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             return cur.fetchone()
     finally:
@@ -335,9 +336,9 @@ print()
 # ═════════════════════════════════════════════════════════════
 print("[7] 审计落库")
 # ═════════════════════════════════════════════════════════════
-conn = pymysql.connect(**DB)
+conn = psycopg2.connect(**DB)
 try:
-    with conn.cursor(pymysql.cursors.DictCursor) as cur:
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             "SELECT DISTINCT action FROM audit_log WHERE action LIKE 'cooperation.%' OR action LIKE 'favorite.%' ORDER BY action"
         )

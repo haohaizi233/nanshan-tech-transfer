@@ -1,4 +1,8 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-pymysql>=1.1.0
+psycopg2-binary>=2.9.0
+pydantic>=2.8.0
+pydantic-settings>=2.7.0
 pyjwt>=2.8.0
+# pymysql 仅 tools/ 一次性 ETL/迁移脚本使用（业务运行时零 MySQL 依赖）
+pymysql>=1.1.0

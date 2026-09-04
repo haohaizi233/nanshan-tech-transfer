@@ -1,4 +1,4 @@
-"""
+﻿"""
 收藏路由 —— /favorites/{targetType}/{targetId}（幂等 PUT/DELETE）
 
 Architecture source: openapi.yaml paths /favorites/{targetType}/{targetId}；06-api-design.md §8
@@ -9,7 +9,7 @@ from core.response import success, get_request_id
 from core.middleware import identity
 from modules.favorite.service import add_favorite, remove_favorite
 
-router = APIRouter(prefix="/api/tech-transfer/v1")
+router = APIRouter(prefix="/api/tech-transfer/v1", tags=["favorite"])
 
 
 @router.put("/favorites/{target_type}/{target_id}")

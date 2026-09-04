@@ -36,3 +36,23 @@ async def json_body(request: Request) -> dict:
     except Exception:
         return {}
     return body if isinstance(body, dict) else {}
+
+
+def admin_identity(request: Request) -> dict:
+    """管理端依赖：登录 + user_role 表实时校验 admin 角色。
+
+    不信任 JWT 内 roles 快照（角色变更后旧 token 立即失效），
+    每次请求查库判定 —— 06 §授权：RBAC（user_role）+ TT_ADMIN_40301。
+    """
+    user = identity(request)
+    from db import get_cursor
+    from core.errors import TT_ADMIN_40301
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
+            (user["userId"],),
+        )
+        if not cur.fetchone():
+            code, message, status = TT_ADMIN_40301
+            raise BizError(code, message, status)
+    return user

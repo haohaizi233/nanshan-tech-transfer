@@ -1,30 +1,16 @@
 """
-capital service — 资本对接只读查询
+capital service — 资本对接只读接口（legacy 适配层）
 
 Architecture source: 04-backend-domain-design.md §capital
 Source: extracted from app.py inline code (Phase A)
 
-Tables: nanshan_capital.platform_base, .featured_invest_org, .ip_service_org
-Note: Phase B will migrate these tables to tech_transfer schema.
+P0-1 改造：数据源从 nanshan_capital（MySQL）三表切换为 tech_transfer.institution（PG），
+对外函数签名与响应格式保持不变（routes/capital.py 零改动），由
+tools/baseline 工具对 legacy_capital_baseline.json 做 diff 验证。
+切换后后端运行时不再依赖 MySQL。
 """
 
-import pymysql
-
-from config import CAPITAL_DB_HOST, CAPITAL_DB_PORT, CAPITAL_DB_USER, CAPITAL_DB_PASSWORD
-
-CAPITAL_DB_CONFIG = {
-    "host": CAPITAL_DB_HOST,
-    "port": CAPITAL_DB_PORT,
-    "user": CAPITAL_DB_USER,
-    "password": CAPITAL_DB_PASSWORD,
-    "database": "nanshan_capital",
-    "charset": "utf8mb4",
-    "cursorclass": pymysql.cursors.DictCursor,
-}
-
-
-def _get_capital_conn():
-    return pymysql.connect(**CAPITAL_DB_CONFIG)
+from modules.institution.service import list_platform_rows, list_org_rows
 
 
 def _map_type_key(platform_type: str) -> str:
@@ -41,11 +27,11 @@ def _row_to_platform_item(row: dict) -> dict:
     return {
         "id": str(row.get("serial_no") or row.get("id") or ""),
         "serialNo": int(row.get("serial_no") or 0),
-        "name": (row.get("platform_name") or "").strip(),
+        "name": (row.get("name") or "").strip(),
         "platformType": ptype,
-        "platformTypeKey": _map_type_key(ptype),
+        "platformTypeKey": row.get("platform_type_key") or _map_type_key(ptype),
         "unit": (row.get("support_unit") or "").strip(),
-        "functionText": (row.get("platform_fun") or "").strip(),
+        "functionText": (row.get("functions") or "").strip(),
         "contact": (row.get("contact_person") or "").strip(),
         "phone": (row.get("contact_mobile") or "").strip(),
     }
@@ -53,8 +39,8 @@ def _row_to_platform_item(row: dict) -> dict:
 
 def _row_to_org_item(row: dict, kind: str) -> dict:
     return {
-        "id": str(row.get("id") or row.get("account") or ""),
-        "name": (row.get("org_name") or "").strip(),
+        "id": str(row.get("source_pk") or row.get("id") or ""),
+        "name": (row.get("name") or "").strip(),
         "intro": (row.get("intro") or "").strip(),
         "detailInfo": (row.get("detail_info") or "").strip(),
         "label": (row.get("label") or "").strip(),
@@ -73,35 +59,8 @@ def _logo_url(file_id: str) -> str:
 
 
 def list_platforms(page: int, page_size: int, type_key: str, keyword: str):
-    where_sql = " WHERE 1=1"
-    params = []
-    if type_key == "poc":
-        where_sql += " AND platform_type LIKE %s"
-        params.append("%概念验证%")
-    elif type_key == "pilot":
-        where_sql += " AND (platform_type LIKE %s OR platform_type LIKE %s)"
-        params.extend(["%中小试%", "%中试%"])
-        where_sql += " AND platform_type NOT LIKE %s"
-        params.append("%概念验证%")
-    if keyword:
-        where_sql += " AND (platform_name LIKE %s OR support_unit LIKE %s OR platform_fun LIKE %s OR contact_person LIKE %s OR contact_mobile LIKE %s)"
-        like = f"%{keyword}%"
-        params.extend([like, like, like, like, like])
-
-    count_sql = "SELECT COUNT(*) AS c FROM platform_base" + where_sql
-    list_sql = "SELECT id, serial_no, platform_name, platform_type, support_unit, platform_fun, contact_person, contact_mobile FROM platform_base" + where_sql + " ORDER BY serial_no ASC LIMIT %s OFFSET %s"
-
-    conn = _get_capital_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(count_sql, params)
-            total = int((cur.fetchone() or {}).get("c") or 0)
-            offset = (page - 1) * page_size
-            cur.execute(list_sql, params + [page_size, offset])
-            rows = cur.fetchall() or []
-    finally:
-        conn.close()
-
+    # type 行为对齐旧实现：poc/pilot 过滤，other/all 不过滤（institution service 内处理）
+    total, rows = list_platform_rows(page, page_size, type_key, keyword)
     total_pages = (total + page_size - 1) // page_size if total else 0
     return {
         "total": total,
@@ -112,29 +71,13 @@ def list_platforms(page: int, page_size: int, type_key: str, keyword: str):
     }
 
 
-def list_orgs(table: str, kind: str, keyword_fields: list, page: int, page_size: int, keyword: str):
-    where_sql = " WHERE 1=1"
-    params = []
-    if keyword:
-        like = f"%{keyword}%"
-        parts = [f"{f} LIKE %s" for f in keyword_fields]
-        where_sql += " AND (" + " OR ".join(parts) + ")"
-        params.extend([like] * len(keyword_fields))
-
-    count_sql = f"SELECT COUNT(*) AS c FROM {table}" + where_sql
-    list_sql = f"SELECT * FROM {table}" + where_sql + " ORDER BY sort_order ASC, id ASC LIMIT %s OFFSET %s"
-
-    conn = _get_capital_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(count_sql, params)
-            total = int((cur.fetchone() or {}).get("c") or 0)
-            offset = (page - 1) * page_size
-            cur.execute(list_sql, params + [page_size, offset])
-            rows = cur.fetchall() or []
-    finally:
-        conn.close()
-
+def list_orgs(kind: str, keyword_fields: list, page: int, page_size: int, keyword: str):
+    # kind 转换：legacy 路由传 "invest"/"bank"，institution 表 kind=invest/service
+    table_kind = "invest" if kind == "invest" else "service"
+    # 旧 MySQL 列名 -> institution 列名映射（org_name 已归一为 name）
+    field_map = {"org_name": "name", "intro": "intro", "label": "label"}
+    mapped = tuple(field_map.get(f, f) for f in keyword_fields)
+    total, rows = list_org_rows(table_kind, mapped, page, page_size, keyword)
     total_pages = (total + page_size - 1) // page_size if total else 0
     return {
         "total": total,

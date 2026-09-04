@@ -40,4 +40,8 @@ def error(code: str, message: str, http_status: int = 400, details=None) -> JSON
     }
     if details is not None:
         body["details"] = details
-    return JSONResponse(status_code=http_status, content=body)
+    resp = JSONResponse(status_code=http_status, content=body)
+    # 500 兜底响应由最外层 ServerErrorMiddleware 产生，不经过请求中间件，
+    # 这里统一补 X-Request-Id 头（中间件路径会以同值覆盖，幂等）
+    resp.headers["X-Request-Id"] = body["requestId"]
+    return resp

@@ -1,4 +1,4 @@
-"""
+﻿"""
 对接路由 —— /cooperations 意向创建、详情、状态机、事件时间线
 
 Architecture source: openapi.yaml paths /cooperations、/cooperations/{id}、
@@ -20,7 +20,7 @@ from modules.cooperation.service import (
     list_events,
 )
 
-router = APIRouter(prefix="/api/tech-transfer/v1")
+router = APIRouter(prefix="/api/tech-transfer/v1", tags=["cooperation"])
 
 
 @router.post("/cooperations", status_code=201)
