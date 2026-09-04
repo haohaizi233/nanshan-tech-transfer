@@ -6,6 +6,7 @@
  */
 
 import { apiRequest } from './api-core.js'
+import { getPublicationStatus } from './review-status.js'
 
 export async function getDemands(params = {}) {
   const { page = 1, pageSize = 10, keyword = '', categoryCode = '', includeMine = false } = params
@@ -51,17 +52,6 @@ export async function getMyDemands(params = {}) {
   return apiRequest('GET', '/me/demands', query)
 }
 
-/** 需求状态 → 中文标签 / 样式类（my-list 状态标签用） */
-const DEMAND_STATUS_META = {
-  draft: { label: '草稿', cls: 'draft' },
-  pending_review: { label: '待审核', cls: 'pending' },
-  published: { label: '已发布', cls: 'success' },
-  matched: { label: '已匹配', cls: 'accepted' },
-  closed: { label: '已关闭', cls: 'rejected' },
-  rejected: { label: '已驳回', cls: 'rejected' },
-  cancelled: { label: '已取消', cls: 'rejected' }
-}
-
 /** 需求列表/详情 → 卡片展示模型 */
 export function toDemandCard(d) {
   const budget = d.budgetNegotiable
@@ -69,7 +59,7 @@ export function toDemandCard(d) {
     : d.budgetMinWan || d.budgetMaxWan
       ? (d.budgetMinWan ? `${d.budgetMinWan}–${d.budgetMaxWan || ''}` : `${d.budgetMaxWan || ''}`) + ' 万'
       : ''
-  const meta = DEMAND_STATUS_META[d.status] || { label: d.status, cls: 'draft' }
+  const meta = getPublicationStatus(d)
   return {
     id: d.id,
     title: d.title,
@@ -85,6 +75,8 @@ export function toDemandCard(d) {
     status: d.status,
     statusLabel: meta.label,
     statusCls: meta.cls,
+    statusHint: meta.hint,
+    rejectReason: d.rejectReason || '',
     isMine: !!d.isMine,
     version: d.version || null,
     contactName: d.contactName || '',

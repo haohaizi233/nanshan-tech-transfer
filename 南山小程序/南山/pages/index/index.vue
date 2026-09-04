@@ -177,7 +177,7 @@
 </template>
 
 <script>
-	import { ensureLoginForDock, canDockContentType } from '../../common/user.js'
+	import { ensureLoginForDock, getUserProfile } from '../../common/user.js'
 	import { getCapitalGroups } from '../../common/capital.js'
 	import { openExternalSearchMiniProgram } from '../../common/external-miniprogram.js'
 	import { getAchievements, formatAchPrice } from '../../common/achievement-api.js'
@@ -239,12 +239,25 @@
 			}
 		},
 		onLoad() {
+			this.applyPersonaTab()
 			this.refreshList()
 		},
 		onShow() {
 			this.refreshList()
 		},
 		methods: {
+			/** 画像=推荐信号（非门禁）：勾选「寻找技术成果」默认展示成果 Tab，其余默认需求 Tab */
+			applyPersonaTab() {
+				try {
+					const profile = getUserProfile()
+					const caps = (profile && profile.businessCapabilities) || []
+					if (caps.indexOf('seek_technology') >= 0) {
+						this.activeTab = 1
+					}
+				} catch (e) {
+					// 画像仅影响默认 Tab，读取异常时保持默认
+				}
+			},
 			async refreshList() {
 				// 收藏状态（后端 API，失败时列表仍正常展示，只是不带收藏标记）
 				let favDemandIds = new Set()
@@ -266,7 +279,7 @@
 							...card,
 							industryLine: [card.industry, card.cooperationType].filter(Boolean).join(' · '),
 							favorited: favDemandIds.has(String(card.id)),
-							canDock: !card.isMine && canDockContentType('demand')
+							canDock: !card.isMine
 						}
 					})
 				} catch (e) {
@@ -284,7 +297,7 @@
 						techIntro: item.techIntro || '',
 						price: formatAchPrice(item),
 						favorited: favResultIds.has(String(item.id)),
-						canDock: canDockContentType('result')
+						canDock: true
 					}))
 				} catch (e) {
 					console.error('[index] loadAchievements failed:', e)

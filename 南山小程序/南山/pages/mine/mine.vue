@@ -50,9 +50,6 @@
 					</view>
 				</view>
 
-				<view class="diag-row">
-					<text class="diag-link" @click="onCheckStorage">诊断存储</text>
-				</view>
 			</view>
 		</view>
 
@@ -90,17 +87,29 @@
 					<input class="input" :value="form.company" placeholder="请输入公司名称" @input="onFieldInput('company', $event)" />
 				</view>
 				<view class="form-item">
-					<text class="label">身份 <text class="required">*</text></text>
-					<view class="identity-row">
+					<text class="label">主体类型 <text class="required">*</text></text>
+					<picker
+						:value="subjectTypeIndex"
+						:range="subjectPickerOptions"
+						range-key="label"
+						@change="onSubjectTypeChange"
+					>
+						<view :class="form.subjectType ? 'form-picker' : 'form-picker placeholder'">
+							{{ subjectTypeText || '请选择主体类型' }}
+						</view>
+					</picker>
+				</view>
+				<view class="form-item">
+					<text class="label">合作方向 <text class="optional">可多选，用于内容推荐</text></text>
+					<view class="cap-row">
 						<view
-							:class="form.identity === 'demand' ? 'identity-btn active' : 'identity-btn'"
-							@click="setIdentity('demand')"
-						>需求方</view>
-						<view
-							:class="form.identity === 'supply' ? 'identity-btn active' : 'identity-btn'"
-							@click="setIdentity('supply')"
-						>供给方</view>
+							v-for="opt in capabilityOptions"
+							:key="opt.value"
+							:class="form.businessCapabilities.indexOf(opt.value) >= 0 ? 'cap-btn active' : 'cap-btn'"
+							@click="toggleCapability(opt.value)"
+						>{{ opt.label }}</view>
 					</view>
+					<text class="cap-tip">主体类型与合作方向仅用于画像与推荐，不影响您可发布或可对接的内容</text>
 				</view>
 				<view class="form-item">
 					<text class="label">手机号</text>
@@ -130,7 +139,14 @@
 					</view>
 					<view class="profile-info">
 						<text class="nickname">{{ profile.nickname }}</text>
-						<text class="identity-tag">{{ identityText }}</text>
+						<view class="tag-row">
+							<text v-if="profileSubjectLabel" class="identity-tag">{{ profileSubjectLabel }}</text>
+							<text
+								v-for="label in profileCapabilityLabels"
+								:key="label"
+								class="cap-tag"
+							>{{ label }}</text>
+						</view>
 					</view>
 					<view class="profile-divider"></view>
 					<view class="contact-side">
@@ -149,11 +165,13 @@
 					<view class="module-icon demand-icon">需</view>
 					<text class="module-title">我发布的需求</text>
 					<text class="module-count">{{ myDemandCount }} 条</text>
+					<text v-if="myDemandPendingCount" class="module-pending">待审核 {{ myDemandPendingCount }} 条</text>
 				</view>
 				<view class="module-box" @click="goMyList('result')">
 					<view class="module-icon result-icon">果</view>
 					<text class="module-title">我发布的成果</text>
 					<text class="module-count">{{ myResultCount }} 条</text>
+					<text v-if="myResultPendingCount" class="module-pending">待审核 {{ myResultPendingCount }} 条</text>
 				</view>
 				<view class="module-box" @click="goMyList('favorite')">
 					<view class="module-icon fav-icon">藏</view>
@@ -177,21 +195,24 @@
 
 <script>
 	import {
-		getUserProfile,
-		isLoggedIn,
-		isAuthenticated,
-		needsProfile,
-		saveUserProfile,
-		logout,
-		registerAccount,
-		loginAccount,
-		listCachedAccounts,
-		getIdentityLabel,
-		getSessionPhone,
-		checkStorageHealth
-	} from '../../common/user.js'
-	import { getMyResults } from '../../common/mock-data.js'
+			getUserProfile,
+			isLoggedIn,
+			isAuthenticated,
+			needsProfile,
+			saveUserProfile,
+			logout,
+			registerAccount,
+			loginAccount,
+			listCachedAccounts,
+			getSessionPhone,
+			SUBJECT_TYPE_OPTIONS,
+			CAPABILITY_OPTIONS,
+			getSubjectTypeLabel,
+			getCapabilityLabels,
+			normalizeCapabilities
+		} from '../../common/user.js'
 	import { getMyDemands } from '../../common/demand-api.js'
+	import { getMyAchievements } from '../../common/achievement-api.js'
 	import { getMyFavorites, getMyCooperations } from '../../common/interaction-api.js'
 
 	export default {
@@ -208,24 +229,41 @@
 					password: ''
 				},
 				cachedAccounts: [],
+				capabilityOptions: CAPABILITY_OPTIONS,
 				form: {
 					avatar: '/static/logo.png',
 					nickname: '',
 					company: '',
-					identity: 'demand',
+					subjectType: '',
+					businessCapabilities: [],
 					phone: '',
 					email: '',
 					wechat: ''
 				},
 				myDemandCount: 0,
+				myDemandPendingCount: 0,
 				myResultCount: 0,
+				myResultPendingCount: 0,
 				favoriteCount: 0,
 				intentionCount: 0
 			}
 		},
 		computed: {
-			identityText() {
-				return getIdentityLabel(this.profile && this.profile.identity)
+			profileSubjectLabel() {
+				return getSubjectTypeLabel(this.profile && this.profile.subjectType)
+			},
+			profileCapabilityLabels() {
+				return getCapabilityLabels((this.profile && this.profile.businessCapabilities) || [])
+			},
+			subjectPickerOptions() {
+				return [{ label: '请选择主体类型', value: '' }].concat(SUBJECT_TYPE_OPTIONS)
+			},
+			subjectTypeIndex() {
+				const idx = this.subjectPickerOptions.findIndex((o) => o.value === this.form.subjectType)
+				return idx >= 0 ? idx : 0
+			},
+			subjectTypeText() {
+				return getSubjectTypeLabel(this.form.subjectType)
 			}
 		},
 		onShow() {
@@ -233,20 +271,6 @@
 		},
 		methods: {
 			refresh() {
-				// 首次加载时自动检查存储健康状态
-				if (!this._diagDone) {
-					this._diagDone = true
-					const report = checkStorageHealth()
-					if (!report.storageAvailable || report.errors.length > 0) {
-						const msgs = report.errors.slice(0, 2).join('；')
-						uni.showToast({
-							title: '存储异常：' + (msgs || '请点击底部「诊断存储」排查'),
-							icon: 'none',
-							duration: 3000
-						})
-					}
-				}
-
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
@@ -265,26 +289,38 @@
 					this.viewMode = 'auth'
 				}
 
-				const phone = this.authPhone || (this.profile && this.profile.phone) || ''
-				this.loadMyDemandCount()
+				this.loadMyPublicationCounts()
 				this.loadInteractionCounts()
-				this.myResultCount = getMyResults(phone).length
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
 				}
 			},
-			async loadMyDemandCount() {
+			async loadMyPublicationCounts() {
 				if (!isLoggedIn()) {
 					this.myDemandCount = 0
+					this.myDemandPendingCount = 0
+					this.myResultCount = 0
+					this.myResultPendingCount = 0
 					return
 				}
 				try {
-					const data = await getMyDemands({ page: 1, pageSize: 1 })
-					this.myDemandCount = data.total || 0
+					const [demands, pendingDemands, achievements, pendingAchievements] = await Promise.all([
+						getMyDemands({ page: 1, pageSize: 1 }),
+						getMyDemands({ page: 1, pageSize: 1, status: 'pending_review' }),
+						getMyAchievements({ page: 1, pageSize: 1 }),
+						getMyAchievements({ page: 1, pageSize: 1, status: 'pending_review' })
+					])
+					this.myDemandCount = demands.total || 0
+					this.myDemandPendingCount = pendingDemands.total || 0
+					this.myResultCount = achievements.total || 0
+					this.myResultPendingCount = pendingAchievements.total || 0
 				} catch (e) {
-					console.error('[mine] loadMyDemandCount failed:', e)
+					console.error('[mine] loadMyPublicationCounts failed:', e)
 					this.myDemandCount = 0
+					this.myDemandPendingCount = 0
+					this.myResultCount = 0
+					this.myResultPendingCount = 0
 				}
 			},
 			async loadInteractionCounts() {
@@ -324,12 +360,7 @@
 					? registerAccount(phone, password)
 					: loginAccount(phone, password)
 				if (!res.ok) {
-					const msg = res.message || '操作失败'
-					uni.showToast({ title: msg, icon: 'none', duration: 2500 })
-					// 如果是存储异常，自动弹出诊断结果
-					if (msg.includes('存储') || msg.includes('缓存')) {
-						setTimeout(() => { this.onCheckStorage() }, 2600)
-					}
+					uni.showToast({ title: res.message || '操作失败', icon: 'none', duration: 2500 })
 					return
 				}
 				this.authForm.password = ''
@@ -340,54 +371,32 @@
 				})
 				this.refresh()
 			},
-			onCheckStorage() {
-				const report = checkStorageHealth()
-				const lines = []
-				if (report.storageAvailable) {
-					lines.push('存储状态：正常')
-				} else {
-					lines.push('存储状态：异常')
-				}
-				lines.push('已存账号：' + report.accountsCount + ' 个')
-				lines.push('当前会话：' + (report.session || '无'))
-				if (report.errors.length > 0) {
-					lines.push('故障原因：' + report.errors.join('；'))
-				}
-				if (!report.storageAvailable) {
-					lines.push('建议：请在微信中清除小程序缓存后重新进入')
-				}
-				const content = lines.join('\n')
-				uni.showModal({
-					title: '存储诊断',
-					content: content,
-					showCancel: true,
-					cancelText: '关闭',
-					confirmText: report.storageAvailable ? '知道了' : '去清除缓存',
-					success: (res) => {
-						if (res.confirm && !report.storageAvailable) {
-							// 引导用户手动清除缓存
-							uni.showToast({
-								title: '请前往微信「设置→通用→存储空间」清理小程序缓存后重试',
-								icon: 'none',
-								duration: 4000
-							})
-						}
-					}
-				})
-			},
 			fillForm(profile) {
 				this.form = {
 					avatar: profile.avatar || '/static/logo.png',
 					nickname: profile.nickname || '',
 					company: profile.company || '',
-					identity: profile.identity || 'demand',
+					subjectType: profile.subjectType || '',
+					businessCapabilities: normalizeCapabilities(profile.businessCapabilities || []),
 					phone: profile.phone || getSessionPhone() || '',
 					email: profile.email || '',
 					wechat: profile.wechat || ''
 				}
 			},
-			setIdentity(identity) {
-				this.form.identity = identity
+			onSubjectTypeChange(e) {
+				const opt = this.subjectPickerOptions[Number(e.detail.value)] || this.subjectPickerOptions[0]
+				this.form.subjectType = opt ? opt.value : ''
+			},
+			isCapSelected(value) {
+				return this.form.businessCapabilities.indexOf(value) >= 0
+			},
+			toggleCapability(value) {
+				const idx = this.form.businessCapabilities.indexOf(value)
+				if (idx >= 0) {
+					this.form.businessCapabilities.splice(idx, 1)
+				} else {
+					this.form.businessCapabilities.push(value)
+				}
 			},
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
@@ -435,6 +444,10 @@
 					uni.showToast({ title: '请填写公司', icon: 'none' })
 					return
 				}
+				if (!this.form.subjectType) {
+					uni.showToast({ title: '请选择主体类型', icon: 'none' })
+					return
+				}
 				if (!email) {
 					uni.showToast({ title: '请填写邮箱', icon: 'none' })
 					return
@@ -476,7 +489,8 @@
 							avatar: '/static/logo.png',
 							nickname: '',
 							company: '',
-							identity: 'demand',
+							subjectType: '',
+							businessCapabilities: [],
 							phone: '',
 							email: '',
 							wechat: ''
@@ -572,18 +586,6 @@
 		margin-top: 6rpx;
 		font-size: 22rpx;
 		color: #999999;
-	}
-
-	.diag-row {
-		display: flex;
-		justify-content: flex-end;
-		margin-top: 20rpx;
-	}
-
-	.diag-link {
-		font-size: 24rpx;
-		color: #999999;
-		text-decoration: underline;
 	}
 
 	.avatar-block {
@@ -750,31 +752,71 @@
 		color: #999999;
 	}
 
-	.identity-row {
-		display: flex;
-		flex-direction: row;
-	}
-
-	.identity-btn {
-		flex: 1;
-		height: 72rpx;
-		line-height: 72rpx;
-		text-align: center;
+	.form-picker {
+		height: 80rpx;
+		line-height: 80rpx;
 		background: #f7f9fc;
 		border-radius: 12rpx;
-		margin-right: 16rpx;
+		padding: 0 24rpx;
 		font-size: 28rpx;
+		color: #333333;
+	}
+
+	.form-picker.placeholder {
+		color: #999999;
+	}
+
+	.optional {
+		font-size: 22rpx;
+		color: #999999;
+		font-weight: 400;
+	}
+
+	.cap-row {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	.cap-btn {
+		height: 64rpx;
+		line-height: 64rpx;
+		padding: 0 26rpx;
+		text-align: center;
+		background: #f7f9fc;
+		border-radius: 32rpx;
+		margin: 0 16rpx 16rpx 0;
+		font-size: 26rpx;
 		color: #666666;
 	}
 
-	.identity-btn:last-child {
-		margin-right: 0;
-	}
-
-	.identity-btn.active {
+	.cap-btn.active {
 		background: rgba(43, 115, 248, 0.12);
 		color: #2b73f8;
 		font-weight: 600;
+	}
+
+	.cap-tip {
+		display: block;
+		font-size: 22rpx;
+		color: #999999;
+		line-height: 1.5;
+	}
+
+	.tag-row {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 10rpx;
+	}
+
+	.cap-tag {
+		font-size: 22rpx;
+		color: #0f9d58;
+		background: rgba(15, 157, 88, 0.1);
+		padding: 4rpx 12rpx;
+		border-radius: 8rpx;
+		margin: 4rpx 10rpx 0 0;
 	}
 
 	.login-btn {
@@ -878,6 +920,12 @@
 		margin-top: 8rpx;
 		font-size: 22rpx;
 		color: #999999;
+	}
+
+	.module-pending {
+		margin-top: 4rpx;
+		font-size: 20rpx;
+		color: #d98a00;
 	}
 
 	.bottom-actions {

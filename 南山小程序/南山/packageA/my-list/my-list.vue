@@ -22,7 +22,7 @@
 				<text class="card-title">{{ item._title }}</text>
 				<view class="badge-wrap">
 					<text
-						v-if="(pageType === 'intention' || pageType === 'demand') && item._statusLabel"
+						v-if="item._statusLabel"
 						:class="'status-tag status-' + item._statusCls"
 					>{{ item._statusLabel }}</text>
 					<text :class="item._type === 'demand' ? 'badge badge-d' : 'badge badge-r'">
@@ -31,9 +31,10 @@
 				</view>
 			</view>
 			<text v-if="item._sub" class="sub">{{ item._sub }}</text>
+			<text v-if="item._statusHint" :class="'review-hint review-hint-' + item._statusCls">{{ item._statusHint }}</text>
 			<text class="desc">{{ item._desc }}</text>
 			<view class="card-foot">
-				<button class="btn" size="mini" @click="onOpen(item)">查看详情</button>
+				<button v-if="!item._gone" class="btn" size="mini" @click="onOpen(item)">查看详情</button>
 				<button
 					v-if="pageType === 'favorite'"
 					class="btn ghost"
@@ -46,17 +47,17 @@
 </template>
 
 <script>
-	import { getMyResults } from '../../common/mock-data.js'
 	import { getMyDemands, toDemandCard } from '../../common/demand-api.js'
+	import { getMyAchievements, toAchievementCard } from '../../common/achievement-api.js'
 	import {
 		getMyFavorites,
 		removeFavorite,
 		getMyCooperations,
 		toFeType,
 		getCoopStatusLabel,
-		getCoopStatusCls
+		getCoopStatusCls,
+		getIntentTypeLabel
 	} from '../../common/interaction-api.js'
-	import { getUserProfile } from '../../common/user.js'
 
 	export default {
 		data() {
@@ -79,7 +80,7 @@
 				if (this.pageType === 'favorite') return '在对接详情页可收藏感兴趣的内容'
 				if (this.pageType === 'intention') {
 					return this.intentTab === 0
-						? '在对接详情页点击「确认对接」后会出现在这里'
+						? '在对接详情页点击「申请对接」后会出现在这里'
 						: '当他人向你发布的需求/成果发起对接时会出现在这里'
 				}
 				return '可在首页发布后在此查看'
@@ -112,6 +113,7 @@
 				return rows.map((item) => {
 					const sum = item.targetSummary || {}
 					const feType = toFeType(item.targetType)
+					const intentLabel = getIntentTypeLabel(feType, item.intentType)
 					return {
 						id: item.targetId,
 						_key: 'c-' + item.id,
@@ -125,7 +127,8 @@
 						_statusCls: getCoopStatusCls(item.status),
 						_title: sum.title || '意向对接',
 						_desc: sum.desc || sum.orgName || '对接意向',
-						_sub: (isSent ? '对接对象：' : '来自：') + (item.counterpartDisplayName || '对方')
+						_sub: ((isSent ? '对接对象：' : '来自：') + (item.counterpartDisplayName || '对方'))
+							+ (intentLabel ? ' · 意向：' + intentLabel : '')
 					}
 				})
 			},
@@ -154,15 +157,27 @@
 					return
 				}
 				if (this.pageType === 'result') {
-					const profile = getUserProfile()
-					const phone = profile && profile.phone ? profile.phone : ''
-					this.list = getMyResults(phone).map((item) => ({
-						...item,
-						_key: 'r-' + item.id,
-						_type: 'result',
-						_title: item.title,
-						_desc: item.techIntro
-					}))
+					try {
+						const data = await getMyAchievements({ page: 1, pageSize: 50 })
+						this.list = (data.list || []).map((item) => {
+							const card = toAchievementCard(item)
+							return {
+								...card,
+								_key: 'r-' + card.id,
+								_type: 'result',
+								_title: card.title,
+								_sub: card.sourceOrgName,
+								_desc: card.techIntro,
+								_status: card.status,
+								_statusLabel: card.statusLabel,
+								_statusCls: card.statusCls,
+								_statusHint: card.statusHint,
+							}
+						})
+					} catch (e) {
+						console.error('[my-list] loadMyAchievements failed:', e)
+						this.list = []
+					}
 					return
 				}
 				if (this.pageType === 'intention') {
@@ -188,13 +203,26 @@
 					const rows = []
 					const push = (fav, feType) => {
 						const sum = fav.targetSummary
-						if (!sum) return
+						const deleted = !sum || sum.status === 'deleted'
+						if (deleted) {
+							// 目标已被删除：仍展示占位卡片，避免「有计数但列表空白」
+							rows.push({
+								id: fav.targetId,
+								_key: feType + '-' + fav.targetId,
+								_type: feType,
+								_title: '已收藏内容（已删除）',
+								_sub: '',
+								_desc: '该内容已被发布方删除，可取消收藏移除记录',
+								_gone: true
+							})
+							return
+						}
 						const offline = sum.status && sum.status !== 'published'
 						rows.push({
 							id: fav.targetId,
 							_key: feType + '-' + fav.targetId,
 							_type: feType,
-							_title: sum.title ? (offline ? sum.title + '（已下线）' : sum.title) : '已收藏内容',
+							_title: offline ? sum.title + '（已下线）' : sum.title,
 							_sub: sum.orgName || '',
 							_desc: sum.desc || ''
 						})
@@ -391,6 +419,19 @@
 		margin-bottom: 8rpx;
 		line-height: 1.4;
 	}
+
+	.review-hint {
+		display: block;
+		font-size: 24rpx;
+		line-height: 1.45;
+		margin-bottom: 8rpx;
+	}
+
+	.review-hint-pending { color: #d98a00; }
+	.review-hint-success { color: #0f9d58; }
+	.review-hint-rejected { color: #8a5d00; }
+	.review-hint-draft,
+	.review-hint-accepted { color: #666666; }
 
 	.desc {
 		display: block;

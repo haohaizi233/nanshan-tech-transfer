@@ -102,7 +102,7 @@
 		clearDemandSearchHistory,
 		clearResultSearchHistory
 	} from '../../common/search.js'
-	import { ensureLoginForDock, canProposeDock } from '../../common/user.js'
+	import { ensureLoginForDock } from '../../common/user.js'
 	import { searchAchievements } from '../../common/achievement-api.js'
 	import { getDemands, toDemandCard } from '../../common/demand-api.js'
 
@@ -169,7 +169,7 @@
 						return {
 							...card,
 							metaLine: [card.company, card.location, card.budget].filter(Boolean).join(' ｜ '),
-							canDock: !card.isMine && canProposeDock('demand', card)
+							canDock: !card.isMine
 						}
 					})
 				} catch (e) {
@@ -185,7 +185,7 @@
 						title: item.title,
 						source: item.sourceOrgName || '',
 						techIntro: item.techIntro || '',
-						canDock: canProposeDock('result', { id: String(item.id) })
+						canDock: true
 					}))
 				} catch (e) {
 					console.error('[search] loadResults failed:', e)

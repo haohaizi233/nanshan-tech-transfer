@@ -3,11 +3,67 @@
  * - 账号库：手机号 + 密码（可缓存多个账号）
  * - 会话：当前登录手机号
  * - 资料：挂在对应账号下，登录后完善
+ *
+ * 身份柔性化业务规则（冻结）：
+ * 任何用户都可以同时发布需求、发布成果、对接需求、对接成果；
+ * 资料中的「主体类型」与「合作方向」仅用于画像和推荐，不作为对接权限限制；
+ * 每次对接的合作方式由用户当次选择的合作意向决定（intentType），与账号属性解耦。
  */
 
 const ACCOUNTS_KEY = 'ns_user_accounts'
 const SESSION_KEY = 'ns_user_session'
 const PROFILE_KEY_LEGACY = 'ns_user_profile'
+
+/** 主体类型：相对稳定的属性，与后端 user_profile.subject_type 枚举一致 */
+export const SUBJECT_TYPE_OPTIONS = [
+	{ label: '企业', value: 'enterprise' },
+	{ label: '高校', value: 'university' },
+	{ label: '科研院所', value: 'research_institute' },
+	{ label: '科研团队', value: 'team' },
+	{ label: '技术服务机构', value: 'service_org' },
+	{ label: '投资机构', value: 'investment_org' },
+	{ label: '个人', value: 'individual' },
+	{ label: '其他', value: 'other' }
+]
+
+/** 合作方向：可多选的画像标签，与后端 user_profile.business_capabilities 枚举一致，仅用于推荐 */
+export const CAPABILITY_OPTIONS = [
+	{ label: '寻找技术成果', value: 'seek_technology' },
+	{ label: '发布技术需求', value: 'publish_demand' },
+	{ label: '提供技术成果', value: 'provide_achievement' },
+	{ label: '联合研发', value: 'joint_rnd' },
+	{ label: '提供技术服务', value: 'provide_service' },
+	{ label: '投融资合作', value: 'investment' }
+]
+
+const SUBJECT_TYPE_VALUES = SUBJECT_TYPE_OPTIONS.map((o) => o.value)
+const CAPABILITY_VALUES = CAPABILITY_OPTIONS.map((o) => o.value)
+
+export function getSubjectTypeLabel(value) {
+	const found = SUBJECT_TYPE_OPTIONS.find((o) => o.value === value)
+	return found ? found.label : ''
+}
+
+export function getCapabilityLabels(caps) {
+	if (!Array.isArray(caps)) return []
+	return caps
+		.filter((v) => CAPABILITY_VALUES.indexOf(v) >= 0)
+		.map((v) => {
+			const found = CAPABILITY_OPTIONS.find((o) => o.value === v)
+			return found ? found.label : ''
+		})
+		.filter(Boolean)
+}
+
+/** 清洗合作方向多选值：去非法项、去重 */
+export function normalizeCapabilities(caps) {
+	if (!Array.isArray(caps)) return []
+	const out = []
+	caps.forEach((v) => {
+		if (CAPABILITY_VALUES.indexOf(v) >= 0 && out.indexOf(v) < 0) out.push(v)
+	})
+	return out
+}
 
 function getStore(key) {
 	try {
@@ -47,6 +103,24 @@ function saveAccountsMap(map) {
 	return setStore(ACCOUNTS_KEY, map)
 }
 
+/**
+ * 老资料结构升级：identity(demand/supply) → businessCapabilities 画像标签
+ * demand → 寻找技术成果；supply → 提供技术成果
+ * 仅在读取到旧结构时补默认值，不改写原存储（下次保存时自然落新结构）
+ */
+function upgradeLegacyProfile(profile) {
+	if (!profile || typeof profile !== 'object') return profile
+	if (profile.businessCapabilities === undefined) {
+		profile.businessCapabilities =
+			profile.identity === 'supply' ? ['provide_achievement'] : ['seek_technology']
+	}
+	if (profile.subjectType === undefined) {
+		profile.subjectType = ''
+	}
+	delete profile.identity
+	return profile
+}
+
 function migrateLegacyProfile() {
 	try {
 		const legacy = getStore(PROFILE_KEY_LEGACY)
@@ -58,7 +132,7 @@ function migrateLegacyProfile() {
 			map[phone] = {
 				phone,
 				password: '',
-				profile: { ...legacy, phone },
+				profile: upgradeLegacyProfile({ ...legacy, phone }),
 				createdAt: Date.now()
 			}
 			saveAccountsMap(map)
@@ -83,7 +157,7 @@ export function listCachedAccounts() {
 	return Object.keys(map)
 		.map((phone) => {
 			const acc = map[phone]
-			const profile = acc && acc.profile ? acc.profile : null
+			const profile = acc && acc.profile ? upgradeLegacyProfile({ ...acc.profile }) : null
 			return {
 				phone,
 				hasPassword: !!(acc && acc.password),
@@ -101,7 +175,8 @@ export function getUserProfile() {
 	const map = getAccountsMap()
 	const acc = map[phone]
 	if (!acc || !acc.profile) return null
-	return { ...acc.profile, phone }
+	const profile = upgradeLegacyProfile({ ...acc.profile })
+	return { ...profile, phone }
 }
 
 function isProfileComplete(profile) {
@@ -130,39 +205,19 @@ export function needsProfile() {
 	return isAuthenticated() && !isProfileComplete(getUserProfile())
 }
 
-/** 当前身份：demand | supply */
-export function getUserIdentity() {
-	const profile = getUserProfile()
-	return profile && profile.identity === 'supply' ? 'supply' : 'demand'
-}
-
 /**
- * 供应方只能对接需求；需求方只能对接成果。
- * 未登录时返回 true（交由登录流程处理）。
+ * 是否可发起对接意向。
+ * 只检查真正的业务约束：自己发布的内容不可对接；
+ * 其余约束（登录/资料、目标是否发布、是否已有活跃意向）由登录流程与后端强校验，
+ * 与账号主体类型/合作方向画像无关。
  */
-export function canDockContentType(type) {
-	if (!getSessionPhone() || !getUserProfile()) return true
-	const t = type === 'result' ? 'result' : 'demand'
-	const identity = getUserIdentity()
-	if (identity === 'supply') return t === 'demand'
-	return t === 'result'
-}
-
-/** 是否可发起对接意向（收藏/意向数据已在后端，本地仅做身份与归属判断） */
 export function canProposeDock(type, detail) {
-	if (!detail) return false
-	if (type === 'demand' && detail.isMine) return false
-	return canDockContentType(type)
+	return !!detail && !detail.isMine
 }
 
 export function getDockBlockMessage(type, detail) {
-	if (type === 'demand' && detail && detail.isMine) {
-		return '这是您自己发布的需求，无法申请对接'
-	}
-	if (!canDockContentType(type)) {
-		return getUserIdentity() === 'supply'
-			? '供应方仅可向需求方发起对接'
-			: '需求方仅可向供应方发起对接'
+	if (detail && detail.isMine) {
+		return '这是您自己发布的内容，无法申请对接'
 	}
 	return ''
 }
@@ -185,7 +240,8 @@ export function registerAccount(phone, password) {
 			avatar: '/static/logo.png',
 			nickname: '',
 			company: '',
-			identity: 'demand',
+			subjectType: '',
+			businessCapabilities: [],
 			phone: p,
 			email: '',
 			wechat: ''
@@ -235,11 +291,15 @@ export function saveUserProfile(profile) {
 	const map = getAccountsMap()
 	const acc = map[phone]
 	if (!acc) return null
+	const subjectType = SUBJECT_TYPE_VALUES.indexOf(profile.subjectType) >= 0
+		? profile.subjectType
+		: ''
 	const data = {
 		avatar: profile.avatar || '/static/logo.png',
 		nickname: (profile.nickname || '').trim(),
 		company: (profile.company || '').trim(),
-		identity: profile.identity === 'supply' ? 'supply' : 'demand',
+		subjectType,
+		businessCapabilities: normalizeCapabilities(profile.businessCapabilities),
 		phone,
 		email: (profile.email || '').trim(),
 		wechat: (profile.wechat || '').trim(),
@@ -257,67 +317,6 @@ export function saveUserProfile(profile) {
 /** 退出当前会话，账号缓存保留 */
 export function logout() {
 	return removeStore(SESSION_KEY)
-}
-
-export function getIdentityLabel(identity) {
-	return identity === 'supply' ? '供给方' : '需求方'
-}
-
-/**
- * 存储健康检查：诊断本地存储是否正常工作
- * 在控制台调用 checkStorageHealth() 即可快速排查问题
- */
-export function checkStorageHealth() {
-	const report = {
-		storageAvailable: false,
-		canRead: false,
-		canWrite: false,
-		accountsCount: 0,
-		session: null,
-		errors: []
-	}
-
-	// 1. 测试写入
-	try {
-		uni.setStorageSync('_health_check', Date.now())
-		report.canWrite = true
-	} catch (e) {
-		report.errors.push('写入失败: ' + (e.message || e))
-	}
-
-	// 2. 测试读取
-	try {
-		const val = uni.getStorageSync('_health_check')
-		report.canRead = !!val
-		if (!val) report.errors.push('读取返回空值，存储可能已被清空')
-	} catch (e) {
-		report.errors.push('读取失败: ' + (e.message || e))
-	}
-
-	// 3. 清理测试数据
-	try {
-		uni.removeStorageSync('_health_check')
-	} catch (e) {}
-
-	// 4. 检查有效状态
-	report.storageAvailable = report.canRead && report.canWrite
-
-	// 5. 检查账号数据
-	const map = getAccountsMap()
-	report.accountsCount = Object.keys(map).length
-
-	// 6. 检查会话
-	report.session = getSessionPhone() || null
-
-	if (!report.storageAvailable && report.errors.length === 0) {
-		report.errors.push('存储不可用，可能是微信缓存被清理或版本更新导致')
-	}
-	if (report.storageAvailable && report.accountsCount === 0) {
-		report.errors.push('存储正常但无账号数据，之前注册的账号可能已被清除')
-	}
-
-	console.log('[user] 存储健康检查报告:', JSON.stringify(report, null, 2))
-	return report
 }
 
 export function ensureLoginForDock() {

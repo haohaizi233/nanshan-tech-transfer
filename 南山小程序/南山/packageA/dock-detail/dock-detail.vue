@@ -117,17 +117,21 @@
 					<text class="contact-value contact-link">{{ detail.wechat }}</text>
 				</view>
 			</view>
-			<text class="tip">{{ type === 'demand' ? '为保护发布方隐私，非发布方查看时联系方式已脱敏' : '联系方式以成果发布方提供的信息为准' }}</text>
+			<text class="tip">为保护发布方隐私，对接被接受前联系方式已脱敏</text>
 		</view>
 
 		<!-- 底部操作区 -->
 			<view class="confirm-wrap">
+				<view v-if="intention && intentionIntentLabel" class="intent-type-bar">
+					<text class="intent-type-label">合作意向</text>
+					<text class="intent-type-value">{{ intentionIntentLabel }}</text>
+				</view>
 				<!-- 发起对接 / 取消待定 -->
 				<button
 					v-if="actionMode === 'propose'"
 					class="confirm-btn"
 					@click="onProposeDock"
-				>确认对接</button>
+				>申请对接</button>
 				<button
 					v-else-if="actionMode === 'cancel_pending'"
 					class="confirm-btn confirm-btn-cancel"
@@ -177,6 +181,41 @@
 				<button class="dialog-cancel" @click="closeConfirm">取消</button>
 			</view>
 		</view>
+
+		<!-- 合作意向选择弹层：每次对接的角色由当次选择决定 -->
+		<view v-if="intentDialogVisible" class="mask" @click.stop="closeIntentDialog">
+			<view class="sheet" @click.stop="stopBubble">
+				<text class="sheet-title">{{ type === 'demand' ? '您希望以什么方式参与？' : '您的合作意向' }}</text>
+				<text class="sheet-sub">针对「{{ detail ? detail.title : '' }}」</text>
+				<scroll-view scroll-y class="sheet-scroll">
+					<view
+						v-for="opt in intentOptions"
+						:key="opt.value"
+						:class="selectedIntentType === opt.value ? 'sheet-option active' : 'sheet-option'"
+						@click="selectedIntentType = opt.value"
+					>
+						<text class="sheet-option-text">{{ opt.label }}</text>
+						<text class="sheet-option-check">{{ selectedIntentType === opt.value ? '✓' : '' }}</text>
+					</view>
+				</scroll-view>
+				<view class="sheet-msg">
+					<text class="sheet-msg-label">留言（选填）</text>
+					<textarea
+						class="sheet-textarea"
+						:value="intentMessage"
+						maxlength="200"
+						placeholder="补充说明您的合作诉求…"
+						@input="onIntentMsgInput"
+					></textarea>
+				</view>
+				<button
+					:class="selectedIntentType ? 'sheet-btn ready' : 'sheet-btn'"
+					:disabled="!selectedIntentType"
+					@click="onSubmitIntent"
+				>提交对接意向</button>
+				<button class="sheet-cancel" @click="closeIntentDialog">取消</button>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -191,6 +230,8 @@
 		createCooperation,
 		getCooperationDetail,
 		getMyActiveIntentForTarget,
+		getIntentTypeOptions,
+		getIntentTypeLabel,
 		acceptCooperation,
 		rejectCooperation,
 		confirmCooperation,
@@ -220,7 +261,11 @@
 				confirmOp: '',
 				confirmLeft: 5,
 				confirmReady: false,
-				confirmTimer: null
+				confirmTimer: null,
+				intentDialogVisible: false,
+				selectedIntentType: '',
+				intentMessage: '',
+				submitting: false
 			}
 		},
 		computed: {
@@ -229,6 +274,14 @@
 			},
 			statusCls() {
 				return this.intention ? getCoopStatusCls(this.intention.status) : 'pending'
+			},
+			intentionIntentLabel() {
+				return this.intention
+					? getIntentTypeLabel(this.type, this.intention.intentType)
+					: ''
+			},
+			intentOptions() {
+				return getIntentTypeOptions(this.type)
 			},
 			statusHint() {
 				const row = this.intention
@@ -446,6 +499,10 @@
 					uni.showToast({ title: '暂无' + label, icon: 'none' })
 					return
 				}
+				if (text.indexOf('*') >= 0) {
+					uni.showToast({ title: '联系方式已脱敏，正式对接后可见', icon: 'none' })
+					return
+				}
 				uni.setClipboardData({
 					data: text,
 					success() {
@@ -487,7 +544,8 @@
 					this.loadIntent(this.detail.id)
 				}
 			},
-			async onProposeDock() {
+			/** 发起对接：先选合作意向（每次对接的角色由当次选择决定，与账号画像无关） */
+			onProposeDock() {
 				if (!ensureLoginForDock()) return
 				if (!this.detail) return
 				if (!canProposeDock(this.type, this.detail)) {
@@ -497,20 +555,39 @@
 					})
 					return
 				}
+				this.selectedIntentType = ''
+				this.intentMessage = ''
+				this.intentDialogVisible = true
+			},
+			closeIntentDialog() {
+				this.intentDialogVisible = false
+			},
+			onIntentMsgInput(e) {
+				this.intentMessage = (e.detail.value || '').slice(0, 200)
+			},
+			async onSubmitIntent() {
+				if (!this.selectedIntentType || !this.detail || this.submitting) return
+				this.submitting = true
+				const message = (this.intentMessage || '').trim()
 				try {
 					const intention = await createCooperation({
 						type: this.type,
 						id: this.detail.id,
-						message: '希望就「' + this.detail.title + '」与您对接，盼回复。'
+						intentType: this.selectedIntentType,
+						message: message || '希望就「' + this.detail.title + '」与您对接，盼回复。'
 					})
 					this.intention = intention
 					this.intentId = String(intention.id)
+					this.intentDialogVisible = false
 					uni.showToast({ title: '对接意向已提交', icon: 'success' })
 				} catch (e) {
-					console.error('[dock-detail] onProposeDock failed:', e)
+					console.error('[dock-detail] onSubmitIntent failed:', e)
 					uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none' })
+					this.intentDialogVisible = false
 					// 已有进行中意向等场景：刷新为意向态展示
 					this.loadIntent(this.detail.id)
+				} finally {
+					this.submitting = false
 				}
 			}
 		}
@@ -836,6 +913,135 @@
 	}
 
 	.dialog-cancel {
+		background: transparent !important;
+		color: #888888 !important;
+		font-size: 28rpx;
+	}
+
+	.intent-type-bar {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		background: #ffffff;
+		border: 1rpx solid #e8ecf2;
+		border-radius: 12rpx;
+		padding: 20rpx 28rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.intent-type-label {
+		font-size: 24rpx;
+		color: #999999;
+		margin-right: 16rpx;
+	}
+
+	.intent-type-value {
+		font-size: 26rpx;
+		color: #2b73f8;
+		font-weight: 600;
+	}
+
+	/* 合作意向选择弹层（底部弹出） */
+	.sheet {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: #ffffff;
+		border-radius: 24rpx 24rpx 0 0;
+		padding: 32rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
+		box-sizing: border-box;
+	}
+
+	.sheet-title {
+		display: block;
+		font-size: 32rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-bottom: 8rpx;
+	}
+
+	.sheet-sub {
+		display: block;
+		font-size: 24rpx;
+		color: #999999;
+		margin-bottom: 24rpx;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.sheet-scroll {
+		max-height: 420rpx;
+	}
+
+	.sheet-option {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		height: 88rpx;
+		padding: 0 24rpx;
+		background: #f7f9fc;
+		border-radius: 12rpx;
+		margin-bottom: 12rpx;
+	}
+
+	.sheet-option.active {
+		background: rgba(43, 115, 248, 0.12);
+	}
+
+	.sheet-option-text {
+		font-size: 28rpx;
+		color: #333333;
+	}
+
+	.sheet-option.active .sheet-option-text {
+		color: #2b73f8;
+		font-weight: 600;
+	}
+
+	.sheet-option-check {
+		font-size: 30rpx;
+		color: #2b73f8;
+		font-weight: 600;
+	}
+
+	.sheet-msg {
+		margin-top: 8rpx;
+		margin-bottom: 24rpx;
+	}
+
+	.sheet-msg-label {
+		display: block;
+		font-size: 24rpx;
+		color: #999999;
+		margin-bottom: 10rpx;
+	}
+
+	.sheet-textarea {
+		width: 100%;
+		height: 120rpx;
+		background: #f7f9fc;
+		border-radius: 12rpx;
+		padding: 16rpx 20rpx;
+		font-size: 26rpx;
+		box-sizing: border-box;
+	}
+
+	.sheet-btn {
+		background: #c8c8c8 !important;
+		color: #ffffff !important;
+		border-radius: 12rpx;
+		font-size: 30rpx;
+		margin-bottom: 12rpx;
+	}
+
+	.sheet-btn.ready {
+		background: #2b73f8 !important;
+	}
+
+	.sheet-cancel {
 		background: transparent !important;
 		color: #888888 !important;
 		font-size: 28rpx;

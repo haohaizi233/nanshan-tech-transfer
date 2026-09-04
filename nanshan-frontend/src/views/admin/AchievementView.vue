@@ -78,6 +78,21 @@ const fmtCount = v =>
     ? '-'
     : Number(v).toLocaleString()
 
+// innovationPoints 兼容两种形态：导入数据 {title, content} 对象、API 自建纯字符串
+const fmtPoint = point => {
+  if (point && typeof point === 'object') {
+    const title = String(point.title || '').trim()
+    const content = String(point.content || '')
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .join('；')
+    if (!content) return title
+    return title ? `${title}：${content}` : content
+  }
+  return String(point ?? '')
+}
+
 const getStatusClass = status =>
   ({
     published: 'published',
@@ -1067,7 +1082,7 @@ onMounted(() => {
                   v-for="(point, index) in innovationPoints"
                   :key="index"
                 >
-                  {{ point }}
+                  {{ fmtPoint(point) }}
                 </li>
               </ul>
 

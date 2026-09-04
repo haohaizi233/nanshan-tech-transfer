@@ -7,6 +7,7 @@
  */
 
 import { apiRequest } from './api-core.js'
+import { getPublicationStatus } from './review-status.js'
 
 export async function getAchievements(params = {}) {
   const { page = 1, pageSize = 10, keyword = '', category = '', maturityLevel = '' } = params
@@ -21,6 +22,35 @@ export async function getAchievements(params = {}) {
 
 export async function getAchievementDetail(id) {
   return apiRequest('GET', `/achievements/${id}`)
+}
+
+/** 本人发布的成果：包含全量审核状态。 */
+export async function getMyAchievements(params = {}) {
+  const { page = 1, pageSize = 20, status = '' } = params
+  const query = {}
+  if (page) query.page = page
+  if (pageSize) query.pageSize = pageSize
+  if (status) query.status = status
+  return apiRequest('GET', '/me/achievements', query)
+}
+
+/** 成果列表/详情 → “我的发布”卡片展示模型。 */
+export function toAchievementCard(item) {
+  const meta = getPublicationStatus(item)
+  return {
+    id: item.id,
+    title: item.title || '',
+    sourceOrgName: item.sourceOrgName || '',
+    techIntro: item.techIntro || '',
+    categoryName: item.categoryName || '',
+    status: item.status,
+    statusLabel: meta.label,
+    statusCls: meta.cls,
+    statusHint: meta.hint,
+    rejectReason: item.rejectReason || '',
+    version: item.version || null,
+    publishedAt: item.publishedAt || null,
+  }
 }
 
 export async function searchAchievements(params = {}) {

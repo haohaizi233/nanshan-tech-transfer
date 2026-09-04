@@ -58,12 +58,12 @@
         </view>
       </view>
 
-      <!-- 创新点 -->
-      <view v-if="detail.innovationPoints && detail.innovationPoints.length" class="section-card">
-        <text class="section-title">技术创新点</text>
-        <view v-for="(point, idx) in detail.innovationPoints" :key="idx" class="point-item">
+      <!-- 创新点（结构化分组：技术创新点/技术成熟度/项目支持/可应用领域等） -->
+      <view v-for="(group, gIdx) in innovationGroups" :key="'g' + gIdx" class="section-card">
+        <text class="section-title">{{ group.title }}</text>
+        <view v-for="(line, idx) in group.lines" :key="idx" class="point-item">
           <text class="point-index">{{ idx + 1 }}</text>
-          <text class="point-text">{{ point }}</text>
+          <text class="point-text">{{ line }}</text>
         </view>
       </view>
 
@@ -137,6 +137,34 @@ export default {
       loading: true,
       error: '',
     }
+  },
+  computed: {
+    // innovationPoints 存在两种形态：
+    // 导入数据 [{title, content(\n 分行)}]，API 自建数据 [string]。
+    // 归一化为 [{title, lines}] 分组渲染。
+    innovationGroups() {
+      const list = (this.detail && this.detail.innovationPoints) || []
+      if (!Array.isArray(list)) return []
+      const groups = []
+      let strGroup = null
+      for (const item of list) {
+        if (item && typeof item === 'object') {
+          const lines = String(item.content || '')
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean)
+          const title = String(item.title || '').trim() || '技术创新点'
+          if (lines.length) groups.push({ title, lines })
+        } else if (item !== null && item !== undefined && String(item).trim()) {
+          if (!strGroup) {
+            strGroup = { title: '技术创新点', lines: [] }
+            groups.push(strGroup)
+          }
+          strGroup.lines.push(String(item).trim())
+        }
+      }
+      return groups
+    },
   },
   onLoad(options) {
     this.achId = parseInt(options.id, 10)

@@ -54,10 +54,45 @@ export async function getFavoriteIdSet(type) {
 
 // ── 对接意向 ─────────────────────────────────────────────────
 
-export async function createCooperation({ type, id, message }) {
+/**
+ * 合作意向选项：由用户每次发起对接时选择，与账号主体类型/合作方向画像解耦。
+ * 枚举与后端 modules/cooperation/service.py 的 INTENT_TYPES 保持一致。
+ */
+export const INTENT_TYPE_OPTIONS = {
+  demand: [
+    { value: 'provide_solution', label: '提供技术方案' },
+    { value: 'provide_achievement', label: '提供现有成果' },
+    { value: 'joint_rnd', label: '联合研发' },
+    { value: 'provide_service', label: '提供技术服务' },
+    { value: 'investment', label: '投融资支持' },
+    { value: 'other', label: '其他' }
+  ],
+  result: [
+    { value: 'purchase', label: '技术购买' },
+    { value: 'license', label: '技术许可' },
+    { value: 'joint_rnd', label: '联合研发' },
+    { value: 'commercialization', label: '成果转化' },
+    { value: 'pilot_validation', label: '场景验证' },
+    { value: 'investment', label: '投融资' },
+    { value: 'other', label: '其他' }
+  ]
+}
+
+export function getIntentTypeOptions(type) {
+  return INTENT_TYPE_OPTIONS[type] || []
+}
+
+export function getIntentTypeLabel(type, intentType) {
+  if (!intentType) return ''
+  const found = getIntentTypeOptions(type).find((o) => o.value === intentType)
+  return found ? found.label : ''
+}
+
+export async function createCooperation({ type, id, intentType, message }) {
   return apiRequest('POST', '/cooperations', null, {
     targetType: toTargetType(type),
     targetId: toTargetId(id),
+    intentType: intentType || undefined,
     message: message || undefined,
   })
 }
