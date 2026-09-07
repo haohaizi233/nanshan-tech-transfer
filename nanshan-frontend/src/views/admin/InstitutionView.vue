@@ -11,7 +11,11 @@ import { api } from '../../api/client'
 const KIND_OPTIONS = [
   { value: 'platform', label: '平台' },
   { value: 'invest', label: '投资机构' },
-  { value: 'service', label: '服务机构' }
+  { value: 'service', label: '服务机构' },
+  { value: 'university', label: '高校' },
+  { value: 'institute', label: '科研院所' },
+  { value: 'enterprise', label: '企业' },
+  { value: 'other', label: '其他机构' }
 ]
 
 const STATUS_OPTIONS = [
@@ -23,13 +27,24 @@ const kindLabel = item => {
   if (item.kind === 'platform') {
     return item.platformTypeKey === 'poc' ? '平台·验证' : item.platformTypeKey === 'pilot' ? '平台·中试' : '平台'
   }
-  return { invest: '投资机构', service: '服务机构' }[item.kind] || '未分类'
+  return {
+    invest: '投资机构',
+    service: '服务机构',
+    university: '高校',
+    institute: '科研院所',
+    enterprise: '企业',
+    other: '其他机构'
+  }[item.kind] || '未分类'
 }
 
 const kindClass = item => ({
   platform: 'tag-platform',
   invest: 'tag-invest',
-  service: 'tag-service'
+  service: 'tag-service',
+  university: 'tag-university',
+  institute: 'tag-institute',
+  enterprise: 'tag-enterprise',
+  other: 'tag-other'
 }[item.kind] || 'tag-none')
 
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
@@ -56,6 +71,15 @@ const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
 
+const registrationVisible = ref(false)
+const registrationLoading = ref(false)
+const registrationError = ref('')
+const registrationRows = ref([])
+const registrationStatus = ref('pending')
+const reviewingRegistrationId = ref(null)
+const rejectTarget = ref(null)
+const rejectReason = ref('')
+
 const modalVisible = ref(false)
 const modalMode = ref('view')
 const modalLoading = ref(false)
@@ -66,6 +90,7 @@ const currentItem = ref(null)
 const form = reactive({
   kind: 'platform',
   name: '',
+  region: '',
   intro: '',
   label: '',
   sortOrder: 0,
@@ -145,6 +170,71 @@ const handlePageSizeChange = () => {
   loadList()
 }
 
+const loadRegistrations = async () => {
+  registrationLoading.value = true
+  registrationError.value = ''
+  try {
+    const data = await api('/admin/institution-registrations', {
+      params: { page: 1, pageSize: 50, registrationStatus: registrationStatus.value }
+    })
+    registrationRows.value = data.list || []
+  } catch (err) {
+    registrationRows.value = []
+    registrationError.value = err.message || '加载注册申请失败'
+  } finally {
+    registrationLoading.value = false
+  }
+}
+
+const openRegistrationReview = () => {
+  registrationVisible.value = true
+  rejectTarget.value = null
+  rejectReason.value = ''
+  loadRegistrations()
+}
+
+const approveRegistration = async item => {
+  if (!window.confirm(`确认通过“${item.name}”的机构注册申请吗？`)) return
+  reviewingRegistrationId.value = item.id
+  registrationError.value = ''
+  try {
+    await api(`/admin/institution-registrations/${item.id}/approve`, { method: 'POST' })
+    await loadRegistrations()
+    loadList()
+  } catch (err) {
+    registrationError.value = err.message || '审核通过失败'
+  } finally {
+    reviewingRegistrationId.value = null
+  }
+}
+
+const openRejectRegistration = item => {
+  rejectTarget.value = item
+  rejectReason.value = ''
+  registrationError.value = ''
+}
+
+const rejectRegistration = async () => {
+  if (!rejectReason.value.trim()) {
+    registrationError.value = '请填写驳回原因'
+    return
+  }
+  reviewingRegistrationId.value = rejectTarget.value.id
+  registrationError.value = ''
+  try {
+    await api(`/admin/institution-registrations/${rejectTarget.value.id}/reject`, {
+      method: 'POST', body: { reason: rejectReason.value.trim() }
+    })
+    rejectTarget.value = null
+    await loadRegistrations()
+    loadList()
+  } catch (err) {
+    registrationError.value = err.message || '驳回申请失败'
+  } finally {
+    reviewingRegistrationId.value = null
+  }
+}
+
 const openView = async item => {
   modalMode.value = 'view'
   modalVisible.value = true
@@ -164,6 +254,7 @@ const fillForm = item => {
   Object.assign(form, {
     kind: item.kind || 'platform',
     name: item.name || '',
+    region: item.region || '',
     intro: item.intro || '',
     label: item.label || '',
     sortOrder: item.sortOrder || 0,
@@ -188,6 +279,7 @@ const openCreate = () => {
   Object.assign(form, {
     kind: 'platform',
     name: '',
+    region: '',
     intro: '',
     label: '',
     sortOrder: 0,
@@ -213,6 +305,7 @@ const save = async () => {
   try {
     const body = {
       name: form.name.trim(),
+      region: form.region.trim(),
       intro: form.intro.trim(),
       label: form.label.trim(),
       sortOrder: Number(form.sortOrder) || 0
@@ -281,11 +374,12 @@ const exportData = async () => {
     }
 
     const csv = [
-      ['ID', '机构名称', '机构类型', '标签', '简介', '状态', '更新时间'],
+      ['ID', '机构名称', '机构类型', '所在地区', '标签', '简介', '状态', '更新时间'],
       ...all.map(item => [
         item.id,
         item.name,
         kindLabel(item),
+        item.region,
         item.label,
         item.intro,
         item.status === 'active' ? '已上架' : '已下架',
@@ -369,6 +463,13 @@ const exportData = async () => {
           </button>
 
           <button
+            class="outline-btn"
+            @click="openRegistrationReview"
+          >
+            注册申请审核
+          </button>
+
+          <button
             class="primary-btn"
             @click="openCreate"
           >
@@ -386,6 +487,7 @@ const exportData = async () => {
               <th>ID</th>
               <th>机构名称</th>
               <th>机构类型</th>
+              <th>所在地区</th>
               <th>标签</th>
               <th>简介</th>
               <th>排序</th>
@@ -417,6 +519,8 @@ const exportData = async () => {
                   {{ kindLabel(item) }}
                 </span>
               </td>
+
+              <td>{{ item.region || '-' }}</td>
 
               <td
                 class="label-cell"
@@ -475,7 +579,7 @@ const exportData = async () => {
 
             <tr v-if="loading">
               <td
-                colspan="9"
+                colspan="10"
                 class="state-row"
               >
                 加载中…
@@ -484,7 +588,7 @@ const exportData = async () => {
 
             <tr v-else-if="loadError">
               <td
-                colspan="9"
+                colspan="10"
                 class="state-row error"
               >
                 {{ loadError }}
@@ -500,7 +604,7 @@ const exportData = async () => {
 
             <tr v-else-if="rows.length === 0">
               <td
-                colspan="9"
+                colspan="10"
                 class="state-row"
               >
                 暂无符合条件的机构
@@ -583,6 +687,56 @@ const exportData = async () => {
       </div>
     </section>
 
+    <div v-if="registrationVisible" class="modal-mask" @click.self="!reviewingRegistrationId && (registrationVisible = false)">
+      <div class="modal registration-modal">
+        <div class="modal-header">
+          <h3>机构注册申请审核</h3>
+          <button :disabled="Boolean(reviewingRegistrationId)" @click="registrationVisible = false">×</button>
+        </div>
+        <div class="registration-toolbar">
+          <label>申请状态
+            <select v-model="registrationStatus" @change="loadRegistrations">
+              <option value="pending">待审核</option>
+              <option value="approved">已通过</option>
+              <option value="rejected">已驳回</option>
+              <option value="all">全部</option>
+            </select>
+          </label>
+          <button class="default-btn" :disabled="registrationLoading" @click="loadRegistrations">刷新</button>
+        </div>
+        <p v-if="registrationError" class="modal-error">{{ registrationError }}</p>
+        <div class="registration-table-wrap">
+          <table class="registration-table">
+            <thead><tr><th>机构</th><th>类型 / 地区</th><th>申请人</th><th>账号</th><th>申请时间</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-if="registrationLoading"><td colspan="7" class="state-row">加载中…</td></tr>
+              <tr v-else-if="!registrationRows.length"><td colspan="7" class="state-row">暂无注册申请</td></tr>
+              <tr v-for="item in registrationRows" :key="item.id">
+                <td><strong>{{ item.name }}</strong><small v-if="item.creditCode">信用代码：{{ item.creditCode }}</small></td>
+                <td>{{ kindLabel(item) }}<small>{{ item.region || '-' }}</small></td>
+                <td>{{ item.applicantName || '-' }}<small>{{ item.applicantPhone || '-' }}</small></td>
+                <td>{{ item.username || '-' }}</td>
+                <td>{{ fmtTime(item.appliedAt) }}</td>
+                <td><span class="registration-status" :class="item.registrationStatus">{{ { pending: '待审核', approved: '已通过', rejected: '已驳回' }[item.registrationStatus] || item.registrationStatus }}</span><small v-if="item.rejectReason">{{ item.rejectReason }}</small></td>
+                <td>
+                  <div v-if="item.registrationStatus === 'pending'" class="review-actions">
+                    <button class="approve-btn" :disabled="Boolean(reviewingRegistrationId)" @click="approveRegistration(item)">通过</button>
+                    <button class="reject-btn" :disabled="Boolean(reviewingRegistrationId)" @click="openRejectRegistration(item)">驳回</button>
+                  </div>
+                  <span v-else>-</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="rejectTarget" class="reject-panel">
+          <strong>驳回“{{ rejectTarget.name }}”</strong>
+          <textarea v-model="rejectReason" rows="3" maxlength="500" placeholder="请填写驳回原因（必填）"></textarea>
+          <div><button class="default-btn" :disabled="Boolean(reviewingRegistrationId)" @click="rejectTarget = null">取消</button><button class="reject-btn" :disabled="Boolean(reviewingRegistrationId)" @click="rejectRegistration">确认驳回</button></div>
+        </div>
+      </div>
+    </div>
+
     <div
       v-if="modalVisible"
       class="modal-mask"
@@ -629,6 +783,11 @@ const exportData = async () => {
             <div>
               <label>机构类型</label>
               <strong>{{ kindLabel(currentItem) }}</strong>
+            </div>
+
+            <div>
+              <label>所在地区</label>
+              <strong>{{ currentItem.region || '-' }}</strong>
             </div>
 
             <div>
@@ -713,6 +872,15 @@ const exportData = async () => {
                 {{ item.label }}
               </option>
             </select>
+          </label>
+
+          <label>
+            所在地区
+
+            <input
+              v-model="form.region"
+              placeholder="如：广东·深圳南山"
+            />
           </label>
 
           <label>
@@ -900,6 +1068,102 @@ const exportData = async () => {
   margin-top: 14px;
 }
 
+.registration-modal {
+  width: min(1120px, calc(100vw - 40px));
+}
+
+.registration-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.registration-toolbar label {
+  color: #344154;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.registration-toolbar select {
+  height: 34px;
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 1px solid #dce4ee;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.registration-toolbar .default-btn,
+.review-actions button,
+.reject-panel button {
+  height: 34px;
+  padding: 0 13px;
+}
+
+.registration-table-wrap {
+  max-height: 460px;
+  overflow: auto;
+}
+
+.registration-table {
+  min-width: 960px;
+  table-layout: auto;
+}
+
+.registration-table th,
+.registration-table td {
+  height: auto;
+  padding: 12px 14px;
+  vertical-align: top;
+}
+
+.registration-table small {
+  display: block;
+  margin-top: 4px;
+  color: #8b97a8;
+}
+
+.registration-status {
+  display: inline-block;
+  padding: 4px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.registration-status.pending { color: #b7791f; background: #fff7e5; }
+.registration-status.approved { color: #168452; background: #eaf8f0; }
+.registration-status.rejected { color: #d14343; background: #fff0f0; }
+
+.review-actions,
+.reject-panel > div {
+  display: flex;
+  gap: 8px;
+}
+
+.approve-btn,
+.reject-btn {
+  border: 0;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.approve-btn { background: #1aae70; }
+.reject-btn { background: #e65b5b; }
+.approve-btn:disabled,
+.reject-btn:disabled { cursor: not-allowed; opacity: .6; }
+
+.reject-panel {
+  padding: 16px 24px 20px;
+  border-top: 1px solid #edf1f5;
+  background: #fffafa;
+}
+
+.reject-panel strong { display: block; margin-bottom: 10px; color: #a83636; }
+.reject-panel textarea { box-sizing: border-box; width: 100%; margin-bottom: 12px; padding: 9px; border: 1px solid #f0b8b8; border-radius: 5px; resize: vertical; }
+
 .table-wrapper {
   overflow-x: auto;
 }
@@ -939,22 +1203,22 @@ th:nth-child(3) {
 }
 
 th:nth-child(4) {
-  width: 110px;
-}
-
-th:nth-child(6) {
-  width: 65px;
+  width: 135px;
 }
 
 th:nth-child(7) {
-  width: 90px;
+  width: 65px;
 }
 
 th:nth-child(8) {
-  width: 145px;
+  width: 90px;
 }
 
 th:nth-child(9) {
+  width: 145px;
+}
+
+th:nth-child(10) {
   width: 150px;
 }
 
@@ -997,6 +1261,26 @@ tbody tr:hover {
 .type-tag.tag-service {
   background: #e9faf8;
   color: #24b6a2;
+}
+
+.type-tag.tag-university {
+  background: #f1edff;
+  color: #7158d9;
+}
+
+.type-tag.tag-institute {
+  background: #e9f7ff;
+  color: #1484b8;
+}
+
+.type-tag.tag-enterprise {
+  background: #eef8e8;
+  color: #528b2d;
+}
+
+.type-tag.tag-other {
+  background: #f5f1ea;
+  color: #8a7045;
 }
 
 .type-tag.tag-none {

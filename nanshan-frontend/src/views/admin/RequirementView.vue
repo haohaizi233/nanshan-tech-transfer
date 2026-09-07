@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../../api/client'
+import { api, getSavedUser } from '../../api/client'
 
 const router = useRouter()
 
@@ -36,6 +36,8 @@ const categoryOptions = ref([])
 const formCategories = ref([])
 const ownerUsers = ref([])
 const organizations = ref([])
+const currentUser = ref(getSavedUser() || {})
+const isPlatformAdmin = computed(() => (currentUser.value.roles || []).includes('admin'))
 
 const loading = ref(false)
 const loadError = ref('')
@@ -87,8 +89,10 @@ onMounted(() => {
   fetchList()
   loadCategoryOptions()
   api('/admin/demand-categories').then(data => { formCategories.value = data || [] }).catch(() => { formCategories.value = [] })
-  api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } }).then(data => { ownerUsers.value = data.list || [] }).catch(() => { ownerUsers.value = [] })
-  api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
+  if (isPlatformAdmin.value) {
+    api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } }).then(data => { ownerUsers.value = data.list || [] }).catch(() => { ownerUsers.value = [] })
+    api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
+  }
 })
 
 const handleSearch = () => {
@@ -170,7 +174,14 @@ const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => Numbe
 
 const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
 const resetDemandForm = () => Object.assign(demandForm, { title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
-const openCreate = () => { formMode.value = 'create'; editingId.value = null; formError.value = ''; resetDemandForm(); formVisible.value = true }
+const openCreate = () => {
+  formMode.value = 'create'; editingId.value = null; formError.value = ''; resetDemandForm()
+  if (!isPlatformAdmin.value) {
+    demandForm.orgId = currentUser.value.orgId || ''
+    demandForm.ownerUserId = currentUser.value.userId || ''
+  }
+  formVisible.value = true
+}
 const openEdit = async item => {
   resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formError.value = ''; formLoading.value = true; formVisible.value = true
   try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
@@ -182,9 +193,10 @@ const saveDemand = async () => {
   try {
     const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable }
     if (demandForm.categoryId) body.categoryId = Number(demandForm.categoryId)
-    if (demandForm.orgId) body.orgId = Number(demandForm.orgId)
-    if (demandForm.ownerUserId) body.ownerUserId = Number(demandForm.ownerUserId)
-    const optionalTextFields = { region: demandForm.region, orgName: demandForm.orgName, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: demandForm.contactPhone }
+    if (isPlatformAdmin.value && demandForm.orgId) body.orgId = Number(demandForm.orgId)
+    if (isPlatformAdmin.value && demandForm.ownerUserId) body.ownerUserId = Number(demandForm.ownerUserId)
+    const optionalTextFields = { region: demandForm.region, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: demandForm.contactPhone }
+    if (isPlatformAdmin.value) optionalTextFields.orgName = demandForm.orgName
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (demandForm.coopModeText.trim()) body.coopMode = splitText(demandForm.coopModeText)
     if (demandForm.tagsText.trim()) body.tags = splitText(demandForm.tagsText)
@@ -349,7 +361,7 @@ const submitReject = async () => {
                   <button @click="openEdit(item)">编辑</button>
                   <span>|</span>
                   <button @click="openDetail(item)">查看</button>
-                  <template v-if="item.status === 'pending_review'">
+                  <template v-if="isPlatformAdmin && item.status === 'pending_review'">
                     <span>|</span>
                     <button @click="openAudit(item)">审核</button>
                   </template>
@@ -517,9 +529,13 @@ const submitReject = async () => {
     <div v-if="formVisible" class="modal-mask" @click.self="formVisible = false">
       <div class="modal form-modal">
         <div class="modal-header"><h3>{{ formMode === 'create' ? '新增需求' : '编辑需求' }}</h3><button type="button" @click="formVisible = false">×</button></div>
-        <div class="modal-body form-content">
+        <div class="modal-body form-content" :class="{ 'org-admin-form': !isPlatformAdmin }">
           <p v-if="formLoading" class="modal-tip">加载中…</p>
           <template v-else>
+            <template v-if="!isPlatformAdmin">
+              <label>所属机构</label><input :value="currentUser.orgName || '当前登录机构'" disabled />
+              <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
+            </template>
             <label>需求标题 *</label><input v-model="demandForm.title" />
             <label>需求描述 *</label><textarea v-model="demandForm.description" rows="4"></textarea>
             <div class="form-grid">
@@ -1173,5 +1189,10 @@ tbody tr:hover {
 .checkbox-label input {
   width: auto;
   margin: 0;
+}
+
+.org-admin-form .form-grid > div:nth-child(1),
+.org-admin-form .form-grid > div:nth-child(4) {
+  display: none;
 }
 </style>

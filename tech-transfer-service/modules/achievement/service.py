@@ -391,9 +391,14 @@ def _validate_refs(cur, fields):
         if not cur.fetchone():
             raise bad_request("categoryId 不存在")
     if "org_id" in fields:
-        cur.execute("SELECT id FROM institution WHERE id=%s", (fields["org_id"],))
-        if not cur.fetchone():
+        cur.execute("SELECT id, name FROM institution WHERE id=%s", (fields["org_id"],))
+        institution = cur.fetchone()
+        if not institution:
             raise bad_request("orgId 不存在")
+        # 展示文本与认证机构分离：sourceOrgName 用户自填原样保留；
+        # 仅在调用方未提供时回填所选机构名（管理端只选机构的场景）。
+        if "source_org_name" not in fields:
+            fields["source_org_name"] = institution["name"]
 
 
 def _sync_inventors(cur, ach_id: int, refs):

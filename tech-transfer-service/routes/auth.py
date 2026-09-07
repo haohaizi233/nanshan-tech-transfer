@@ -1,6 +1,6 @@
 ﻿from fastapi import APIRouter, Depends
 
-from core.response import success
+from core.response import success, get_request_id
 from core.middleware import json_body
 from core.errors import bootstrap_credential_invalid, BizError, TT_AUTH_40105, TT_COMMON_40102
 from modules.identity.provider import get_identity_provider
@@ -10,6 +10,7 @@ from modules.identity.service import (
     register_user,
     refresh_session,
     logout_session,
+    register_password_user,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
@@ -27,8 +28,16 @@ def login(body: dict = Depends(json_body)):
     return success(result)
 
 
-@router.post("/register", summary="手机号注册（创建用户并直接签发会话）")
+@router.post("/register", summary="注册（username 用户名或 phone 手机号两种模式）")
 def register(body: dict = Depends(json_body)):
+    username = (body.get("username") or "").strip()
+    if username:
+        # Vue 后台注册页：用户名 + 密码（可选 displayName/phone/email），注册后跳登录
+        return success(
+            register_password_user(body, request_id=get_request_id()),
+            "注册成功，请登录",
+        )
+    # 小程序手机号注册：创建用户并直接签发会话（免登录）
     phone = (body.get("phone") or "").strip()
     password = body.get("password") or ""
     display_name = (body.get("displayName") or "").strip() or None

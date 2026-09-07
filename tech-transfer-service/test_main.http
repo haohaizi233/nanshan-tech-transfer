@@ -91,3 +91,111 @@ Content-Type: application/json
   "budgetMaxWan": 50,
   "tags": ["AI", "已编辑"]
 }
+
+###
+POST http://127.0.0.1:8787/api/tech-transfer/v1/institution-registrations
+Content-Type: application/json
+
+{
+  "kind": "enterprise",
+  "name": "机构注册测试企业-001",
+  "region": "广东·深圳南山",
+  "creditCode": "TEST-ORG-20260907-001",
+  "intro": "用于验证机构注册申请功能。",
+  "contactName": "张三",
+  "contactPhone": "13800138001",
+  "email": "zhangsan@example.com",
+  "username": "org_apply_test_001",
+  "password": "Test@2026"
+}
+
+###
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "org_apply_test_001",
+  "password": "Test@2026"
+}
+
+###     然后请求待审核列表：
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/institution-registrations?registrationStatus=pending
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NzUyODkxLCJleHAiOjE3ODg3NjAwOTF9.OQFj6tZE8W0u_rcn00O5K0rEAAeANiC9HvFnfud3mEk
+
+
+###
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/institution-registrations/189/approve
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NzUyODkxLCJleHAiOjE3ODg3NjAwOTF9.OQFj6tZE8W0u_rcn00O5K0rEAAeANiC9HvFnfud3mEk
+Content-Type: application/json
+
+###
+
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "org_apply_test_001",
+  "password": "Test@2026"
+}
+
+
+###         用管理员 Token 请求：  预期：正常返回全平台成果，total 约为原来的全部数量。
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements?page=1&pageSize=10
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NzUzNTI0LCJleHAiOjE3ODg3NjA3MjR9.djbHm_Xdow3-7_rByJGnzhareMkXKtzCUfTtQTyghBQ
+
+
+###         用机构管理员 Token 请求
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements?page=1&pageSize=10
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg3NTM1NzYsImV4cCI6MTc4ODc2MDc3Nn0._T4JZ0PrLNfXOozFGcRYOg5qfMG61Mb6MA25qo23mX8
+
+
+
+###         越权详情测试：先用平台管理员成果列表找一条不属于机构 189 的成果 ID，例如当前库中通常可用 223。然后用机构管理员 Token 请求：
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements/223
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg3NTM1NzYsImV4cCI6MTc4ODc2MDc3Nn0._T4JZ0PrLNfXOozFGcRYOg5qfMG61Mb6MA25qo23mX8
+
+
+####        平台管理员需求列表
+
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/demands?page=1&pageSize=10
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NzUzNTI0LCJleHAiOjE3ODg3NjA3MjR9.djbHm_Xdow3-7_rByJGnzhareMkXKtzCUfTtQTyghBQ
+
+###         机构管理员需求列表
+
+GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/demands?page=1&pageSize=10
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg3NTM1NzYsImV4cCI6MTc4ODc2MDc3Nn0._T4JZ0PrLNfXOozFGcRYOg5qfMG61Mb6MA25qo23mX8
+
+
+###
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/achievements
+Authorization: Bearer {{orgAdminToken}}
+Content-Type: application/json
+
+{
+  "title": "机构管理员新增成果测试",
+  "categoryId": 1,
+  "maturityLevel": "02_lab",
+  "pricingMode": "negotiable",
+  "techIntro": "用于验证机构管理员新增成果。",
+  "orgId": 162,
+  "ownerUserId": 32,
+  "sourceOrgName": "伪造机构"
+}
+
+
+###
+
+
+
+###
+
+
+
+###
+
+
+
+###
+
+
+###

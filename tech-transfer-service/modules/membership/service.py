@@ -645,7 +645,8 @@ def approve_organization_application(admin: dict, application_id: int, version: 
                 _assert_system_admin(cur, admin)
                 cur.execute(
                     """
-                    SELECT id, applicant_user_id, requested_name, requested_type, region
+                    SELECT id, applicant_user_id, requested_name, requested_type,
+                           region, credit_code
                     FROM organization_application WHERE id = %s FOR UPDATE
                     """,
                     (application_id,),
@@ -674,19 +675,20 @@ def approve_organization_application(admin: dict, application_id: int, version: 
                 if cur.fetchone():
                     raise conflict("同名机构已存在")
                 kind = (application.get("requested_type") or "").strip().lower()
-                if kind not in ("university", "institute", "enterprise", "service", "invest"):
+                if kind not in ("university", "institute", "enterprise", "service", "invest", "other"):
                     kind = "enterprise"
                 cur.execute(
                     """
                     INSERT INTO institution
-                        (kind, name, region, status, user_type, source_site,
+                        (kind, name, region, credit_code, status, user_type, source_site,
                          registration_status, registered_by_user_id, registration_applied_at)
-                    VALUES (%s, %s, %s, 'active', %s, 'self_registration',
+                    VALUES (%s, %s, %s, %s, 'active', %s, 'self_registration',
                             'approved', %s, CURRENT_TIMESTAMP)
                     RETURNING id
                     """,
                     (kind, application["requested_name"], application.get("region"),
-                     kind, application["applicant_user_id"]),
+                     application.get("credit_code"), kind,
+                     application["applicant_user_id"]),
                 )
                 org_id = cur.fetchone()["id"]
                 membership = _activate_membership(

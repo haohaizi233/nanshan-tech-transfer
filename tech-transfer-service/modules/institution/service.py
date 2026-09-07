@@ -13,7 +13,10 @@ Architecture source: 05-data-model-design.md §8（capital 三表归并为 insti
 
 from db import get_cursor
 
-KINDS = ("platform", "invest", "service")
+KINDS = (
+    "platform", "invest", "service",
+    "university", "institute", "enterprise", "other",
+)
 
 # 平台类 keyword 命中字段（对齐旧 platform_base 五字段 LIKE）
 PLATFORM_KEYWORD_FIELDS = ("name", "support_unit", "functions", "contact_person", "contact_mobile")
@@ -156,6 +159,7 @@ def _to_unified_item(row: dict) -> dict:
         "id": str(row["id"]),
         "kind": row["kind"],
         "name": (row.get("name") or "").strip(),
+        "region": (row.get("region") or "").strip(),
         "intro": (row.get("intro") or "").strip(),
         "detailInfo": (row.get("detail_info") or "").strip(),
         "label": (row.get("label") or "").strip(),

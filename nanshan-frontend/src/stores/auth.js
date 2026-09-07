@@ -32,7 +32,7 @@ export const useAuthStore = defineStore('auth', () => {
     })
 
     const roles = (data.user && data.user.roles) || []
-    if (!roles.includes('admin')) {
+    if (!roles.includes('admin') && !roles.includes('org_admin')) {
       throw new Error('该账号不是管理员，无法登录后台')
     }
 

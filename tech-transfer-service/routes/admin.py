@@ -7,7 +7,7 @@ admin 路由 —— 管理审核组（06-api-design.md §15）
 from fastapi import APIRouter, Depends, Request
 
 from core.response import success, get_request_id
-from core.middleware import admin_identity, json_body
+from core.middleware import admin_identity, backend_identity, json_body
 from modules.admin.service import (
     achievements_review_queue,
     demands_review_queue,
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
 
 
 @router.get("/admin/demand-categories")
-def admin_demand_categories(admin: dict = Depends(admin_identity)):
+def admin_demand_categories(scope: dict = Depends(backend_identity)):
     return success(list_demand_categories_admin())
 
 
@@ -42,13 +42,16 @@ def admin_content_organizations(admin: dict = Depends(admin_identity)):
 
 
 @router.get("/admin/achievements")
-def admin_achievements_list(request: Request, admin: dict = Depends(admin_identity)):
-    return success(list_achievements_admin(request.query_params))
+def admin_achievements_list(
+    request: Request,
+    scope: dict = Depends(backend_identity),
+):
+    return success(list_achievements_admin(request.query_params, scope))
 
 @router.post("/admin/achievements", status_code=201)
 def admin_achievement_create(
     body: dict = Depends(json_body),
-    admin: dict = Depends(admin_identity),
+    admin: dict = Depends(backend_identity),
 ):
     result = create_achievement_admin(
         admin,
@@ -63,15 +66,18 @@ def admin_ach_queue(request: Request, admin: dict = Depends(admin_identity)):
 
 
 @router.get("/admin/achievements/{ach_id}")
-def admin_achievement_detail(ach_id: int, admin: dict = Depends(admin_identity)):
-    return success(get_achievement_admin(ach_id))
+def admin_achievement_detail(
+    ach_id: int,
+    scope: dict = Depends(backend_identity),
+):
+    return success(get_achievement_admin(ach_id, scope))
 
 
 @router.patch("/admin/achievements/{ach_id}")
 def admin_achievement_update(
     ach_id: int,
     body: dict = Depends(json_body),
-    admin: dict = Depends(admin_identity),
+    admin: dict = Depends(backend_identity),
 ):
     result = update_achievement_admin(
         admin,
@@ -110,13 +116,16 @@ def admin_ach_reject(ach_id: int, body: dict = Depends(json_body), admin: dict =
 
 
 @router.get("/admin/demands")
-def admin_demands_list(request: Request, admin: dict = Depends(admin_identity)):
-    return success(list_demands_admin(request.query_params))
+def admin_demands_list(
+    request: Request,
+    scope: dict = Depends(backend_identity),
+):
+    return success(list_demands_admin(request.query_params, scope))
 
 @router.post("/admin/demands", status_code=201)
 def admin_demand_create(
     body: dict = Depends(json_body),
-    admin: dict = Depends(admin_identity),
+    admin: dict = Depends(backend_identity),
 ):
     result = create_demand_admin(
         admin,
@@ -132,14 +141,17 @@ def admin_dmd_queue(request: Request, admin: dict = Depends(admin_identity)):
 
 
 @router.get("/admin/demands/{demand_id}")
-def admin_demand_detail(demand_id: int, admin: dict = Depends(admin_identity)):
-    return success(get_demand_admin(demand_id))
+def admin_demand_detail(
+    demand_id: int,
+    scope: dict = Depends(backend_identity),
+):
+    return success(get_demand_admin(demand_id, scope))
 
 @router.patch("/admin/demands/{demand_id}")
 def admin_demand_update(
     demand_id: int,
     body: dict = Depends(json_body),
-    admin: dict = Depends(admin_identity),
+    admin: dict = Depends(backend_identity),
 ):
     result = update_demand_admin(
         admin,

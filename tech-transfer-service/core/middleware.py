@@ -94,3 +94,44 @@ def org_admin_identity(request: Request) -> dict:
         "organizationAdminOrgIds": org_ids,
         "isSystemAdmin": is_system_admin,
     }
+
+
+def backend_identity(request: Request) -> dict:
+    """后台内容管理访问身份（admin 路由 scope 契约）。
+
+    - 平台管理员（user_role.role_code='admin'）：isPlatformAdmin=True，全平台范围；
+    - 机构管理员：isPlatformAdmin=False，orgId 限本机构（内容 scope 过滤）。
+
+    机构管理员身份来自 organization_membership(role='admin', status='active')
+    实时查库——不使用 user_role 表达机构权限（与 org_admin_identity 同源）。
+    """
+    user = identity(request)
+    from db import get_cursor
+    from core.errors import TT_ADMIN_40301
+
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
+            (user["userId"],),
+        )
+        if cur.fetchone():
+            return {**user, "isPlatformAdmin": True, "orgId": None}
+
+        cur.execute(
+            """
+            SELECT m.org_id
+            FROM organization_membership m
+            JOIN institution i ON i.id = m.org_id AND i.status = 'active'
+            WHERE m.user_id = %s AND m.role = 'admin' AND m.status = 'active'
+            ORDER BY m.org_id
+            LIMIT 1
+            """,
+            (user["userId"],),
+        )
+        row = cur.fetchone()
+
+    if row:
+        return {**user, "isPlatformAdmin": False, "orgId": int(row["org_id"])}
+
+    code, message, status = TT_ADMIN_40301
+    raise BizError(code, message, status)
