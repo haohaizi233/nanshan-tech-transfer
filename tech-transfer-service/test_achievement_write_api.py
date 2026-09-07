@@ -8,10 +8,11 @@
 import psycopg2
 import psycopg2.extras
 import requests
+from config import settings
 
-BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
-DB = dict(host="127.0.0.1", port=5432, user="postgres", password="postgres123",
-          dbname="tech_transfer")
+BASE = settings.API_BASE.rstrip("/") + settings.API_PREFIX
+DB = dict(host=settings.DB_HOST, port=settings.DB_PORT, user=settings.DB_USER,
+          password=settings.DB_PASSWORD, dbname=settings.DB_NAME)
 PASS = 0
 FAIL = 0
 
@@ -114,8 +115,9 @@ a1 = r.json()["data"]
 check("创建即draft", a1["status"] == "draft", a1.get("status"))
 check("version=1", a1["version"] == 1, a1.get("version"))
 check("owner注入=C", not a1.get("ownerUserId") or True)  # 响应不含 owner 字段，验证 DB 侧
-rows = db_query("SELECT owner_user_id FROM achievement WHERE id=%s", (a1["id"],))
+rows = db_query("SELECT owner_user_id, org_id, source_org_name FROM achievement WHERE id=%s", (a1["id"],))
 check("DB owner=C", rows[0]["owner_user_id"] == user_c["userId"])
+check("来源名称仅保存展示快照", rows[0]["org_id"] is None and rows[0]["source_org_name"] == "成果写接口-测试大学")
 check("applicationFields落库", a1["applicationFields"] == ["新能源", "储能"], a1.get("applicationFields"))
 check("innovationPoints落库", a1["innovationPoints"] == ["点1", "点2"], a1.get("innovationPoints"))
 check("inventors=2", len(a1["inventors"]) == 2, a1.get("inventors"))

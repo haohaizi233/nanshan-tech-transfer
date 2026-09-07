@@ -11,6 +11,7 @@ Architecture source: 04-backend-domain-design.md §4.5, 05-data-model-design.md 
 import json
 
 from db import get_cursor
+from modules.membership.service import assert_active_membership
 from core.errors import (
     bad_request,
     conflict,
@@ -513,6 +514,8 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
             raise bad_request("priceMinWan 不能大于 priceMaxWan")
 
     with get_cursor(commit=True) as cur:
+        if "org_id" in fields:
+            assert_active_membership(cur, user_id, fields["org_id"])
         _validate_refs(cur, fields)
         cur.execute(
             """
@@ -580,6 +583,8 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
                 f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected 可编辑）"
             )
 
+        if "org_id" in fields:
+            assert_active_membership(cur, user_id, fields["org_id"])
         _validate_refs(cur, fields)
         if fields:
             set_clause = ", ".join(f"{k}=%s" for k in fields)

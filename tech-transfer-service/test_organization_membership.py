@@ -587,6 +587,111 @@ def check_http_flows():
                 cur.execute("DELETE FROM organization WHERE org_name = ANY(%s)", (names,))
 
 
+def check_profile_and_content_associations():
+    """Exercise text/identity separation and content authorization against real DB rows."""
+    from fastapi.testclient import TestClient
+    from app import app
+    from core.jwt_utils import sign_access_token
+
+    suffix = uuid.uuid4().hex[:12]
+    users, orgs = [], []
+    display_name = f"display-only-{suffix}"
+    try:
+        with db.get_cursor(commit=True) as cur:
+            for i in range(2):
+                cur.execute("INSERT INTO app_user (user_no) VALUES (%s) RETURNING id", (f"T4{suffix}{i}",))
+                users.append(cur.fetchone()["id"])
+                cur.execute("INSERT INTO organization (org_name, intro) VALUES (%s, 'original intro') RETURNING id", (f"canonical-{suffix}-{i}",))
+                orgs.append(cur.fetchone()["id"])
+            cur.execute("INSERT INTO user_profile (user_id, org_id) VALUES (%s, %s)", (users[0], orgs[0]))
+            cur.execute("INSERT INTO user_profile (user_id) VALUES (%s)", (users[1],))
+            cur.execute("INSERT INTO organization_membership (user_id, org_id, role) VALUES (%s, %s, 'member')", (users[1], orgs[1]))
+        headers = [{"Authorization": f"Bearer {sign_access_token(uid, f'T4{suffix}{i}', ['user'])}"} for i, uid in enumerate(users)]
+        with TestClient(app) as client:
+            def call(method, path, body=None, who=0, status=200):
+                response = client.request(method, "/api/tech-transfer/v1" + path, headers=headers[who], json=body)
+                check(f"association {method} {path} = {status}", response.status_code == status, response.text[:200])
+                return response.json().get("data") or {}
+
+            profile = call("GET", "/me")
+            check("legacy profile orgId does not certify membership", profile.get("organizationMemberships") == [])
+            updated = call("PATCH", "/me/profile", {"version": 1, "companyText": f"  {display_name}  "})
+            check("company text is editable display text", updated.get("companyText") == display_name)
+            check("company text does not create formal membership", updated.get("organizationMemberships") == [])
+            for invalid_text in (123, {"orgId": orgs[1]}, "x" * 129):
+                call("PATCH", "/me/profile", {"version": updated.get("version", 1), "companyText": invalid_text}, status=400)
+            call("PATCH", "/me/profile", {"version": updated.get("version", 1), "orgId": orgs[1]}, status=400)
+            with db.get_cursor() as cur:
+                cur.execute("SELECT org_id FROM user_profile WHERE user_id=%s", (users[0],))
+                check("direct profile orgId cannot change legacy association", cur.fetchone()["org_id"] == orgs[0])
+                cur.execute("SELECT COUNT(*) AS c FROM organization_membership WHERE user_id=%s", (users[0],))
+                check("profile edits create no membership rows", cur.fetchone()["c"] == 0)
+                cur.execute("SELECT COUNT(*) AS c FROM organization WHERE org_name=%s", (display_name,))
+                check("profile company text creates no canonical organization", cur.fetchone()["c"] == 0)
+            profile = call("GET", "/me", who=1)
+            memberships = profile.get("organizationMemberships", [])
+            check("profile returns canonical active membership", len(memberships) == 1 and memberships[0].get("orgId") == orgs[1] and memberships[0].get("orgName") == f"canonical-{suffix}-1" and memberships[0].get("role") == "member" and memberships[0].get("status") == "active")
+
+            for resource, table, content, text_key, column in (
+                ("demands", "demand", {"description": "ordinary publishing"}, "orgName", "org_name_snapshot"),
+                ("achievements", "achievement", {"maturityLevel": "02_lab", "pricingMode": "negotiable"}, "sourceOrgName", "source_org_name"),
+            ):
+                base = {"title": f"task4-{suffix}", **content}
+                plain = call("POST", f"/{resource}", base, status=201)
+                if plain.get("id"):
+                    call("POST", f"/{resource}/{plain['id']}/submit", {"version": 1})
+                with db.get_cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS c FROM organization WHERE org_name=%s", (display_name,))
+                    organization_count = cur.fetchone()["c"]
+                display = call("POST", f"/{resource}", {**base, "orgId": None, text_key: display_name}, status=201)
+                check(f"{resource} preserve display snapshot", display.get(text_key) == display_name)
+                with db.get_cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS c FROM organization WHERE org_name=%s", (display_name,))
+                    check(f"{resource} display text creates no canonical organization", cur.fetchone()["c"] == organization_count)
+                    cur.execute(f"SELECT org_id, {column} FROM {table} WHERE id=%s", (display.get("id", -1),))
+                    row = cur.fetchone() or {}
+                    check(f"{resource} text remains unassociated", row.get("org_id") is None and row.get(column) == display_name)
+                call("POST", f"/{resource}", {**base, "orgId": orgs[0]}, status=403)
+                call("POST", f"/{resource}", {**base, "orgId": orgs[0], text_key: f"canonical-{suffix}-1"}, who=1, status=403)
+                if display.get("id"):
+                    call("PATCH", f"/{resource}/{display['id']}", {"version": 1, "orgId": orgs[1]}, status=403)
+                    with db.get_cursor() as cur:
+                        cur.execute(f"SELECT org_id, version FROM {table} WHERE id=%s", (display["id"],))
+                        row = cur.fetchone()
+                        check(f"{resource} forged update leaves row unchanged", row["org_id"] is None and row["version"] == 1)
+                valid = call("POST", f"/{resource}", {**base, "orgId": orgs[1], text_key: display_name}, who=1, status=201)
+                if valid.get("id"):
+                    call("PATCH", f"/{resource}/{valid['id']}", {"version": 1, "orgId": orgs[1], text_key: display_name + "-edit"}, who=1)
+                    with db.get_cursor() as cur:
+                        cur.execute(f"SELECT org_id, {column} FROM {table} WHERE id=%s", (valid["id"],))
+                        row = cur.fetchone()
+                        check(f"{resource} active membership authorizes exact org without guessing from text", row["org_id"] == orgs[1] and row[column] == display_name + "-edit")
+                        cur.execute("SELECT intro FROM organization WHERE id=%s", (orgs[1],))
+                        check(f"{resource} does not edit canonical organization", cur.fetchone()["intro"] == "original intro")
+                    with db.get_cursor(commit=True) as cur:
+                        cur.execute("UPDATE organization_membership SET status='revoked' WHERE user_id=%s", (users[1],))
+                    profile = call("GET", "/me", who=1)
+                    check("revoked membership immediately disappears from certification", profile.get("organizationMemberships") == [])
+                    call("POST", f"/{resource}", {**base, "orgId": orgs[1]}, who=1, status=403)
+                    call("PATCH", f"/{resource}/{valid['id']}", {"version": 2, "orgId": orgs[1]}, who=1, status=403)
+                    # An unrelated edit must not rewrite a pre-existing association.
+                    call("PATCH", f"/{resource}/{valid['id']}", {"version": 2, "title": base["title"] + " edited"}, who=1)
+                    with db.get_cursor(commit=True) as cur:
+                        cur.execute(f"SELECT org_id FROM {table} WHERE id=%s", (valid["id"],))
+                        check(f"{resource} existing association is preserved on unrelated edit", cur.fetchone()["org_id"] == orgs[1])
+                        cur.execute("UPDATE organization_membership SET status='active' WHERE user_id=%s", (users[1],))
+    finally:
+        if users:
+            with db.get_cursor(commit=True) as cur:
+                cur.execute("DELETE FROM audit_log WHERE actor_user_id = ANY(%s)", (users,))
+                for table in ("demand", "achievement"):
+                    cur.execute(f"DELETE FROM {table} WHERE owner_user_id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM organization_membership WHERE user_id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM user_profile WHERE user_id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM app_user WHERE id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM organization WHERE id = ANY(%s) OR org_name = ANY(%s)", (orgs, [display_name, display_name + "-edit"]))
+
+
 def main():
     with db.get_cursor() as cur:
         cur.execute(
@@ -625,6 +730,7 @@ def main():
     check_revoked_user_can_apply_for_admin()
     check_admin_rejection_audit_has_org_id()
     check_request_validation()
+    check_profile_and_content_associations()
     check_http_flows()
 
     print(f"RESULT: {PASS} passed, {FAIL} failed")
