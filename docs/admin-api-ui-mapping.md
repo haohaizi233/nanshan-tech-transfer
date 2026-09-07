@@ -97,18 +97,65 @@ admin online         → 公开恢复可见
 
 创建/编辑请求体字段（camelCase）：`kind`（必填，创建时）、`name`（必填）、`intro`、`detailInfo`、`label`、`logoFileId`、`sortOrder`、`userType`、`detailActivityId`、`platformType`、`platformTypeKey`、`unit`、`functionText`、`contact`、`phone`、`serialNo`。kind/source 溯源字段/id 不可编辑。写操作审计：`institution.create/update/online/offline`。
 
-## 4. 对接管理（只读）
+## 4. 对接管理
+
+### 4.1 意向列表与详情
 
 | UI 页 | API | 过滤参数 |
 |-------|-----|---------|
-| 意向列表 | `GET /admin/cooperations?status=&keyword=` | status=状态机值；keyword 命中双方姓名/目标标题/留言 |
+| 意向列表 | `GET /admin/cooperations?status=&keyword=&handlingMode=&assistStatus=&targetType=&targetOrgId=` | status=状态机值；keyword 命中双方姓名/目标标题/留言；handlingMode=direct/assisted；assistStatus=平台协助阶段；targetType=achievement/demand；targetOrgId=目标机构 |
 | 意向详情 | `GET /admin/cooperations/{id}` | 含 events 事件流 |
 
-列表项字段：`id`、`initiatorUserId/UserNo/Name`、`targetOwnerUserId/UserNo/Name`、`targetType`（achievement/demand）、`targetId`、`targetTitle`、`message`、`status`、`version`、`createdAt/acceptedAt/confirmedAt/completedAt/closedAt`。
+列表项字段：`id`、`initiatorUserId/UserNo/Name`、`targetOwnerUserId/UserNo/Name`、`targetType`、`targetId`、`targetTitle`、`targetOrgId/Name`、`message`、`status`、`handlingMode`、`assistStatus`、`acceptMode`、`handledByUserId/Name`、`version`、`createdAt/acceptedAt/confirmedAt/completedAt/closedAt`、`initiatorContact`（快照摘要）、`assistNote`、`contactShareConsentAt`。
 
 详情额外 `events[]`：`id`、`eventType`、`fromStatus`、`toStatus`、`operatorUserId`、`operatorRole`、`remark`、`createdAt`。
 
-**管理端不提供任何写操作**（状态机归参与方，Admin 只旁观 + 审计留痕）；GET 不改变状态。
+### 4.2 管理员代发布
+
+| UI 操作 | API | 说明 |
+|---------|-----|------|
+| 代录成果 | `POST /admin/achievements` | `ownerUserId` 可为空（NULL = 真实机构无平台账号，走 assisted）；必填 `orgId` |
+| 代录需求 | `POST /admin/demands` | 同上 |
+| 代提交审核 | `POST /admin/achievements/{id}/submit` | 代录入内容提交审核（有归属用户的内容不能代 submit，返回 400） |
+| 代提交审核 | `POST /admin/demands/{id}/submit` | 同上 |
+
+**重要：** Admin 是录入人（`created_by_user_id = admin`），不自动成为业务归属人。`ownerUserId = NULL` 表示真实机构尚无平台绑定账号，后续对接进入平台协助流程。
+
+### 4.3 平台协助对接（Assisted Cooperation）
+
+仅 `handlingMode = assisted` 的意向可执行以下操作。所有操作均需 `version` 乐观锁，状态冲突返回 409 `TT_COMMON_40902`。
+
+| 按钮 / 操作 | API | 请求体 | 前置条件 | 效果 |
+|------------|-----|--------|---------|------|
+| 开始联系 | `POST /admin/cooperations/{id}/assist/start-contact` | `{version}` | status=pending，assist_status ∈ (queued, unreachable) | assist_status → contacting，handled_by = 当前 admin |
+| 等待回复 | `POST /admin/cooperations/{id}/assist/waiting-reply` | `{version}` | status=pending，assist_status = contacting | assist_status → waiting_reply |
+| 标记联系不上 | `POST /admin/cooperations/{id}/assist/mark-unreachable` | `{version}` | status=pending | assist_status → unreachable（**主状态仍为 pending**，联系不上≠拒绝） |
+| 代接受 | `POST /admin/cooperations/{id}/assist/accept` | `{version, confirmationNote}`（confirmationNote 必填） | status=pending，assist_status ∈ (contacting, waiting_reply, unreachable)；**必须先线下获得机构明确同意** | status → accepted，assist_status → target_agreed，accept_mode → platform_assisted，accepted_at 落库 |
+| 代拒绝 | `POST /admin/cooperations/{id}/assist/reject` | `{version, reason}`（reason 必填） | status=pending | status → rejected，assist_status → target_rejected，closed_at 落库 |
+
+**代接受（assist/accept）是高风险操作：**
+- `confirmationNote` 必须填写，记录确认依据（如"2026-09-07 电话联系李老师，对方确认愿意进一步对接"）
+- 必须真实机构明确同意后才能点击，禁止看到申请就直接 accept
+- 操作人、确认依据、事件、审计日志全部留痕，同一事务原子提交
+
+### 4.4 联系方式与快照
+
+- `initiatorContactSnapshot`（详情返回）：申请方联系方式快照（创建时服务端生成，防止申请人事后改资料导致历史申请联系人漂移）
+- Admin 通过电话/邮件/微信将申请人意向和联系方式提供给目标机构（平台撮合）
+- `assistNote`：运营内部记录，不对普通用户返回
+- accepted 后，申请人侧自动解锁目标方联系方式（与 direct 流程一致）
+
+### 4.5 审计
+
+所有 Admin 协助操作均写审计日志：
+
+| 操作 | audit action key |
+|------|-----------------|
+| 协助阶段变更 | `cooperation.assist_status` |
+| 代接受 | `cooperation.admin_accept` |
+| 代拒绝 | `cooperation.admin_reject` |
+| 代发布创建 | `achievement.admin_create` / `demand.admin_create` |
+| 代提交审核 | `achievement.admin_submit` / `demand.admin_submit` |
 
 ## 5. 用户管理（只读）
 
