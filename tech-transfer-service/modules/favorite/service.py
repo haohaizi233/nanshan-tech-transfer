@@ -41,10 +41,10 @@ def _target_summary(cur, target_type: str, target_id: int):
         cur.execute(
             """
             SELECT d.id, d.title, d.status, d.description,
-                   o.org_name, o.intro AS org_intro
+                   o.name AS org_name, o.intro AS org_intro
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
-            WHERE d.id = %s AND d.deleted_at IS NULL
+            LEFT JOIN institution o ON d.org_id = o.id
+            WHERE d.id=%s AND d.deleted_at IS NULL
             """,
             (target_id,),
         )

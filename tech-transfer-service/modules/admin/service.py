@@ -1,4 +1,4 @@
-﻿"""
+"""
 admin 服务层（P0-3/P0-4）—— 管理审核
 
 Architecture source: 04-backend-domain-design.md §5.4, 06-api-design.md §15 admin 组
@@ -1161,7 +1161,7 @@ def list_users_admin(args) -> dict:
         params.append(status)
     if keyword:
         like = f"%{keyword}%"
-        where.append("(u.user_no ILIKE %s OR p.display_name ILIKE %s OR o.org_name ILIKE %s)")
+        where.append("(u.user_no ILIKE %s OR p.display_name ILIKE %s OR o.name ILIKE %s)")
         params.extend([like] * 3)
     where_sql = " WHERE " + " AND ".join(where)
 

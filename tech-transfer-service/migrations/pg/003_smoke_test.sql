@@ -9,18 +9,19 @@
 
 BEGIN;
 
--- 1) 中文写入 + updated_at 触发器
-INSERT INTO organization (org_name, org_type, intro, region)
-VALUES ('北京大学深圳研究生院', 'university', '南山区大学城机构，中文冒烟测试', '深圳市南山区');
+-- 1) 中文写入 + updated_at 触发器（统一机构目录 institution，organization 已并入）
+INSERT INTO institution (kind, name, intro, region, user_type, source_site)
+VALUES ('university', '北京大学深圳研究生院', '南山区大学城机构，中文冒烟测试', '深圳市南山区', 'university', 'smoke_test');
 
-UPDATE organization
+UPDATE institution
    SET intro = '更新后的简介：验证 updated_at 自动维护'
- WHERE org_name = '北京大学深圳研究生院';
+ WHERE name = '北京大学深圳研究生院';
 
-SELECT org_name,
+SELECT name AS org_name,
        intro,
        (updated_at >= created_at) AS updated_at_trigger_ok
-  FROM organization;
+  FROM institution
+ WHERE name = '北京大学深圳研究生院';
 
 -- 2) 准备两个测试用户
 INSERT INTO app_user (user_no) VALUES ('smoke-u1');
@@ -50,8 +51,9 @@ SELECT count(*) AS intent_rows_after_reopen FROM cooperation_intent;
 DO $$
 BEGIN
     BEGIN
-        INSERT INTO demand (owner_user_id, title, description, budget_min_wan, budget_max_wan)
+        INSERT INTO demand (owner_user_id, created_by_user_id, title, description, budget_min_wan, budget_max_wan)
         VALUES ((SELECT id FROM app_user WHERE user_no = 'smoke-u1'),
+                (SELECT id FROM app_user WHERE user_no = 'smoke-u1'),
                 '预算倒挂的需求', '描述', 100, 50);
         RAISE EXCEPTION 'FAIL: inverted budget was not rejected';
     EXCEPTION WHEN check_violation THEN
@@ -86,17 +88,18 @@ END $$;
 
 ROLLBACK;
 
--- 8) 结构核对：21 张表（18 业务 + 3 资本域）+ 10 个 updated_at 触发器 + 2 个 GIN 全文索引
+-- 8) 结构核对：24 张表（业务 + 资本域，organization 已并入 institution）+ 12 个 updated_at 触发器 + 2 个 GIN 全文索引
 SELECT count(*) AS table_count FROM pg_tables WHERE schemaname = 'public';
 
 SELECT count(*) AS trigger_count
   FROM pg_trigger
  WHERE NOT tgisinternal
    AND tgrelid::regclass::text IN
-       ('app_user', 'user_profile', 'auth_session', 'organization',
+       ('app_user', 'user_profile', 'auth_session', 'institution',
         'achievement', 'demand', 'cooperation_intent',
-        'platform_base', 'ip_service_org', 'featured_invest_org');
+        'platform_base', 'ip_service_org', 'featured_invest_org',
+        'ai_task', 'user_credential');
 
 SELECT indexname, indexdef
   FROM pg_indexes
- WHERE schemaname = 'public' AND indexdef LIKE '%GIN%';
+ WHERE schemaname = 'public' AND indexdef ILIKE '%gin%';

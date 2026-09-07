@@ -26,9 +26,13 @@ def check(name, condition, detail=""):
 resp = requests.get(f"{BASE}/institutions", timeout=10)
 data = resp.json()["data"]
 check("列表返回200", resp.status_code == 200)
-check("total=137（100+21+16）", data["total"] == 137, f"got {data['total']}")
+# 三类种子各取 kind 总数，统一列表 total 应不小于三类之和
+# （管理后台可新增其他 kind 的真实机构数据，total 允许随内容增长）
+_k = {k: requests.get(f"{BASE}/institutions", params={"kind": k}, timeout=10).json()["data"]["total"]
+      for k in ("platform", "invest", "service")}
+check("total>=三类之和（100+21+16 起步）", data["total"] >= sum(_k.values()), f"got {data['total']}, kinds={_k}")
 check("默认pageSize=10", data["pageSize"] == 10)
-check("totalPages=14", data["totalPages"] == 14, f"got {data['totalPages']}")
+check("totalPages=ceil(total/10)", data["totalPages"] == -(-data["total"] // 10), f"got {data['totalPages']}")
 item = data["list"][0]
 check("列表项有id", bool(item.get("id")))
 check("列表项有kind", item.get("kind") in ("platform", "invest", "service"))
