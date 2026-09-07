@@ -49,7 +49,7 @@ def _parse_page_args(args):
     return page, page_size, keyword, category, maturity
 
 
-def _row_to_list_item(row):
+def _row_to_list_item(row, user_id=None):
     fields = row.get("application_fields")
     if fields and isinstance(fields, str):
         try:
@@ -74,10 +74,12 @@ def _row_to_list_item(row):
         "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") else None,
         "viewCount": row.get("view_count", 0),
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
+        "isMine": user_id is not None and row.get("owner_user_id") == user_id,
+        "platformAssisted": row.get("owner_user_id") is None,
     }
 
 
-def list_achievements(args):
+def list_achievements(args, user_id=None):
     page, page_size, keyword, category, maturity = _parse_page_args(args)
 
     where = " WHERE a.status='published' AND a.deleted_at IS NULL"
@@ -106,7 +108,7 @@ def list_achievements(args):
         SELECT a.id, a.title, a.source_org_name, a.tech_intro,
                a.maturity_level, a.maturity_desc, a.application_fields,
                a.pricing_mode, a.price_min_wan, a.price_max_wan,
-               a.view_count, a.published_at,
+               a.view_count, a.published_at, a.owner_user_id,
                c.name AS category_name, c.code AS category_code
         FROM achievement a
         LEFT JOIN achievement_category c ON a.category_id=c.id
@@ -129,7 +131,7 @@ def list_achievements(args):
         "page": page,
         "pageSize": page_size,
         "totalPages": total_pages,
-        "list": [_row_to_list_item(r) for r in rows],
+        "list": [_row_to_list_item(r, user_id) for r in rows],
     }
 
 
@@ -224,6 +226,8 @@ def get_achievement_detail(ach_id: int, user_id=None):
         **contact,
         "viewCount": row.get("view_count", 0),
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
+        "isMine": user_id is not None and row.get("owner_user_id") == user_id,
+        "platformAssisted": row.get("owner_user_id") is None,
         "inventors": [
             {
                 "name": inv["name"],
@@ -386,7 +390,7 @@ def _validate_refs(cur, fields):
         if not cur.fetchone():
             raise bad_request("categoryId 不存在")
     if "org_id" in fields:
-        cur.execute("SELECT id FROM organization WHERE id=%s", (fields["org_id"],))
+        cur.execute("SELECT id FROM institution WHERE id=%s", (fields["org_id"],))
         if not cur.fetchone():
             raise bad_request("orgId 不存在")
 
@@ -428,7 +432,7 @@ def _get_ach_row(cur, ach_id: int):
     return cur.fetchone()
 
 
-def _owner_detail(cur, ach_id: int):
+def _owner_detail(cur, ach_id: int, user_id=None):
     """owner 视角详情（写接口返回值）：不限 status，含 version/rejectReason"""
     cur.execute(
         """
@@ -488,6 +492,8 @@ def _owner_detail(cur, ach_id: int):
         "status": row.get("status"),
         "version": row.get("version"),
         "rejectReason": row.get("reject_reason"),
+        "isMine": user_id is not None and row.get("owner_user_id") == user_id,
+        "platformAssisted": row.get("owner_user_id") is None,
         "inventors": [
             {
                 "name": inv["name"],
@@ -501,9 +507,9 @@ def _owner_detail(cur, ach_id: int):
     }
 
 
-def _owner_detail_public(ach_id: int):
+def _owner_detail_public(ach_id: int, user_id=None):
     with get_cursor() as cur:
-        return _owner_detail(cur, ach_id)
+        return _owner_detail(cur, ach_id, user_id)
 
 
 def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
@@ -517,15 +523,16 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
         cur.execute(
             """
             INSERT INTO achievement
-                (owner_user_id, title, category_id, org_id, source_org_name,
+                (owner_user_id, created_by_user_id, title, category_id, org_id, source_org_name,
                  tech_intro, tech_route, maturity_level, maturity_desc,
                  application_fields, innovation_points, pricing_mode,
                  price_min_wan, price_max_wan, contact_name, contact_title,
                  contact_phone, contact_email, contact_wechat, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
             RETURNING id
             """,
             (
+                user_id,
                 user_id,
                 fields.get("title"),
                 fields.get("category_id"),
@@ -556,7 +563,7 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
         actor_user_id=user_id, actor_user_no=user_no,
         details={"title": fields.get("title")}, request_id=request_id,
     )
-    return _owner_detail_public(ach_id)
+    return _owner_detail_public(ach_id, user_id)
 
 
 def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, request_id=None):
@@ -596,7 +603,7 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
         "achievement.update", "achievement", resource_id=ach_id,
         actor_user_id=user_id, actor_user_no=user_no, request_id=request_id,
     )
-    return _owner_detail_public(ach_id)
+    return _owner_detail_public(ach_id, user_id)
 
 
 def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reason=None, request_id=None):

@@ -56,17 +56,17 @@ def list_demand_categories_admin() -> list[dict]:
 
 
 def list_content_organizations_admin() -> list[dict]:
-    """后台内容录入使用的已启用来源机构。"""
+    """后台内容录入使用的已启用机构（统一机构目录 institution）。"""
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT id, org_name
-            FROM organization
-            WHERE status = 'active' AND deleted_at IS NULL
-            ORDER BY org_name, id
+            SELECT id, name
+            FROM institution
+            WHERE status = 'active'
+            ORDER BY name, id
             """
         )
-        return [{"id": row["id"], "name": row["org_name"]} for row in (cur.fetchall() or [])]
+        return [{"id": row["id"], "name": row["name"]} for row in (cur.fetchall() or [])]
 
 
 # ── 审核队列 ────────────────────────────────────────────────
@@ -125,10 +125,10 @@ def demands_review_queue(args) -> dict:
         cur.execute(
             """
             SELECT d.id, d.title, d.status, d.version, d.updated_at,
-                   o.org_name, dc.name AS category_name, dc.code AS category_code,
+                   o.name AS org_name, dc.name AS category_name, dc.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             LEFT JOIN app_user u ON d.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
@@ -692,7 +692,7 @@ def set_institution_status(admin_user: dict, inst_id: int, action: str, request_
     return {"status": to_status}
 
 
-# ── P0-3 Cooperation 管理端（READ ONLY，不动状态机） ────────
+# ── P0-3 Cooperation 管理端（READ ONLY + 平台协助运营操作走 cooperation 模块） ──
 
 _COOP_FROM = """
 FROM cooperation_intent ci
@@ -702,15 +702,19 @@ LEFT JOIN app_user tu ON ci.target_owner_user_id = tu.id
 LEFT JOIN user_profile tp ON tu.id = tp.user_id
 LEFT JOIN demand d ON ci.target_type = 'demand' AND ci.target_id = d.id
 LEFT JOIN achievement a ON ci.target_type = 'achievement' AND ci.target_id = a.id
+LEFT JOIN institution org ON ci.target_org_id = org.id
 """
 
 _COOP_LIST_SQL = """
 SELECT ci.id, ci.initiator_user_id, ci.target_type, ci.target_id,
        ci.target_owner_user_id, ci.intent_type, ci.message, ci.status, ci.version,
        ci.created_at, ci.accepted_at, ci.confirmed_at, ci.completed_at, ci.closed_at,
+       ci.handling_mode, ci.assist_status, ci.accept_mode, ci.handled_by_user_id,
+       ci.target_org_id, ci.initiator_contact_snapshot, ci.assist_note, ci.contact_share_consent_at,
        iu.user_no AS initiator_user_no, ip.display_name AS initiator_name,
        tu.user_no AS target_owner_user_no, tp.display_name AS target_owner_name,
-       COALESCE(d.title, a.title) AS target_title
+       COALESCE(d.title, a.title) AS target_title,
+       org.name AS target_org_name
 """ + _COOP_FROM
 
 
@@ -720,7 +724,7 @@ def _coop_admin_item(r):
         "initiatorUserId": r["initiator_user_id"],
         "initiatorUserNo": r.get("initiator_user_no"),
         "initiatorName": r.get("initiator_name"),
-        "targetOwnerUserId": r["target_owner_user_id"],
+        "targetOwnerUserId": r.get("target_owner_user_id"),
         "targetOwnerUserNo": r.get("target_owner_user_no"),
         "targetOwnerName": r.get("target_owner_name"),
         "targetType": r["target_type"],
@@ -729,6 +733,18 @@ def _coop_admin_item(r):
         "intentType": r.get("intent_type"),
         "message": r.get("message"),
         "status": r["status"],
+        "handlingMode": r.get("handling_mode") or "direct",
+        "assistStatus": r.get("assist_status"),
+        "acceptMode": r.get("accept_mode"),
+        "handledByUserId": r.get("handled_by_user_id"),
+        "targetOrgId": r.get("target_org_id"),
+        "targetOrgName": r.get("target_org_name"),
+        "initiatorContact": r.get("initiator_contact_snapshot"),
+        "assistNote": r.get("assist_note"),
+        "contactShareConsentAt": (
+            r["contact_share_consent_at"].isoformat()
+            if r.get("contact_share_consent_at") else None
+        ),
         "version": r["version"],
         "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
         "acceptedAt": r["accepted_at"].isoformat() if r.get("accepted_at") else None,
@@ -739,22 +755,30 @@ def _coop_admin_item(r):
 
 
 def list_cooperations_admin(args) -> dict:
-    """GET /admin/cooperations —— 只读列表：status 过滤 + keyword（双方用户/目标标题/留言）。"""
+    """GET /admin/cooperations —— 只读列表：status/handlingMode/assistStatus 过滤 + keyword。"""
     page, page_size = _page_args(args)
     status = (args.get("status") or "").strip().lower()
+    handling_mode = (args.get("handlingMode") or "").strip().lower()
+    assist_status = (args.get("assistStatus") or "").strip().lower()
     keyword = (args.get("keyword") or "").strip()
 
     where, params = [], []
     if status:
         where.append("ci.status = %s")
         params.append(status)
+    if handling_mode:
+        where.append("ci.handling_mode = %s")
+        params.append(handling_mode)
+    if assist_status:
+        where.append("ci.assist_status = %s")
+        params.append(assist_status)
     if keyword:
         like = f"%{keyword}%"
         where.append(
             "(ci.message ILIKE %s OR ip.display_name ILIKE %s OR tp.display_name ILIKE %s"
-            " OR COALESCE(d.title, a.title) ILIKE %s)"
+            " OR COALESCE(d.title, a.title) ILIKE %s OR org.name ILIKE %s)"
         )
-        params.extend([like] * 4)
+        params.extend([like] * 5)
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
     with get_cursor() as cur:
@@ -819,6 +843,7 @@ _DMD_STATUS_LABELS = {
 
 def _ach_admin_item(r) -> dict:
     status = r["status"]
+    owner_id = r.get("owner_user_id")
     return {
         "id": r["id"],
         "title": r["title"],
@@ -828,6 +853,8 @@ def _ach_admin_item(r) -> dict:
         "categoryName": r.get("category_name"),
         "categoryCode": r.get("category_code"),
         "orgName": r.get("source_org_name"),
+        "ownerUserId": owner_id,
+        "platformAssisted": owner_id is None,
         "submitterUserNo": r.get("submitter_user_no"),
         "submitterName": r.get("submitter_name"),
         "viewCount": int(r.get("view_count") or 0),
@@ -876,6 +903,7 @@ def list_achievements_admin(args) -> dict:
             f"""
             SELECT a.id, a.title, a.status, a.version, a.tech_intro, a.source_org_name,
                    a.view_count, a.reject_reason, a.published_at, a.created_at, a.updated_at,
+                   a.owner_user_id,
                    c.name AS category_name, c.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM achievement a
@@ -973,6 +1001,8 @@ def _dmd_admin_item(r) -> dict:
         "region": r.get("region"),
         "budget": budget,
         "budgetNegotiable": bool(r.get("budget_negotiable")),
+        "ownerUserId": r.get("owner_user_id"),
+        "platformAssisted": r.get("owner_user_id") is None,
         "submitterUserNo": r.get("submitter_user_no"),
         "submitterName": r.get("submitter_name"),
         "rejectReason": r.get("reject_reason"),
@@ -999,7 +1029,7 @@ def list_demands_admin(args) -> dict:
         params.append(category_code)
     if keyword:
         like = f"%{keyword}%"
-        where.append("(d.title ILIKE %s OR o.org_name ILIKE %s)")
+        where.append("(d.title ILIKE %s OR o.name ILIKE %s)")
         params.extend([like, like])
     where_sql = " WHERE " + " AND ".join(where)
 
@@ -1008,7 +1038,7 @@ def list_demands_admin(args) -> dict:
             f"""
             SELECT COUNT(*) AS c
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             {where_sql}
             """,
@@ -1021,10 +1051,11 @@ def list_demands_admin(args) -> dict:
             SELECT d.id, d.title, d.status, d.version, d.region,
                    d.budget_min_wan, d.budget_max_wan, d.budget_negotiable,
                    d.reject_reason, d.published_at, d.created_at, d.updated_at,
-                   o.org_name, dc.name AS category_name, dc.code AS category_code,
+                   d.owner_user_id,
+                   o.name AS org_name, dc.name AS category_name, dc.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             LEFT JOIN app_user u ON d.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
@@ -1043,11 +1074,11 @@ def get_demand_admin(demand_id: int) -> dict:
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT d.*, o.org_name, o.intro AS org_intro,
+            SELECT d.*, o.name AS org_name, o.intro AS org_intro,
                    dc.name AS category_name, dc.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             LEFT JOIN app_user u ON d.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
@@ -1088,13 +1119,13 @@ def get_demand_admin(demand_id: int) -> dict:
 _USER_FROM = """
 FROM app_user u
 LEFT JOIN user_profile p ON u.id = p.user_id
-LEFT JOIN organization o ON p.org_id = o.id
+LEFT JOIN institution o ON p.org_id = o.id
 """
 
 _USER_LIST_SQL = """
 SELECT u.id, u.user_no, u.status, u.created_at, u.updated_at,
        p.display_name, p.user_type, p.phone, p.email, p.org_id, p.org_title,
-       o.org_name,
+       o.name AS org_name,
        (SELECT COALESCE(array_agg(ur.role_code ORDER BY ur.role_code), ARRAY[]::varchar[])
           FROM user_role ur WHERE ur.user_id = u.id) AS roles
 """ + _USER_FROM
@@ -1177,11 +1208,15 @@ def get_user_admin(user_id: int) -> dict:
     }
     return item
 
-def _admin_owner_user_id(cur, body: dict, org_id: int) -> int:
-    """后台代录必须指定归属用户，且用户必须绑定所选机构。"""
+def _admin_owner_user_id(cur, body: dict, org_id: int):
+    """后台代录归属用户解析。
+
+    未传 ownerUserId = 平台代录：owner_user_id 落 NULL（真实机构尚无平台账号），
+    内容进入「平台协助对接」流程；传了则要求用户存在、启用且绑定所选机构。
+    """
     raw_owner_id = body.get("ownerUserId")
     if raw_owner_id is None:
-        raise bad_request("后台录入必须选择内容归属用户")
+        return None
 
     try:
         owner_user_id = int(raw_owner_id)
@@ -1215,7 +1250,8 @@ def create_achievement_admin(
     管理员新增成果。
 
     默认状态为 draft；后续仍通过 submit + approve 流程发布。
-    允许 ownerUserId 指定归属人；未传时归属当前管理员。
+    传 ownerUserId 指定归属人；未传 = 平台代录（owner NULL，进入平台协助对接），
+    录入人 created_by_user_id 恒为当前管理员。
     """
     fields, inventor_refs = _parse_upsert_body(body, partial=False)
 
@@ -1238,6 +1274,7 @@ def create_achievement_admin(
             INSERT INTO achievement
                 (
                     owner_user_id,
+                    created_by_user_id,
                     title,
                     category_id,
                     org_id,
@@ -1260,7 +1297,7 @@ def create_achievement_admin(
                 )
             VALUES
                 (
-                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, 'draft'
@@ -1269,6 +1306,7 @@ def create_achievement_admin(
             """,
             (
                 owner_user_id,
+                admin_user["userId"],
                 fields.get("title"),
                 fields.get("category_id"),
                 fields.get("org_id"),
@@ -1304,6 +1342,7 @@ def create_achievement_admin(
             details={
                 "title": fields.get("title"),
                 "ownerUserId": owner_user_id,
+                "platformAssisted": owner_user_id is None,
                 "status": "draft",
             },
             request_id=request_id,
@@ -1404,7 +1443,8 @@ def create_demand_admin(
     管理员新增需求。
 
     默认状态为 draft；后续仍经过 submit + approve 才发布。
-    可传 ownerUserId 指定需求归属人；未传时归属当前管理员。
+    传 ownerUserId 指定需求归属人；未传 = 平台代录（owner NULL，进入平台协助对接），
+    录入人 created_by_user_id 恒为当前管理员。
     """
     fields, tags = _parse_demand_upsert_body(body, partial=False)
 
@@ -1431,6 +1471,7 @@ def create_demand_admin(
             INSERT INTO demand
                 (
                     owner_user_id,
+                    created_by_user_id,
                     title,
                     category_id,
                     org_id,
@@ -1451,7 +1492,7 @@ def create_demand_admin(
                 )
             VALUES
                 (
-                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, 'draft'
@@ -1460,6 +1501,7 @@ def create_demand_admin(
             """,
             (
                 owner_user_id,
+                admin_user["userId"],
                 fields.get("title"),
                 fields.get("category_id"),
                 fields.get("org_id"),
@@ -1492,6 +1534,7 @@ def create_demand_admin(
             details={
                 "title": fields.get("title"),
                 "ownerUserId": owner_user_id,
+                "platformAssisted": owner_user_id is None,
                 "status": "draft",
             },
             request_id=request_id,
@@ -1582,3 +1625,79 @@ def update_demand_admin(
         )
 
     return get_demand_admin(demand_id)
+
+
+# ── 代无账号内容提交审核（平台协助闭环：owner NULL 时无人可 submit） ──
+
+def submit_achievement_admin(admin_user: dict, ach_id: int, body: dict, request_id=None) -> dict:
+    """POST /admin/achievements/{id}/submit —— 代平台代录成果提交审核。
+
+    仅允许 owner_user_id IS NULL 的内容（有归属用户的草稿应由归属用户自行提交）。
+    draft / rejected → pending_review，随后走既有 approve / reject 审核流。
+    """
+    version = body.get("version")
+    if version is None:
+        raise bad_request("必须携带 version（乐观锁）")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "SELECT status, version, owner_user_id FROM achievement WHERE id=%s AND deleted_at IS NULL",
+            (ach_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise achievement_not_found()
+        if row["owner_user_id"] is not None:
+            raise bad_request("该成果有归属用户，应由归属用户自行提交审核")
+        if row["status"] not in ("draft", "rejected"):
+            raise achievement_conflict(
+                f"当前状态 {row['status']} 不允许提交审核（要求 draft/rejected）"
+            )
+        cur.execute(
+            "UPDATE achievement SET status='pending_review', version=version+1 WHERE id=%s AND version=%s",
+            (ach_id, version),
+        )
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        audit_record(
+            "achievement.admin_submit", "achievement", resource_id=ach_id,
+            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            details={"from": row["status"], "to": "pending_review", "onBehalfOf": "platform"},
+            request_id=request_id, cur=cur,
+        )
+    return {"status": "pending_review"}
+
+
+def submit_demand_admin(admin_user: dict, demand_id: int, body: dict, request_id=None) -> dict:
+    """POST /admin/demands/{id}/submit —— 代平台代录需求提交审核（仅 owner NULL）。"""
+    version = body.get("version")
+    if version is None:
+        raise bad_request("必须携带 version（乐观锁）")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "SELECT status, version, owner_user_id FROM demand WHERE id=%s AND deleted_at IS NULL",
+            (demand_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise demand_not_found()
+        if row["owner_user_id"] is not None:
+            raise bad_request("该需求有归属用户，应由归属用户自行提交审核")
+        if row["status"] not in ("draft", "rejected"):
+            raise demand_conflict(
+                f"当前状态 {row['status']} 不允许提交审核（要求 draft/rejected）"
+            )
+        cur.execute(
+            "UPDATE demand SET status='pending_review', version=version+1 WHERE id=%s AND version=%s",
+            (demand_id, version),
+        )
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        audit_record(
+            "demand.admin_submit", "demand", resource_id=demand_id,
+            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            details={"from": row["status"], "to": "pending_review", "onBehalfOf": "platform"},
+            request_id=request_id, cur=cur,
+        )
+    return {"status": "pending_review"}

@@ -22,6 +22,8 @@ from modules.admin.service import (
     update_achievement_admin,
     create_demand_admin,
     update_demand_admin,
+    submit_achievement_admin,
+    submit_demand_admin,
     list_demand_categories_admin,
     list_content_organizations_admin,
 )
@@ -80,6 +82,19 @@ def admin_achievement_update(
     return success(result, "成果更新成功")
 
 
+@router.post("/admin/achievements/{ach_id}/submit")
+def admin_achievement_submit(
+    ach_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    """代平台代录成果提交审核（仅 owner NULL 的内容）。"""
+    return success(
+        submit_achievement_admin(admin, ach_id, body, request_id=get_request_id()),
+        "已提交审核",
+    )
+
+
 @router.post("/admin/achievements/{ach_id}/approve")
 def admin_ach_approve(ach_id: int, body: dict = Depends(json_body), admin: dict = Depends(admin_identity)):
     body = dict(body)
@@ -133,6 +148,19 @@ def admin_demand_update(
         request_id=get_request_id(),
     )
     return success(result, "需求更新成功")
+
+
+@router.post("/admin/demands/{demand_id}/submit")
+def admin_demand_submit(
+    demand_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    """代平台代录需求提交审核（仅 owner NULL 的内容）。"""
+    return success(
+        submit_demand_admin(admin, demand_id, body, request_id=get_request_id()),
+        "已提交审核",
+    )
 
 
 @router.post("/admin/demands/{demand_id}/approve")

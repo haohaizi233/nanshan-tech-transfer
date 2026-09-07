@@ -176,7 +176,7 @@ def _validate_refs(cur, fields):
         if not cur.fetchone():
             raise bad_request("categoryId 不存在")
     if "org_id" in fields:
-        cur.execute("SELECT id FROM organization WHERE id=%s", (fields["org_id"],))
+        cur.execute("SELECT id FROM institution WHERE id=%s", (fields["org_id"],))
         if not cur.fetchone():
             raise bad_request("orgId 不存在")
 
@@ -195,18 +195,24 @@ def _resolve_name_refs(cur, fields):
         raise bad_request("orgIntro 需与 orgName 一起提供")
 
     if org_name:
-        cur.execute("SELECT id FROM organization WHERE org_name=%s", (org_name,))
+        # 统一机构目录 institution：按名称 get-or-create
+        # （source_site='organization' 标记来自表单/旧组织表路径，source_pk 留空不参与唯一溯源）
+        cur.execute("SELECT id FROM institution WHERE name=%s", (org_name,))
         row = cur.fetchone()
         if row:
             org_id = row["id"]
             if org_intro:
                 cur.execute(
-                    "UPDATE organization SET intro=%s WHERE id=%s AND (intro IS NULL OR intro='')",
+                    "UPDATE institution SET intro=%s WHERE id=%s AND (intro IS NULL OR intro='')",
                     (org_intro, org_id),
                 )
         else:
             cur.execute(
-                "INSERT INTO organization (org_name, intro) VALUES (%s, %s) RETURNING id",
+                """
+                INSERT INTO institution (kind, name, intro, user_type, source_site)
+                VALUES ('enterprise', %s, %s, 'enterprise', 'organization')
+                RETURNING id
+                """,
                 (org_name, org_intro),
             )
             org_id = cur.fetchone()["id"]
@@ -299,6 +305,7 @@ def _row_to_summary(row, tags, user_id):
         "tags": tags.get(row["id"], []),
         "status": row["status"],
         "isMine": is_owner,
+        "platformAssisted": row["owner_user_id"] is None,
         "version": row.get("version"),
         # 审核反馈仅返回给本人，公开列表与其他用户不暴露原因。
         "rejectReason": row.get("reject_reason") if is_owner else None,
@@ -342,10 +349,10 @@ def _row_to_detail(row, tags, user_id, contact_visible=False):
 # ── 查询 ─────────────────────────────────────────────────────
 
 _BASE_SELECT = """
-    SELECT d.*, o.org_name, o.intro AS org_intro,
+    SELECT d.*, o.name AS org_name, o.intro AS org_intro,
            c.name AS category_name, c.code AS category_code
     FROM demand d
-    LEFT JOIN organization o ON d.org_id = o.id
+    LEFT JOIN institution o ON d.org_id = o.id
     LEFT JOIN demand_category c ON d.category_id = c.id
 """
 
@@ -362,7 +369,7 @@ def list_demands(args, user_id: int):
     params = [user_id] if include_mine else []
 
     if keyword:
-        where += " AND (d.title LIKE %s OR d.description LIKE %s OR o.org_name LIKE %s)"
+        where += " AND (d.title LIKE %s OR d.description LIKE %s OR o.name LIKE %s)"
         like = f"%{keyword}%"
         params.extend([like, like, like])
 
@@ -371,7 +378,7 @@ def list_demands(args, user_id: int):
         params.append(category_code)
 
     with get_cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) AS c FROM demand d LEFT JOIN organization o ON d.org_id=o.id LEFT JOIN demand_category c ON d.category_id=c.id{where}", params)
+        cur.execute(f"SELECT COUNT(*) AS c FROM demand d LEFT JOIN institution o ON d.org_id=o.id LEFT JOIN demand_category c ON d.category_id=c.id{where}", params)
         total = int((cur.fetchone() or {}).get("c") or 0)
 
         offset = (page - 1) * page_size
@@ -467,14 +474,15 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
         cur.execute(
             """
             INSERT INTO demand
-                (owner_user_id, title, category_id, org_id, description, region,
+                (owner_user_id, created_by_user_id, title, category_id, org_id, description, region,
                  coop_mode, budget_min_wan, budget_max_wan, budget_negotiable,
                  expect_deadline, deadline_desc, contact_name, contact_title,
                  contact_phone, contact_email, contact_wechat, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
             RETURNING id
             """,
             (
+                user_id,
                 user_id,
                 fields.get("title"),
                 fields.get("category_id"),

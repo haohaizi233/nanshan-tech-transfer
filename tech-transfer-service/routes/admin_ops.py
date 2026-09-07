@@ -10,7 +10,7 @@ Institution Create/Update 使用 Pydantic Schema（§21）；
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from core.middleware import admin_identity
+from core.middleware import admin_identity, json_body
 from core.response import success, get_request_id
 from modules.admin.schemas import InstitutionCreateRequest, InstitutionUpdateRequest
 from modules.admin.service import (
@@ -25,6 +25,10 @@ from modules.admin.service import (
     get_cooperation_admin,
     list_users_admin,
     get_user_admin,
+)
+from modules.cooperation.service import (
+    update_assist_status,
+    admin_assist_transition,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1")
@@ -85,7 +89,7 @@ def admin_institutions_offline(institution_id: int, admin: dict = Depends(admin_
     return success(set_institution_status(admin, institution_id, "offline", request_id=get_request_id()))
 
 
-# ── admin-cooperations（READ ONLY，状态机不开放给 Admin） ────
+# ── admin-cooperations（只读 + 平台协助运营操作） ─────────────
 
 @router.get("/admin/cooperations", tags=["admin-cooperations"])
 def admin_cooperations_list(request: Request, admin: dict = Depends(admin_identity)):
@@ -95,6 +99,26 @@ def admin_cooperations_list(request: Request, admin: dict = Depends(admin_identi
 @router.get("/admin/cooperations/{intent_id}", tags=["admin-cooperations"])
 def admin_cooperations_detail(intent_id: int, admin: dict = Depends(admin_identity)):
     return success(get_cooperation_admin(intent_id))
+
+
+@router.post("/admin/cooperations/{intent_id}/assist-status", tags=["admin-cooperations"])
+def admin_cooperation_assist_status(
+    intent_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    """平台协助处理阶段流转（queued/contacting/waiting_reply/target_agreed/...）。"""
+    return success(update_assist_status(admin, intent_id, body, request_id=get_request_id()))
+
+
+@router.post("/admin/cooperations/{intent_id}/assist-transition", tags=["admin-cooperations"])
+def admin_cooperation_assist_transition(
+    intent_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    """平台代目标机构操作状态机（accept 强制前置 assist_status=target_agreed）。"""
+    return success(admin_assist_transition(admin, intent_id, body, request_id=get_request_id()))
 
 
 # ── admin-users（READ ONLY，禁用/启用为 P1） ─────────────────
