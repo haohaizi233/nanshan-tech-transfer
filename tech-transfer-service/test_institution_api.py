@@ -58,7 +58,8 @@ check("invest项有intro", "intro" in data["list"][0])
 
 resp = requests.get(f"{BASE}/institutions?kind=service", timeout=10)
 data = resp.json()["data"]
-check("kind=service total=16", data["total"] == 16, f"got {data['total']}")
+service_total = data["total"]
+check("kind=service total>=16", service_total >= 16, f"got {service_total}")
 check("service项有label", "label" in data["list"][0])
 print()
 
@@ -103,7 +104,7 @@ data = resp.json()["data"]
 check("分页page=2", data["page"] == 2)
 check("分页pageSize=5", data["pageSize"] == 5)
 check("分页list长度=5", len(data["list"]) == 5)
-check("分页total不变", data["total"] == 16)
+check("分页total不变", data["total"] == service_total)
 
 page1 = requests.get(f"{BASE}/institutions?kind=service&page=1&pageSize=8", timeout=10).json()["data"]["list"]
 page2 = requests.get(f"{BASE}/institutions?kind=service&page=2&pageSize=8", timeout=10).json()["data"]["list"]

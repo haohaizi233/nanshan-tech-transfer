@@ -11,8 +11,11 @@ import time
 import psycopg2
 import psycopg2.extras
 import requests
+from config import settings
 
-BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
+BASE = settings.API_BASE.rstrip("/") + settings.API_PREFIX
+DB = dict(host=settings.DB_HOST, port=settings.DB_PORT, user=settings.DB_USER,
+          password=settings.DB_PASSWORD, dbname=settings.DB_NAME)
 PASS = 0
 FAIL = 0
 
@@ -36,8 +39,7 @@ def bootstrap(ticket):
 
 def set_status_sql(demand_id, status):
     """测试辅助：直接置状态（模拟未实现的 admin approve），仅供状态机验证"""
-    conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres",
-                            password="postgres123", dbname="tech_transfer")
+    conn = psycopg2.connect(**DB)
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -50,8 +52,7 @@ def set_status_sql(demand_id, status):
 
 def cleanup_test_demands():
     """删除此前运行残留的测试需求（owner 为测试用户 id>3；演示数据 owner=2 保留）"""
-    conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres",
-                            password="postgres123", dbname="tech_transfer")
+    conn = psycopg2.connect(**DB)
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM demand WHERE owner_user_id > 3")
@@ -91,6 +92,7 @@ print()
 resp = requests.get(f"{BASE}/demands?keyword=视觉", headers=headers_a, timeout=10)
 data = resp.json()["data"]
 check("搜索'视觉'有结果", data["total"] >= 1, f"got {data['total']}")
+demo_demand_id = next(item["id"] for item in data["list"] if item["title"] == "高精度视觉检测算法合作需求")
 check("搜索结果含'视觉'", all("视觉" in (i["title"] + str(i.get("tags"))) or True for i in data["list"]))
 resp = requests.get(f"{BASE}/demands?keyword=不存在的词xyz", headers=headers_a, timeout=10)
 check("无结果关键词 total=0", resp.json()["data"]["total"] == 0)
@@ -104,7 +106,7 @@ check("分类筛选categoryName=智能制造", all(i.get("categoryName") == "智
 print()
 
 # ── 4. 需求详情 + 联系方式脱敏 ─────────────────────────────
-resp = requests.get(f"{BASE}/demands/1", headers=headers_b, timeout=10)
+resp = requests.get(f"{BASE}/demands/{demo_demand_id}", headers=headers_b, timeout=10)
 detail = resp.json()["data"]
 check("详情返回200", resp.status_code == 200)
 check("详情有description", bool(detail.get("description")))
@@ -189,17 +191,21 @@ check("orgName创建返回201", resp.status_code == 201, f"got {resp.status_code
 detail_name = resp.json()["data"]
 name_demand_id = detail_name["id"]
 check("orgName已落库回显", detail_name.get("orgName") == "测试组织-科技转化", f"got {detail_name.get('orgName')}")
-check("orgIntro已落库回显", detail_name.get("orgIntro") == "测试组织简介")
+check("orgIntro文本不会写入认证机构", detail_name.get("orgIntro") is None)
+with psycopg2.connect(**DB) as association_conn:
+    with association_conn.cursor() as association_cur:
+        association_cur.execute("SELECT org_id, org_name_snapshot FROM demand WHERE id=%s", (name_demand_id,))
+        check("orgName仅保存展示快照", association_cur.fetchone() == (None, "测试组织-科技转化"))
 check("categoryName复用既有分类", detail_name.get("categoryName") == "智能制造")
 
 resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
     "title": "测试需求-组织复用",
-    "description": "同名组织应复用而非重复创建。",
+    "description": "同名展示文本不创建或推断机构关联。",
     "orgName": "测试组织-科技转化",
     "categoryName": "测试新分类-唯一",
     "contactPhone": "13600005556",
 }, timeout=10)
-check("同名orgName复用=201", resp.status_code == 201)
+check("同名orgName展示文本=201", resp.status_code == 201)
 check("新分类自动创建", resp.json()["data"].get("categoryName") == "测试新分类-唯一")
 
 resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
@@ -352,13 +358,12 @@ resp = requests.get(f"{BASE}/demands", timeout=10)
 check("无Token需求列表=401", resp.status_code == 401)
 resp = requests.post(f"{BASE}/demands", json={"title": "x", "description": "x"}, timeout=10)
 check("无Token创建需求=401", resp.status_code == 401)
-resp = requests.get(f"{BASE}/demands/1", timeout=10)
+resp = requests.get(f"{BASE}/demands/{demo_demand_id}", timeout=10)
 check("无Token需求详情=401", resp.status_code == 401)
 print()
 
 # ── 13. 审计日志 ───────────────────────────────────────────
-conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres",
-                        password="postgres123", dbname="tech_transfer")
+conn = psycopg2.connect(**DB)
 try:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(

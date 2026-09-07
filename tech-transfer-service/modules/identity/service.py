@@ -27,7 +27,7 @@ def _get_profile(cur, user_id: int) -> dict:
     cur.execute(
         """
         SELECT up.user_id, up.display_name, up.user_type, up.phone, up.email,
-               up.org_id, up.org_title, up.version,
+               up.org_id, up.org_title, up.company_text, up.version,
                up.subject_type, up.business_capabilities, up.wechat
         FROM user_profile up
         WHERE up.user_id = %s
@@ -67,6 +67,21 @@ def build_user_response(cur, user_id: int) -> dict:
     if not user:
         return None
     org_name = _get_org_name(cur, profile.get("org_id") if profile else None)
+    cur.execute(
+        """
+        SELECT m.id, m.org_id, o.name AS org_name, m.role, m.status, m.version
+        FROM organization_membership m
+        JOIN institution o ON o.id = m.org_id
+        WHERE m.user_id = %s AND m.status = 'active'
+        ORDER BY m.id
+        """,
+        (user_id,),
+    )
+    memberships = [
+        {"id": row["id"], "orgId": row["org_id"], "orgName": row["org_name"],
+         "role": row["role"], "status": row["status"], "version": row["version"]}
+        for row in cur.fetchall()
+    ]
     return {
         "userId": user_id,
         "userNo": user["user_no"],
@@ -77,6 +92,9 @@ def build_user_response(cur, user_id: int) -> dict:
         "phone": profile["phone"] if profile else None,
         "email": profile["email"] if profile else None,
         "wechat": profile["wechat"] if profile else None,
+        "companyText": profile["company_text"] if profile else None,
+        "organizationMemberships": memberships,
+        # Compatibility only: legacy profile fields never establish certification.
         "orgId": profile["org_id"] if profile else None,
         "orgName": org_name,
         "orgTitle": profile["org_title"] if profile else None,

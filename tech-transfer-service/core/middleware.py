@@ -56,3 +56,41 @@ def admin_identity(request: Request) -> dict:
             code, message, status = TT_ADMIN_40301
             raise BizError(code, message, status)
     return user
+
+
+def org_admin_identity(request: Request) -> dict:
+    """Authenticate using current organization-admin rows, never JWT role snapshots.
+
+    System Admins may enter organization-admin flows, but every resource operation
+    must still call ``assert_org_admin_for`` with the resource's canonical org id.
+    """
+    user = identity(request)
+    from db import get_cursor
+    from core.errors import TT_ADMIN_40301
+
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT org_id
+            FROM organization_membership
+            WHERE user_id = %s AND role = 'admin' AND status = 'active'
+            ORDER BY org_id
+            """,
+            (user["userId"],),
+        )
+        org_ids = [int(row["org_id"]) for row in (cur.fetchall() or [])]
+        cur.execute(
+            "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
+            (user["userId"],),
+        )
+        is_system_admin = bool(cur.fetchone())
+
+    if not org_ids and not is_system_admin:
+        code, message, status = TT_ADMIN_40301
+        raise BizError(code, "非机构管理员", status)
+
+    return {
+        **user,
+        "organizationAdminOrgIds": org_ids,
+        "isSystemAdmin": is_system_admin,
+    }

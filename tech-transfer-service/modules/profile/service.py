@@ -39,7 +39,7 @@ FIELD_MAP = {
     "phone": "phone",
     "email": "email",
     "wechat": "wechat",
-    "orgId": "org_id",
+    "companyText": "company_text",
     "orgTitle": "org_title",
 }
 
@@ -66,6 +66,8 @@ def _normalize_capabilities(raw):
 
 
 def update_my_profile(user_id: int, body: dict) -> dict:
+    if "orgId" in body:
+        raise bad_request("orgId 不可通过个人资料修改，请申请机构认证；展示名称使用 companyText")
     version = body.get("version")
     if not isinstance(version, int) or version < 1:
         raise bad_request("version 必须为正整数")
@@ -74,14 +76,14 @@ def update_my_profile(user_id: int, body: dict) -> dict:
     for camel_key, db_col in FIELD_MAP.items():
         if camel_key in body:
             val = body[camel_key]
-            if db_col in ("org_id",):
-                if val is not None:
-                    val = int(val)
-            else:
-                if val is not None:
-                    val = str(val).strip()
-                    if not val:
-                        val = None
+            if val is not None:
+                if db_col == "company_text" and not isinstance(val, str):
+                    raise bad_request("companyText 必须是文本")
+                val = str(val).strip()
+                if db_col == "company_text" and len(val) > 128:
+                    raise bad_request("companyText 长度不能超过 128")
+                if not val:
+                    val = None
             fields[db_col] = val
 
     allowed_types = {"enterprise_staff", "researcher", "investor", "service_org", "other"}

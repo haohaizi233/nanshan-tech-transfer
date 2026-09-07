@@ -22,6 +22,7 @@ from core.errors import (
 from core.masking import mask_contact
 from modules.audit.service import record as audit_record
 from modules.cooperation.service import has_accepted_intent
+from modules.membership.service import assert_active_membership
 
 # 状态流转表（06 §5.5 权限矩阵）
 TRANSITIONS = {
@@ -141,13 +142,12 @@ def _parse_upsert_body(body: dict, partial: bool):
         except (ValueError, TypeError):
             raise bad_request("orgId 必须是整数")
 
-    # 过渡期便捷字段（openapi.yaml DemandUpsertRequest orgName/orgIntro/categoryName）：
-    # 小程序表单只有名称没有 ID，服务端按名称 get-or-create（同 etl_demands.py 模式）
+    # Legacy organization names are display snapshots, never canonical identities.
     if "orgName" in body and body["orgName"] is not None:
         org_name = str(body["orgName"]).strip()
         if len(org_name) > 128:
             raise bad_request("orgName 长度不能超过 128")
-        fields["org_name"] = org_name or None
+        fields["org_name_snapshot"] = org_name or None
 
     if "orgIntro" in body and body["orgIntro"] is not None:
         org_intro = str(body["orgIntro"]).strip()
@@ -170,7 +170,7 @@ def _parse_upsert_body(body: dict, partial: bool):
 
 
 def _validate_refs(cur, fields):
-    """校验 categoryId / orgId 外键存在性，避免 500"""
+    """Validate foreign keys; user publication also requires active membership."""
     if "category_id" in fields:
         cur.execute("SELECT id FROM demand_category WHERE id=%s", (fields["category_id"],))
         if not cur.fetchone():
@@ -182,18 +182,11 @@ def _validate_refs(cur, fields):
 
 
 def _resolve_name_refs(cur, fields):
-    """orgName/orgIntro/categoryName → get-or-create，落为 org_id/category_id
-
-    字段来源：05-data-model-design.md §12.2 演示数据映射（company→organization
-    get-or-create；industry 首段→分类）。小程序表单无 ID 选择器，复用同一映射。
-    """
-    org_name = fields.pop("org_name", None)
+    """Legacy administrative entry only; never used by user create/update paths."""
+    org_name = fields.pop("org_name_snapshot", None)
     org_intro = fields.pop("org_intro", None)
-    category_name = fields.pop("category_name", None)
-
     if org_intro and not org_name:
         raise bad_request("orgIntro 需与 orgName 一起提供")
-
     if org_name:
         # 统一机构目录 institution：按名称 get-or-create
         # （source_site='organization' 标记来自表单/旧组织表路径，source_pk 留空不参与唯一溯源）
@@ -217,6 +210,18 @@ def _resolve_name_refs(cur, fields):
             )
             org_id = cur.fetchone()["id"]
         fields["org_id"] = org_id
+        # Explicit admin correction must also supersede any old user snapshot.
+        fields["org_name_snapshot"] = None
+    _resolve_category_name(cur, fields)
+
+
+def _resolve_category_name(cur, fields):
+    """Preserve legacy category resolution; organization text cannot mutate organizations."""
+    org_intro = fields.pop("org_intro", None)
+    category_name = fields.pop("category_name", None)
+
+    if org_intro and not fields.get("org_name_snapshot"):
+        raise bad_request("orgIntro 需与 orgName 一起提供")
 
     if category_name:
         cur.execute(
@@ -349,7 +354,7 @@ def _row_to_detail(row, tags, user_id, contact_visible=False):
 # ── 查询 ─────────────────────────────────────────────────────
 
 _BASE_SELECT = """
-    SELECT d.*, o.name AS org_name, o.intro AS org_intro,
+    SELECT d.*, COALESCE(d.org_name_snapshot, o.name) AS org_name, o.intro AS org_intro,
            c.name AS category_name, c.code AS category_code
     FROM demand d
     LEFT JOIN institution o ON d.org_id = o.id
@@ -369,7 +374,7 @@ def list_demands(args, user_id: int):
     params = [user_id] if include_mine else []
 
     if keyword:
-        where += " AND (d.title LIKE %s OR d.description LIKE %s OR o.name LIKE %s)"
+        where += " AND (d.title LIKE %s OR d.description LIKE %s OR COALESCE(d.org_name_snapshot, o.name) LIKE %s)"
         like = f"%{keyword}%"
         params.extend([like, like, like])
 
@@ -469,16 +474,18 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
             raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
 
     with get_cursor(commit=True) as cur:
-        _resolve_name_refs(cur, fields)
+        if "org_id" in fields:
+            assert_active_membership(cur, user_id, fields["org_id"])
+        _resolve_category_name(cur, fields)
         _validate_refs(cur, fields)
         cur.execute(
             """
             INSERT INTO demand
-                (owner_user_id, created_by_user_id, title, category_id, org_id, description, region,
+                (owner_user_id, created_by_user_id, title, category_id, org_id, org_name_snapshot, description, region,
                  coop_mode, budget_min_wan, budget_max_wan, budget_negotiable,
                  expect_deadline, deadline_desc, contact_name, contact_title,
                  contact_phone, contact_email, contact_wechat, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
             RETURNING id
             """,
             (
@@ -487,6 +494,7 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
                 fields.get("title"),
                 fields.get("category_id"),
                 fields.get("org_id"),
+                fields.get("org_name_snapshot"),
                 fields.get("description"),
                 fields.get("region"),
                 fields.get("coop_mode"),
@@ -533,7 +541,9 @@ def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, reques
         if row["status"] not in EDITABLE_STATUSES:
             raise demand_conflict(f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected 可编辑）")
 
-        _resolve_name_refs(cur, fields)
+        if "org_id" in fields:
+            assert_active_membership(cur, user_id, fields["org_id"])
+        _resolve_category_name(cur, fields)
         _validate_refs(cur, fields)
         if fields:
             set_clause = ", ".join(f"{k}=%s" for k in fields)

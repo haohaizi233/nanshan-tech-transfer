@@ -36,6 +36,7 @@ from routes.ai import router as ai_router
 from routes.admin import router as admin_router
 from routes.admin_ops import router as admin_ops_router
 from routes.file import router as file_router
+from routes.membership import router as membership_router
 
 assert_environment()
 configure_logging()
@@ -87,6 +88,7 @@ app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(admin_ops_router)
 app.include_router(file_router)
+app.include_router(membership_router)
 
 
 # ── Vue 后台管理静态托管（nanshan-frontend/dist）────────────
