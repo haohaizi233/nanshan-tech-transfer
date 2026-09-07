@@ -1,4 +1,5 @@
 """Focused assertions for the organization-membership schema and authorization."""
+import json
 import sys
 from contextlib import contextmanager
 
@@ -86,6 +87,14 @@ class IdentityCursor:
 
     def fetchone(self):
         return self._row
+
+
+class CursorConnection:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def cursor(self):
+        return self._cursor
 
 
 def expect_biz_error(name, expected_status, operation):
@@ -208,6 +217,175 @@ def check_active_membership_ids():
         membership_service.get_cursor = original_get_cursor
 
 
+def check_member_approval_cannot_demote_admin():
+    class ActiveAdminCursor:
+        def __init__(self):
+            self._row = None
+
+        def execute(self, sql, params):
+            normalized = " ".join(sql.split())
+            if normalized.startswith("SELECT id, user_id, org_id, role, status, version"):
+                self._row = {
+                    "id": 501,
+                    "user_id": 51,
+                    "org_id": 101,
+                    "role": "admin",
+                    "status": "active",
+                    "version": 3,
+                }
+                return
+            raise AssertionError("member activation attempted to mutate an active admin")
+
+        def fetchone(self):
+            return self._row
+
+    try:
+        membership_service._activate_membership(
+            ActiveAdminCursor(), 51, 101, "member", actor_id=99,
+        )
+    except BizError as exc:
+        check(
+            "pending member approval cannot demote an active administrator",
+            exc.http_status == 409,
+            f"status={exc.http_status}",
+        )
+    except AssertionError as exc:
+        check("pending member approval cannot demote an active administrator", False, str(exc))
+    else:
+        check("pending member approval cannot demote an active administrator", False, "no conflict")
+
+
+def check_revoked_user_can_apply_for_admin():
+    class AdminApplicationCursor:
+        def __init__(self):
+            self._row = None
+            self.memberships = [
+                {"user_id": 61, "org_id": 101, "role": "member", "status": "revoked"},
+            ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, sql, params):
+            normalized = " ".join(sql.split())
+            if "FROM organization WHERE" in normalized:
+                self._row = {"ok": 1}
+            elif "FROM organization_membership" in normalized:
+                matches = [
+                    row for row in self.memberships
+                    if row["user_id"] == params[0]
+                    and row["org_id"] == params[1]
+                    and row["status"] == "active"
+                ]
+                if "role = 'admin'" in normalized:
+                    matches = [row for row in matches if row["role"] == "admin"]
+                self._row = {"ok": 1} if matches else None
+            elif "FROM organization_admin_application" in normalized:
+                self._row = None
+            elif normalized.startswith("INSERT INTO organization_admin_application"):
+                self._row = {
+                    "id": 601,
+                    "user_id": 61,
+                    "org_id": 101,
+                    "status": "pending",
+                    "version": 1,
+                }
+            else:
+                raise AssertionError(f"unexpected admin-application query: {normalized}")
+
+        def fetchone(self):
+            return self._row
+
+    original_transaction = membership_service.transaction
+    cursor = AdminApplicationCursor()
+
+    @contextmanager
+    def fake_transaction():
+        yield CursorConnection(cursor)
+
+    try:
+        membership_service.transaction = fake_transaction
+        try:
+            result = membership_service.apply_organization_admin(
+                {"userId": 61}, {"orgId": 101, "reason": "负责机构认证"},
+            )
+        except (BizError, AssertionError) as exc:
+            check("revoked user can submit organization-admin application", False, str(exc))
+        else:
+            check(
+                "revoked user can submit organization-admin application",
+                result == {
+                    "id": 601,
+                    "userId": 61,
+                    "orgId": 101,
+                    "status": "pending",
+                    "version": 1,
+                },
+                str(result),
+            )
+    finally:
+        membership_service.transaction = original_transaction
+
+
+def check_admin_rejection_audit_has_org_id():
+    class AdminRejectionCursor:
+        def __init__(self):
+            self._row = None
+            self.audit_details = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, sql, params):
+            normalized = " ".join(sql.split())
+            if "FROM user_role" in normalized:
+                self._row = {"ok": 1}
+            elif normalized.startswith("SELECT id,") and "organization_admin_application" in normalized:
+                self._row = {"id": 701, "user_id": 71}
+                if "org_id" in normalized.split("FROM", 1)[0]:
+                    self._row["org_id"] = 101
+            elif normalized.startswith("UPDATE organization_admin_application"):
+                self._row = {"id": 701, "user_id": 71, "status": "rejected", "version": 2}
+                if "org_id" in normalized.split("RETURNING", 1)[-1]:
+                    self._row["org_id"] = 101
+            elif normalized.startswith("INSERT INTO audit_log"):
+                self.audit_details = json.loads(params[5])
+                self._row = None
+            else:
+                raise AssertionError(f"unexpected admin-rejection query: {normalized}")
+
+        def fetchone(self):
+            return self._row
+
+    original_transaction = membership_service.transaction
+    cursor = AdminRejectionCursor()
+
+    @contextmanager
+    def fake_transaction():
+        yield CursorConnection(cursor)
+
+    try:
+        membership_service.transaction = fake_transaction
+        result = membership_service.reject_organization_admin_application(
+            {"userId": 99, "userNo": "SYS-99"}, 701, 1, "材料不足",
+        )
+        check(
+            "organization-admin rejection audit includes organization id",
+            cursor.audit_details is not None
+            and cursor.audit_details.get("orgId") == 101
+            and result.get("orgId") == 101,
+            f"result={result}, audit={cursor.audit_details}",
+        )
+    finally:
+        membership_service.transaction = original_transaction
+
+
 def rejects(schema, payload):
     try:
         schema.model_validate(payload)
@@ -275,6 +453,9 @@ def main():
     check_org_admin_isolation()
     check_realtime_identity()
     check_active_membership_ids()
+    check_member_approval_cannot_demote_admin()
+    check_revoked_user_can_apply_for_admin()
+    check_admin_rejection_audit_has_org_id()
     check_request_validation()
 
     print(f"RESULT: {PASS} passed, {FAIL} failed")

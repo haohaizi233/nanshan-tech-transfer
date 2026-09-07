@@ -160,7 +160,10 @@ def _activate_membership(cur, user_id: int, org_id: int, role: str, actor_id: in
     )
     existing = cur.fetchone()
     if existing and existing["status"] == "active":
-        if existing["role"] == role:
+        # Membership-application approval must never rewrite an existing active
+        # identity (especially admin -> member). Only the System Admin flows
+        # request role='admin', where promoting an active member is intentional.
+        if role == "member" or existing["role"] == role:
             raise conflict("该用户已有有效机构身份")
         cur.execute(
             """
@@ -338,7 +341,12 @@ def apply_organization_admin(user: dict, body: dict) -> dict:
     try:
         with transaction() as conn:
             with conn.cursor() as cur:
-                assert_active_membership(cur, user_id, org_id)
+                cur.execute(
+                    "SELECT 1 FROM organization WHERE id = %s AND status = 'active' AND deleted_at IS NULL",
+                    (org_id,),
+                )
+                if not cur.fetchone():
+                    raise not_found("机构不存在或未启用")
                 cur.execute(
                     """
                     SELECT 1 FROM organization_membership
@@ -600,11 +608,12 @@ def _reject_system_application(admin: dict, table: str, application_id: int, ver
     if table not in {"organization_admin_application", "organization_application"}:
         raise ValueError("unsupported application table")
     user_column = "user_id" if table == "organization_admin_application" else "applicant_user_id"
+    org_column = ", org_id" if table == "organization_admin_application" else ""
     with transaction() as conn:
         with conn.cursor() as cur:
             _assert_system_admin(cur, admin)
             cur.execute(
-                f"SELECT id, {user_column} FROM {table} WHERE id = %s FOR UPDATE",
+                f"SELECT id, {user_column}{org_column} FROM {table} WHERE id = %s FOR UPDATE",
                 (application_id,),
             )
             application = cur.fetchone()
@@ -617,16 +626,23 @@ def _reject_system_application(admin: dict, table: str, application_id: int, ver
                     reviewed_at = CURRENT_TIMESTAMP, review_reason = %s,
                     version = version + 1
                 WHERE id = %s AND version = %s AND status = 'pending'
-                RETURNING id, {user_column}, status, version
+                RETURNING id, {user_column}{org_column}, status, version
                 """,
                 (admin["userId"], reason, application_id, version),
             )
             reviewed = cur.fetchone()
             if not reviewed:
                 raise conflict("申请状态或版本已变更")
+            details = {
+                "userId": application[user_column],
+                "from": "pending",
+                "to": "rejected",
+                "reason": reason,
+            }
+            if table == "organization_admin_application":
+                details["orgId"] = application["org_id"]
             audit_record(
                 action, table, application_id, admin["userId"], admin.get("userNo", ""),
-                {"userId": application[user_column], "from": "pending", "to": "rejected",
-                 "reason": reason}, request_id=request_id, cur=cur,
+                details, request_id=request_id, cur=cur,
             )
             return _map_application(reviewed)
