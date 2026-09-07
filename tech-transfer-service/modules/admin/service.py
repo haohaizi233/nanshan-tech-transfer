@@ -60,13 +60,16 @@ def list_content_organizations_admin() -> list[dict]:
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT id, org_name
-            FROM organization
-            WHERE status = 'active' AND deleted_at IS NULL
-            ORDER BY org_name, id
+            SELECT id, name, kind
+            FROM institution
+            WHERE status = 'active'
+            ORDER BY name, id
             """
         )
-        return [{"id": row["id"], "name": row["org_name"]} for row in (cur.fetchall() or [])]
+        return [
+            {"id": row["id"], "name": row["name"], "kind": row["kind"]}
+            for row in (cur.fetchall() or [])
+        ]
 
 
 # ── 审核队列 ────────────────────────────────────────────────
@@ -125,10 +128,10 @@ def demands_review_queue(args) -> dict:
         cur.execute(
             """
             SELECT d.id, d.title, d.status, d.version, d.updated_at,
-                   o.org_name, dc.name AS category_name, dc.code AS category_code,
+                   o.name AS org_name, dc.name AS category_name, dc.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             LEFT JOIN app_user u ON d.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
@@ -343,13 +346,17 @@ from core.errors import (
     TT_INST_40001, TT_INST_40401, TT_INST_40901, TT_COOP_40401, not_found,
 )
 
-INST_KINDS = ("platform", "invest", "service")
+INST_KINDS = (
+    "platform", "invest", "service",
+    "university", "institute", "enterprise", "other",
+)
 PLATFORM_TYPE_KEYS = ("poc", "pilot", "other")
 INST_STATUSES = ("active", "disabled")
 
 # Institution PATCH 可编辑字段（camel → snake）；kind/source 溯源/id/时间戳不可改
 INST_EDITABLE = {
     "name": "name",
+    "region": "region",
     "intro": "intro",
     "detailInfo": "detail_info",
     "label": "label",
@@ -487,6 +494,7 @@ def _inst_admin_item(r):
         "id": r["id"],
         "kind": r["kind"],
         "name": (r.get("name") or "").strip(),
+        "region": (r.get("region") or "").strip(),
         "intro": (r.get("intro") or "").strip(),
         "detailInfo": (r.get("detail_info") or "").strip(),
         "label": (r.get("label") or "").strip(),
@@ -600,7 +608,7 @@ def create_institution(admin_user: dict, body: dict, request_id=None) -> dict:
 
     columns = ["kind", "status"]
     values: list = [kind, "active"]
-    for snake in ("name", "intro", "detail_info", "label", "logo_file_id", "sort_order",
+    for snake in ("name", "region", "intro", "detail_info", "label", "logo_file_id", "sort_order",
                   "user_type", "detail_activity_id", "platform_type", "platform_type_key",
                   "support_unit", "functions", "contact_person", "contact_mobile",
                   "serial_no"):
@@ -838,7 +846,7 @@ def _ach_admin_item(r) -> dict:
     }
 
 
-def list_achievements_admin(args) -> dict:
+def list_achievements_admin(args, scope: dict) -> dict:
     """GET /admin/achievements —— 全量成果列表（status/categoryCode/keyword 过滤 + 分页）。"""
     page, page_size = _page_args(args)
     status = (args.get("status") or "").strip()
@@ -847,6 +855,12 @@ def list_achievements_admin(args) -> dict:
 
     where = ["a.deleted_at IS NULL"]
     params = []
+    
+    # 机构管理员只能看自己机构的成果；平台管理员不加此条件。
+    if not scope.get("isPlatformAdmin"):
+        where.append("a.org_id = %s")
+        params.append(scope["orgId"])
+
     if status:
         where.append("a.status = %s")
         params.append(status)
@@ -891,24 +905,45 @@ def list_achievements_admin(args) -> dict:
     return _page_of(rows, page, page_size, total, _ach_admin_item)
 
 
-def get_achievement_admin(ach_id: int) -> dict:
+def get_achievement_admin(ach_id: int, scope: dict) -> dict:
     """GET /admin/achievements/{id} —— 成果详情（任意状态，含发明人与审核信息）。"""
+    # with get_cursor() as cur:
+    #     cur.execute(
+    #         """
+    #         SELECT a.*, c.name AS category_name, c.code AS category_code,
+    #                u.user_no AS submitter_user_no, p.display_name AS submitter_name
+    #         FROM achievement a
+    #         LEFT JOIN achievement_category c ON a.category_id = c.id
+    #         LEFT JOIN app_user u ON a.owner_user_id = u.id
+    #         LEFT JOIN user_profile p ON u.id = p.user_id
+    #         WHERE a.id = %s AND a.deleted_at IS NULL
+    #         """,
+    #         (ach_id,),
+    #     )
+    where = ["a.id = %s", "a.deleted_at IS NULL"]
+    params = [ach_id]
+
+    if not scope.get("isPlatformAdmin"):
+        where.append("a.org_id = %s")
+        params.append(scope["orgId"])
+
     with get_cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT a.*, c.name AS category_name, c.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM achievement a
             LEFT JOIN achievement_category c ON a.category_id = c.id
             LEFT JOIN app_user u ON a.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
-            WHERE a.id = %s AND a.deleted_at IS NULL
+            WHERE {" AND ".join(where)}
             """,
-            (ach_id,),
+            params,
         )
+        
         row = cur.fetchone()
         if not row:
-            raise bad_request("成果不存在")
+            raise achievement_not_found()
         cur.execute(
             """
             SELECT i.name, i.org_name, ai.sort_order, ai.contribution
@@ -981,7 +1016,7 @@ def _dmd_admin_item(r) -> dict:
     }
 
 
-def list_demands_admin(args) -> dict:
+def list_demands_admin(args, scope: dict) -> dict:
     """GET /admin/demands —— 全量需求列表（status/categoryCode/keyword 过滤 + 分页）。"""
     page, page_size = _page_args(args)
     status = (args.get("status") or "").strip()
@@ -990,6 +1025,12 @@ def list_demands_admin(args) -> dict:
 
     where = ["d.deleted_at IS NULL"]
     params = []
+
+    # 机构管理员只能查看本机构需求；平台管理员查看全部。
+    if not scope.get("isPlatformAdmin"):
+        where.append("d.org_id = %s")
+        params.append(scope["orgId"])
+
     if status:
         where.append("d.status = %s")
         params.append(status)
@@ -998,7 +1039,7 @@ def list_demands_admin(args) -> dict:
         params.append(category_code)
     if keyword:
         like = f"%{keyword}%"
-        where.append("(d.title ILIKE %s OR o.org_name ILIKE %s)")
+        where.append("(d.title ILIKE %s OR o.name ILIKE %s)")
         params.extend([like, like])
     where_sql = " WHERE " + " AND ".join(where)
 
@@ -1007,7 +1048,7 @@ def list_demands_admin(args) -> dict:
             f"""
             SELECT COUNT(*) AS c
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             {where_sql}
             """,
@@ -1020,10 +1061,10 @@ def list_demands_admin(args) -> dict:
             SELECT d.id, d.title, d.status, d.version, d.region,
                    d.budget_min_wan, d.budget_max_wan, d.budget_negotiable,
                    d.reject_reason, d.published_at, d.created_at, d.updated_at,
-                   o.org_name, dc.name AS category_name, dc.code AS category_code,
+                   o.name AS org_name, dc.name AS category_name, dc.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             LEFT JOIN app_user u ON d.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
@@ -1037,27 +1078,34 @@ def list_demands_admin(args) -> dict:
     return _page_of(rows, page, page_size, total, _dmd_admin_item)
 
 
-def get_demand_admin(demand_id: int) -> dict:
+def get_demand_admin(demand_id: int, scope: dict) -> dict:
     """GET /admin/demands/{id} —— 需求详情（任意状态，含联系方式与标签）。"""
+    where = ["d.id = %s", "d.deleted_at IS NULL"]
+    params = [demand_id]
+
+    if not scope.get("isPlatformAdmin"):
+        where.append("d.org_id = %s")
+        params.append(scope["orgId"])
+
     with get_cursor() as cur:
         cur.execute(
-            """
-            SELECT d.*, o.org_name, o.intro AS org_intro,
+            f"""
+            SELECT d.*, o.name AS org_name, o.intro AS org_intro,
                    dc.name AS category_name, dc.code AS category_code,
                    u.user_no AS submitter_user_no, p.display_name AS submitter_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             LEFT JOIN app_user u ON d.owner_user_id = u.id
             LEFT JOIN user_profile p ON u.id = p.user_id
-            WHERE d.id = %s AND d.deleted_at IS NULL
+            WHERE {" AND ".join(where)}
             """,
-            (demand_id,),
+            params,
         )
         row = cur.fetchone()
+
         if not row:
-            code, message, status = TT_DMD_40401
-            raise BizError(code, message, status)
+            raise demand_not_found()
         cur.execute(
             """
             SELECT t.name FROM demand_tag_relation r
@@ -1087,13 +1135,13 @@ def get_demand_admin(demand_id: int) -> dict:
 _USER_FROM = """
 FROM app_user u
 LEFT JOIN user_profile p ON u.id = p.user_id
-LEFT JOIN organization o ON p.org_id = o.id
+LEFT JOIN institution o ON p.org_id = o.id
 """
 
 _USER_LIST_SQL = """
 SELECT u.id, u.user_no, u.status, u.created_at, u.updated_at,
        p.display_name, p.user_type, p.phone, p.email, p.org_id, p.org_title,
-       o.org_name,
+       o.name AS org_name,
        (SELECT COALESCE(array_agg(ur.role_code ORDER BY ur.role_code), ARRAY[]::varchar[])
           FROM user_role ur WHERE ur.user_id = u.id) AS roles
 """ + _USER_FROM
@@ -1129,7 +1177,7 @@ def list_users_admin(args) -> dict:
         params.append(status)
     if keyword:
         like = f"%{keyword}%"
-        where.append("(u.user_no ILIKE %s OR p.display_name ILIKE %s OR o.org_name ILIKE %s)")
+        where.append("(u.user_no ILIKE %s OR p.display_name ILIKE %s OR o.name ILIKE %s)")
         params.extend([like] * 3)
     where_sql = " WHERE " + " AND ".join(where)
 
@@ -1204,9 +1252,42 @@ def _admin_owner_user_id(cur, body: dict, org_id: int) -> int:
 
     return owner_user_id
 
+def _content_write_context(cur, scope: dict, body: dict, fields: dict) -> tuple[int, int, int]:
+    """
+    返回：
+    - org_id：内容所属机构
+    - owner_user_id：内容业务归属人
+    - created_by_user_id：实际创建操作人
+    """
+    actor_user_id = scope["userId"]
+
+    # 平台管理员：仍然可以代机构、代用户录入。
+    if scope.get("isPlatformAdmin"):
+        org_id = fields.get("org_id")
+        if org_id is None:
+            raise bad_request("后台录入必须选择所属机构")
+
+        owner_user_id = _admin_owner_user_id(cur, body, org_id)
+        return org_id, owner_user_id, actor_user_id
+
+    # 机构管理员：机构和归属人均由登录身份决定，绝不信任请求体。
+    org_id = scope.get("orgId")
+    if org_id is None:
+        raise bad_request("机构管理员未绑定有效机构")
+
+    org_id = int(org_id)
+    fields["org_id"] = org_id
+
+    owner_user_id = _admin_owner_user_id(
+        cur,
+        {"ownerUserId": actor_user_id},
+        org_id,
+    )
+    return org_id, owner_user_id, actor_user_id
+
 
 def create_achievement_admin(
-    admin_user: dict,
+    scope: dict,
     body: dict,
     request_id=None,
 ) -> dict:
@@ -1218,18 +1299,23 @@ def create_achievement_admin(
     """
     fields, inventor_refs = _parse_upsert_body(body, partial=False)
 
+    # 机构管理员不可指定或伪造机构名称、机构 ID。
+    if not scope.get("isPlatformAdmin"):
+        fields.pop("org_id", None)
+        fields.pop("source_org_name", None)
+
     min_price = fields.get("price_min_wan")
     max_price = fields.get("price_max_wan")
     if min_price is not None and max_price is not None and min_price > max_price:
         raise bad_request("priceMinWan 不能大于 priceMaxWan")
 
     with get_cursor(commit=True) as cur:
-        org_id = fields.get("org_id")
-        if org_id is None:
-            raise bad_request("后台录入必须选择所属机构")
         if fields.get("category_id") is None:
             raise bad_request("后台录入必须选择成果分类")
-        owner_user_id = _admin_owner_user_id(cur, body, org_id)
+
+        org_id, owner_user_id, created_by_user_id = _content_write_context(
+            cur, scope, body, fields
+        )
         _validate_refs(cur, fields)
 
         cur.execute(
@@ -1237,6 +1323,7 @@ def create_achievement_admin(
             INSERT INTO achievement
                 (
                     owner_user_id,
+                    created_by_user_id,
                     title,
                     category_id,
                     org_id,
@@ -1259,7 +1346,7 @@ def create_achievement_admin(
                 )
             VALUES
                 (
-                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, 'draft'
@@ -1268,6 +1355,7 @@ def create_achievement_admin(
             """,
             (
                 owner_user_id,
+                created_by_user_id,
                 fields.get("title"),
                 fields.get("category_id"),
                 fields.get("org_id"),
@@ -1298,8 +1386,8 @@ def create_achievement_admin(
             "achievement.admin_create",
             "achievement",
             resource_id=ach_id,
-            actor_user_id=admin_user["userId"],
-            actor_user_no=admin_user.get("userNo", ""),
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={
                 "title": fields.get("title"),
                 "ownerUserId": owner_user_id,
@@ -1309,11 +1397,11 @@ def create_achievement_admin(
             cur=cur,
         )
 
-    return get_achievement_admin(ach_id)
+    return get_achievement_admin(ach_id, scope)
 
 
 def update_achievement_admin(
-    admin_user: dict,
+    scope: dict,
     ach_id: int,
     body: dict,
     request_id=None,
@@ -1326,6 +1414,12 @@ def update_achievement_admin(
     """
     fields, inventor_refs = _parse_upsert_body(body, partial=True)
 
+    # 机构管理员不能通过编辑把成果迁移到其他机构，
+    # 也不能伪造来源机构名称。
+    if not scope.get("isPlatformAdmin"):
+        fields.pop("org_id", None)
+        fields.pop("source_org_name", None)
+
     version = body.get("version")
     if not isinstance(version, int) or version < 1:
         raise bad_request("编辑成果必须携带正整数 version")
@@ -1334,14 +1428,20 @@ def update_achievement_admin(
         raise bad_request("没有可更新的成果字段")
 
     with get_cursor(commit=True) as cur:
+        where = ["id = %s", "deleted_at IS NULL"]
+        params = [ach_id]
+
+        if not scope.get("isPlatformAdmin"):
+            where.append("org_id = %s")
+            params.append(scope["orgId"])
+
         cur.execute(
-            """
+            f"""
             SELECT id, version, price_min_wan, price_max_wan
             FROM achievement
-            WHERE id = %s
-              AND deleted_at IS NULL
+            WHERE {" AND ".join(where)}
             """,
-            (ach_id,),
+            params,
         )
         current = cur.fetchone()
 
@@ -1361,15 +1461,24 @@ def update_achievement_admin(
         set_clauses = [f"{column}=%s" for column in fields]
         set_clauses.append("version=version+1")
 
+        update_where = [
+            "id = %s",
+            "version = %s",
+            "deleted_at IS NULL",
+        ]
+        update_params = list(fields.values()) + [ach_id, version]
+
+        if not scope.get("isPlatformAdmin"):
+            update_where.append("org_id = %s")
+            update_params.append(scope["orgId"])
+
         cur.execute(
             f"""
             UPDATE achievement
             SET {", ".join(set_clauses)}
-            WHERE id = %s
-              AND version = %s
-              AND deleted_at IS NULL
+            WHERE {" AND ".join(update_where)}
             """,
-            list(fields.values()) + [ach_id, version],
+            update_params,
         )
 
         if cur.rowcount == 0:
@@ -1383,19 +1492,19 @@ def update_achievement_admin(
             "achievement.admin_update",
             "achievement",
             resource_id=ach_id,
-            actor_user_id=admin_user["userId"],
-            actor_user_no=admin_user.get("userNo", ""),
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={"updatedFields": list(fields.keys())},
             request_id=request_id,
             cur=cur,
         )
 
-    return get_achievement_admin(ach_id)
+    return get_achievement_admin(ach_id, scope)
 
 # ── 后台需求新增 / 编辑 ─────────────────────────────────────
 
 def create_demand_admin(
-    admin_user: dict,
+    scope: dict,
     body: dict,
     request_id=None,
 ) -> dict:
@@ -1407,6 +1516,12 @@ def create_demand_admin(
     """
     fields, tags = _parse_demand_upsert_body(body, partial=False)
 
+    # 机构管理员不能通过旧字段 orgName / orgIntro 自动创建或改绑机构。
+    if not scope.get("isPlatformAdmin"):
+        fields.pop("org_id", None)
+        fields.pop("org_name", None)
+        fields.pop("org_intro", None)
+
     min_budget = fields.get("budget_min_wan")
     max_budget = fields.get("budget_max_wan")
     if min_budget is not None and max_budget is not None:
@@ -1414,12 +1529,12 @@ def create_demand_admin(
             raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
 
     with get_cursor(commit=True) as cur:
-        org_id = fields.get("org_id")
-        if org_id is None:
-            raise bad_request("后台录入必须选择所属机构")
         if fields.get("category_id") is None:
             raise bad_request("后台录入必须选择需求分类")
-        owner_user_id = _admin_owner_user_id(cur, body, org_id)
+
+        org_id, owner_user_id, created_by_user_id = _content_write_context(
+            cur, scope, body, fields
+        )
 
         # orgName / categoryName 自动转换或创建对应机构、分类。
         _resolve_demand_name_refs(cur, fields)
@@ -1430,6 +1545,7 @@ def create_demand_admin(
             INSERT INTO demand
                 (
                     owner_user_id,
+                    created_by_user_id,
                     title,
                     category_id,
                     org_id,
@@ -1450,7 +1566,7 @@ def create_demand_admin(
                 )
             VALUES
                 (
-                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, 'draft'
@@ -1459,6 +1575,7 @@ def create_demand_admin(
             """,
             (
                 owner_user_id,
+                created_by_user_id,
                 fields.get("title"),
                 fields.get("category_id"),
                 fields.get("org_id"),
@@ -1486,8 +1603,8 @@ def create_demand_admin(
             "demand.admin_create",
             "demand",
             resource_id=demand_id,
-            actor_user_id=admin_user["userId"],
-            actor_user_no=admin_user.get("userNo", ""),
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={
                 "title": fields.get("title"),
                 "ownerUserId": owner_user_id,
@@ -1497,11 +1614,11 @@ def create_demand_admin(
             cur=cur,
         )
 
-    return get_demand_admin(demand_id)
+    return get_demand_admin(demand_id, scope)
 
 
 def update_demand_admin(
-    admin_user: dict,
+    scope: dict,
     demand_id: int,
     body: dict,
     request_id=None,
@@ -1514,6 +1631,11 @@ def update_demand_admin(
     """
     fields, tags = _parse_demand_upsert_body(body, partial=True)
 
+    if not scope.get("isPlatformAdmin"):
+        fields.pop("org_id", None)
+        fields.pop("org_name", None)
+        fields.pop("org_intro", None)
+
     version = body.get("version")
     if not isinstance(version, int) or version < 1:
         raise bad_request("编辑需求必须携带正整数 version")
@@ -1522,14 +1644,20 @@ def update_demand_admin(
         raise bad_request("没有可更新的需求字段")
 
     with get_cursor(commit=True) as cur:
+        where = ["id = %s", "deleted_at IS NULL"]
+        params = [demand_id]
+
+        if not scope.get("isPlatformAdmin"):
+            where.append("org_id = %s")
+            params.append(scope["orgId"])
+
         cur.execute(
-            """
+            f"""
             SELECT id, version, budget_min_wan, budget_max_wan
             FROM demand
-            WHERE id = %s
-              AND deleted_at IS NULL
+            WHERE {" AND ".join(where)}
             """,
-            (demand_id,),
+            params,
         )
         current = cur.fetchone()
 
@@ -1551,15 +1679,24 @@ def update_demand_admin(
         set_clauses = [f"{column}=%s" for column in fields]
         set_clauses.append("version=version+1")
 
+        update_where = [
+            "id = %s",
+            "version = %s",
+            "deleted_at IS NULL",
+        ]
+        update_params = list(fields.values()) + [demand_id, version]
+
+        if not scope.get("isPlatformAdmin"):
+            update_where.append("org_id = %s")
+            update_params.append(scope["orgId"])
+
         cur.execute(
             f"""
             UPDATE demand
             SET {", ".join(set_clauses)}
-            WHERE id = %s
-              AND version = %s
-              AND deleted_at IS NULL
+            WHERE {" AND ".join(update_where)}
             """,
-            list(fields.values()) + [demand_id, version],
+            update_params,
         )
 
         if cur.rowcount == 0:
@@ -1573,11 +1710,10 @@ def update_demand_admin(
             "demand.admin_update",
             "demand",
             resource_id=demand_id,
-            actor_user_id=admin_user["userId"],
-            actor_user_no=admin_user.get("userNo", ""),
-            details={"updatedFields": list(fields.keys())},
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             request_id=request_id,
             cur=cur,
         )
 
-    return get_demand_admin(demand_id)
+    return get_demand_admin(demand_id, scope)

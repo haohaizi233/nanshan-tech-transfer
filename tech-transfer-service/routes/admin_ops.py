@@ -10,7 +10,7 @@ Institution Create/Update 使用 Pydantic Schema（§21）；
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from core.middleware import admin_identity
+from core.middleware import admin_identity, json_body
 from core.response import success, get_request_id
 from modules.admin.schemas import InstitutionCreateRequest, InstitutionUpdateRequest
 from modules.admin.service import (
@@ -26,6 +26,11 @@ from modules.admin.service import (
     list_users_admin,
     get_user_admin,
 )
+from modules.institution_registration.service import (
+    list_institution_registrations,
+    approve_institution_registration,
+    reject_institution_registration,
+)
 
 router = APIRouter(prefix="/api/tech-transfer/v1")
 
@@ -40,6 +45,50 @@ def admin_dashboard_summary(admin: dict = Depends(admin_identity)):
 @router.get("/admin/dashboard/trend", tags=["admin-dashboard"])
 def admin_dashboard_trend(request: Request, admin: dict = Depends(admin_identity)):
     return success(dashboard_trend(request.query_params.get("days")))
+
+
+# ── 机构注册审核 ─────────────────────────────────────────────
+
+@router.get("/admin/institution-registrations", tags=["admin-institution-registrations"])
+def admin_institution_registrations_list(
+    request: Request,
+    admin: dict = Depends(admin_identity),
+):
+    return success(list_institution_registrations(request.query_params))
+
+
+@router.post(
+    "/admin/institution-registrations/{institution_id}/approve",
+    tags=["admin-institution-registrations"],
+)
+def admin_institution_registration_approve(
+    institution_id: int,
+    admin: dict = Depends(admin_identity),
+):
+    result = approve_institution_registration(
+        admin,
+        institution_id,
+        request_id=get_request_id(),
+    )
+    return success(result, "机构注册申请已通过")
+
+
+@router.post(
+    "/admin/institution-registrations/{institution_id}/reject",
+    tags=["admin-institution-registrations"],
+)
+def admin_institution_registration_reject(
+    institution_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    result = reject_institution_registration(
+        admin,
+        institution_id,
+        body.get("reason"),
+        request_id=get_request_id(),
+    )
+    return success(result, "机构注册申请已驳回")
 
 
 # ── admin-institutions ───────────────────────────────────────

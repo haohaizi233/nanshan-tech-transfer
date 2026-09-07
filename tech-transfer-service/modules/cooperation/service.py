@@ -62,9 +62,9 @@ def _target_summary(cur, target_type: str, target_id: int):
     if target_type == "demand":
         cur.execute(
             """
-            SELECT d.title, d.status, o.org_name
+            SELECT d.title, d.status, o.name AS org_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             WHERE d.id=%s AND d.deleted_at IS NULL
             """,
             (target_id,),

@@ -64,6 +64,10 @@ def get_cursor(commit: bool = False):
             yield cur
             if commit:
                 conn.commit()
+            else:
+                # psycopg2 即使执行 SELECT 也会开启事务；线程长连接若不结束事务，
+                # 会长期持有 AccessShareLock，阻塞后续 ALTER TABLE 等迁移。
+                conn.rollback()
         except Exception:
             conn.rollback()
             raise

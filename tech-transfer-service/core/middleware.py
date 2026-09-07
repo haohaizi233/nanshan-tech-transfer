@@ -56,3 +56,70 @@ def admin_identity(request: Request) -> dict:
             code, message, status = TT_ADMIN_40301
             raise BizError(code, message, status)
     return user
+
+
+def backend_identity(request: Request) -> dict:
+    """
+    后台访问身份：
+
+    - admin：平台管理员，拥有全平台范围
+    - org_admin：机构管理员，只拥有自己机构范围
+    """
+    user = identity(request)
+
+    from db import get_cursor
+    from core.errors import TT_ADMIN_40301
+
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                p.org_id,
+                i.registration_status,
+                EXISTS (
+                    SELECT 1
+                    FROM user_role
+                    WHERE user_id = %s
+                      AND role_code = 'admin'
+                ) AS is_platform_admin,
+                EXISTS (
+                    SELECT 1
+                    FROM user_role
+                    WHERE user_id = %s
+                      AND role_code = 'org_admin'
+                ) AS is_org_admin
+            FROM app_user u
+            LEFT JOIN user_profile p ON p.user_id = u.id
+            LEFT JOIN institution i ON i.id = p.org_id
+            WHERE u.id = %s
+              AND u.status = 'active'
+              AND u.deleted_at IS NULL
+            """,
+            (user["userId"], user["userId"], user["userId"]),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        code, message, status = TT_ADMIN_40301
+        raise BizError(code, message, status)
+
+    if row["is_platform_admin"]:
+        return {
+            **user,
+            "isPlatformAdmin": True,
+            "orgId": None,
+        }
+
+    if (
+        row["is_org_admin"]
+        and row["org_id"] is not None
+        and row["registration_status"] == "approved"
+    ):
+        return {
+            **user,
+            "isPlatformAdmin": False,
+            "orgId": row["org_id"],
+        }
+
+    code, message, status = TT_ADMIN_40301
+    raise BizError(code, message, status)

@@ -93,9 +93,9 @@ def create_match_task(user_id: int, user_no: str, demand_id: int, request_id=Non
             """
             SELECT d.id, d.title, d.description, d.status, d.version,
                    d.coop_mode, d.budget_min_wan, d.budget_max_wan, d.region,
-                   o.org_name, dc.name AS category_name
+                   o.name AS org_name, dc.name AS category_name
             FROM demand d
-            LEFT JOIN organization o ON d.org_id = o.id
+            LEFT JOIN institution o ON d.org_id = o.id
             LEFT JOIN demand_category dc ON d.category_id = dc.id
             WHERE d.id = %s
             """,

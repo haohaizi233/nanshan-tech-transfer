@@ -360,9 +360,12 @@ def _validate_refs(cur, fields):
         if not cur.fetchone():
             raise bad_request("categoryId 不存在")
     if "org_id" in fields:
-        cur.execute("SELECT id FROM organization WHERE id=%s", (fields["org_id"],))
-        if not cur.fetchone():
+        cur.execute("SELECT id, name FROM institution WHERE id=%s", (fields["org_id"],))
+        institution = cur.fetchone()
+        if not institution:
             raise bad_request("orgId 不存在")
+        # source_org_name 是成果展示用的冗余快照，始终与所选机构同步。
+        fields["source_org_name"] = institution["name"]
 
 
 def _sync_inventors(cur, ach_id: int, refs):

@@ -10,15 +10,22 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-INST_KINDS = ("platform", "invest", "service")
+INST_KINDS = (
+    "platform", "invest", "service",
+    "university", "institute", "enterprise", "other",
+)
 PLATFORM_TYPE_KEYS = ("poc", "pilot", "other")
 
 
 class InstitutionCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    kind: str = Field(..., description="机构类别：platform/invest/service")
+    kind: str = Field(
+        ...,
+        description="机构类别：platform/invest/service/university/institute/enterprise/other",
+    )
     name: str = Field(..., min_length=1, max_length=255)
+    region: Optional[str] = Field(None, max_length=64)
     intro: Optional[str] = Field(None, max_length=5000)
     detailInfo: Optional[str] = Field(None, max_length=10000)
     label: Optional[str] = Field(None, max_length=64)
@@ -40,6 +47,7 @@ class InstitutionUpdateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    region: Optional[str] = Field(None, max_length=64)
     intro: Optional[str] = Field(None, max_length=5000)
     detailInfo: Optional[str] = Field(None, max_length=10000)
     label: Optional[str] = Field(None, max_length=64)

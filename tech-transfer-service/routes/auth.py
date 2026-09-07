@@ -1,6 +1,6 @@
 ﻿from fastapi import APIRouter, Depends
 
-from core.response import success
+from core.response import success, get_request_id
 from core.middleware import json_body
 from core.errors import bootstrap_credential_invalid, BizError, TT_AUTH_40105, TT_COMMON_40102
 from modules.identity.provider import get_identity_provider
@@ -9,6 +9,7 @@ from modules.identity.service import (
     password_login_session,
     refresh_session,
     logout_session,
+    register_password_user,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
@@ -24,6 +25,14 @@ def login(body: dict = Depends(json_body)):
 
     result = password_login_session(username, password)
     return success(result)
+
+
+@router.post("/register", status_code=201, summary="普通用户账号密码注册")
+def register(body: dict = Depends(json_body)):
+    return success(
+        register_password_user(body, request_id=get_request_id()),
+        "注册成功，请登录",
+    )
 
 
 @router.post("/bootstrap")

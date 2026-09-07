@@ -174,7 +174,7 @@ def _validate_refs(cur, fields):
         if not cur.fetchone():
             raise bad_request("categoryId 不存在")
     if "org_id" in fields:
-        cur.execute("SELECT id FROM organization WHERE id=%s", (fields["org_id"],))
+        cur.execute("SELECT id FROM institution WHERE id=%s", (fields["org_id"],))
         if not cur.fetchone():
             raise bad_request("orgId 不存在")
 
@@ -182,7 +182,7 @@ def _validate_refs(cur, fields):
 def _resolve_name_refs(cur, fields):
     """orgName/orgIntro/categoryName → get-or-create，落为 org_id/category_id
 
-    字段来源：05-data-model-design.md §12.2 演示数据映射（company→organization
+    字段来源：05-data-model-design.md §12.2 演示数据映射（company→institution
     get-or-create；industry 首段→分类）。小程序表单无 ID 选择器，复用同一映射。
     """
     org_name = fields.pop("org_name", None)
@@ -193,18 +193,22 @@ def _resolve_name_refs(cur, fields):
         raise bad_request("orgIntro 需与 orgName 一起提供")
 
     if org_name:
-        cur.execute("SELECT id FROM organization WHERE org_name=%s", (org_name,))
+        cur.execute("SELECT id FROM institution WHERE name=%s", (org_name,))
         row = cur.fetchone()
         if row:
             org_id = row["id"]
             if org_intro:
                 cur.execute(
-                    "UPDATE organization SET intro=%s WHERE id=%s AND (intro IS NULL OR intro='')",
+                    "UPDATE institution SET intro=%s WHERE id=%s AND (intro IS NULL OR intro='')",
                     (org_intro, org_id),
                 )
         else:
             cur.execute(
-                "INSERT INTO organization (org_name, intro) VALUES (%s, %s) RETURNING id",
+                """
+                INSERT INTO institution (kind, name, intro, user_type, status)
+                VALUES ('enterprise', %s, %s, 'enterprise', 'active')
+                RETURNING id
+                """,
                 (org_name, org_intro),
             )
             org_id = cur.fetchone()["id"]
@@ -327,10 +331,10 @@ def _row_to_detail(row, tags, user_id):
 # ── 查询 ─────────────────────────────────────────────────────
 
 _BASE_SELECT = """
-    SELECT d.*, o.org_name, o.intro AS org_intro,
+    SELECT d.*, o.name AS org_name, o.intro AS org_intro,
            c.name AS category_name, c.code AS category_code
     FROM demand d
-    LEFT JOIN organization o ON d.org_id = o.id
+    LEFT JOIN institution o ON d.org_id = o.id
     LEFT JOIN demand_category c ON d.category_id = c.id
 """
 
@@ -347,7 +351,7 @@ def list_demands(args, user_id: int):
     params = [user_id] if include_mine else []
 
     if keyword:
-        where += " AND (d.title LIKE %s OR d.description LIKE %s OR o.org_name LIKE %s)"
+        where += " AND (d.title LIKE %s OR d.description LIKE %s OR o.name LIKE %s)"
         like = f"%{keyword}%"
         params.extend([like, like, like])
 
@@ -356,7 +360,7 @@ def list_demands(args, user_id: int):
         params.append(category_code)
 
     with get_cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) AS c FROM demand d LEFT JOIN organization o ON d.org_id=o.id LEFT JOIN demand_category c ON d.category_id=c.id{where}", params)
+        cur.execute(f"SELECT COUNT(*) AS c FROM demand d LEFT JOIN institution o ON d.org_id=o.id LEFT JOIN demand_category c ON d.category_id=c.id{where}", params)
         total = int((cur.fetchone() or {}).get("c") or 0)
 
         offset = (page - 1) * page_size

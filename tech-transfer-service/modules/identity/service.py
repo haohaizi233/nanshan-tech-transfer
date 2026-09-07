@@ -5,7 +5,9 @@ from db import get_cursor
 from modules.identity.context import IdentityContext
 from modules.identity.provider import ExternalIdentity
 from core.jwt_utils import sign_access_token, sign_refresh_token
-from core.password import verify_password
+from core.password import hash_password, verify_password
+from core.errors import BizError, TT_COMMON_40903, bad_request
+from modules.audit.service import record as audit_record
 
 
 def _generate_user_no(cur) -> str:
@@ -38,7 +40,9 @@ def _get_profile(cur, user_id: int) -> dict:
 def _get_org_name(cur, org_id: Optional[int]) -> Optional[str]:
     if not org_id:
         return None
-    return None
+    cur.execute("SELECT name FROM institution WHERE id=%s", (org_id,))
+    row = cur.fetchone()
+    return row["name"] if row else None
 
 
 def build_user_response(cur, user_id: int) -> dict:
@@ -216,6 +220,66 @@ def password_login_session(username: str, password: str) -> dict:
         result["user"] = build_user_response(cur, user_id)
         result["isNewUser"] = False
         return result
+
+
+def register_password_user(body: dict, request_id: str | None = None) -> dict:
+    """注册普通用户：账号创建后即可登录，不绑定机构，也不授予后台管理角色。"""
+    import re
+
+    username = str(body.get("username") or "").strip()
+    password = body.get("password") or ""
+    display_name = str(body.get("displayName") or "").strip() or None
+    phone = str(body.get("phone") or "").strip() or None
+    email = str(body.get("email") or "").strip() or None
+
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{4,64}", username):
+        raise bad_request("用户名须为 4-64 位字母、数字或 . _ -")
+    if len(password) < 8 or len(password) > 128:
+        raise bad_request("密码长度须为 8-128 位")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
+        if cur.fetchone():
+            code, message, status = TT_COMMON_40903
+            raise BizError(code, "该登录账号已存在", status)
+
+        user_no = _generate_user_no(cur)
+        cur.execute(
+            "INSERT INTO app_user (user_no, status) VALUES (%s, 'active') RETURNING id",
+            (user_no,),
+        )
+        user_id = cur.fetchone()["id"]
+        cur.execute(
+            """
+            INSERT INTO user_profile (user_id, display_name, phone, email)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (user_id, display_name, phone, email),
+        )
+        cur.execute(
+            """
+            INSERT INTO user_credential (user_id, username, password_hash, status)
+            VALUES (%s, %s, %s, 'active')
+            """,
+            (user_id, username, hash_password(password)),
+        )
+        cur.execute(
+            "INSERT INTO user_role (user_id, role_code) VALUES (%s, 'user')",
+            (user_id,),
+        )
+        audit_record(
+            "user.registration.submit",
+            "app_user",
+            resource_id=user_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            details={"username": username},
+            request_id=request_id,
+            cur=cur,
+        )
+        user = build_user_response(cur, user_id)
+
+    return {"user": user, "username": username}
 
 
 def refresh_session(refresh_token: str) -> dict:

@@ -8,7 +8,7 @@ Excel 真实成果数据导入（SIAT 待转化技术成果 223 条）
 - 幂等可重跑：每次清空成果域（TRUNCATE RESTART IDENTITY）后全量导入
 - 成果归属 dev-user-002（app_user.id=2），与 etl_demands.py 约定一致：
   默认用户 dev-user-001 可对其发起对接
-- 机构挂 SIAT（organization.id=1，'中国科学院深圳先进技术研究院'）
+- 机构挂 SIAT（按名称从统一 institution 表查找，不依赖固定 ID）
 - Excel 标签 → 分类映射：新增 medical_device/material_energy/brain_science/
   synthetic_bio 4 类（add-only），复用 ai/biomed
 - innovation_points ← Excel「结果列表」JSON（[{title,content,_lock}]，剔除 _lock）
@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import settings  # noqa: E402
 
 OWNER_USER_ID = 2                      # dev-user-002
-ORG_ID = 1                             # 中国科学院深圳先进技术研究院
 ORG_NAME = "中国科学院深圳先进技术研究院"
 SOURCE_XLSX = r"c:\Users\admin\.trae-cn\attachments\6a994f6e5ccb52d03a16d9c3\e752f292-2224-4168-807e-a3a71f661797_54406ecb-dc56-4a40-bba9-e3c471f6b9db_待转化技术成果表格导出_1786344353.xlsx"
 
@@ -113,6 +112,19 @@ def main():
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     try:
+        cur.execute(
+            """
+            SELECT id FROM institution
+            WHERE name=%s AND status='active'
+            ORDER BY id LIMIT 1
+            """,
+            (ORG_NAME,),
+        )
+        org = cur.fetchone()
+        if not org:
+            raise RuntimeError(f"统一机构表中不存在已启用机构：{ORG_NAME}")
+        org_id = org["id"]
+
         # 1. 清理成果域旧数据（demo 随机数据 + 其收藏/意向），id 序列归零
         cur.execute("SELECT COUNT(*) AS c FROM achievement")
         old_ach = cur.fetchone()["c"]
@@ -164,7 +176,7 @@ def main():
                         %s::timestamptz)
                 RETURNING id
                 """,
-                (OWNER_USER_ID, ORG_ID, ORG_NAME,
+                (OWNER_USER_ID, org_id, ORG_NAME,
                  row["title"][:200], cat_id,
                  row["intro"] or None,
                  json.dumps(parse_innovation_points(row["result_list"]),

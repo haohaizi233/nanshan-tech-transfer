@@ -6,13 +6,15 @@ import {
   ref,
 } from 'vue'
 
-import { api } from '../../api/client'
+import { api, getSavedUser } from '../../api/client'
 
 const achievements = ref([])
 
 const categories = ref([])
 const ownerUsers = ref([])
 const organizations = ref([])
+const currentUser = ref(getSavedUser() || {})
+const isPlatformAdmin = computed(() => (currentUser.value.roles || []).includes('admin'))
 
 const statusOptions = [
   { value: 'draft', label: '草稿' },
@@ -247,6 +249,10 @@ const openView = item => {
 }
 
 const fetchOwnerUsers = async () => {
+  if (!isPlatformAdmin.value) {
+    ownerUsers.value = []
+    return
+  }
   try {
     const data = await api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } })
     ownerUsers.value = data.list || []
@@ -271,6 +277,10 @@ const openCreate = () => {
   editingId.value = null
   formError.value = ''
   resetAchievementForm()
+  if (!isPlatformAdmin.value) {
+    achievementForm.orgId = currentUser.value.orgId || ''
+    achievementForm.ownerUserId = currentUser.value.userId || ''
+  }
   formVisible.value = true
 }
 
@@ -323,8 +333,8 @@ const saveAchievement = async () => {
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (formMode.value === 'create' || achievementForm.applicationFieldsText.trim()) body.applicationFields = splitText(achievementForm.applicationFieldsText)
     if (achievementForm.categoryId) body.categoryId = Number(achievementForm.categoryId)
-    if (achievementForm.orgId) body.orgId = Number(achievementForm.orgId)
-    if (achievementForm.ownerUserId) body.ownerUserId = Number(achievementForm.ownerUserId)
+    if (isPlatformAdmin.value && achievementForm.orgId) body.orgId = Number(achievementForm.orgId)
+    if (isPlatformAdmin.value && achievementForm.ownerUserId) body.ownerUserId = Number(achievementForm.ownerUserId)
     if (achievementForm.priceMinWan !== '') body.priceMinWan = Number(achievementForm.priceMinWan)
     if (achievementForm.priceMaxWan !== '') body.priceMaxWan = Number(achievementForm.priceMaxWan)
     const inventors = splitText(achievementForm.inventorNamesText)
@@ -573,7 +583,9 @@ onMounted(() => {
   fetchList()
   fetchCategories()
   fetchOwnerUsers()
-  api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
+  if (isPlatformAdmin.value) {
+    api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
+  }
 })
 </script>
 
@@ -784,7 +796,7 @@ onMounted(() => {
 
                     <button
                       v-if="
-                        item.status === 'pending_review'
+                        isPlatformAdmin && item.status === 'pending_review'
                       "
                       type="button"
                       @click="openAudit(item)"
@@ -794,7 +806,7 @@ onMounted(() => {
 
                     <span
                       v-if="
-                        item.status === 'pending_review'
+                        isPlatformAdmin && item.status === 'pending_review'
                       "
                     >
                       |
@@ -909,9 +921,13 @@ onMounted(() => {
     <div v-if="formVisible" class="modal-mask" @click.self="!formSaving && (formVisible = false)">
       <div class="modal form-modal">
         <div class="modal-header"><h3>{{ formMode === 'create' ? '新增成果' : '编辑成果' }}</h3><button type="button" class="close-button" @click="formVisible = false">×</button></div>
-        <div class="form-content">
+        <div class="form-content" :class="{ 'org-admin-form': !isPlatformAdmin }">
           <p v-if="formLoading" class="modal-state">加载中…</p>
           <template v-else>
+            <template v-if="!isPlatformAdmin">
+              <label>所属机构</label><input :value="currentUser.orgName || '当前登录机构'" disabled />
+              <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
+            </template>
             <label>成果名称 *</label><input v-model="achievementForm.title" />
             <label>分类 *</label><select v-model="achievementForm.categoryId"><option value="">请选择分类</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
             <label>所属机构 *</label><select v-model="achievementForm.orgId" @change="achievementForm.ownerUserId = ''"><option value="">请选择机构</option><option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option></select>
@@ -1672,4 +1688,8 @@ tbody tr:hover {
 .form-content input, .form-content select, .form-content textarea { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid #dce4ee; border-radius: 5px; font: inherit; }
 .form-content textarea { resize: vertical; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.org-admin-form > label:nth-of-type(5),
+.org-admin-form > label:nth-of-type(6),
+.org-admin-form > select:nth-of-type(2),
+.org-admin-form > select:nth-of-type(3) { display: none; }
 </style>

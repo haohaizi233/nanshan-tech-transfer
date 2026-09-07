@@ -35,6 +35,7 @@ from routes.ai import router as ai_router
 from routes.admin import router as admin_router
 from routes.admin_ops import router as admin_ops_router
 from routes.file import router as file_router
+from routes.institution_registration import router as institution_registration_router
 
 assert_environment()
 configure_logging()
@@ -64,6 +65,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(institution_registration_router)
 app.include_router(me_router)
 app.include_router(achievement_router)
 app.include_router(demand_router)
