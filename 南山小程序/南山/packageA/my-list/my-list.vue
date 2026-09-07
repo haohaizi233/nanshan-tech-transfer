@@ -54,9 +54,10 @@
 		removeFavorite,
 		getMyCooperations,
 		toFeType,
-		getCoopStatusLabel,
-		getCoopStatusCls,
-		getIntentTypeLabel
+		getCooperationDisplayLabel,
+		getCooperationDisplayCls,
+		getIntentTypeLabel,
+		getAssistedHint
 	} from '../../common/interaction-api.js'
 
 	export default {
@@ -114,6 +115,13 @@
 					const sum = item.targetSummary || {}
 					const feType = toFeType(item.targetType)
 					const intentLabel = getIntentTypeLabel(feType, item.intentType)
+					const handlingMode = item.handlingMode || 'direct'
+					const assistStatus = item.assistStatus || null
+					const statusLabel = getCooperationDisplayLabel(item.status, handlingMode, assistStatus)
+					const statusCls = getCooperationDisplayCls(item.status, handlingMode, assistStatus)
+					const statusHint = handlingMode === 'assisted'
+						? getAssistedHint(item.status, assistStatus)
+						: ''
 					return {
 						id: item.targetId,
 						_key: 'c-' + item.id,
@@ -123,8 +131,9 @@
 						_intentId: item.id,
 						_role: isSent ? 'sent' : 'received',
 						_status: item.status,
-						_statusLabel: getCoopStatusLabel(item.status),
-						_statusCls: getCoopStatusCls(item.status),
+						_statusLabel: statusLabel,
+						_statusCls: statusCls,
+						_statusHint: statusHint,
 						_title: sum.title || '意向对接',
 						_desc: sum.desc || sum.orgName || '对接意向',
 						_sub: ((isSent ? '对接对象：' : '来自：') + (item.counterpartDisplayName || '对方'))

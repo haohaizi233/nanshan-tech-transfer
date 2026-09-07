@@ -183,3 +183,63 @@ export function getCoopStatusCls(status) {
   const meta = COOP_STATUS_META[status]
   return meta ? meta.cls : 'pending'
 }
+
+// ── 平台协助对接（assisted）状态展示 ────────────────────────
+
+/**
+ * assisted 对接状态映射：status + assistStatus → 用户友好文案
+ * 仅 handlingMode === 'assisted' 时使用；direct 模式沿用原状态标签
+ */
+const ASSISTED_STATUS_META = {
+  'pending|queued':          { label: '平台待处理',     cls: 'pending' },
+  'pending|contacting':      { label: '平台正在联系对方', cls: 'pending' },
+  'pending|waiting_reply':   { label: '等待目标机构回复', cls: 'pending' },
+  'pending|unreachable':     { label: '暂未联系到对方',  cls: 'pending' },
+  'accepted|target_agreed':  { label: '对方已接受对接',  cls: 'accepted' },
+  'rejected|target_rejected':{ label: '对方暂不接受',    cls: 'rejected' },
+}
+
+/**
+ * 获取对接状态显示标签（自动区分 direct / assisted）
+ * @param {string} status - 主状态
+ * @param {string} handlingMode - direct / assisted
+ * @param {string} assistStatus - 平台协助处理阶段（仅 assisted）
+ */
+export function getCooperationDisplayLabel(status, handlingMode, assistStatus) {
+  if (handlingMode === 'assisted' && status && assistStatus) {
+    const key = `${status}|${assistStatus}`
+    const meta = ASSISTED_STATUS_META[key]
+    if (meta) return meta.label
+  }
+  return getCoopStatusLabel(status)
+}
+
+/**
+ * 获取对接状态样式类（自动区分 direct / assisted）
+ */
+export function getCooperationDisplayCls(status, handlingMode, assistStatus) {
+  if (handlingMode === 'assisted' && status && assistStatus) {
+    const key = `${status}|${assistStatus}`
+    const meta = ASSISTED_STATUS_META[key]
+    if (meta) return meta.cls
+  }
+  return getCoopStatusCls(status)
+}
+
+/**
+ * assisted 模式下的状态提示文案（发起方视角）
+ */
+const ASSISTED_HINT_MAP = {
+  'pending|queued':          '对接申请已提交，平台工作人员将协助联系目标机构',
+  'pending|contacting':      '平台正在联系目标机构，请耐心等待',
+  'pending|waiting_reply':   '平台已联系目标机构，等待对方回复',
+  'pending|unreachable':     '暂未联系到对方，平台将继续尝试联系',
+  'accepted|target_agreed':  '对方已同意对接，可查看联系方式',
+  'rejected|target_rejected':'对方暂不接受本次对接',
+}
+
+export function getAssistedHint(status, assistStatus) {
+  if (!status || !assistStatus) return ''
+  const key = `${status}|${assistStatus}`
+  return ASSISTED_HINT_MAP[key] || ''
+}

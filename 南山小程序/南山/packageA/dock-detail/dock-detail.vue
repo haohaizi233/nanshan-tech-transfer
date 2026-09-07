@@ -237,8 +237,9 @@
 		confirmCooperation,
 		cancelCooperation,
 		completeCooperation,
-		getCoopStatusLabel,
-		getCoopStatusCls
+		getCooperationDisplayLabel,
+		getCooperationDisplayCls,
+		getAssistedHint
 	} from '../../common/interaction-api.js'
 
 	const ACTION_TIPS = {
@@ -270,10 +271,20 @@
 		},
 		computed: {
 			statusLabel() {
-				return this.intention ? getCoopStatusLabel(this.intention.status) : ''
+				if (!this.intention) return ''
+				return getCooperationDisplayLabel(
+					this.intention.status,
+					this.intention.handlingMode,
+					this.intention.assistStatus
+				)
 			},
 			statusCls() {
-				return this.intention ? getCoopStatusCls(this.intention.status) : 'pending'
+				if (!this.intention) return 'pending'
+				return getCooperationDisplayCls(
+					this.intention.status,
+					this.intention.handlingMode,
+					this.intention.assistStatus
+				)
 			},
 			intentionIntentLabel() {
 				return this.intention
@@ -283,9 +294,17 @@
 			intentOptions() {
 				return getIntentTypeOptions(this.type)
 			},
+			isAssisted() {
+				return this.intention && this.intention.handlingMode === 'assisted'
+			},
 			statusHint() {
 				const row = this.intention
 				if (!row) return ''
+				// assisted 模式：使用平台协助状态提示
+				if (row.handlingMode === 'assisted') {
+					const hint = getAssistedHint(row.status, row.assistStatus)
+					if (hint) return hint
+				}
 				const isInitiator = row.myRole === 'initiator'
 				if (row.status === 'pending') {
 					return isInitiator ? '等待对方处理' : '请选择同意或拒绝'
@@ -302,6 +321,13 @@
 				if (!row) {
 					if (this.detail && !canProposeDock(this.type, this.detail)) return 'blocked'
 					return 'propose'
+				}
+				// assisted 模式：目标方没有平台账号，永远不显示接收方操作按钮
+				if (row.handlingMode === 'assisted') {
+					if (row.status === 'pending' && row.myRole === 'initiator') {
+						return 'cancel_pending'
+					}
+					return 'status'
 				}
 				if (row.status === 'pending') {
 					return row.myRole === 'target_owner' ? 'receiver_decide' : 'cancel_pending'
