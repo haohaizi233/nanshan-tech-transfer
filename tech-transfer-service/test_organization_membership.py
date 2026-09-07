@@ -1,6 +1,7 @@
 """Focused assertions for the organization-membership schema and authorization."""
 import json
 import sys
+import uuid
 from contextlib import contextmanager
 
 import db
@@ -419,6 +420,173 @@ def check(name, ok, detail=""):
         print(f"[FAIL] {name} — {detail}")
 
 
+def check_http_flows():
+    """Real HTTP/auth/service/DB flows; fixtures are unique and cleaned by exact IDs."""
+    from fastapi.testclient import TestClient
+    from app import app
+    from core.jwt_utils import sign_access_token
+
+    suffix = uuid.uuid4().hex[:12]
+    users, orgs = [], []
+    names = [f"membership-{suffix}-{i}" for i in range(5)]
+    try:
+        with db.get_cursor(commit=True) as cur:
+            for i in range(4):
+                cur.execute("INSERT INTO app_user (user_no) VALUES (%s) RETURNING id", (f"M{suffix}{i}",))
+                users.append(cur.fetchone()["id"])
+            for i in range(4):
+                cur.execute(
+                    "INSERT INTO organization (org_name, status, deleted_at) VALUES (%s, %s, %s) RETURNING id",
+                    (names[i], "inactive" if i == 2 else "active", "2026-01-01" if i == 3 else None),
+                )
+                orgs.append(cur.fetchone()["id"])
+            cur.execute("INSERT INTO user_role (user_id, role_code) VALUES (%s, 'admin')", (users[3],))
+            cur.execute(
+                "INSERT INTO organization_membership (user_id, org_id, role) VALUES (%s, %s, 'admin') RETURNING id",
+                (users[1], orgs[0]),
+            )
+            org_admin_membership = cur.fetchone()["id"]
+        headers = [
+            {"Authorization": f"Bearer {sign_access_token(uid, f'M{suffix}{i}', ['user'])}",
+             "X-Request-Id": f"membership-{suffix}"}
+            for i, uid in enumerate(users)
+        ]
+        with TestClient(app) as client:
+            def call(method, path, who=0, body=None, status=200):
+                response = client.request(
+                    method, "/api/tech-transfer/v1" + path,
+                    headers=headers[who] if who is not None else {}, json=body,
+                )
+                check(f"HTTP {method} {path} = {status}", response.status_code == status, response.text[:300])
+                if response.status_code != status:
+                    raise AssertionError(f"unexpected response: {response.status_code} {response.text[:300]}")
+                payload = response.json()
+                check("HTTP response carries request ID", payload.get("requestId") == response.headers.get("X-Request-Id"))
+                return payload.get("data")
+
+            def all_pages(path, who):
+                separator = "&" if "?" in path else "?"
+                result = call("GET", f"{path}{separator}pageSize=50", who=who)
+                rows = list(result["list"])
+                for page in range(2, (result["total"] + 49) // 50 + 1):
+                    rows.extend(call("GET", f"{path}{separator}pageSize=50&page={page}", who=who)["list"])
+                return {**result, "list": rows}
+
+            call("GET", "/organizations/search", who=None, status=401)
+            found = call("GET", f"/organizations/search?keyword={suffix}&page=1&pageSize=1")
+            check("canonical search excludes inactive/deleted and paginates", found["total"] == 2 and len(found["list"]) == 1)
+            check("search candidate includes canonical name", found["list"][0]["orgName"] == names[0])
+            check("search never grants membership", call("GET", "/me/organization-memberships")["list"] == [])
+            call("POST", "/me/organization-membership-applications", body={"orgId": orgs[2]}, status=404)
+            application = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0], "realName": "申请人", "proofMaterial": "proof"})
+            aid = application["id"]
+            call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]}, status=409)
+            call("GET", f"/org-admin/members?orgId={orgs[0]}", status=403)
+            queue = all_pages(f"/org-admin/membership-applications?orgId={orgs[0]}&status=pending", who=1)
+            check("review queue includes evidence", any(row["id"] == aid and row["proofMaterial"] == "proof" for row in queue["list"]))
+            cross = call("POST", "/me/organization-membership-applications", who=2, body={"orgId": orgs[1]})
+            call("GET", f"/org-admin/membership-applications?orgId={orgs[1]}", who=1, status=403)
+            call("GET", f"/org-admin/members?orgId={orgs[1]}", who=1, status=403)
+            call("POST", f"/org-admin/membership-applications/{cross['id']}/approve", who=1, body={"version": 1}, status=403)
+            call("POST", f"/org-admin/membership-applications/{cross['id']}/reject", who=1, body={"version": 1, "reason": "no"}, status=403)
+            call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 99}, status=409)
+            for version in (True, "1", 1.5, 0):
+                call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": version}, status=422)
+            # Audit storage is the injected failure boundary; the real transaction
+            # must roll back both the application review and new membership.
+            from unittest.mock import patch
+            import psycopg2
+            with patch.object(membership_service, "audit_record", side_effect=psycopg2.DataError("test audit failure")):
+                call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1}, status=500)
+            with db.get_cursor() as cur:
+                cur.execute("SELECT status, version FROM organization_membership_application WHERE id = %s", (aid,))
+                pending = cur.fetchone()
+                cur.execute("SELECT COUNT(*) AS total FROM organization_membership WHERE user_id = %s", (users[0],))
+                member_count = cur.fetchone()["total"]
+                cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE actor_user_id = ANY(%s)", (users,))
+                audit_count = cur.fetchone()["total"]
+            check("audit failure rolls back application and membership atomically", pending["status"] == "pending" and pending["version"] == 1 and member_count == 0 and audit_count == 0)
+            approved = call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1})
+            mid = approved["membership"]["id"]
+            check("approval activates membership", approved["membership"]["status"] == "active" and approved["membership"]["role"] == "member")
+            mine = call("GET", "/me/organization-memberships")
+            check("own membership includes canonical name", mine["list"][0]["orgName"] == names[0])
+            members = call("GET", f"/org-admin/members?orgId={orgs[0]}&status=active", who=1)
+            check("member list includes approved member", mid in [row["id"] for row in members["list"]])
+            call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1}, status=409)
+            call("POST", f"/org-admin/members/{org_admin_membership}/revoke", who=1, body={"version": 1, "reason": "no"}, status=409)
+            call("POST", f"/org-admin/members/{mid}/revoke", who=1, body={"version": 1, "reason": "离职"})
+            reapply = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]})
+            call("POST", f"/org-admin/membership-applications/{reapply['id']}/reject", who=1, body={"version": 1, "reason": "   "}, status=422)
+            call("POST", f"/org-admin/membership-applications/{reapply['id']}/reject", who=1, body={"version": 1, "reason": "材料不足"})
+            reapply = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]})
+            revived = call("POST", f"/org-admin/membership-applications/{reapply['id']}/approve", who=1, body={"version": 1})["membership"]
+            check("reapplication reactivates revoked membership", revived["id"] == mid and revived["version"] == 3)
+            call("POST", f"/me/organization-membership-applications/{cross['id']}/cancel", body={"version": 1}, status=404)
+            call("POST", f"/me/organization-membership-applications/{cross['id']}/cancel", who=2, body={"version": 99}, status=409)
+            cancelled = call("POST", f"/me/organization-membership-applications/{cross['id']}/cancel", who=2, body={"version": 1})
+            check("owner cancels pending application", cancelled["status"] == "cancelled")
+            cross = call("POST", "/me/organization-membership-applications", who=2, body={"orgId": orgs[1]})
+            cross_member = call("POST", f"/org-admin/membership-applications/{cross['id']}/approve", who=3, body={"version": 1})["membership"]
+            call("POST", f"/org-admin/members/{cross_member['id']}/revoke", who=1, body={"version": 1, "reason": "no"}, status=403)
+            grant_path = f"/admin/organization-memberships/{mid}/grant-admin"
+            revoke_path = f"/admin/organization-memberships/{mid}/revoke-admin"
+            call("POST", grant_path, who=1, body={"version": 3}, status=403)
+            call("POST", grant_path, who=3, body={"version": 2}, status=409)
+            granted = call("POST", grant_path, who=3, body={"version": 3})
+            check("System Admin grants admin role", granted["role"] == "admin")
+            call("POST", revoke_path, who=1, body={"version": 4, "reason": "no"}, status=403)
+            call("POST", revoke_path, who=3, body={"version": 4, "reason": "任期结束"})
+            call("GET", f"/org-admin/members?orgId={orgs[0]}", status=403)
+            admin_app = call("POST", "/me/organization-admin-applications", body={"orgId": orgs[0], "proofMaterial": "admin-proof"})
+            call("GET", "/admin/organization-admin-applications", who=1, status=403)
+            queue = all_pages("/admin/organization-admin-applications?status=pending", who=3)
+            check("admin application evidence visible to System Admin", any(row["id"] == admin_app["id"] and row["proofMaterial"] == "admin-proof" for row in queue["list"]))
+            path = f"/admin/organization-admin-applications/{admin_app['id']}"
+            call("POST", path + "/approve", who=1, body={"version": 1}, status=403)
+            call("POST", path + "/reject", who=3, body={"version": 1, "reason": "补材料"})
+            admin_app = call("POST", "/me/organization-admin-applications", body={"orgId": orgs[0]})
+            call("POST", f"/admin/organization-admin-applications/{admin_app['id']}/approve", who=3, body={"version": 1})
+            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise", "contactName": "申请人"})
+            path = f"/admin/organization-applications/{org_app['id']}"
+            call("GET", "/admin/organization-applications", who=1, status=403)
+            queue = all_pages("/admin/organization-applications?status=pending", who=3)
+            check("new organization queue includes requested fields", any(row["id"] == org_app["id"] and row["requestedName"] == names[4] for row in queue["list"]))
+            call("POST", path + "/approve", who=1, body={"version": 1}, status=403)
+            call("POST", path + "/reject", who=3, body={"version": 1, "reason": "补材料"})
+            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise"})
+            created = call("POST", f"/admin/organization-applications/{org_app['id']}/approve", who=3, body={"version": 1})
+            orgs.append(created["orgId"])
+            check("new organization grants active administrator", created["membership"]["orgId"] == created["orgId"] and created["membership"]["role"] == "admin" and created["membership"]["status"] == "active")
+            found = call("GET", f"/organizations/search?keyword={names[4]}")
+            check("approved organization is canonical searchable candidate", found["list"][0]["id"] == created["orgId"])
+            with db.get_cursor() as cur:
+                cur.execute("SELECT action, details, request_id FROM audit_log WHERE actor_user_id = ANY(%s)", (users,))
+                audits = cur.fetchall()
+            actions = {row["action"] for row in audits}
+            check("reviews, cancellation, grants and revokes have audits", {
+                "organization_membership_application.approve", "organization_membership_application.reject",
+                "organization_membership_application.cancel", "organization_membership.revoke",
+                "organization_admin.grant", "organization_admin.revoke",
+                "organization_admin_application.approve", "organization_admin_application.reject",
+                "organization_application.approve", "organization_application.reject",
+            } <= actions)
+            check("audit records carry HTTP request ID", all(row["request_id"] == f"membership-{suffix}" for row in audits))
+    except AssertionError as exc:
+        print(f"[HTTP FLOW STOPPED] {exc}")
+    finally:
+        # Only remove rows created by this invocation; never mutate existing fixtures.
+        if users:
+            with db.get_cursor(commit=True) as cur:
+                cur.execute("DELETE FROM audit_log WHERE actor_user_id = ANY(%s)", (users,))
+                for table in TABLES:
+                    column = "applicant_user_id" if table == "organization_application" else "user_id"
+                    cur.execute(f"DELETE FROM {table} WHERE {column} = ANY(%s)", (users,))
+                cur.execute("DELETE FROM user_role WHERE user_id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM app_user WHERE id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM organization WHERE org_name = ANY(%s)", (names,))
+
+
 def main():
     with db.get_cursor() as cur:
         cur.execute(
@@ -457,6 +625,7 @@ def main():
     check_revoked_user_can_apply_for_admin()
     check_admin_rejection_audit_has_org_id()
     check_request_validation()
+    check_http_flows()
 
     print(f"RESULT: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

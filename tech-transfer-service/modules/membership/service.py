@@ -7,6 +7,120 @@ from db import get_cursor, transaction
 from modules.audit.service import record as audit_record
 
 
+def _map_read_row(row: dict) -> dict:
+    """Expose database fields in the API's existing camelCase convention."""
+    return {
+        key.split('_')[0] + ''.join(part.title() for part in key.split('_')[1:]): value
+        for key, value in row.items()
+    }
+
+
+def _read_page(cur, select_sql: str, from_sql: str, params: list, page: int, page_size: int) -> dict:
+    cur.execute(f"SELECT COUNT(*) AS total {from_sql}", params)
+    total = cur.fetchone()["total"]
+    cur.execute(
+        f"SELECT {select_sql} {from_sql} ORDER BY a.id LIMIT %s OFFSET %s",
+        [*params, page_size, (page - 1) * page_size],
+    )
+    return {"list": [_map_read_row(row) for row in cur.fetchall()],
+            "total": total, "page": page, "pageSize": page_size}
+
+
+def search_organizations(keyword: str, page: int, page_size: int) -> dict:
+    # A literal substring search only returns candidates; it cannot create an identity.
+    pattern = '%' + keyword.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+    with get_cursor() as cur:
+        return _read_page(
+            cur, "a.id, a.org_name, a.org_type, a.region",
+            "FROM organization a WHERE a.status = 'active' AND a.deleted_at IS NULL AND a.org_name ILIKE %s",
+            [pattern], page, page_size,
+        )
+
+
+def list_my_memberships(user: dict, page: int, page_size: int) -> dict:
+    with get_cursor() as cur:
+        return _read_page(
+            cur, "a.*, o.org_name, o.org_type",
+            "FROM organization_membership a JOIN organization o ON o.id = a.org_id WHERE a.user_id = %s",
+            [user["userId"]], page, page_size,
+        )
+
+
+def list_org_members(admin: dict, org_id: int, status, page: int, page_size: int) -> dict:
+    return _list_org_records(admin, org_id, "organization_membership", status, page, page_size)
+
+
+def list_membership_applications(admin: dict, org_id: int, status, page: int, page_size: int) -> dict:
+    return _list_org_records(admin, org_id, "organization_membership_application", status, page, page_size)
+
+
+def _list_org_records(admin, org_id, table, status, page, page_size):
+    if table not in {"organization_membership", "organization_membership_application"}:
+        raise ValueError("unsupported membership table")
+    with get_cursor() as cur:
+        assert_org_admin_for(cur, admin, org_id)
+        sql = f"FROM {table} a JOIN app_user u ON u.id = a.user_id JOIN organization o ON o.id = a.org_id WHERE a.org_id = %s"
+        params = [org_id]
+        if status is not None:
+            sql += " AND a.status = %s"
+            params.append(status)
+        return _read_page(cur, "a.*, u.user_no, o.org_name", sql, params, page, page_size)
+
+
+def list_organization_applications(admin: dict, status, page: int, page_size: int) -> dict:
+    return _list_system_applications(admin, "organization_application", status, page, page_size)
+
+
+def list_organization_admin_applications(admin: dict, status, page: int, page_size: int) -> dict:
+    return _list_system_applications(admin, "organization_admin_application", status, page, page_size)
+
+
+def _list_system_applications(admin, table, status, page, page_size):
+    if table not in {"organization_application", "organization_admin_application"}:
+        raise ValueError("unsupported application table")
+    user_column = "applicant_user_id" if table == "organization_application" else "user_id"
+    with get_cursor() as cur:
+        _assert_system_admin(cur, admin)
+        sql = f"FROM {table} a JOIN app_user u ON u.id = a.{user_column}"
+        columns = "a.*, u.user_no"
+        if table == "organization_admin_application":
+            sql += " JOIN organization o ON o.id = a.org_id"
+            columns += ", o.org_name"
+        params = []
+        if status is not None:
+            sql += " WHERE a.status = %s"
+            params.append(status)
+        return _read_page(cur, columns, sql, params, page, page_size)
+
+
+def cancel_membership_application(user: dict, application_id: int, version: int, request_id=None) -> dict:
+    with transaction() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM organization_membership_application WHERE id = %s AND user_id = %s FOR UPDATE",
+                (application_id, user["userId"]),
+            )
+            if not cur.fetchone():
+                raise not_found("成员申请不存在")
+            cur.execute(
+                """UPDATE organization_membership_application
+                   SET status = 'cancelled', version = version + 1
+                   WHERE id = %s AND user_id = %s AND version = %s AND status = 'pending'
+                   RETURNING id, user_id, org_id, status, version""",
+                (application_id, user["userId"], version),
+            )
+            cancelled = cur.fetchone()
+            if not cancelled:
+                raise conflict("申请状态或版本已变更")
+            audit_record(
+                "organization_membership_application.cancel", "membership_application", application_id,
+                user["userId"], user.get("userNo", ""),
+                {"orgId": cancelled["org_id"], "userId": cancelled["user_id"], "from": "pending", "to": "cancelled"},
+                request_id=request_id, cur=cur,
+            )
+            return _map_application(cancelled)
+
+
 def active_membership_org_ids(user_id: int) -> set[int]:
     """Return canonical organization ids from current active memberships."""
     with get_cursor() as cur:
@@ -245,7 +359,7 @@ def approve_membership_application(admin: dict, application_id: int, version: in
                 int(admin["userId"]), application.get("department"), application.get("title"),
             )
             audit_record(
-                "organization_membership_application.approve", "organization_membership_application",
+                "organization_membership_application.approve", "membership_application",
                 application_id, admin["userId"], admin.get("userNo", ""),
                 {"orgId": application["org_id"], "userId": application["user_id"],
                  "membershipId": membership["id"], "from": "pending", "to": "approved"},
@@ -286,7 +400,7 @@ def reject_membership_application(admin: dict, application_id: int, version: int
             if not reviewed:
                 raise conflict("申请状态或版本已变更")
             audit_record(
-                "organization_membership_application.reject", "organization_membership_application",
+                "organization_membership_application.reject", "membership_application",
                 application_id, admin["userId"], admin.get("userNo", ""),
                 {"orgId": application["org_id"], "userId": application["user_id"],
                  "from": "pending", "to": "rejected", "reason": reason},
