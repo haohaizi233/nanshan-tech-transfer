@@ -12,6 +12,7 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 import OverviewView from '../views/admin/OverviewView.vue'
 import AchievementView from '../views/admin/AchievementView.vue'
 import InstitutionView from '../views/admin/InstitutionView.vue'
+import MembershipReviewView from '../views/admin/MembershipReviewView.vue'
 import UserView from '../views/admin/UserView.vue'
 import ContentView from '../views/admin/ContentView.vue'
 import SystemView from '../views/admin/SystemView.vue'
@@ -140,6 +141,17 @@ const routes = [
         meta: {
           parent: '机构管理',
           title: '机构列表'
+        }
+      },
+
+      {
+        path: 'membership-review',
+        name: 'membership-review',
+        component: MembershipReviewView,
+
+        meta: {
+          parent: '机构管理',
+          title: '机构认证审核'
         }
       },
 

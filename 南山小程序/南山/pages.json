@@ -145,6 +145,33 @@
 						"navigationBarTextStyle": "black",
 						"backgroundColor": "#F5F6F8"
 					}
+				},
+				{
+					"path": "org-join/org-join",
+					"style": {
+						"navigationBarTitleText": "申请加入机构",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "org-apply/org-apply",
+					"style": {
+						"navigationBarTitleText": "机构入驻申请",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
+					"path": "org-manage/org-manage",
+					"style": {
+						"navigationBarTitleText": "机构管理",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
 				}
 			]
 		}

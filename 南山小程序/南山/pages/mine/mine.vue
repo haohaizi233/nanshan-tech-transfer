@@ -160,6 +160,33 @@
 				</view>
 			</view>
 
+			<view class="org-card">
+				<text class="org-card-title">机构认证</text>
+				<view v-if="!memberships.length" class="org-none">
+					<text class="org-none-text">未认证</text>
+					<view class="org-none-actions">
+						<button class="org-action-btn" size="mini" @click="goOrgJoin">申请加入已有机构</button>
+						<button class="org-action-btn ghost" size="mini" @click="goOrgApply">申请机构入驻</button>
+					</view>
+				</view>
+				<view v-else>
+					<view v-for="m in memberships" :key="m.id" class="org-row">
+						<view class="org-info">
+							<text class="org-name">{{ m.orgName }}</text>
+							<text :class="m.role === 'admin' ? 'org-role admin' : 'org-role'">
+								{{ m.role === 'admin' ? '机构管理员 ✓' : '认证成员 ✓' }}
+							</text>
+						</view>
+						<button
+							v-if="m.role === 'admin'"
+							class="org-manage-btn"
+							size="mini"
+							@click="goOrgManage()"
+						>进入机构管理</button>
+					</view>
+				</view>
+			</view>
+
 			<view class="module-grid">
 				<view class="module-box" @click="goMyList('demand')">
 					<view class="module-icon demand-icon">需</view>
@@ -214,6 +241,8 @@
 	import { getMyDemands } from '../../common/demand-api.js'
 	import { getMyAchievements } from '../../common/achievement-api.js'
 	import { getMyFavorites, getMyCooperations } from '../../common/interaction-api.js'
+	import { fetchCurrentUser, getMembershipsFromUser } from '../../common/membership-api.js'
+	import { getCurrentUser } from '../../common/api-core.js'
 
 	export default {
 		data() {
@@ -245,7 +274,8 @@
 				myResultCount: 0,
 				myResultPendingCount: 0,
 				favoriteCount: 0,
-				intentionCount: 0
+				intentionCount: 0,
+				memberships: []
 			}
 		},
 		computed: {
@@ -291,9 +321,24 @@
 
 				this.loadMyPublicationCounts()
 				this.loadInteractionCounts()
+				this.loadMemberships()
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
+				}
+			},
+			async loadMemberships() {
+				if (!isLoggedIn()) {
+					this.memberships = []
+					return
+				}
+				this.memberships = getMembershipsFromUser(getCurrentUser())
+				try {
+					const user = await fetchCurrentUser()
+					this.memberships = getMembershipsFromUser(user)
+					this.profile = getUserProfile()
+				} catch (e) {
+					console.error('[mine] loadMemberships failed:', e)
 				}
 			},
 			async loadMyPublicationCounts() {
@@ -517,6 +562,15 @@
 				uni.navigateTo({
 					url: '/packageA/my-list/my-list?type=' + type
 				})
+			},
+			goOrgJoin() {
+				uni.navigateTo({ url: '/packageA/org-join/org-join' })
+			},
+			goOrgApply() {
+				uni.navigateTo({ url: '/packageA/org-apply/org-apply' })
+			},
+			goOrgManage() {
+				uni.navigateTo({ url: '/packageA/org-manage/org-manage' })
 			}
 		}
 	}
@@ -866,6 +920,95 @@
 		color: #666666;
 		line-height: 1.5;
 		word-break: break-all;
+	}
+
+	.org-card {
+		margin-top: 24rpx;
+		background: #ffffff;
+		border-radius: 16rpx;
+		padding: 28rpx 32rpx;
+		border: 1rpx solid #e8ecf2;
+	}
+
+	.org-card-title {
+		display: block;
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-bottom: 18rpx;
+	}
+
+	.org-none-text {
+		display: block;
+		font-size: 26rpx;
+		color: #999999;
+		margin-bottom: 16rpx;
+	}
+
+	.org-none-actions {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.org-action-btn {
+		flex: 1;
+		margin: 0 8rpx;
+		background: #2b73f8;
+		color: #ffffff;
+		border-radius: 12rpx;
+		font-size: 26rpx;
+	}
+
+	.org-action-btn.ghost {
+		background: #ffffff;
+		color: #2b73f8;
+		border: 1rpx solid #2b73f8;
+	}
+
+	.org-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 10rpx 0;
+	}
+
+	.org-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.org-name {
+		font-size: 28rpx;
+		color: #222222;
+		font-weight: 600;
+		word-break: break-all;
+	}
+
+	.org-role {
+		align-self: flex-start;
+		margin-top: 8rpx;
+		font-size: 22rpx;
+		color: #0f9d58;
+		background: rgba(15, 157, 88, 0.1);
+		padding: 4rpx 12rpx;
+		border-radius: 8rpx;
+	}
+
+	.org-role.admin {
+		color: #2b73f8;
+		background: rgba(43, 115, 248, 0.12);
+	}
+
+	.org-manage-btn {
+		margin-left: 16rpx;
+		background: #ffffff;
+		color: #2b73f8;
+		border: 1rpx solid #2b73f8;
+		border-radius: 12rpx;
+		font-size: 24rpx;
 	}
 
 	.module-grid {

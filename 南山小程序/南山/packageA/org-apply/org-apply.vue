@@ -1,0 +1,268 @@
+<template>
+	<view class="page">
+		<view class="card">
+			<text class="card-title">机构入驻申请</text>
+			<text class="card-desc">机构尚未收录时，提交入驻申请。平台管理员审核通过后将创建机构，并授予您机构管理员身份</text>
+
+			<view class="form-item">
+				<text class="label">机构名称 <text class="required">*</text></text>
+				<input class="input" :value="form.requestedName" placeholder="请输入机构全称" @input="onFieldInput('requestedName', $event)" />
+				<text class="tip">请先在「申请加入机构」页搜索确认机构未被收录</text>
+			</view>
+			<view class="form-item">
+				<text class="label">机构类型 <text class="required">*</text></text>
+				<picker :value="typeIndex" :range="typeOptions" range-key="label" @change="onTypeChange">
+					<view :class="form.requestedType ? 'form-picker' : 'form-picker placeholder'">
+						{{ typeText || '请选择机构类型' }}
+					</view>
+				</picker>
+			</view>
+			<view class="form-item">
+				<text class="label">统一社会信用代码</text>
+				<input class="input" :value="form.creditCode" placeholder="请输入统一社会信用代码" @input="onFieldInput('creditCode', $event)" />
+			</view>
+			<view class="form-item">
+				<text class="label">官网</text>
+				<input class="input" :value="form.website" placeholder="请输入官网地址" @input="onFieldInput('website', $event)" />
+			</view>
+			<view class="form-item">
+				<text class="label">所在地区</text>
+				<input class="input" :value="form.region" placeholder="如：广东省深圳市南山区" @input="onFieldInput('region', $event)" />
+			</view>
+			<view class="form-item">
+				<text class="label">详细地址</text>
+				<input class="input" :value="form.address" placeholder="请输入详细地址" @input="onFieldInput('address', $event)" />
+			</view>
+
+			<text class="section-title">联系人信息</text>
+			<view class="form-item">
+				<text class="label">联系人 <text class="required">*</text></text>
+				<input class="input" :value="form.contactName" placeholder="请输入联系人姓名" @input="onFieldInput('contactName', $event)" />
+			</view>
+			<view class="form-item">
+				<text class="label">联系电话 <text class="required">*</text></text>
+				<input class="input" type="number" maxlength="11" :value="form.contactPhone" placeholder="请输入联系电话" @input="onFieldInput('contactPhone', $event)" />
+			</view>
+			<view class="form-item">
+				<text class="label">联系邮箱</text>
+				<input class="input" :value="form.contactEmail" placeholder="请输入联系邮箱" @input="onFieldInput('contactEmail', $event)" />
+			</view>
+			<view class="form-item">
+				<text class="label">资质证明说明</text>
+				<textarea class="textarea" :value="form.proofMaterial" placeholder="如营业执照、法人授权等材料说明（文字描述）" @input="onFieldInput('proofMaterial', $event)" />
+			</view>
+
+			<button class="submit-btn" type="primary" :disabled="submitting" @click="onSubmit">
+				{{ submitting ? '提交中...' : '提交申请' }}
+			</button>
+		</view>
+	</view>
+</template>
+
+<script>
+	import { applyOrganization } from '../../common/membership-api.js'
+	import { isLoggedIn } from '../../common/user.js'
+
+	const TYPE_OPTIONS = [
+		{ label: '企业', value: 'enterprise' },
+		{ label: '高校', value: 'university' },
+		{ label: '科研院所', value: 'institute' },
+		{ label: '服务机构', value: 'service' },
+		{ label: '投资机构', value: 'invest' }
+	]
+
+	export default {
+		data() {
+			return {
+				typeOptions: TYPE_OPTIONS,
+				submitting: false,
+				form: {
+					requestedName: '',
+					requestedType: '',
+					creditCode: '',
+					website: '',
+					region: '',
+					address: '',
+					contactName: '',
+					contactPhone: '',
+					contactEmail: '',
+					proofMaterial: ''
+				}
+			}
+		},
+		computed: {
+			typeIndex() {
+				const idx = this.typeOptions.findIndex((o) => o.value === this.form.requestedType)
+				return idx >= 0 ? idx : 0
+			},
+			typeText() {
+				const opt = this.typeOptions.find((o) => o.value === this.form.requestedType)
+				return opt ? opt.label : ''
+			}
+		},
+		onShow() {
+			if (!isLoggedIn()) {
+				uni.showToast({ title: '请先登录', icon: 'none' })
+				setTimeout(() => uni.navigateBack(), 800)
+			}
+		},
+		methods: {
+			onFieldInput(key, e) {
+				this.form[key] = e.detail.value
+			},
+			onTypeChange(e) {
+				const opt = this.typeOptions[Number(e.detail.value)] || this.typeOptions[0]
+				this.form.requestedType = opt ? opt.value : ''
+			},
+			async onSubmit() {
+				const name = (this.form.requestedName || '').trim()
+				if (!name) {
+					uni.showToast({ title: '请填写机构名称', icon: 'none' })
+					return
+				}
+				if (!this.form.requestedType) {
+					uni.showToast({ title: '请选择机构类型', icon: 'none' })
+					return
+				}
+				const contactName = (this.form.contactName || '').trim()
+				if (!contactName) {
+					uni.showToast({ title: '请填写联系人', icon: 'none' })
+					return
+				}
+				const contactPhone = (this.form.contactPhone || '').trim()
+				if (!contactPhone) {
+					uni.showToast({ title: '请填写联系电话', icon: 'none' })
+					return
+				}
+				this.submitting = true
+				uni.showLoading({ title: '提交中', mask: true })
+				try {
+					await applyOrganization({
+						requestedName: name,
+						requestedType: this.form.requestedType,
+						creditCode: (this.form.creditCode || '').trim() || undefined,
+						website: (this.form.website || '').trim() || undefined,
+						region: (this.form.region || '').trim() || undefined,
+						address: (this.form.address || '').trim() || undefined,
+						contactName,
+						contactPhone,
+						contactEmail: (this.form.contactEmail || '').trim() || undefined,
+						proofMaterial: (this.form.proofMaterial || '').trim() || undefined
+					})
+					uni.hideLoading()
+					uni.showToast({ title: '已提交，等待平台管理员审核', icon: 'none', duration: 2000 })
+					setTimeout(() => uni.navigateBack(), 1200)
+				} catch (e) {
+					uni.hideLoading()
+					uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none', duration: 2500 })
+				} finally {
+					this.submitting = false
+				}
+			}
+		}
+	}
+</script>
+
+<style>
+	.page {
+		min-height: 100vh;
+		background: #f5f6f8;
+		padding: 24rpx;
+		padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
+		box-sizing: border-box;
+	}
+
+	.card {
+		background: #ffffff;
+		border-radius: 16rpx;
+		padding: 32rpx;
+		border: 1rpx solid #e8ecf2;
+	}
+
+	.card-title {
+		display: block;
+		font-size: 32rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-bottom: 10rpx;
+	}
+
+	.card-desc {
+		display: block;
+		font-size: 24rpx;
+		color: #999999;
+		line-height: 1.6;
+		margin-bottom: 28rpx;
+	}
+
+	.section-title {
+		display: block;
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #333333;
+		margin: 28rpx 0 20rpx;
+		padding-top: 24rpx;
+		border-top: 1rpx solid #eef0f4;
+	}
+
+	.form-item {
+		margin-bottom: 22rpx;
+	}
+
+	.label {
+		display: block;
+		font-size: 28rpx;
+		color: #333333;
+		margin-bottom: 10rpx;
+	}
+
+	.required {
+		color: #e74c3c;
+	}
+
+	.tip {
+		display: block;
+		font-size: 22rpx;
+		color: #999999;
+		margin-top: 8rpx;
+	}
+
+	.input {
+		height: 80rpx;
+		background: #f7f9fc;
+		border-radius: 12rpx;
+		padding: 0 24rpx;
+		font-size: 28rpx;
+	}
+
+	.form-picker {
+		height: 80rpx;
+		line-height: 80rpx;
+		background: #f7f9fc;
+		border-radius: 12rpx;
+		padding: 0 24rpx;
+		font-size: 28rpx;
+		color: #333333;
+	}
+
+	.form-picker.placeholder {
+		color: #999999;
+	}
+
+	.textarea {
+		width: 100%;
+		min-height: 140rpx;
+		background: #f7f9fc;
+		border-radius: 12rpx;
+		padding: 20rpx 24rpx;
+		font-size: 28rpx;
+		box-sizing: border-box;
+	}
+
+	.submit-btn {
+		margin-top: 12rpx;
+		background: #2b73f8;
+		color: #ffffff;
+		border-radius: 12rpx;
+	}
+</style>

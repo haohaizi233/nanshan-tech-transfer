@@ -10,9 +10,12 @@ from core.password import verify_password
 
 
 def _generate_user_no(cur) -> str:
-    cur.execute("SELECT COUNT(*) AS c FROM app_user")
-    count = cur.fetchone()["c"]
-    return f"U{datetime.now().strftime('%Y')}{count + 1:05d}"
+    # 取存量编号数值最大值+1（COUNT 会在测试清理用户后回落，与存量编号撞唯一约束）
+    cur.execute(
+        "SELECT COALESCE(MAX(regexp_replace(user_no, '\\D', '', 'g')::bigint), 0) AS m "
+        "FROM app_user WHERE user_no ~ '^U\\d+$'"
+    )
+    return f"U{cur.fetchone()['m'] + 1}"
 
 
 def _get_roles(cur, user_id: int) -> list[str]:

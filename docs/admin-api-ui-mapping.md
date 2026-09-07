@@ -164,10 +164,56 @@ admin online         → 公开恢复可见
 | 用户列表 | `GET /admin/users?keyword=&status=&page=&pageSize=` | keyword 命中 userNo/displayName/orgName |
 | 用户详情 | `GET /admin/users/{id}` | |
 
-列表项字段：`userId`、`userNo`、`status`、`displayName`、`userType`、`phone`、`email`、`orgName`、`orgTitle`、`roles`（数组，如 `["admin"]`）、`createdAt`。
+列表项字段：`userId`、`userNo`、`status`、`displayName`、`userType`、`phone`、`email`、`orgName`、`orgTitle`、`roles`（数组，如 `["admin"]`）、`organizationMemberships`（2026-09-07 新增，见 §5.1）、`createdAt`。
 
 详情额外 `statistics`：`achievementCount`、`demandCount`、`cooperationCount`、`favoriteCount`（均 int）。
 禁用/启用账号为 P1（当前 READ ONLY）。
+
+### 5.1 机构认证信息（2026-09-07 起）
+
+列表与详情均返回 `organizationMemberships[]`（仅 active）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | int | membership 主键（grant/revoke-admin 用） |
+| orgId | int | 机构 ID |
+| orgName | string | 机构名称 |
+| role | string | member / admin |
+| status | string | active |
+| version | int | 乐观锁（写操作必带） |
+
+用户详情模态框提供两个系统管理员操作（均带 version 乐观锁，409 时重新拉详情）：
+
+| 按钮 | API | 请求体 |
+|------|-----|--------|
+| 设为机构管理员 | `POST /admin/organization-memberships/{id}/grant-admin` | `{version}` |
+| 撤销机构管理员 | `POST /admin/organization-memberships/{id}/revoke-admin` | `{version, reason}`（reason 必填） |
+
+## 5A. 机构认证审核（MembershipReviewView，2026-09-07 新增）
+
+UI 路由 `/admin/membership-review`（侧边栏「机构认证审核」），双 Tab 结构，默认过滤 `status=pending`。
+
+### 5A.1 机构入驻申请 Tab
+
+| UI 操作 | API | 说明 |
+|---------|-----|------|
+| 列表 | `GET /admin/organization-applications?status=&page=&pageSize=` | 全量字段 camelCase 透出 |
+| 详情/通过 | `POST /admin/organization-applications/{id}/approve` | `{version}`；事务内创建 institution（active）+ 申请人成为该机构 admin |
+| 驳回 | `POST /admin/organization-applications/{id}/reject` | `{version, reason}`（reason 必填） |
+
+列表/详情字段：`id`、`applicantUserId`、`userNo`（申请人）、`requestedName`、`requestedType`（university/institute/enterprise/service/invest）、`creditCode`、`website`、`region`、`address`、`contactName`、`contactPhone`、`contactEmail`、`proofMaterial`、`status`（pending/approved/rejected/cancelled）、`reviewReason`、`reviewedAt`、`version`、`createdAt`。
+
+### 5A.2 机构管理员申请 Tab
+
+| UI 操作 | API | 说明 |
+|---------|-----|------|
+| 列表 | `GET /admin/organization-admin-applications?status=&page=&pageSize=` | |
+| 通过 | `POST /admin/organization-admin-applications/{id}/approve` | `{version}`；通过后该用户 membership role → admin |
+| 驳回 | `POST /admin/organization-admin-applications/{id}/reject` | `{version, reason}` |
+
+列表/详情字段：`id`、`userId`、`userNo`、`orgId`、`orgName`、`realName`、`department`、`title`、`workEmail`、`reason`、`proofMaterial`、`status`、`reviewReason`、`reviewedAt`、`version`、`createdAt`。
+
+完整业务规则（三态模型、机构管理员权限边界、成员申请 fallback 审核链）见 `tech-transfer-service/docs/organization-membership.md`。
 
 ## 6. 审计日志
 

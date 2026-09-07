@@ -1127,7 +1127,12 @@ SELECT u.id, u.user_no, u.status, u.created_at, u.updated_at,
        p.display_name, p.user_type, p.phone, p.email, p.org_id, p.org_title,
        o.name AS org_name,
        (SELECT COALESCE(array_agg(ur.role_code ORDER BY ur.role_code), ARRAY[]::varchar[])
-          FROM user_role ur WHERE ur.user_id = u.id) AS roles
+          FROM user_role ur WHERE ur.user_id = u.id) AS roles,
+       (SELECT COALESCE(json_agg(t ORDER BY t.id), '[]'::json)
+          FROM (SELECT m.id, m.org_id, i.name AS org_name, m.role, m.status, m.version
+                  FROM organization_membership m
+                  JOIN institution i ON i.id = m.org_id
+                 WHERE m.user_id = u.id AND m.status = 'active') t) AS memberships
 """ + _USER_FROM
 
 
@@ -1144,6 +1149,11 @@ def _user_admin_item(r):
         "orgName": r.get("org_name"),
         "orgTitle": (r.get("org_title") or "").strip(),
         "roles": list(r.get("roles") or []),
+        "organizationMemberships": [
+            {"id": m["id"], "orgId": m["org_id"], "orgName": m["org_name"],
+             "role": m["role"], "status": m["status"], "version": m["version"]}
+            for m in (r.get("memberships") or [])
+        ],
         "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
     }
 

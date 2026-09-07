@@ -22,6 +22,10 @@ const USER_TYPE_LABELS = {
 
 const typeLabel = v => USER_TYPE_LABELS[v] || v || '未填写'
 
+const membershipText = user => (user.organizationMemberships || [])
+  .map(m => `${m.orgName}（${m.role === 'admin' ? '管理员' : '成员'}）`)
+  .join('；')
+
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
 const filters = reactive({
@@ -46,6 +50,7 @@ const loadError = ref('')
 const modalVisible = ref(false)
 const modalLoading = ref(false)
 const modalError = ref('')
+const modalActionError = ref('')
 const currentUser = ref(null)
 
 const exporting = ref(false)
@@ -136,6 +141,48 @@ const openView = async user => {
 
 const closeModal = () => {
   modalVisible.value = false
+  modalActionError.value = ''
+}
+
+const reloadDetail = async () => {
+  const id = currentUser.value?.userId
+  if (!id) return
+  currentUser.value = await api(`/admin/users/${id}`)
+  loadList()
+}
+
+const grantAdmin = async m => {
+  if (!window.confirm(`确认将该成员设为「${m.orgName}」的机构管理员？`)) return
+  modalActionError.value = ''
+  try {
+    await api(`/admin/organization-memberships/${m.id}/grant-admin`, {
+      method: 'POST',
+      body: { version: m.version }
+    })
+    await reloadDetail()
+  } catch (err) {
+    modalActionError.value = err.message || '操作失败'
+  }
+}
+
+const revokeAdmin = async m => {
+  const reason = window.prompt(`撤销「${m.orgName}」机构管理员身份，请填写原因：`)
+  if (reason === null) return
+  const trimmed = reason.trim()
+  if (!trimmed) {
+    modalActionError.value = '撤销机构管理员必须填写原因'
+    return
+  }
+  modalActionError.value = ''
+  try {
+    await api(`/admin/organization-memberships/${m.id}/revoke-admin`, {
+      method: 'POST',
+      body: { version: m.version, reason: trimmed }
+    })
+    await reloadDetail()
+  } catch (err) {
+    modalActionError.value = err.message || '操作失败'
+  }
 }
 
 const escapeCsv = value => `"${String(value ?? '').replaceAll('"', '""')}"`
@@ -158,7 +205,7 @@ const exportData = async () => {
     }
 
     const csv = [
-      ['ID', '用户编号', '姓名', '用户类型', '手机号', '邮箱', '所属机构', '职务', '角色', '状态', '注册时间'],
+      ['ID', '用户编号', '姓名', '用户类型', '手机号', '邮箱', '所属机构', '职务', '认证机构', '角色', '状态', '注册时间'],
       ...all.map(user => [
         user.userId,
         user.userNo,
@@ -168,6 +215,7 @@ const exportData = async () => {
         user.email,
         user.orgName,
         user.orgTitle,
+        membershipText(user),
         (user.roles || []).join('/'),
         user.status === 'active' ? '正常' : user.status,
         fmtTime(user.createdAt)
@@ -254,6 +302,7 @@ const exportData = async () => {
             <th>用户类型</th>
             <th>手机号</th>
             <th>所属企业/单位</th>
+            <th>认证机构</th>
             <th>角色</th>
             <th>状态</th>
             <th>注册时间</th>
@@ -287,6 +336,24 @@ const exportData = async () => {
               {{ user.orgName || '-' }}
             </td>
 
+            <td class="memberships">
+              <template v-if="(user.organizationMemberships || []).length">
+                <span
+                  v-for="m in user.organizationMemberships"
+                  :key="m.id"
+                  class="membership-tag"
+                  :class="{ admin: m.role === 'admin' }"
+                  :title="m.orgName"
+                >
+                  {{ m.orgName }}{{ m.role === 'admin' ? '·管理员' : '' }}
+                </span>
+              </template>
+
+              <template v-else>
+                -
+              </template>
+            </td>
+
             <td>{{ (user.roles || []).join(' / ') || '-' }}</td>
 
             <td>
@@ -311,7 +378,7 @@ const exportData = async () => {
 
           <tr v-if="loading">
             <td
-              colspan="10"
+              colspan="11"
               class="state-row"
             >
               加载中…
@@ -320,7 +387,7 @@ const exportData = async () => {
 
           <tr v-else-if="loadError">
             <td
-              colspan="10"
+              colspan="11"
               class="state-row error"
             >
               {{ loadError }}
@@ -336,7 +403,7 @@ const exportData = async () => {
 
           <tr v-else-if="rows.length === 0">
             <td
-              colspan="10"
+              colspan="11"
               class="state-row"
             >
               暂无符合条件的用户
@@ -462,6 +529,57 @@ const exportData = async () => {
             <div class="full">
               <label>所属单位</label>
               <strong>{{ currentUser.orgName || '-' }}{{ currentUser.orgTitle ? `（${currentUser.orgTitle}）` : '' }}</strong>
+            </div>
+
+            <div class="full">
+              <label>机构认证</label>
+
+              <div
+                v-if="(currentUser.organizationMemberships || []).length"
+                class="membership-list"
+              >
+                <div
+                  v-for="m in currentUser.organizationMemberships"
+                  :key="m.id"
+                  class="membership-row"
+                >
+                  <span class="membership-tag">
+                    {{ m.orgName }}
+                  </span>
+
+                  <span
+                    class="membership-tag"
+                    :class="{ admin: m.role === 'admin' }"
+                  >
+                    {{ m.role === 'admin' ? '机构管理员' : '认证成员' }}
+                  </span>
+
+                  <button
+                    v-if="m.role === 'member'"
+                    class="link-btn"
+                    @click="grantAdmin(m)"
+                  >
+                    设为机构管理员
+                  </button>
+
+                  <button
+                    v-else
+                    class="link-btn danger"
+                    @click="revokeAdmin(m)"
+                  >
+                    撤销机构管理员
+                  </button>
+                </div>
+              </div>
+
+              <strong v-else>未认证</strong>
+
+              <div
+                v-if="modalActionError"
+                class="action-error"
+              >
+                {{ modalActionError }}
+              </div>
             </div>
 
             <div>
@@ -647,18 +765,22 @@ th:nth-child(5) {
 }
 
 th:nth-child(7) {
-  width: 105px;
+  width: 150px;
 }
 
 th:nth-child(8) {
-  width: 75px;
+  width: 105px;
 }
 
 th:nth-child(9) {
-  width: 145px;
+  width: 75px;
 }
 
 th:nth-child(10) {
+  width: 145px;
+}
+
+th:nth-child(11) {
   width: 80px;
 }
 
@@ -670,6 +792,66 @@ tbody tr:hover {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.memberships {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.membership-tag {
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #e9faf1;
+  color: #20b875;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.membership-tag.admin {
+  background: #fff4e5;
+  color: #f08c00;
+}
+
+.membership-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.membership-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1677ff;
+  font-size: 13px;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.link-btn.danger {
+  color: #ef4f5d;
+}
+
+.action-error {
+  margin-top: 8px;
+  color: #ef4f5d;
+  font-size: 13px;
 }
 
 .user-type,

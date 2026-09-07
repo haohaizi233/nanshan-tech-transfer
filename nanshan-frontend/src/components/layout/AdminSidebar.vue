@@ -40,6 +40,11 @@ const menuList = [
     icon: 'institution'
   },
   {
+    name: '机构认证审核',
+    path: '/admin/membership-review',
+    icon: 'institution'
+  },
+  {
     name: '用户管理',
     path: '/admin/users',
     icon: 'user'
