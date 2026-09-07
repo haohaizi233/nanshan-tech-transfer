@@ -10,6 +10,7 @@ const ACCESS_TOKEN_KEY = 'tt_access_token'
 const REFRESH_TOKEN_KEY = 'tt_refresh_token'
 const USER_KEY = 'tt_current_user'
 const TOKEN_EXPIRES_KEY = 'tt_token_expires_at'
+const AUTH_MODE_KEY = 'tt_auth_mode'
 
 function getStorageSync(key) {
   try {
@@ -136,12 +137,15 @@ export function generateRequestId() {
   return 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
-export function saveSession(accessToken, refreshToken, expiresIn, user) {
+export function saveSession(accessToken, refreshToken, expiresIn, user, authMode) {
   setStorageSync(ACCESS_TOKEN_KEY, accessToken)
   setStorageSync(REFRESH_TOKEN_KEY, refreshToken)
   setStorageSync(USER_KEY, user)
   const expiresAt = Date.now() + (expiresIn || 7200) * 1000
   setStorageSync(TOKEN_EXPIRES_KEY, expiresAt)
+  if (authMode) {
+    setStorageSync(AUTH_MODE_KEY, authMode)
+  }
 }
 
 export function clearSession() {
@@ -149,6 +153,7 @@ export function clearSession() {
   removeStorageSync(REFRESH_TOKEN_KEY)
   removeStorageSync(USER_KEY)
   removeStorageSync(TOKEN_EXPIRES_KEY)
+  removeStorageSync(AUTH_MODE_KEY)
 }
 
 export function getStoredUser() {

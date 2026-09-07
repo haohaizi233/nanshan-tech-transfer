@@ -4,7 +4,7 @@
 		<view v-if="viewMode === 'auth'" class="login-wrap">
 			<view class="login-card">
 				<text class="login-title">{{ authMode === 'register' ? '注册账号' : '登录账号' }}</text>
-				<text class="login-desc">使用手机号注册，密码设置一次即可；支持本地缓存多账号</text>
+				<text class="login-desc">使用手机号注册登录，账号数据云端同步，小程序与 H5 通用</text>
 
 				<view class="form-item">
 					<text class="label">手机号 <text class="required">*</text></text>
@@ -276,18 +276,18 @@
 				this.profile = getUserProfile()
 
 				if (this.editing) {
-					this.viewMode = 'profile'
-				} else if (isLoggedIn()) {
-					this.viewMode = 'home'
-				} else if (isAuthenticated() || needsProfile()) {
-					this.viewMode = 'profile'
-					if (this.profile) this.fillForm(this.profile)
-					else {
-						this.form.phone = this.authPhone
-					}
-				} else {
-					this.viewMode = 'auth'
+				this.viewMode = 'profile'
+			} else if (isLoggedIn() && !needsProfile()) {
+				this.viewMode = 'home'
+			} else if (isAuthenticated() || needsProfile()) {
+				this.viewMode = 'profile'
+				if (this.profile) this.fillForm(this.profile)
+				else {
+					this.form.phone = this.authPhone
 				}
+			} else {
+				this.viewMode = 'auth'
+			}
 
 				this.loadMyPublicationCounts()
 				this.loadInteractionCounts()
@@ -353,24 +353,30 @@
 				this.authMode = 'login'
 				uni.showToast({ title: '已填入手机号，请输入密码', icon: 'none' })
 			},
-			onAuthSubmit() {
-				const phone = (this.authForm.phone || '').trim()
-				const password = (this.authForm.password || '').trim()
-				const res = this.authMode === 'register'
-					? registerAccount(phone, password)
-					: loginAccount(phone, password)
-				if (!res.ok) {
-					uni.showToast({ title: res.message || '操作失败', icon: 'none', duration: 2500 })
-					return
-				}
-				this.authForm.password = ''
-				this.editing = false
-				uni.showToast({
-					title: this.authMode === 'register' ? '注册成功' : '登录成功',
-					icon: 'success'
-				})
-				this.refresh()
-			},
+			async onAuthSubmit() {
+			const phone = (this.authForm.phone || '').trim()
+			const password = (this.authForm.password || '').trim()
+			uni.showLoading({ title: this.authMode === 'register' ? '注册中...' : '登录中...', mask: true })
+			let res
+			try {
+				res = this.authMode === 'register'
+					? await registerAccount(phone, password)
+					: await loginAccount(phone, password)
+			} finally {
+				uni.hideLoading()
+			}
+			if (!res.ok) {
+				uni.showToast({ title: res.message || '操作失败', icon: 'none', duration: 2500 })
+				return
+			}
+			this.authForm.password = ''
+			this.editing = false
+			uni.showToast({
+				title: this.authMode === 'register' ? '注册成功' : '登录成功',
+				icon: 'success'
+			})
+			this.refresh()
+		},
 			fillForm(profile) {
 				this.form = {
 					avatar: profile.avatar || '/static/logo.png',
@@ -431,7 +437,7 @@
 				const val = (e.detail.value || '').trim()
 				if (val) this.form.nickname = val
 			},
-			onSaveProfile() {
+			async onSaveProfile() {
 				const nickname = (this.form.nickname || '').trim()
 				const company = (this.form.company || '').trim()
 				const email = (this.form.email || '').trim()
@@ -462,7 +468,15 @@
 				this.form.wechat = wechat
 				this.form.phone = getSessionPhone()
 				const wasEditing = this.editing
-				this.profile = saveUserProfile(this.form)
+				uni.showLoading({ title: '保存中...', mask: true })
+				let saved = null
+				try {
+					saved = await saveUserProfile(this.form)
+				} finally {
+					uni.hideLoading()
+				}
+				if (!saved) return
+				this.profile = saved
 				this.editing = false
 				uni.showToast({ title: wasEditing ? '保存成功' : '资料已完善', icon: 'success' })
 				this.refresh()
@@ -479,10 +493,10 @@
 			onLogout() {
 				uni.showModal({
 					title: '提示',
-					content: '退出后账号仍会缓存在本机，可再次登录切换',
-					success: (res) => {
+					content: '退出后账号仍会保留登录历史，可再次登录切换',
+					success: async (res) => {
 						if (!res.confirm) return
-						logout()
+						await logout()
 						this.editing = false
 						this.authForm.password = ''
 						this.form = {

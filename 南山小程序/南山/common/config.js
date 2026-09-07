@@ -33,3 +33,5 @@ export const API_BASE = LOCAL_API_BASE || 'http://127.0.0.1:8787'
 // #endif
 
 export const USE_CAPITAL_DEMO = false
+
+export { APP_ENV }

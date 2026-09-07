@@ -67,6 +67,7 @@ async function bootstrap() {
           res.data.refreshToken,
           res.data.expiresIn,
           res.data.user,
+          'mock',
         )
         return true
       }
