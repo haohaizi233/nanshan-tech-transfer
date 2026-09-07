@@ -204,6 +204,8 @@ def _resolve_name_refs(cur, fields):
             )
             org_id = cur.fetchone()["id"]
         fields["org_id"] = org_id
+        # Explicit admin correction must also supersede any old user snapshot.
+        fields["org_name_snapshot"] = None
     _resolve_category_name(cur, fields)
 
 

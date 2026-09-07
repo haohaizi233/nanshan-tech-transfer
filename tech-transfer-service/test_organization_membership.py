@@ -680,6 +680,24 @@ def check_profile_and_content_associations():
                         cur.execute(f"SELECT org_id FROM {table} WHERE id=%s", (valid["id"],))
                         check(f"{resource} existing association is preserved on unrelated edit", cur.fetchone()["org_id"] == orgs[1])
                         cur.execute("UPDATE organization_membership SET status='active' WHERE user_id=%s", (users[1],))
+
+            with db.get_cursor(commit=True) as cur:
+                cur.execute("INSERT INTO user_role (user_id, role_code) VALUES (%s, 'admin')", (users[1],))
+            original = call("POST", "/demands", {
+                "title": f"admin-correction-{suffix}", "description": "correct display organization",
+                "orgName": display_name,
+            }, status=201)
+            check("user demand starts with original display organization", original.get("orgName") == display_name)
+            if original.get("id"):
+                corrected_name = f"canonical-{suffix}-1"
+                call("PATCH", f"/admin/demands/{original['id']}", {
+                    "version": 1, "orgName": corrected_name,
+                }, who=1)
+                corrected = call("GET", f"/demands/{original['id']}")
+                check("admin organization correction replaces stale user display snapshot", corrected.get("orgName") == corrected_name, str(corrected.get("orgName")))
+                mine = call("GET", "/me/demands")
+                item = next((row for row in mine.get("list", []) if row["id"] == original["id"]), {})
+                check("user demand list reflects admin organization correction", item.get("orgName") == corrected_name, str(item.get("orgName")))
     finally:
         if users:
             with db.get_cursor(commit=True) as cur:
@@ -687,6 +705,7 @@ def check_profile_and_content_associations():
                 for table in ("demand", "achievement"):
                     cur.execute(f"DELETE FROM {table} WHERE owner_user_id = ANY(%s)", (users,))
                 cur.execute("DELETE FROM organization_membership WHERE user_id = ANY(%s)", (users,))
+                cur.execute("DELETE FROM user_role WHERE user_id = ANY(%s)", (users,))
                 cur.execute("DELETE FROM user_profile WHERE user_id = ANY(%s)", (users,))
                 cur.execute("DELETE FROM app_user WHERE id = ANY(%s)", (users,))
                 cur.execute("DELETE FROM organization WHERE id = ANY(%s) OR org_name = ANY(%s)", (orgs, [display_name, display_name + "-edit"]))
