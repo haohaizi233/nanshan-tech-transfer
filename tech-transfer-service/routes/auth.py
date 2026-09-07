@@ -7,6 +7,7 @@ from modules.identity.provider import get_identity_provider
 from modules.identity.service import (
     bootstrap_session,
     password_login_session,
+    register_user,
     refresh_session,
     logout_session,
 )
@@ -23,6 +24,15 @@ def login(body: dict = Depends(json_body)):
         raise BizError(code, "请输入账号和密码", status)
 
     result = password_login_session(username, password)
+    return success(result)
+
+
+@router.post("/register", summary="手机号注册（创建用户并直接签发会话）")
+def register(body: dict = Depends(json_body)):
+    phone = (body.get("phone") or "").strip()
+    password = body.get("password") or ""
+    display_name = (body.get("displayName") or "").strip() or None
+    result = register_user(phone, password, display_name)
     return success(result)
 
 

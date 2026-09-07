@@ -28,7 +28,7 @@ def _get_profile(cur, user_id: int) -> dict:
         """
         SELECT up.user_id, up.display_name, up.user_type, up.phone, up.email,
                up.org_id, up.org_title, up.version,
-               up.subject_type, up.business_capabilities
+               up.subject_type, up.business_capabilities, up.wechat
         FROM user_profile up
         WHERE up.user_id = %s
         """,
@@ -76,6 +76,7 @@ def build_user_response(cur, user_id: int) -> dict:
         "businessCapabilities": _parse_capabilities(profile.get("business_capabilities")) if profile else [],
         "phone": profile["phone"] if profile else None,
         "email": profile["email"] if profile else None,
+        "wechat": profile["wechat"] if profile else None,
         "orgId": profile["org_id"] if profile else None,
         "orgName": org_name,
         "orgTitle": profile["org_title"] if profile else None,
@@ -194,6 +195,69 @@ def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
         "refreshToken": refresh_token,
         "expiresIn": 7200,
     }
+
+
+def register_user(phone: str, password: str, display_name: str = None) -> dict:
+    """手机号注册：创建 app_user + user_profile + user_credential + user_role。
+
+    注册成功后直接签发会话（免登录），返回与 password_login_session 相同结构。
+    手机号已注册时抛 TT_AUTH_40901。
+    """
+    from core.errors import BizError, TT_AUTH_40901, TT_COMMON_40001
+    from core.password import hash_password
+    import re
+
+    if not phone or not re.match(r"^\d{11}$", phone):
+        raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "请输入11位手机号")
+    if not password or len(password) < 6:
+        raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "密码至少6位")
+
+    with get_cursor(commit=True) as cur:
+        # 检查手机号是否已注册（通过 user_credential.username 唯一）
+        cur.execute(
+            "SELECT user_id FROM user_credential WHERE username = %s",
+            (phone,),
+        )
+        if cur.fetchone():
+            code, message, status = TT_AUTH_40901
+            raise BizError(code, message, status)
+
+        # 创建 app_user
+        user_no = _generate_user_no(cur)
+        cur.execute(
+            "INSERT INTO app_user (user_no, status) VALUES (%s, 'active') RETURNING id",
+            (user_no,),
+        )
+        user_id = cur.fetchone()["id"]
+
+        # 创建 user_profile
+        cur.execute(
+            """
+            INSERT INTO user_profile (user_id, display_name, phone)
+            VALUES (%s, %s, %s)
+            """,
+            (user_id, display_name or phone, phone),
+        )
+
+        # 创建 user_role
+        cur.execute(
+            "INSERT INTO user_role (user_id, role_code) VALUES (%s, 'user')",
+            (user_id,),
+        )
+
+        # 创建 user_credential（username = 手机号）
+        cur.execute(
+            "INSERT INTO user_credential (user_id, username, password_hash, status) "
+            "VALUES (%s, %s, %s, 'active')",
+            (user_id, phone, hash_password(password)),
+        )
+
+        # 签发会话
+        roles = _get_roles(cur, user_id)
+        result = _issue_session(cur, user_id, roles)
+        result["user"] = build_user_response(cur, user_id)
+        result["isNewUser"] = True
+        return result
 
 
 def password_login_session(username: str, password: str) -> dict:

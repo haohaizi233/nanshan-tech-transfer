@@ -38,6 +38,7 @@ FIELD_MAP = {
     "subjectType": "subject_type",
     "phone": "phone",
     "email": "email",
+    "wechat": "wechat",
     "orgId": "org_id",
     "orgTitle": "org_title",
 }

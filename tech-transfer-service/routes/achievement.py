@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["achievement"])
 
 @router.get("/achievements", summary="成果列表（仅 published）")
 def achievements_list(request: Request, user: dict = Depends(identity)):
-    result = list_achievements(request.query_params)
+    result = list_achievements(request.query_params, user.get("userId"))
     return success(result)
 
 
@@ -94,5 +94,5 @@ def search(request: Request, user: dict = Depends(identity)):
     search_type = (request.query_params.get("type") or "").strip()
     if search_type != "achievement":
         return success({"total": 0, "list": [], "page": 1, "pageSize": 10, "totalPages": 0})
-    result = list_achievements(request.query_params)
+    result = list_achievements(request.query_params, user.get("userId"))
     return success(result)
