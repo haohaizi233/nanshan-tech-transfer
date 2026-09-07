@@ -116,17 +116,26 @@
 	}
 </script>
 
+<style lang="scss">
+	/* 全局：页面根节点高度撑满，防止页面整体可滑动，确保输入框固定底部 */
+	page {
+		height: 100%;
+		overflow: hidden;
+	}
+</style>
+
 <style lang="scss" scoped>
 	.page {
-		height: 100vh;
+		height: 100%;
 		display: flex;
 		flex-direction: column;
 		background-color: #f5f6f8;
 		box-sizing: border-box;
+		overflow: hidden;
 	}
 
 	.header {
-		flex-shrink: 0;
+		flex: 0 0 auto;
 		padding: 24rpx 28rpx 16rpx;
 		background: #ffffff;
 		border-bottom: 1rpx solid #eef1f5;
@@ -148,8 +157,9 @@
 	}
 
 	.chat-scroll {
-		flex: 1;
+		flex: 1 1 auto;
 		height: 0;
+		min-height: 0;
 		padding: 24rpx 24rpx 8rpx;
 		box-sizing: border-box;
 	}
