@@ -46,5 +46,57 @@ class FrontendFreshnessTests(unittest.TestCase):
             self.assertTrue(start_dev.output_is_stale([source], root / "missing" / "index.html"))
 
 
+class SpawnChildDetectionTests(unittest.TestCase):
+    """uvicorn reload worker（multiprocessing spawn 子进程）的枚举逻辑。"""
+
+    def test_finds_spawn_child_by_parent_pid(self):
+        original = start_dev._python_processes_with_cmdline
+        try:
+            start_dev._python_processes_with_cmdline = lambda: [
+                (14520, r"C:\python.exe C:\南山小程序\start_dev.py"),
+                (14404, '"C:\\python.exe" "-c" "from multiprocessing.spawn import spawn_main; '
+                        'spawn_main(parent_pid=30584, pipe_handle=504)" "--multiprocessing-fork"'),
+                (999, '"C:\\python.exe" "-c" "spawn_main(parent_pid=11111, pipe_handle=1)"'),
+            ]
+            self.assertEqual(start_dev._spawn_child_pids([30584]), [14404])
+            self.assertEqual(start_dev._spawn_child_pids([11111]), [999])
+            self.assertEqual(start_dev._spawn_child_pids([42]), [])
+        finally:
+            start_dev._python_processes_with_cmdline = original
+
+    def test_ignores_non_spawn_python_processes(self):
+        original = start_dev._python_processes_with_cmdline
+        try:
+            start_dev._python_processes_with_cmdline = lambda: [
+                (14520, r"C:\python.exe C:\南山小程序\start_dev.py"),
+                (200, r"C:\python.exe -u app.py"),
+            ]
+            self.assertEqual(start_dev._spawn_child_pids([14520, 200]), [])
+        finally:
+            start_dev._python_processes_with_cmdline = original
+
+    def test_processes_with_cmdline_parses_single_object_and_array(self):
+        import json as json_mod
+
+        class FakeCompleted:
+            def __init__(self, payload):
+                self.stdout = payload
+
+        cases = [
+            (json_mod.dumps([{"ProcessId": 1, "CommandLine": "a"},
+                             {"ProcessId": 2, "CommandLine": "b"}]), [(1, "a"), (2, "b")]),
+            (json_mod.dumps({"ProcessId": 7, "CommandLine": "c"}), [(7, "c")]),
+            ("", []),
+            ("not json", []),
+        ]
+        original_run = start_dev.subprocess.run
+        try:
+            for payload, expected in cases:
+                start_dev.subprocess.run = lambda *a, **k: FakeCompleted(payload)
+                self.assertEqual(start_dev._python_processes_with_cmdline(), expected)
+        finally:
+            start_dev.subprocess.run = original_run
+
+
 if __name__ == "__main__":
     unittest.main()

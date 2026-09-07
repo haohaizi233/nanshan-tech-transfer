@@ -27,7 +27,9 @@
 说明：
   - HBuilderX CLI 运行 H5 / 微信均为「HBuilderX owned」进程，启动器不强制关闭它们；
     Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI / frpc）。
-  - 8787 已有健康的南山 FastAPI 时自动复用，退出启动器不会终止它。
+  - 8787 已有健康的南山 FastAPI 时自动复用，退出启动器不会终止它；
+    但若后端源码比监听进程新（如 git pull 之后），会先终止旧进程再重新启动，
+    避免复用旧代码导致「前端拉到最新但接口还是旧行为」。
   - 外网转发使用 frp（frpc.toml：serverAddr + 8076→8787 + 8077→5173），
     默认随启动器一起拉起 frpc 并做外网端到端健康验证（--no-tunnel 关闭）；
     frpc 目录检测顺序：FRPC_HOME 环境变量 > 桌面 frp* 扫描。
@@ -126,6 +128,16 @@ def admin_source_files():
         root_files=("index.html", "vite.config.js", "package.json", "package-lock.json"),
         source_dirs=("src", "public"),
     )
+
+
+def backend_source_files():
+    """后端运行时代码（app/config/db + core/modules/routes）；测试、工具脚本、迁移不参与过期判断。"""
+    files = [API_SERVER_DIR / name for name in ("app.py", "config.py", "db.py")]
+    for relative_dir in ("core", "modules", "routes"):
+        directory = API_SERVER_DIR / relative_dir
+        if directory.is_dir():
+            files.extend(p for p in directory.rglob("*.py") if p.is_file())
+    return files
 
 
 def _h5_state_file():
@@ -293,6 +305,120 @@ def port_pid(port):
     return None
 
 
+def port_pids(port):
+    """Windows：netstat 解析该端口全部监听 PID（去重）。
+
+    uvicorn reload 模式下父子进程共享监听 socket，且可能残留历史孤儿进程，
+    逐个 PID 终止时必须拿全量列表。
+    """
+    pids = set()
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except Exception:
+        return []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[3] == "LISTENING" and f":{port}" in parts[1]:
+            try:
+                pid = int(parts[4])
+                if pid > 0:
+                    pids.add(pid)
+            except ValueError:
+                pass
+    return sorted(pids)
+
+
+def _filetime_to_ns(raw):
+    """FILETIME（1601 纪元起 100ns 计数）→ 1970 纪元纳秒。偏移 = 11644473600s × 10^7 tick/100ns。"""
+    return (raw - 11644473600 * 10**7) * 100
+
+
+def process_start_ns(pid):
+    """Windows：ctypes 读进程创建时间，返回与 time.time_ns() 可比的纳秒值；失败返回 None。"""
+    import ctypes
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", ctypes.c_uint32), ("dwHighDateTime", ctypes.c_uint32)]
+
+    kernel32 = ctypes.windll.kernel32
+    # 必须显式声明原型：默认 c_int 返回值会把 64 位句柄/结果截断成垃圾值（已实测踩坑）
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.GetProcessTimes.restype = ctypes.c_int
+    kernel32.GetProcessTimes.argtypes = [ctypes.c_void_p] + [ctypes.c_void_p] * 4
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        creation, exit_time, kernel_t, user_t = FILETIME(), FILETIME(), FILETIME(), FILETIME()
+        if not kernel32.GetProcessTimes(
+            handle, ctypes.byref(creation), ctypes.byref(exit_time),
+            ctypes.byref(kernel_t), ctypes.byref(user_t),
+        ):
+            return None
+        raw = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+        # FILETIME：1601 纪元起 100ns 计数；偏移 = 11644473600s × 10^7 tick/100ns
+        return (raw - 11644473600 * 10**7) * 100
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _python_processes_with_cmdline():
+    """[(pid, cmdline)]：python.exe / pythonw.exe 进程清单（PowerShell CIM，失败返回 []）。
+
+    errors="replace"：控制台代码页与解码不一致时中文乱码无妨，ASCII 的
+    parent_pid=<数字> 一定能读出来。
+    """
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" "
+             "| Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, errors="replace", timeout=20,
+        ).stdout.strip()
+    except Exception:
+        return []
+    if not out:
+        return []
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return []
+    if isinstance(data, dict):  # 单进程时 ConvertTo-Json 输出对象而非数组
+        data = [data]
+    result = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            pid = int(item.get("ProcessId"))
+        except (TypeError, ValueError):
+            continue
+        result.append((pid, item.get("CommandLine") or ""))
+    return result
+
+
+def _spawn_child_pids(parent_pids):
+    """multiprocessing spawn 子进程（uvicorn reload worker）的 PID。
+
+    spawn 子进程命令形如：python -c "from multiprocessing.spawn import spawn_main;
+    spawn_main(parent_pid=30584, pipe_handle=504)" —— 自带父 PID，可精确匹配不误伤。
+    它持有继承的监听 socket：netstat 只显示创建者、taskkill /T 实测也会漏杀，
+    必须单独枚举（2026-09-07 实弹踩坑：杀掉 netstat 两个 PID 后端口仍被占）。
+    """
+    wanted = {str(p) for p in parent_pids}
+    found = []
+    for pid, cmdline in _python_processes_with_cmdline():
+        m = re.search(r"parent_pid=(\d+)", cmdline)
+        if m and m.group(1) in wanted and pid not in wanted:
+            found.append(pid)
+    return found
+
+
 def get_lan_ips():
     """返回真实活动网卡的 IPv4 候选列表，排除 loopback / link-local，私有网段优先。"""
     ips = []
@@ -417,6 +543,50 @@ def check_db_config():
 
 
 # ── 8787 端口三分支 ───────────────────────────────────────────
+def backend_is_stale():
+    """复用前检查：任一后端进程启动后，后端源码又更新过（git pull / 本地修改）。
+
+    「后端进程」= netstat 监听者 + 其 multiprocessing spawn 子进程（uvicorn reload
+    worker 持有继承的 socket，netstat 不显示、taskkill /T 也会漏杀）。
+    返回 True 表示旧进程已清理、端口已释放，调用方应重新启动后端。
+    拿不到进程启动时间时不误杀，维持旧复用行为。
+    """
+    owners = port_pids(BACKEND_PORT)
+    if not owners:
+        return False
+    procs = owners + [p for p in _spawn_child_pids(owners) if p not in owners]
+    starts = [(pid, process_start_ns(pid)) for pid in procs]
+    known_starts = [s for _, s in starts if s]
+    if not known_starts:
+        warn(f"无法读取现有后端进程（PID={','.join(map(str, procs))}）启动时间，直接复用")
+        return False
+    oldest_start = min(known_starts)  # 多进程（reload 父子/孤儿）按最老者判断
+    grace_ns = 2_000_000_000  # 2s 容差：进程启动瞬间落盘的同秒文件不算过期
+    stale_files = [
+        f for f in backend_source_files()
+        if f.is_file() and f.stat().st_mtime_ns > oldest_start + grace_ns
+    ]
+    if not stale_files:
+        return False
+    newest = max(stale_files, key=lambda f: f.stat().st_mtime_ns)
+    warn(
+        f"现有后端（PID={','.join(map(str, procs))}）启动早于代码更新"
+        f"（{len(stale_files)} 个源文件已变更，最新 {newest.name}），重启以加载新代码"
+    )
+    for pid in procs:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=15)
+    for _ in range(20):
+        if not port_listening(BACKEND_PORT):
+            break
+        time.sleep(0.5)
+    if port_listening(BACKEND_PORT):
+        # 理论上不应到达：所有已知持有者都已终止。可能句柄被更隐蔽的进程复制。
+        error(f"旧后端进程已终止，但端口 {BACKEND_PORT} 仍被占用（socket 句柄被隐藏进程持有）")
+        error("  请手动排查：netstat -ano | findstr :8787，或重启电脑后重试")
+        sys.exit(1)
+    return True
+
+
 def resolve_backend(lan):
     """返回 (proc|None)。proc=None 表示复用已有后端。"""
     if not port_listening(BACKEND_PORT):
@@ -424,6 +594,8 @@ def resolve_backend(lan):
 
     http_ok, body = fetch_health()
     if http_ok and body and isinstance(body.get("data"), dict) and body["data"].get("status") in ("ok", "degraded"):
+        if backend_is_stale():
+            return start_backend(lan)
         ok(f"检测到现有 FastAPI :{BACKEND_PORT}，直接复用")
         if body["data"].get("database") == "ok":
             ok(f"PostgreSQL Ready（appUsers={body['data'].get('appUsers')}）")
