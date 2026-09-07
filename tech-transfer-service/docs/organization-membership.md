@@ -65,6 +65,51 @@ organization_application               机构入驻申请（新机构，系统�
 
 审计：全部写操作落 `audit_log`（action 形如 `organization_membership_application.approve`、`organization_admin.grant` 等），并携带 HTTP requestId。
 
+## 3A. 权限矩阵
+
+| Ability | 未认证 | 认证成员 | 机构管理员 | 系统管理员 |
+|---|---:|---:|---:|---:|
+| 发布需求 | ✅ | ✅ | ✅ | ✅ |
+| 发布成果 | ✅ | ✅ | ✅ | ✅ |
+| 发起/申请对接 | ✅ | ✅ | ✅ | ✅ |
+| 收藏/维护资料 | ✅ | ✅ | ✅ | ✅ |
+| 发布内容关联认证机构（orgId） | ❌ | ✅ | ✅ | ✅ |
+| 申请加入已有机构 | ✅ | ✅* | ✅* | ✅ |
+| 申请新机构入驻 | ✅ | ✅ | ✅ | ✅ |
+| 申请成为机构管理员 | ✅ | ✅ | ✅ | ✅ |
+| 审核本机构成员申请 | ❌ | ❌ | ✅ | ✅ |
+| 撤销本机构普通 member | ❌ | ❌ | ✅ | ✅ |
+| 撤销机构管理员（role=admin） | ❌ | ❌ | ❌ | ✅ |
+| 授予机构管理员 | ❌ | ❌ | ❌ | ✅ |
+| 审核新机构入驻 / 机构管理员申请 | ❌ | ❌ | ❌ | ✅ |
+| 新增 canonical 机构 | ❌ | ❌ | ❌ | ✅ |
+| 查看全局用户 / 系统后台 | ❌ | ❌ | ❌ | ✅ |
+
+`*` 多机构模型：用户可同时持有多机构 membership；对同一机构存在 active membership 或 pending 申请时再次申请返回 409，对其他机构申请不受影响。
+
+机构管理员的"本机构成果/需求/合作对接"查看能力：当前 MVP 通过 org_id 关联实现（机构管理页 org-manage 以 orgId 过滤成员与申请）；机构维度的成果/需求/对接列表页为后续增强，不在本轮范围。
+
+## 3B. 与 Assisted Cooperation（平台协助对接）的衔接
+
+沿用现有「管理员代发布 / 平台协助对接」模型（1ded23c），本轮保持兼容：
+
+- Admin 代机构发布时 `org_id = canonical institution.id`，`org_name_snapshot` 为展示快照。
+- 若真实机构已有平台负责人（该机构存在 membership 关联用户）：`owner_user_id = user_id` → direct cooperation。
+- 若机构无平台负责人：`owner_user_id = NULL` → assisted cooperation，Admin 不自动作为 owner。
+- membership 体系不改变 assisted cooperation 状态机；机构管理员撤销/成员变更不影响已存在的 cooperation_intent 记录。
+
+## 3C. Reapply 规则（重复申请与复活）
+
+| 当前状态 | 同一 (user_id, org_id) 再次申请 | 行为 |
+|---|---|---|
+| pending 申请存在 | 409（partial unique index 拦截） | — |
+| active membership 存在 | 409 | — |
+| 申请 rejected | 允许重新提交新申请 | 新 pending 记录，旧记录保留审计 |
+| membership revoked | 允许重新提交新申请 | approve 时复活原 membership 行（UPDATE status→active, version+1，重写 verified_by/verified_at） |
+| 申请 cancelled | 允许重新提交 | 同 rejected |
+
+ revoked → 复活：`organization_membership` 一人一机构一行（UNIQUE(org_id,user_id)），重入不 INSERT 新行，改为 UPDATE，保留首次创建时间与历史撤销记录的审计痕迹。
+
 ## 4. 业务流程
 
 ### 4.1 加入已有机构（搜索式，禁止名称绑定）
