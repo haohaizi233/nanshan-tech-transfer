@@ -66,10 +66,14 @@
 				</view>
 			</view>
 		</block>
+
+		<!-- 底部导航（分包业务壳统一 tab：首页 / AI匹配 / 我的） -->
+		<AppTabbar active="ai" />
 	</view>
 </template>
 
 <script>
+	import AppTabbar from '../../components/app-tabbar.vue'
 	import { getMyDemands, toDemandCard } from '../../api/demand.js'
 	import {
 		createMatchTask,
@@ -91,6 +95,9 @@
 	}
 
 	export default {
+		components: {
+			AppTabbar,
+		},
 		data() {
 			return {
 				loading: false,

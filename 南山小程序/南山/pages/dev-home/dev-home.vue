@@ -1,5 +1,12 @@
 <template>
   <view class="dev-home">
+    <!-- 后端健康状态：固定悬浮于顶部，小屏无需下滑即可见 -->
+    <view class="dev-health">
+      <text class="health-text" :class="{ ok: healthOk, fail: !healthOk }">
+        {{ healthOk ? '✓ 后端正常' : '✗ 后端未响应' }} · {{ apiBase }}
+      </text>
+    </view>
+
     <view class="dev-header">
       <text class="dev-title">南山科转通 · 本地开发宿主</text>
       <text class="dev-env">HOST_MODE=local · AUTH_PROVIDER=mock</text>
@@ -24,20 +31,18 @@
         <text class="card-desc">身份引导 · 个人资料</text>
       </view>
     </view>
-
-    <view class="dev-footer">
-      <text class="footer-text" :class="{ ok: healthOk, fail: !healthOk }">
-        {{ healthOk ? '✓ 后端正常' : '✗ 后端未响应' }} · http://127.0.0.1:8787
-      </text>
-    </view>
   </view>
 </template>
 
 <script>
+import { APP_ENV, API_BASE } from '../../config/local.env.js'
+import { resolveH5ApiBase } from '../../host/local-adapter.js'
+
 export default {
   data() {
     return {
       healthOk: false,
+      apiBase: '',
     }
   },
   onShow() {
@@ -52,10 +57,13 @@ export default {
       }})
     },
     async checkHealth() {
+      // API 地址随页面访问来源配对：本地→127.0.0.1:8787，
+      // 公网隧道 :8077→同主机 :8076，局域网 IP→同主机 :8787
+      this.apiBase = resolveH5ApiBase({ appEnv: APP_ENV, localApiBase: API_BASE })
       try {
         const res = await new Promise((resolve, reject) => {
           uni.request({
-            url: 'http://127.0.0.1:8787/api/health',
+            url: this.apiBase + '/api/health',
             success: resolve,
             fail: reject,
           })
@@ -138,12 +146,18 @@ export default {
   color: #999;
   text-align: center;
 }
-.dev-footer {
-  margin-top: auto;
-  margin-bottom: 60rpx;
-  padding-bottom: env(safe-area-inset-bottom);
+.dev-health {
+  position: fixed;
+  top: 20rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999;
+  background: #fff;
+  border-radius: 999rpx;
+  padding: 10rpx 28rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08);
 }
-.footer-text {
+.health-text {
   font-size: 22rpx;
   color: #999;
 }

@@ -15,21 +15,30 @@ const AUTH_MODE_KEY = 'tt_auth_mode'
 const PRODUCTION_ENVS = ['staging', 'production']
 const TUNNEL_H5_PORT = '8077'
 const TUNNEL_API_PORT = '8076'
+const LOCAL_API_PORT = '8787'
+const LOCALHOST_HOSTNAMES = ['localhost', '127.0.0.1', '::1', '[::1]']
 const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
 
 /**
  * Select the API origin for an H5 page without changing its public route.
  *
- * The dev launcher exposes H5 and FastAPI as a paired frp tunnel:
- * :8077 for the page and :8076 for its API.  A phone must never inherit the
- * developer machine's 127.0.0.1 API address from local.env.js.
+ * The page's own origin decides which API it can reach — a visitor's browser
+ * must never inherit the developer machine's 127.0.0.1 API address:
+ *   - :8077 frp tunnel page  → paired :8076 tunnel API on the same host
+ *   - LAN hostname (phone/other PC on the same WiFi) → same host, direct :8787
+ *   - localhost / mini-program (no location) → localApiBase as configured
  */
 export function resolveH5ApiBase({ appEnv, localApiBase, pageLocation = globalThis.location } = {}) {
   if (PRODUCTION_ENVS.includes(appEnv)) return ''
 
-  if (pageLocation && String(pageLocation.port) === TUNNEL_H5_PORT && pageLocation.hostname) {
+  if (pageLocation && pageLocation.hostname) {
     const protocol = pageLocation.protocol === 'https:' ? 'https:' : 'http:'
-    return `${protocol}//${pageLocation.hostname}:${TUNNEL_API_PORT}`
+    if (String(pageLocation.port) === TUNNEL_H5_PORT) {
+      return `${protocol}//${pageLocation.hostname}:${TUNNEL_API_PORT}`
+    }
+    if (!LOCALHOST_HOSTNAMES.includes(pageLocation.hostname)) {
+      return `${protocol}//${pageLocation.hostname}:${LOCAL_API_PORT}`
+    }
   }
 
   return localApiBase || DEFAULT_LOCAL_API_BASE

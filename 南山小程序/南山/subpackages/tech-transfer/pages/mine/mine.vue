@@ -217,10 +217,14 @@
 				<button class="ghost-btn danger" @click="onLogout">退出登录</button>
 			</view>
 		</view>
+
+		<!-- 底部导航（分包业务壳统一 tab：首页 / AI匹配 / 我的） -->
+		<AppTabbar active="mine" />
 	</view>
 </template>
 
 <script>
+	import AppTabbar from '../../components/app-tabbar.vue'
 	import {
 			getUserProfile,
 			isLoggedIn,
@@ -246,6 +250,9 @@
 	import HostBridge from '../../../../host/host-bridge.js'
 
 	export default {
+		components: {
+			AppTabbar,
+		},
 		data() {
 			return {
 				viewMode: 'auth',
@@ -298,6 +305,9 @@
 			}
 		},
 		onShow() {
+			// #ifdef H5
+			window.__mineOnShowCount = (window.__mineOnShowCount || 0) + 1
+			// #endif
 			this.refresh()
 		},
 		methods: {

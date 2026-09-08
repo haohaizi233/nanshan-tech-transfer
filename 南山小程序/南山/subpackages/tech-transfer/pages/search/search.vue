@@ -135,11 +135,6 @@
 				return '“' + kw + '” ' + name + '共 ' + count + ' 条'
 			}
 		},
-		onLoad() {
-			this.loadHistory()
-			this.loadDemands('')
-			this.loadResults('')
-		},
 		onShow() {
 			this.loadHistory()
 			if (this.searchType === 0) {

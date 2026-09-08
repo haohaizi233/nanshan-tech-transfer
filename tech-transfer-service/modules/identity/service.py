@@ -248,10 +248,11 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
         raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "密码至少6位")
 
     with get_cursor(commit=True) as cur:
-        # 检查手机号是否已注册（通过 user_credential.username 唯一）
+        # 检查手机号是否已注册（phone 唯一索引 + username 唯一约束双查，
+        # 兼容迁移 012 回填前 username=手机号 的存量记录）
         cur.execute(
-            "SELECT user_id FROM user_credential WHERE username = %s",
-            (phone,),
+            "SELECT user_id FROM user_credential WHERE phone = %s OR username = %s",
+            (phone, phone),
         )
         if cur.fetchone():
             code, message, status = TT_AUTH_40901
@@ -280,11 +281,12 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
             (user_id,),
         )
 
-        # 创建 user_credential（username = 手机号）
+        # 创建 user_credential（小程序注册：username 与 phone 均写入手机号，
+        # username 保留兼容旧登录链路，phone 为小程序端登录标识）
         cur.execute(
-            "INSERT INTO user_credential (user_id, username, password_hash, status) "
-            "VALUES (%s, %s, %s, 'active')",
-            (user_id, phone, hash_password(password)),
+            "INSERT INTO user_credential (user_id, username, password_hash, phone, status) "
+            "VALUES (%s, %s, %s, %s, 'active')",
+            (user_id, phone, hash_password(password), phone),
         )
 
         # 签发会话
@@ -295,44 +297,73 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
         return result
 
 
-def password_login_session(username: str, password: str) -> dict:
-    """账号密码登录（user_credential 表真实校验，无宿主票据）。
+_LOGIN_CRED_SQL = """
+    SELECT uc.user_id, uc.password_hash, uc.status AS cred_status,
+           au.status AS user_status
+    FROM user_credential uc
+    JOIN app_user au ON au.id = uc.user_id
+    WHERE au.deleted_at IS NULL AND {where}
+"""
+
+
+def _verify_login_and_issue(cur, cred: dict | None, password: str) -> dict:
+    """密码校验 + 账号状态检查 + 签发会话（username/phone 两种登录共用）。
 
     用户不存在 / 密码错误返回同一文案（防账号枚举）；
     账号禁用（credential 或 app_user 任一 disabled）返回独立错误码。
     """
-    from core.errors import BizError, TT_AUTH_40105, TT_AUTH_40106
+    from core.errors import TT_AUTH_40105, TT_AUTH_40106
+
+    if cred is None or not verify_password(password, cred["password_hash"]):
+        code, message, status = TT_AUTH_40105
+        raise BizError(code, message, status)
+
+    if cred["cred_status"] != "active" or cred["user_status"] != "active":
+        code, message, status = TT_AUTH_40106
+        raise BizError(code, message, status)
+
+    user_id = cred["user_id"]
+    roles = _get_roles(cur, user_id)
+    result = _issue_session(cur, user_id, roles)
+    result["user"] = build_user_response(cur, user_id)
+    result["isNewUser"] = False
+    return result
+
+
+def password_login_session(username: str, password: str) -> dict:
+    """账号密码登录（后台管理端：按 user_credential.username 校验，无宿主票据）。"""
+    from core.errors import TT_AUTH_40105
 
     if not username or not password:
-        raise BizError(*TT_AUTH_40105[:2], TT_AUTH_40105[2])
+        raise BizError(*TT_AUTH_40105)
 
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            """
-            SELECT uc.user_id, uc.password_hash, uc.status AS cred_status,
-                   au.status AS user_status
-            FROM user_credential uc
-            JOIN app_user au ON au.id = uc.user_id
-            WHERE uc.username = %s AND au.deleted_at IS NULL
-            """,
-            (username,),
-        )
+        cur.execute(_LOGIN_CRED_SQL.format(where="uc.username = %s"), (username,))
         cred = cur.fetchone()
+        return _verify_login_and_issue(cur, cred, password)
 
-        if cred is None or not verify_password(password, cred["password_hash"]):
-            code, message, status = TT_AUTH_40105
-            raise BizError(code, message, status)
 
-        if cred["cred_status"] != "active" or cred["user_status"] != "active":
-            code, message, status = TT_AUTH_40106
-            raise BizError(code, message, status)
+def login_phone_session(phone: str, password: str) -> dict:
+    """手机号密码登录（小程序端：按 user_credential.phone 校验）。
 
-        user_id = cred["user_id"]
-        roles = _get_roles(cur, user_id)
-        result = _issue_session(cur, user_id, roles)
-        result["user"] = build_user_response(cur, user_id)
-        result["isNewUser"] = False
-        return result
+    phone 未命中时回退按 username 匹配（兜底迁移 012 回填时因冲突跳过的
+    phone 为 NULL 且 username=手机号 的存量账号）。
+    """
+    from core.errors import TT_AUTH_40105
+
+    if not phone or not password:
+        raise BizError(*TT_AUTH_40105)
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(_LOGIN_CRED_SQL.format(where="uc.phone = %s"), (phone,))
+        cred = cur.fetchone()
+        if cred is None:
+            cur.execute(
+                _LOGIN_CRED_SQL.format(where="uc.phone IS NULL AND uc.username = %s"),
+                (phone,),
+            )
+            cred = cur.fetchone()
+        return _verify_login_and_issue(cur, cred, password)
 
 
 def create_password_account(cur, username: str, password: str,
@@ -340,7 +371,22 @@ def create_password_account(cur, username: str, password: str,
     """在调用方事务游标内创建密码账号全套（app_user/profile/credential/role）。
 
     返回 (user_id, user_no)。供普通注册与机构注册申请（单事务创建账号+申请）复用。
+    填写的 11 位手机号除 user_profile.phone 外同时写入 user_credential.phone
+    （小程序端可用手机号+密码登录）；手机号已被注册时抛冲突。
     """
+    import re
+
+    cred_phone = phone if (phone and re.fullmatch(r"\d{11}", phone)) else None
+    if cred_phone:
+        cur.execute(
+            "SELECT 1 FROM user_credential WHERE phone = %s "
+            "OR (phone IS NULL AND username = %s)",
+            (cred_phone, cred_phone),
+        )
+        if cur.fetchone():
+            code, message, status = TT_COMMON_40903
+            raise BizError(code, "该手机号已被注册", status)
+
     user_no = _generate_user_no(cur)
     cur.execute(
         "INSERT INTO app_user (user_no, status) VALUES (%s, 'active') RETURNING id",
@@ -356,10 +402,10 @@ def create_password_account(cur, username: str, password: str,
     )
     cur.execute(
         """
-        INSERT INTO user_credential (user_id, username, password_hash, status)
-        VALUES (%s, %s, %s, 'active')
+        INSERT INTO user_credential (user_id, username, password_hash, phone, status)
+        VALUES (%s, %s, %s, %s, 'active')
         """,
-        (user_id, username, hash_password(password)),
+        (user_id, username, hash_password(password), cred_phone),
     )
     cur.execute(
         "INSERT INTO user_role (user_id, role_code) VALUES (%s, 'user')",

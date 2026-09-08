@@ -25,6 +25,39 @@ test('keeps the local API address for the H5 development server', () => {
   )
 })
 
+test('derives the same-host direct API for a LAN-visited H5 page (phone on same WiFi)', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      pageLocation: new URL('http://192.168.2.79:5173/#/pages/index/index'),
+    }),
+    'http://192.168.2.79:8787',
+  )
+})
+
+test('keeps the configured local API when the page hostname is localhost', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      pageLocation: new URL('http://localhost:5173/#/pages/index/index'),
+    }),
+    'http://127.0.0.1:8787',
+  )
+})
+
+test('falls back to the configured local API when there is no page location (mini-program)', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      pageLocation: null,
+    }),
+    'http://127.0.0.1:8787',
+  )
+})
+
 test('uses same-origin API paths for a production H5 build', () => {
   assert.equal(
     resolveH5ApiBase({

@@ -1068,8 +1068,8 @@ const exportData = async () => {
   margin-top: 14px;
 }
 
-.registration-modal {
-  width: min(1120px, calc(100vw - 40px));
+.modal.registration-modal {
+  width: min(1180px, calc(100vw - 40px));
 }
 
 .registration-toolbar {
@@ -1103,12 +1103,13 @@ const exportData = async () => {
 }
 
 .registration-table-wrap {
-  max-height: 460px;
+  max-height: min(60vh, 520px);
   overflow: auto;
 }
 
 .registration-table {
-  min-width: 960px;
+  width: 100%;
+  border-collapse: collapse;
   table-layout: auto;
 }
 
@@ -1116,7 +1117,23 @@ const exportData = async () => {
 .registration-table td {
   height: auto;
   padding: 12px 14px;
+  border-bottom: 1px solid #edf1f5;
+  color: #4f5b6d;
+  font-size: 13px;
+  text-align: left;
   vertical-align: top;
+  word-break: break-word;
+}
+
+.registration-table th {
+  color: #29364a;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.registration-table th:nth-child(5),
+.registration-table td:nth-child(5) {
+  white-space: nowrap;
 }
 
 .registration-table small {
@@ -1168,15 +1185,15 @@ const exportData = async () => {
   overflow-x: auto;
 }
 
-table {
+.table-wrapper table {
   width: 100%;
   min-width: 1240px;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-th,
-td {
+.table-wrapper th,
+.table-wrapper td {
   height: 62px;
   padding: 0 14px;
   border-bottom: 1px solid #edf1f5;
@@ -1185,40 +1202,40 @@ td {
   text-align: left;
 }
 
-th {
+.table-wrapper th {
   color: #29364a;
   font-weight: 600;
 }
 
-th:nth-child(1) {
+.table-wrapper th:nth-child(1) {
   width: 70px;
 }
 
-th:nth-child(2) {
+.table-wrapper th:nth-child(2) {
   width: 220px;
 }
 
-th:nth-child(3) {
+.table-wrapper th:nth-child(3) {
   width: 110px;
 }
 
-th:nth-child(4) {
+.table-wrapper th:nth-child(4) {
   width: 135px;
 }
 
-th:nth-child(7) {
+.table-wrapper th:nth-child(7) {
   width: 65px;
 }
 
-th:nth-child(8) {
+.table-wrapper th:nth-child(8) {
   width: 90px;
 }
 
-th:nth-child(9) {
+.table-wrapper th:nth-child(9) {
   width: 145px;
 }
 
-th:nth-child(10) {
+.table-wrapper th:nth-child(10) {
   width: 150px;
 }
 

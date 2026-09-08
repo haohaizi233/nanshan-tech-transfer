@@ -37,8 +37,8 @@ def admin_demand_categories(scope: dict = Depends(backend_identity)):
 
 
 @router.get("/admin/content-organizations")
-def admin_content_organizations(admin: dict = Depends(admin_identity)):
-    return success(list_content_organizations_admin())
+def admin_content_organizations(scope: dict = Depends(backend_identity)):
+    return success(list_content_organizations_admin(scope))
 
 
 @router.get("/admin/achievements")

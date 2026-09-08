@@ -63,16 +63,23 @@ def list_demand_categories_admin() -> list[dict]:
         return [{"id": row["id"], "code": row["code"], "name": row["name"]} for row in (cur.fetchall() or [])]
 
 
-def list_content_organizations_admin() -> list[dict]:
-    """后台内容录入使用的已启用机构（统一机构目录 institution）。"""
+def list_content_organizations_admin(scope: dict) -> list[dict]:
+    """后台内容录入使用的已启用机构（统一机构目录 institution）。
+
+    平台管理员返回全部活跃机构；机构管理员只返回本机构
+    （创建/编辑内容的机构归属由服务端强制为本机构，此处仅控制下拉展示）。
+    """
+    org_filter = "" if scope.get("isPlatformAdmin") else " AND id = %s"
+    params: list = [scope["orgId"]] if org_filter else []
     with get_cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT id, name, kind
             FROM institution
-            WHERE status = 'active'
+            WHERE status = 'active'{org_filter}
             ORDER BY name, id
-            """
+            """,
+            params,
         )
         return [
             {"id": row["id"], "name": row["name"], "kind": row["kind"]}

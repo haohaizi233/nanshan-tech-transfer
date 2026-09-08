@@ -74,6 +74,7 @@
 			return {
 				pageType: 'demand',
 				intentTab: 0,
+				intentAutoSwitched: false,
 				list: []
 			}
 		},
@@ -107,7 +108,6 @@
 			uni.setNavigationBarTitle({
 				title: titleMap[this.pageType] || '我的内容'
 			})
-			this.loadList()
 		},
 		onShow() {
 			this.loadList()
@@ -201,12 +201,20 @@
 				}
 				if (this.pageType === 'intention') {
 					try {
-						const data = await getMyCooperations({
-							role: this.intentTab === 0 ? 'initiator' : 'target',
-							page: 1,
-							pageSize: 50
-						})
+						const role = this.intentTab === 0 ? 'initiator' : 'target'
+						const data = await getMyCooperations({ role, page: 1, pageSize: 50 })
 						this.list = this.mapIntentionRows(data.list || [])
+						// 默认 tab（我提出的）为空但对侧有数据时自动切换一次，
+						// 避免 mine 角标有计数、点进来却看到空列表误以为接口未接通
+						if (!this.list.length && !this.intentAutoSwitched) {
+							this.intentAutoSwitched = true
+							const otherRole = role === 'initiator' ? 'target' : 'initiator'
+							const other = await getMyCooperations({ role: otherRole, page: 1, pageSize: 50 })
+							if ((other.total || 0) > 0) {
+								this.intentTab = otherRole === 'initiator' ? 0 : 1
+								this.list = this.mapIntentionRows(other.list || [])
+							}
+						}
 					} catch (e) {
 						console.error('[my-list] loadCooperations failed:', e)
 						this.list = []

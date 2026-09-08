@@ -6,6 +6,7 @@ from core.errors import bootstrap_credential_invalid, BizError, TT_AUTH_40105, T
 from modules.identity.provider import get_identity_provider
 from modules.identity.service import (
     bootstrap_session,
+    login_phone_session,
     password_login_session,
     register_user,
     refresh_session,
@@ -16,15 +17,21 @@ from modules.identity.service import (
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
 
 
-@router.post("/login", summary="账号密码登录（user_credential 真实校验）")
+@router.post("/login", summary="登录（小程序传 phone 手机号 / 后台传 username 账号）")
 def login(body: dict = Depends(json_body)):
+    phone = (body.get("phone") or "").strip()
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
-    if not username or not password:
+    if not (phone or username) or not password:
         code, message, status = TT_AUTH_40105
         raise BizError(code, "请输入账号和密码", status)
 
-    result = password_login_session(username, password)
+    if phone:
+        # 小程序端：手机号 + 密码（user_credential.phone 校验）
+        result = login_phone_session(phone, password)
+    else:
+        # 后台管理端：登录账号 + 密码（user_credential.username 校验）
+        result = password_login_session(username, password)
     return success(result)
 
 

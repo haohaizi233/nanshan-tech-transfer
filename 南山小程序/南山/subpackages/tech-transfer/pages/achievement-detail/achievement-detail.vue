@@ -110,6 +110,11 @@
       </view>
     </view>
 
+    <!-- 底部操作区：我要对接（与需求侧 dock-detail 同一对接流程） -->
+    <view v-if="detail" class="dock-bar">
+      <button class="dock-btn" @click="onProposeDock">我要对接</button>
+    </view>
+
     <!-- 错误 -->
     <view v-if="error" class="state-box">
       <text class="state-text">加载失败</text>
@@ -121,6 +126,8 @@
 
 <script>
 import { getAchievementDetail } from '../../api/achievement.js'
+import { ensureLoginForDock } from '../../api/user.js'
+import HostBridge from '../../../../host/host-bridge.js'
 
 const PRICING_MODE_LABELS = {
   'negotiable': '面议',
@@ -192,6 +199,11 @@ export default {
     formatPricingMode(mode) {
       return PRICING_MODE_LABELS[mode] || '面议'
     },
+    onProposeDock() {
+      if (!ensureLoginForDock()) return
+      if (!this.achId) return
+      HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: this.achId })
+    },
     goBack() {
       uni.navigateBack()
     },
@@ -203,7 +215,28 @@ export default {
 .page {
   min-height: 100vh;
   background: #f5f6f8;
-  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
+}
+
+.dock-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  border-top: 1rpx solid #e8ecf2;
+  padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom));
+  z-index: 100;
+}
+
+.dock-btn {
+  background: #2b73f8 !important;
+  color: #ffffff !important;
+  border-radius: 12rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  height: 88rpx;
+  line-height: 88rpx;
 }
 
 .state-box {

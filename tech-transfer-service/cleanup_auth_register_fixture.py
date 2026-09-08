@@ -4,7 +4,7 @@ import psycopg2.extras
 
 DB = dict(host="127.0.0.1", port=5432, user="postgres", password="postgres123",
           dbname="tech_transfer")
-PHONES = ("13911111111", "13922222222")
+PHONES = ("13911111111", "13922222222", "13933333333")
 
 conn = psycopg2.connect(**DB)
 try:

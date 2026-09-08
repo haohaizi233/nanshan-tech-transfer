@@ -173,11 +173,15 @@
 				</view>
 			</block>
 		</view>
+
+		<!-- 底部导航（分包业务壳统一 tab：首页 / AI匹配 / 我的） -->
+		<AppTabbar active="home" />
 	</view>
 </template>
 
 <script>
 	import HostBridge from '../../../../host/host-bridge.js'
+	import AppTabbar from '../../components/app-tabbar.vue'
 	import { ensureLoginForDock, getUserProfile } from '../../api/user.js'
 	import { getCapitalGroups } from '../../constants/capital-modules.js'
 	import { getAchievements, formatAchPrice } from '../../api/achievement.js'
@@ -186,6 +190,9 @@
 	import { retryRequest } from '../../api/request-retry.js'
 
 	export default {
+		components: {
+			AppTabbar,
+		},
 		data() {
 			return {
 				activeTab: 0,
@@ -240,7 +247,6 @@
 		},
 		onLoad() {
 			this.applyPersonaTab()
-			this.refreshList()
 		},
 		onShow() {
 			this.refreshList()

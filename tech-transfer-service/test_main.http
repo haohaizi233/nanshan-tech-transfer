@@ -232,7 +232,7 @@ Content-Type: application/json
 
 ###     张三发起对郑大芯片成果的对接
 POST http://127.0.0.1:8787/api/tech-transfer/v1/cooperations
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4NDczNTcsImV4cCI6MTc4ODg1NDU1N30.-tY-3_zgB3MqCI6bFG4jKgsrJODrKz3VtzpCt8m2EUU
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4NjAzNDMsImV4cCI6MTc4ODg2NzU0M30.NIBwO9fgPzpyyeZFmhf0a2P8FG_UKhNijxTpdj_awYc
 Content-Type: application/json
 
 {
@@ -243,8 +243,8 @@ Content-Type: application/json
 
 
 ###     李四所属机构管理员接受
-POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/cooperations/316/accept
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MSIsInVzZXJObyI6IlUyMDI2MDAwNTgiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4MzUwNDEsImV4cCI6MTc4ODg0MjI0MX0._kG8-higFDguRl4OvBKX4BUDiB6ktT7HvRmnn6cgU8Y
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/cooperations/351/accept
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MSIsInVzZXJObyI6IlUyMDI2MDAwNTgiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4NTU0MDEsImV4cCI6MTc4ODg2MjYwMX0.QY_Kjc602HVxpXnSfaJpnDbjv0znuVdand_AQ3veRzU
 Content-Type: application/json
 
 {
