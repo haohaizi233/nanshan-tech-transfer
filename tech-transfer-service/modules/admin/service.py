@@ -14,8 +14,16 @@ import json
 
 from db import get_cursor
 from core.errors import (
-    BizError, bad_request, conflict,
-    TT_ACH_40901, TT_DMD_40401, TT_DMD_40901,
+    BizError,
+    bad_request,
+    conflict,
+    forbidden,
+    coop_conflict,
+    coop_forbidden,
+    coop_not_found,
+    TT_ACH_40901,
+    TT_DMD_40401,
+    TT_DMD_40901,
     TT_ADMIN_40001,
 )
 from modules.audit.service import record as audit_record
@@ -710,7 +718,7 @@ LEFT JOIN app_user tu ON ci.target_owner_user_id = tu.id
 LEFT JOIN user_profile tp ON tu.id = tp.user_id
 LEFT JOIN demand d ON ci.target_type = 'demand' AND ci.target_id = d.id
 LEFT JOIN achievement a ON ci.target_type = 'achievement' AND ci.target_id = a.id
-LEFT JOIN institution org ON ci.target_org_id = org.id
+LEFT JOIN institution org ON COALESCE(ci.target_org_id, d.org_id, a.org_id) = org.id
 """
 
 _COOP_LIST_SQL = """
@@ -718,7 +726,8 @@ SELECT ci.id, ci.initiator_user_id, ci.target_type, ci.target_id,
        ci.target_owner_user_id, ci.intent_type, ci.message, ci.status, ci.version,
        ci.created_at, ci.accepted_at, ci.confirmed_at, ci.completed_at, ci.closed_at,
        ci.handling_mode, ci.assist_status, ci.accept_mode, ci.handled_by_user_id,
-       ci.target_org_id, ci.initiator_contact_snapshot, ci.assist_note, ci.contact_share_consent_at,
+       COALESCE(ci.target_org_id, d.org_id, a.org_id) AS target_org_id,
+       ci.initiator_contact_snapshot, ci.assist_note, ci.contact_share_consent_at,
        iu.user_no AS initiator_user_no, ip.display_name AS initiator_name,
        tu.user_no AS target_owner_user_no, tp.display_name AS target_owner_name,
        COALESCE(d.title, a.title) AS target_title,
@@ -762,8 +771,8 @@ def _coop_admin_item(r):
     }
 
 
-def list_cooperations_admin(args) -> dict:
-    """GET /admin/cooperations —— 只读列表：status/handlingMode/assistStatus 过滤 + keyword。"""
+def list_cooperations_admin(args, scope: dict) -> dict:
+    """GET /admin/cooperations：按状态、协助模式和关键字筛选；机构管理员仅查看本机构相关记录。"""
     page, page_size = _page_args(args)
     status = (args.get("status") or "").strip().lower()
     handling_mode = (args.get("handlingMode") or "").strip().lower()
@@ -771,6 +780,9 @@ def list_cooperations_admin(args) -> dict:
     keyword = (args.get("keyword") or "").strip()
 
     where, params = [], []
+    if not scope.get("isPlatformAdmin"):
+        where.append("(ip.org_id = %s OR tp.org_id = %s)")
+        params.extend([scope["orgId"], scope["orgId"]])
     if status:
         where.append("ci.status = %s")
         params.append(status)
@@ -801,10 +813,15 @@ def list_cooperations_admin(args) -> dict:
     return _page_of(rows, page, page_size, total, _coop_admin_item)
 
 
-def get_cooperation_admin(intent_id: int) -> dict:
+def get_cooperation_admin(intent_id: int, scope: dict) -> dict:
     """GET /admin/cooperations/{id} —— 只读详情 + events（管理端视角，无参与方权限过滤）。"""
     with get_cursor() as cur:
-        cur.execute(_COOP_LIST_SQL + " WHERE ci.id = %s", (intent_id,))
+        where = ["ci.id = %s"]
+        params = [intent_id]
+        if not scope.get("isPlatformAdmin"):
+            where.append("(ip.org_id = %s OR tp.org_id = %s)")
+            params.extend([scope["orgId"], scope["orgId"]])
+        cur.execute(_COOP_LIST_SQL + " WHERE " + " AND ".join(where), params)
         row = cur.fetchone()
         if not row:
             code, message, status = TT_COOP_40401
@@ -820,6 +837,21 @@ def get_cooperation_admin(intent_id: int) -> dict:
         events = cur.fetchall() or []
 
     detail = _coop_admin_item(row)
+
+    target_org_id = row.get("target_org_id")
+    is_platform_admin = bool(scope.get("isPlatformAdmin"))
+
+    detail["canReview"] = bool(
+        row["status"] == "pending"
+        and (
+            is_platform_admin
+            or (
+                target_org_id is not None
+                and int(target_org_id) == int(scope.get("orgId") or 0)
+            )
+        )
+    )
+
     detail["events"] = [
         {
             "id": e["id"],
@@ -834,6 +866,233 @@ def get_cooperation_admin(intent_id: int) -> dict:
         for e in events
     ]
     return detail
+
+def _insert_admin_cooperation_event(
+    cur,
+    intent_id: int,
+    event_type: str,
+    from_status: str | None,
+    to_status: str,
+    operator_user_id: int,
+    operator_role: str,
+    remark: str | None = None,
+):
+    """后台处理对接时写入状态事件。"""
+    cur.execute(
+        """
+        INSERT INTO cooperation_event
+            (
+                intent_id,
+                event_type,
+                from_status,
+                to_status,
+                operator_user_id,
+                operator_role,
+                remark
+            )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            intent_id,
+            event_type,
+            from_status,
+            to_status,
+            operator_user_id,
+            operator_role,
+            remark,
+        ),
+    )
+
+
+def _can_review_cooperation(scope: dict, row: dict) -> bool:
+    """
+    对接审核权限：
+
+    - 平台管理员：admin，可处理全部 pending 对接；
+    - 机构管理员：仅可处理“目标内容属于自己机构”的 pending 对接；
+    - 发起方机构管理员仅能看，不可接受自己发起的申请。
+    """
+    if row["status"] != "pending":
+        return False
+
+    if scope.get("isPlatformAdmin"):
+        return True
+
+    target_org_id = row.get("target_org_id")
+    scope_org_id = scope.get("orgId")
+
+    return (
+        target_org_id is not None
+        and scope_org_id is not None
+        and int(target_org_id) == int(scope_org_id)
+    )
+
+
+def admin_review_cooperation(
+    scope: dict,
+    intent_id: int,
+    body: dict,
+    action: str,
+    request_id=None,
+) -> dict:
+    """
+    后台处理对接申请。
+
+    action:
+    - accept：pending -> accepted
+    - reject：pending -> rejected
+
+    不修改小程序已有的 accept/reject 状态机；
+    此函数仅为 admin / org_admin 后台提供处理入口。
+    """
+    if action not in ("accept", "reject"):
+        raise bad_request("对接处理动作只能是 accept 或 reject")
+
+    version = body.get("version")
+    if not isinstance(version, int) or version < 1:
+        raise bad_request("处理对接必须携带正整数 version")
+
+    reason = (body.get("reason") or "").strip()
+    if action == "reject" and not reason:
+        raise bad_request("驳回对接必须填写 reason")
+
+    to_status = "accepted" if action == "accept" else "rejected"
+    timestamp_column = "accepted_at" if action == "accept" else "closed_at"
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            SELECT
+                ci.id,
+                ci.initiator_user_id,
+                ci.target_type,
+                ci.target_id,
+                ci.target_owner_user_id,
+                ci.status,
+                ci.version,
+                COALESCE(d.org_id, a.org_id) AS target_org_id
+            FROM cooperation_intent ci
+            LEFT JOIN demand d
+                ON ci.target_type = 'demand'
+               AND ci.target_id = d.id
+            LEFT JOIN achievement a
+                ON ci.target_type = 'achievement'
+               AND ci.target_id = a.id
+            WHERE ci.id = %s
+            FOR UPDATE OF ci
+            """,
+            (intent_id,),
+        )
+        row = cur.fetchone()
+
+        if not row:
+            raise coop_not_found()
+
+        if not _can_review_cooperation(scope, row):
+            raise coop_forbidden("无权处理该对接申请")
+
+        if row["status"] != "pending":
+            raise coop_conflict("只有待处理的对接申请可以接受或驳回")
+
+        cur.execute(
+            f"""
+            UPDATE cooperation_intent
+            SET
+                status = %s,
+                version = version + 1,
+                {timestamp_column} = NOW()
+            WHERE id = %s
+              AND version = %s
+            """,
+            (to_status, intent_id, version),
+        )
+
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+
+        operator_role = (
+            "admin"
+            if scope.get("isPlatformAdmin")
+            else "org_admin"
+        )
+
+        _insert_admin_cooperation_event(
+            cur,
+            intent_id=intent_id,
+            event_type="accepted" if action == "accept" else "rejected",
+            from_status="pending",
+            to_status=to_status,
+            operator_user_id=scope["userId"],
+            operator_role=operator_role,
+            remark=reason or None,
+        )
+
+        # 接受某条对接后，同一目标的其他待处理对接自动驳回。
+        # 与小程序原有 accept 行为保持一致。
+        if action == "accept":
+            cur.execute(
+                """
+                SELECT id
+                FROM cooperation_intent
+                WHERE target_type = %s
+                  AND target_id = %s
+                  AND status = 'pending'
+                  AND id <> %s
+                FOR UPDATE
+                """,
+                (
+                    row["target_type"],
+                    row["target_id"],
+                    intent_id,
+                ),
+            )
+            other_pending_rows = cur.fetchall() or []
+
+            for other in other_pending_rows:
+                other_id = other["id"]
+
+                cur.execute(
+                    """
+                    UPDATE cooperation_intent
+                    SET
+                        status = 'rejected',
+                        version = version + 1,
+                        closed_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (other_id,),
+                )
+
+                _insert_admin_cooperation_event(
+                    cur,
+                    intent_id=other_id,
+                    event_type="auto_rejected",
+                    from_status="pending",
+                    to_status="rejected",
+                    operator_user_id=scope["userId"],
+                    operator_role="system",
+                    remark="目标内容已接受其他对接申请",
+                )
+
+        audit_record(
+            f"cooperation.admin_{action}",
+            "cooperation_intent",
+            resource_id=intent_id,
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
+            details={
+                "from": "pending",
+                "to": to_status,
+                "targetType": row["target_type"],
+                "targetId": row["target_id"],
+                "targetOrgId": row.get("target_org_id"),
+                "reason": reason or None,
+            },
+            request_id=request_id,
+            cur=cur,
+        )
+
+    return get_cooperation_admin(intent_id, scope)
 
 
 # ── P0-5 成果/需求全量管理列表（后台管理页数据源，任意状态可读） ──
@@ -1205,7 +1464,7 @@ def _user_admin_item(r):
     }
 
 
-def list_users_admin(args) -> dict:
+def list_users_admin(args, scope: dict) -> dict:
     """GET /admin/users —— 只读列表：keyword（user_no/display_name/org_name）+ status。"""
     page, page_size = _page_args(args)
     status = (args.get("status") or "").strip().lower()
@@ -1213,6 +1472,9 @@ def list_users_admin(args) -> dict:
 
     where = ["u.deleted_at IS NULL"]
     params = []
+    if not scope.get("isPlatformAdmin"):
+        where.append("p.org_id = %s")
+        params.append(scope["orgId"])
     if status:
         where.append("u.status = %s")
         params.append(status)
@@ -1234,10 +1496,15 @@ def list_users_admin(args) -> dict:
     return _page_of(rows, page, page_size, total, _user_admin_item)
 
 
-def get_user_admin(user_id: int) -> dict:
+def get_user_admin(user_id: int, scope: dict) -> dict:
     """GET /admin/users/{id} —— 用户 + profile + roles + 低成本统计（4 个 COUNT 子查询）。"""
     with get_cursor() as cur:
-        cur.execute(_USER_LIST_SQL + " WHERE u.id = %s AND u.deleted_at IS NULL", (user_id,))
+        where = ["u.id = %s", "u.deleted_at IS NULL"]
+        params = [user_id]
+        if not scope.get("isPlatformAdmin"):
+            where.append("p.org_id = %s")
+            params.append(scope["orgId"])
+        cur.execute(_USER_LIST_SQL + " WHERE " + " AND ".join(where), params)
         row = cur.fetchone()
         if not row:
             raise not_found("用户不存在")
@@ -1330,6 +1597,44 @@ def _content_write_context(cur, scope: dict, body: dict, fields: dict) -> tuple[
     )
     return org_id, owner_user_id, actor_user_id
 
+def _resolve_admin_save_action(
+    scope: dict,
+    body: dict,
+    *,
+    is_create: bool,
+) -> tuple[str | None, str | None]:
+    """
+    返回：
+    - save_action：draft / submit / publish / None
+    - target_status：draft / pending_review / published / None
+
+    新增接口未传 saveAction 时，为兼容旧前端，默认保存草稿。
+    编辑接口未传 saveAction 时，仅更新内容，不改状态。
+    """
+    raw_action = body.get("saveAction")
+
+    if raw_action is None or not str(raw_action).strip():
+        return ("draft", "draft") if is_create else (None, None)
+
+    save_action = str(raw_action).strip().lower()
+
+    if scope.get("isPlatformAdmin"):
+        action_to_status = {
+            "draft": "draft",
+            "publish": "published",
+        }
+        if save_action not in action_to_status:
+            raise bad_request("平台管理员 saveAction 只能是 draft 或 publish")
+        return save_action, action_to_status[save_action]
+
+    # backend_identity 已保证这里是有效 org_admin。
+    action_to_status = {
+        "draft": "draft",
+        "submit": "pending_review",
+    }
+    if save_action not in action_to_status:
+        raise forbidden("机构管理员只能保存草稿或提交审核")
+    return save_action, action_to_status[save_action]
 
 def create_achievement_admin(
     scope: dict,
@@ -1344,6 +1649,12 @@ def create_achievement_admin(
     录入人 created_by_user_id 恒为当前管理员。
     """
     fields, inventor_refs = _parse_upsert_body(body, partial=False)
+
+    save_action, target_status = _resolve_admin_save_action(
+        scope,
+        body,
+        is_create=True,
+    )
 
     # 机构管理员不可指定或伪造机构名称、机构 ID。
     if not scope.get("isPlatformAdmin"):
@@ -1424,6 +1735,23 @@ def create_achievement_admin(
         )
         ach_id = cur.fetchone()["id"]
 
+        # 新增时先统一落 draft；同一个事务内再按动作切换状态，
+        # 外部不会看到中间状态。
+        if target_status != "draft":
+            cur.execute(
+                """
+                UPDATE achievement
+                SET status = %s,
+                    published_at = CASE
+                        WHEN %s = 'published' THEN NOW()
+                        ELSE NULL
+                    END,
+                    reject_reason = NULL
+                WHERE id = %s
+                """,
+                (target_status, target_status, ach_id),
+            )
+
         if inventor_refs:
             _sync_inventors(cur, ach_id, inventor_refs)
 
@@ -1438,7 +1766,8 @@ def create_achievement_admin(
                 "title": fields.get("title"),
                 "ownerUserId": owner_user_id,
                 "platformAssisted": owner_user_id is None,
-                "status": "draft",
+                "saveAction": save_action,
+                "status": target_status,
             },
             request_id=request_id,
             cur=cur,
@@ -1461,6 +1790,12 @@ def update_achievement_admin(
     """
     fields, inventor_refs = _parse_upsert_body(body, partial=True)
 
+    save_action, target_status = _resolve_admin_save_action(
+        scope,
+        body,
+        is_create=False,
+    )
+
     # 机构管理员不能通过编辑把成果迁移到其他机构，
     # 也不能伪造来源机构名称。
     if not scope.get("isPlatformAdmin"):
@@ -1471,7 +1806,7 @@ def update_achievement_admin(
     if not isinstance(version, int) or version < 1:
         raise bad_request("编辑成果必须携带正整数 version")
 
-    if not fields and inventor_refs is None:
+    if not fields and inventor_refs is None and target_status is None:
         raise bad_request("没有可更新的成果字段")
 
     with get_cursor(commit=True) as cur:
@@ -1484,7 +1819,7 @@ def update_achievement_admin(
 
         cur.execute(
             f"""
-            SELECT id, version, price_min_wan, price_max_wan
+            SELECT id, version, status, price_min_wan, price_max_wan
             FROM achievement
             WHERE {" AND ".join(where)}
             """,
@@ -1506,6 +1841,29 @@ def update_achievement_admin(
                 raise bad_request("priceMinWan 不能大于 priceMaxWan")
 
         set_clauses = [f"{column}=%s" for column in fields]
+        set_values = list(fields.values())
+
+        if target_status is not None:
+            # 机构管理员只能把草稿或已驳回内容送审。
+            if (
+                target_status == "pending_review"
+                and current["status"] not in ("draft", "rejected")
+            ):
+                raise bad_request("只有草稿或已驳回的成果可以提交审核")
+
+            set_clauses.append("status=%s")
+            set_values.append(target_status)
+
+            if target_status == "published":
+                set_clauses.append("published_at=NOW()")
+                set_clauses.append("reject_reason=NULL")
+            elif target_status == "pending_review":
+                set_clauses.append("published_at=NULL")
+                set_clauses.append("reject_reason=NULL")
+            else:
+                # 保存草稿时不应保留历史发布时间。
+                set_clauses.append("published_at=NULL")
+
         set_clauses.append("version=version+1")
 
         update_where = [
@@ -1513,7 +1871,7 @@ def update_achievement_admin(
             "version = %s",
             "deleted_at IS NULL",
         ]
-        update_params = list(fields.values()) + [ach_id, version]
+        update_params = set_values + [ach_id, version]
 
         if not scope.get("isPlatformAdmin"):
             update_where.append("org_id = %s")
@@ -1541,7 +1899,11 @@ def update_achievement_admin(
             resource_id=ach_id,
             actor_user_id=scope["userId"],
             actor_user_no=scope.get("userNo", ""),
-            details={"updatedFields": list(fields.keys())},
+            details={
+                "updatedFields": list(fields.keys()),
+                "saveAction": save_action,
+                "status": target_status or current["status"],
+            },
             request_id=request_id,
             cur=cur,
         )
@@ -1563,6 +1925,12 @@ def create_demand_admin(
     录入人 created_by_user_id 恒为当前管理员。
     """
     fields, tags = _parse_demand_upsert_body(body, partial=False)
+
+    save_action, target_status = _resolve_admin_save_action(
+        scope,
+        body,
+        is_create=True,
+    )
 
     # 机构管理员不能通过旧字段 orgName / orgIntro 自动创建或改绑机构。
     if not scope.get("isPlatformAdmin"):
@@ -1644,6 +2012,21 @@ def create_demand_admin(
         )
         demand_id = cur.fetchone()["id"]
 
+        if target_status != "draft":
+            cur.execute(
+                """
+                UPDATE demand
+                SET status = %s,
+                    published_at = CASE
+                        WHEN %s = 'published' THEN NOW()
+                        ELSE NULL
+                    END,
+                    reject_reason = NULL
+                WHERE id = %s
+                """,
+                (target_status, target_status, demand_id),
+            )
+
         if tags is not None:
             _sync_demand_tags(cur, demand_id, tags)
 
@@ -1657,7 +2040,8 @@ def create_demand_admin(
                 "title": fields.get("title"),
                 "ownerUserId": owner_user_id,
                 "platformAssisted": owner_user_id is None,
-                "status": "draft",
+                "saveAction": save_action,
+                "status": target_status,
             },
             request_id=request_id,
             cur=cur,
@@ -1680,6 +2064,12 @@ def update_demand_admin(
     """
     fields, tags = _parse_demand_upsert_body(body, partial=True)
 
+    save_action, target_status = _resolve_admin_save_action(
+        scope,
+        body,
+        is_create=False,
+    )
+
     if not scope.get("isPlatformAdmin"):
         fields.pop("org_id", None)
         fields.pop("org_name", None)
@@ -1689,7 +2079,7 @@ def update_demand_admin(
     if not isinstance(version, int) or version < 1:
         raise bad_request("编辑需求必须携带正整数 version")
 
-    if not fields and tags is None:
+    if not fields and tags is None and target_status is None:
         raise bad_request("没有可更新的需求字段")
 
     with get_cursor(commit=True) as cur:
@@ -1702,7 +2092,7 @@ def update_demand_admin(
 
         cur.execute(
             f"""
-            SELECT id, version, budget_min_wan, budget_max_wan
+            SELECT id, version, status, budget_min_wan, budget_max_wan
             FROM demand
             WHERE {" AND ".join(where)}
             """,
@@ -1726,6 +2116,27 @@ def update_demand_admin(
                 raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
 
         set_clauses = [f"{column}=%s" for column in fields]
+        set_values = list(fields.values())
+
+        if target_status is not None:
+            if (
+                target_status == "pending_review"
+                and current["status"] not in ("draft", "rejected")
+            ):
+                raise bad_request("只有草稿或已驳回的需求可以提交审核")
+
+            set_clauses.append("status=%s")
+            set_values.append(target_status)
+
+            if target_status == "published":
+                set_clauses.append("published_at=NOW()")
+                set_clauses.append("reject_reason=NULL")
+            elif target_status == "pending_review":
+                set_clauses.append("published_at=NULL")
+                set_clauses.append("reject_reason=NULL")
+            else:
+                set_clauses.append("published_at=NULL")
+
         set_clauses.append("version=version+1")
 
         update_where = [
@@ -1733,7 +2144,7 @@ def update_demand_admin(
             "version = %s",
             "deleted_at IS NULL",
         ]
-        update_params = list(fields.values()) + [demand_id, version]
+        update_params = set_values + [demand_id, version]
 
         if not scope.get("isPlatformAdmin"):
             update_where.append("org_id = %s")
@@ -1761,6 +2172,11 @@ def update_demand_admin(
             resource_id=demand_id,
             actor_user_id=scope["userId"],
             actor_user_no=scope.get("userNo", ""),
+            details={
+                "updatedFields": list(fields.keys()),
+                "saveAction": save_action,
+                "status": target_status or current["status"],
+            },
             request_id=request_id,
             cur=cur,
         )

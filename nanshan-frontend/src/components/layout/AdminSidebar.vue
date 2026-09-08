@@ -1,5 +1,7 @@
 <script setup>
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { getSavedUser } from '../../api/client'
 
 defineProps({
   collapsed: {
@@ -12,6 +14,16 @@ const emit = defineEmits(['toggle'])
 
 const route = useRoute()
 const router = useRouter()
+const isOrgAdminOnly = computed(() => {
+  const roles = getSavedUser()?.roles || []
+  return roles.includes('org_admin') && !roles.includes('admin')
+})
+const orgAdminPaths = new Set([
+  '/admin/achievements',
+  '/admin/requirements',
+  '/admin/cooperation',
+  '/admin/users',
+])
 
 const menuList = [
   {
@@ -71,6 +83,12 @@ const menuList = [
   }
 ]
 
+const visibleMenuList = computed(() => (
+  isOrgAdminOnly.value
+    ? menuList.filter(item => orgAdminPaths.has(item.path))
+    : menuList
+))
+
 const goPage = (path) => {
   router.push(path)
 }
@@ -107,7 +125,7 @@ const isActive = (path) => {
 
     <nav class="menu">
       <button
-        v-for="item in menuList"
+        v-for="item in visibleMenuList"
         :key="item.path"
         type="button"
         class="menu-item"

@@ -27,8 +27,12 @@ const handleLogin = async () => {
   errorMsg.value = ''
 
   try {
-    await authStore.login(form.username.trim(), form.password)
-    router.push(route.query.redirect || '/admin/overview')
+    const user = await authStore.login(form.username.trim(), form.password)
+    const roles = user.roles || []
+    const defaultPath = roles.includes('org_admin') && !roles.includes('admin')
+      ? '/admin/achievements'
+      : '/admin/overview'
+    router.push(route.query.redirect || defaultPath)
   } catch (err) {
     errorMsg.value = err.message || '登录失败，请稍后再试'
   } finally {

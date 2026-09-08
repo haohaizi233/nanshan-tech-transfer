@@ -10,7 +10,7 @@ Institution Create/Update 使用 Pydantic Schema（§21）；
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from core.middleware import admin_identity, json_body
+from core.middleware import admin_identity, backend_identity, json_body
 from core.response import success, get_request_id
 from modules.admin.schemas import InstitutionCreateRequest, InstitutionUpdateRequest
 from modules.admin.service import (
@@ -23,6 +23,7 @@ from modules.admin.service import (
     set_institution_status,
     list_cooperations_admin,
     get_cooperation_admin,
+    admin_review_cooperation,
     list_users_admin,
     get_user_admin,
 )
@@ -141,14 +142,44 @@ def admin_institutions_offline(institution_id: int, admin: dict = Depends(admin_
 # ── admin-cooperations（只读 + 平台协助运营操作） ─────────────
 
 @router.get("/admin/cooperations", tags=["admin-cooperations"])
-def admin_cooperations_list(request: Request, admin: dict = Depends(admin_identity)):
-    return success(list_cooperations_admin(request.query_params))
+def admin_cooperations_list(request: Request, scope: dict = Depends(backend_identity)):
+    return success(list_cooperations_admin(request.query_params, scope))
 
 
 @router.get("/admin/cooperations/{intent_id}", tags=["admin-cooperations"])
-def admin_cooperations_detail(intent_id: int, admin: dict = Depends(admin_identity)):
-    return success(get_cooperation_admin(intent_id))
+def admin_cooperations_detail(intent_id: int, scope: dict = Depends(backend_identity)):
+    return success(get_cooperation_admin(intent_id, scope))
 
+@router.post("/admin/cooperations/{intent_id}/accept", tags=["admin-cooperations"])
+def admin_cooperations_accept(
+    intent_id: int,
+    body: dict = Depends(json_body),
+    scope: dict = Depends(backend_identity),
+):
+    result = admin_review_cooperation(
+        scope,
+        intent_id,
+        body,
+        action="accept",
+        request_id=get_request_id(),
+    )
+    return success(result, "对接申请已接受")
+
+
+@router.post("/admin/cooperations/{intent_id}/reject", tags=["admin-cooperations"])
+def admin_cooperations_reject(
+    intent_id: int,
+    body: dict = Depends(json_body),
+    scope: dict = Depends(backend_identity),
+):
+    result = admin_review_cooperation(
+        scope,
+        intent_id,
+        body,
+        action="reject",
+        request_id=get_request_id(),
+    )
+    return success(result, "对接申请已驳回")
 
 @router.post("/admin/cooperations/{intent_id}/assist-status", tags=["admin-cooperations"])
 def admin_cooperation_assist_status(
@@ -173,10 +204,10 @@ def admin_cooperation_assist_transition(
 # ── admin-users（READ ONLY，禁用/启用为 P1） ─────────────────
 
 @router.get("/admin/users", tags=["admin-users"])
-def admin_users_list(request: Request, admin: dict = Depends(admin_identity)):
-    return success(list_users_admin(request.query_params))
+def admin_users_list(request: Request, scope: dict = Depends(backend_identity)):
+    return success(list_users_admin(request.query_params, scope))
 
 
 @router.get("/admin/users/{user_id}", tags=["admin-users"])
-def admin_users_detail(user_id: int, admin: dict = Depends(admin_identity)):
-    return success(get_user_admin(user_id))
+def admin_users_detail(user_id: int, scope: dict = Depends(backend_identity)):
+    return success(get_user_admin(user_id, scope))

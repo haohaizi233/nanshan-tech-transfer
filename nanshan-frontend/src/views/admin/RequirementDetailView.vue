@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../../api/client'
+import { api, getSavedUser } from '../../api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -9,6 +9,7 @@ const router = useRouter()
 const loading = ref(false)
 const loadError = ref('')
 const detail = ref(null)
+const isPlatformAdmin = computed(() => (getSavedUser()?.roles || []).includes('admin'))
 
 const submitting = ref(false)
 const actionError = ref('')
@@ -276,7 +277,7 @@ const submitReject = async () => {
       <section class="action-bar">
 
         <div class="action-buttons">
-          <template v-if="detail.status === 'pending_review'">
+          <template v-if="isPlatformAdmin && detail.status === 'pending_review'">
             <button class="approve-btn" :disabled="submitting" @click="approve">
               {{ submitting ? '提交中…' : '✓ 审核通过' }}
             </button>

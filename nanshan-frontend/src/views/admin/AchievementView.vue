@@ -326,7 +326,7 @@ const openEdit = async item => {
   }
 }
 
-const saveAchievement = async () => {
+const saveAchievement = async (saveAction = 'draft') => {
   if (formMode.value === 'create' && (!achievementForm.categoryId || !achievementForm.orgId || !achievementForm.ownerUserId)) {
     formError.value = '请依次选择分类、所属机构和归属用户'
     return
@@ -338,7 +338,7 @@ const saveAchievement = async () => {
   formSaving.value = true
   formError.value = ''
   try {
-    const body = { title: achievementForm.title.trim(), maturityLevel: achievementForm.maturityLevel, pricingMode: achievementForm.pricingMode }
+    const body = { title: achievementForm.title.trim(), maturityLevel: achievementForm.maturityLevel, pricingMode: achievementForm.pricingMode, saveAction }
     const optionalTextFields = {
       sourceOrgName: achievementForm.sourceOrgName, techIntro: achievementForm.techIntro,
       techRoute: achievementForm.techRoute, maturityDesc: achievementForm.maturityDesc,
@@ -957,7 +957,12 @@ onMounted(() => {
             <p v-if="formError" class="audit-error">{{ formError }}</p>
           </template>
         </div>
-        <div class="modal-footer"><button type="button" class="default-button" :disabled="formSaving" @click="formVisible = false">取消</button><button type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement">{{ formSaving ? '保存中…' : '保存' }}</button></div>
+        <div class="modal-footer">
+          <button type="button" class="default-button" :disabled="formSaving" @click="formVisible = false">取消</button>
+          <button type="button" class="default-button" :disabled="formLoading || formSaving" @click="saveAchievement('draft')">{{ formSaving ? '保存中…' : '保存草稿' }}</button>
+          <button v-if="isPlatformAdmin" type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement('publish')">{{ formSaving ? '保存中…' : '直接发布' }}</button>
+          <button v-else type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement('submit')">{{ formSaving ? '保存中…' : '提交审核' }}</button>
+        </div>
       </div>
     </div>
 
