@@ -531,8 +531,6 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
         profile = cur.fetchone()
         if profile and profile.get("org_id") is not None:
             fields["org_id"] = profile["org_id"]
-        if "org_id" in fields:
-            assert_active_membership(cur, user_id, fields["org_id"])
         _validate_refs(cur, fields)
         cur.execute(
             """
