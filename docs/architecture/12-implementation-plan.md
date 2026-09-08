@@ -96,44 +96,45 @@
 
 ---
 
-## Phase B — Core Domain Migration（进行中）
+## Phase B — Core Domain Migration（✅ 已完成 2026-09-08，收口报告见文档 17）
 
 | 链路 | 模块 | 前置 | 工作量 | 状态 |
 |------|------|------|--------|------|
 | 需求 CRUD | demand | 建表 + service + router + 前端迁移 | 大 | ✅ 已完成（2026-09-03，见文档 16） |
 | 收藏 | favorite | 建表 + service + router | 小 | ✅ 已完成（2026-09-03，迁移 005 + /me/favorites + 幂等 PUT/DELETE，前端 index/dock-detail/my-list/mine 已接入） |
 | 对接 | cooperation | 建表 + 状态机 + 四角色权限 | 大 | ✅ 已完成（2026-09-03，迁移 005 + 五操作状态机 + 乐观锁 + accept 自动拒绝/confirm 需求转 matched 副作用，前端 dock-detail/my-list/mine 已接入，78 项断言 + 成果目标冒烟 13/13） |
-| 搜索统一 | search | 抽离 achievement 搜索 | 中 | 待办 |
-| Mock 清除 | — | 删除 mock-data.js, user.js | 中 | 需求/收藏/意向部分已清除；成果发布与 AI 部分待 Phase C |
-| 资本迁移 | capital | nanshan_capital → tech_transfer | 中 | 待办 |
-| 主包 HostBridge | — | common/*.js 改用 HostBridge | 中 | 待办（已抽出 common/api-core.js 共享请求基础设施，为 HostBridge 切换收敛入口） |
-| packageA 迁移 | — | 7 页迁移到 tech-transfer | 大 | 需求/收藏/意向相关 5 页已迁移（index/dock-detail/my-list/mine/search）；成果发布 2 页待 Phase C |
+| 搜索统一 | search | 抽离 achievement 搜索 | 中 | ✅ 已完成（2026-09-08，GET /search 双类型聚合 + test_search_api 32 项，见文档 17） |
+| Mock 清除 | — | 删除 mock-data.js, user.js | 中 | ✅ 已完成（2026-09-08，common/ 全目录 12 文件删除，AI 假回复/假评分/成果本地写入全清，见文档 17） |
+| 资本迁移 | capital | nanshan_capital → tech_transfer | 中 | ✅ 已完成（2026-09-08，统一 /institutions（kind=platform/invest/service），legacy 三组接口与演示数据分支废弃，见文档 17） |
+| 主包 HostBridge | — | common/*.js 改用 HostBridge | 中 | ✅ 已完成（2026-09-08，分包 api/client.js 全量经 HostBridge.request，主包 common/ 删除，架构门 12 处越包引用全为 host-bridge.js，见文档 17） |
+| packageA 迁移 | — | 7 页迁移到 tech-transfer | 大 | ✅ 已完成（2026-09-08，packageA 10 页 + 主包 4 业务页全量迁入分包 16 页，packageA 目录删除，主包仅剩 dev-home + mine-home 壳页，见文档 17） |
 
 ---
 
-## Phase C — AI Capability（本轮仅规划）
+## Phase C — AI Capability（✅ 非模型边界已交付 2026-09-08，见文档 17）
 
-| 接口 | 模块 | 依赖 |
-|------|------|------|
-| POST /ai/match-tasks | ai | demand + achievement 数据 |
-| GET /ai/match-tasks/{id} | ai | 任务状态机 |
-| POST /ai/evaluation-tasks | ai | achievement 数据 |
-| GET /ai/evaluation-tasks/{id} | ai | 任务状态机 |
+| 接口 | 模块 | 依赖 | 状态 |
+|------|------|------|------|
+| POST /ai/match-tasks | ai | demand + achievement 数据 | ✅ 已交付 |
+| GET /ai/match-tasks/{id} | ai | 任务状态机 | ✅ 已交付 |
+| POST /ai/evaluation-tasks | ai | achievement 数据 | ✅ 已交付（迁移 013 + owner/状态校验 + 10 分钟去重 + 限流共享，36 项断言） |
+| GET /ai/evaluation-tasks/{id} | ai | 任务状态机 | ✅ 已交付（类型隔离 + 内嵌 evaluation） |
 
-**关键约束**：AiProvider 未配置时返回 `TT_AI_50301`，禁止假数据。
+**关键约束**：AiProvider 未配置时返回 `TT_AI_50301`，禁止假数据。  
+**非模型边界（2026-09-08）**：任务基础设施（状态机 queued/running/succeeded/failed、去重、限流、审计）+ 前端全链路（ai-match 任务制、ai-eval-detail 轮询展示、post-result 发起评估）已交付；**AI worker（真实模型调用）待 AiProvider 配置**，无 worker 时任务保持 queued、ai_evaluation 表恒空（测试显式断言零假数据）。
 
 ---
 
-## Phase D — Host Integration（本轮仅规划）
+## Phase D — Host Integration（example + 契约测试已交付 2026-09-08，真实 adapter 待协议确认）
 
 | 依赖项 | 来源 | 状态 |
 |--------|------|------|
-| C-01 上级认证协议 | 08 文档 | 已索取 |
-| C-03 上级路由协议 | 08 文档 | 已索取 |
+| C-01 上级认证协议 | 08 文档 | 已索取未确认 |
+| C-03 上级路由协议 | 08 文档 | 已索取未确认 |
 | C-07 包合并方式 | 08 文档 | 待确认 |
-| C-08 网关部署 | 08 文档 | 已索取 |
-| AiNanshanAdapter | 03 文档 | 待实现 |
-| AiNanshanIdentityProvider | ADR-002 | 待实现 |
+| C-08 网关部署 | 08 文档 | 已索取未确认 |
+| AiNanshanAdapter | 03 文档 | ✅ example 骨架 + 契约测试已交付（`host/ainanshan-adapter.example.js` 9 方法签名 + 未确认协议标注；`tests/host-bridge.test.mjs` 23 项含 Mock AiNanshan 同组断言）；真实 adapter 待 C-01/03/07/08 |
+| AiNanshanIdentityProvider | ADR-002 | 待实现（随真实 adapter） |
 
 ---
 
