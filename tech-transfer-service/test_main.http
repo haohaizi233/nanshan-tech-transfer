@@ -118,6 +118,26 @@ Content-Type: application/json
   "password": "Test@2026"
 }
 
+###
+
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "admin",
+  "password": "Admin@2026"
+}
+
+###
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "lisi",
+  "password": "lisilisi"
+}
+
 ###     然后请求待审核列表：
 GET http://127.0.0.1:8787/api/tech-transfer/v1/admin/institution-registrations?registrationStatus=pending
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMiIsInVzZXJObyI6IkFETUlOQURNSU4iLCJyb2xlcyI6WyJhZG1pbiJdLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzg4NzUyODkxLCJleHAiOjE3ODg3NjAwOTF9.OQFj6tZE8W0u_rcn00O5K0rEAAeANiC9HvFnfud3mEk
@@ -182,18 +202,75 @@ Content-Type: application/json
   "sourceOrgName": "伪造机构"
 }
 
+###     张三登录
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
 
-###
+{
+  "username": "zhangsan",
+  "password": "Test@2026"
+}
+
+###     管理员登录
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "admin",
+  "password": "Admin@2026"
+}
+
+###     李四登录
+POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "lisi",
+  "password": "lisilisi"
+}
+
+###     张三发起对郑大芯片成果的对接
+POST http://127.0.0.1:8787/api/tech-transfer/v1/cooperations
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4NDczNTcsImV4cCI6MTc4ODg1NDU1N30.-tY-3_zgB3MqCI6bFG4jKgsrJODrKz3VtzpCt8m2EUU
+Content-Type: application/json
+
+{
+  "targetType": "achievement",
+  "targetId": 314,
+  "message": "我们有医药需求，希望进一步了解郑大医药成果的技术参数、合作方式与交付周期。"
+}
 
 
+###     李四所属机构管理员接受
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/cooperations/316/accept
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MSIsInVzZXJObyI6IlUyMDI2MDAwNTgiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4MzUwNDEsImV4cCI6MTc4ODg0MjI0MX0._kG8-higFDguRl4OvBKX4BUDiB6ktT7HvRmnn6cgU8Y
+Content-Type: application/json
 
-###
+{
+  "version": 1
+}
 
 
+###     测试驳回
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/cooperations/317/reject
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MSIsInVzZXJObyI6IlUyMDI2MDAwNTgiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4MzUwNDEsImV4cCI6MTc4ODg0MjI0MX0._kG8-higFDguRl4OvBKX4BUDiB6ktT7HvRmnn6cgU8Y
+Content-Type: application/json
 
-###
+{
+  "version": 1,
+  "reason": "当前成果暂不开放该合作方向。"
+}
 
+###     张三权限测试
+POST http://127.0.0.1:8787/api/tech-transfer/v1/admin/cooperations/317/reject
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1OCIsInVzZXJObyI6IlUyMDI2MDAwNTUiLCJyb2xlcyI6WyJ1c2VyIiwib3JnX2FkbWluIl0sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODg4MzQzODYsImV4cCI6MTc4ODg0MTU4Nn0.f0-84UmT5Y1tnb3xHzkkG1eTdiH6SuMFYHue-GB_Shc
+Content-Type: application/json
 
+{
+  "version": 1,
+  "reason": "当前成果暂不开放该合作方向。"
+}
 
 ###
 

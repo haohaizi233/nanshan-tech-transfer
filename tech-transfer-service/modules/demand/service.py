@@ -434,6 +434,12 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
 
     with get_cursor(commit=True) as cur:
         _resolve_name_refs(cur, fields)
+        # 已绑定机构的普通用户发布内容时，机构归属只能取本人 profile.org_id。
+        # 不信任请求体中的 orgId / orgName，避免内容与归属用户的机构不一致。
+        cur.execute("SELECT org_id FROM user_profile WHERE user_id=%s", (user_id,))
+        profile = cur.fetchone()
+        if profile and profile.get("org_id") is not None:
+            fields["org_id"] = profile["org_id"]
         _validate_refs(cur, fields)
         cur.execute(
             """

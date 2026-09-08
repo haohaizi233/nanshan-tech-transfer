@@ -186,12 +186,12 @@ const openEdit = async item => {
   resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formError.value = ''; formLoading.value = true; formVisible.value = true
   try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
 }
-const saveDemand = async () => {
+const saveDemand = async (saveAction = 'draft') => {
   if (formMode.value === 'create' && (!demandForm.categoryId || !demandForm.orgId || !demandForm.ownerUserId)) { formError.value = '请依次选择分类、所属机构和归属用户'; return }
   if (!demandForm.title.trim() || !demandForm.description.trim()) { formError.value = '请填写需求标题和需求描述'; return }
   formSaving.value = true; formError.value = ''
   try {
-    const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable }
+    const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable, saveAction }
     if (demandForm.categoryId) body.categoryId = Number(demandForm.categoryId)
     if (isPlatformAdmin.value && demandForm.orgId) body.orgId = Number(demandForm.orgId)
     if (isPlatformAdmin.value && demandForm.ownerUserId) body.ownerUserId = Number(demandForm.ownerUserId)
@@ -554,7 +554,12 @@ const submitReject = async () => {
             <p v-if="formError" class="error-text">{{ formError }}</p>
           </template>
         </div>
-        <div class="modal-footer"><button class="plain-btn" :disabled="formSaving" @click="formVisible = false">取消</button><button class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand">{{ formSaving ? '保存中…' : '保存' }}</button></div>
+        <div class="modal-footer">
+          <button class="plain-btn" :disabled="formSaving" @click="formVisible = false">取消</button>
+          <button class="plain-btn" :disabled="formLoading || formSaving" @click="saveDemand('draft')">{{ formSaving ? '保存中…' : '保存草稿' }}</button>
+          <button v-if="isPlatformAdmin" class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand('publish')">{{ formSaving ? '保存中…' : '直接发布' }}</button>
+          <button v-else class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand('submit')">{{ formSaving ? '保存中…' : '提交审核' }}</button>
+        </div>
       </div>
     </div>
 

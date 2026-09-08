@@ -38,6 +38,10 @@ const TYPE_META = {
 const loading = ref(false)
 const loadError = ref('')
 const detail = ref(null)
+const reviewing = ref(false)
+const reviewError = ref('')
+const rejectVisible = ref(false)
+const rejectReason = ref('')
 
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
@@ -63,6 +67,59 @@ onMounted(fetchDetail)
 
 const goBack = () => {
   router.push('/admin/cooperation')
+}
+
+const acceptCooperation = async () => {
+  if (!detail.value || reviewing.value) return
+  if (!window.confirm('确认接受该对接申请吗？')) return
+
+  reviewing.value = true
+  reviewError.value = ''
+  try {
+    detail.value = await api(`/admin/cooperations/${detail.value.id}/accept`, {
+      method: 'POST',
+      body: { version: detail.value.version }
+    })
+  } catch (err) {
+    reviewError.value = err.message || '接受对接失败'
+  } finally {
+    reviewing.value = false
+  }
+}
+
+const openReject = () => {
+  rejectReason.value = ''
+  reviewError.value = ''
+  rejectVisible.value = true
+}
+
+const closeReject = () => {
+  if (!reviewing.value) rejectVisible.value = false
+}
+
+const rejectCooperation = async () => {
+  if (!detail.value || reviewing.value) return
+  if (!rejectReason.value.trim()) {
+    reviewError.value = '请填写驳回原因'
+    return
+  }
+
+  reviewing.value = true
+  reviewError.value = ''
+  try {
+    detail.value = await api(`/admin/cooperations/${detail.value.id}/reject`, {
+      method: 'POST',
+      body: {
+        version: detail.value.version,
+        reason: rejectReason.value.trim()
+      }
+    })
+    rejectVisible.value = false
+  } catch (err) {
+    reviewError.value = err.message || '驳回对接失败'
+  } finally {
+    reviewing.value = false
+  }
 }
 
 const initiatorText = computed(() => {
@@ -412,6 +469,24 @@ const operatorText = event => {
       <section class="bottom-actions">
 
         <button
+          v-if="detail.canReview"
+          class="accept-btn"
+          :disabled="reviewing"
+          @click="acceptCooperation"
+        >
+          {{ reviewing ? '处理中…' : '接受对接' }}
+        </button>
+
+        <button
+          v-if="detail.canReview"
+          class="reject-btn"
+          :disabled="reviewing"
+          @click="openReject"
+        >
+          驳回对接
+        </button>
+
+        <button
           class="back-btn"
           @click="goBack"
         >
@@ -419,6 +494,67 @@ const operatorText = event => {
         </button>
 
       </section>
+
+      <p
+        v-if="reviewError && !rejectVisible"
+        class="review-error"
+      >
+        {{ reviewError }}
+      </p>
+
+      <div
+        v-if="rejectVisible"
+        class="modal-mask"
+        @click.self="closeReject"
+      >
+        <section class="reject-modal">
+          <header class="reject-modal-header">
+            <h2>驳回对接申请</h2>
+            <button
+              type="button"
+              :disabled="reviewing"
+              @click="closeReject"
+            >
+              ×
+            </button>
+          </header>
+
+          <div class="reject-modal-body">
+            <p>请填写驳回原因，系统会将它记录到对接进度中。</p>
+            <textarea
+              v-model="rejectReason"
+              maxlength="500"
+              rows="4"
+              placeholder="请输入驳回原因"
+            ></textarea>
+            <p
+              v-if="reviewError"
+              class="review-error"
+            >
+              {{ reviewError }}
+            </p>
+          </div>
+
+          <footer class="reject-modal-footer">
+            <button
+              class="back-btn"
+              type="button"
+              :disabled="reviewing"
+              @click="closeReject"
+            >
+              取消
+            </button>
+            <button
+              class="reject-btn"
+              type="button"
+              :disabled="reviewing"
+              @click="rejectCooperation"
+            >
+              {{ reviewing ? '处理中…' : '确认驳回' }}
+            </button>
+          </footer>
+        </section>
+      </div>
 
     </template>
 
@@ -759,6 +895,117 @@ const operatorText = event => {
   border: 1px solid #cfd7e1;
   background: white;
   color: #596577;
+}
+
+.accept-btn,
+.reject-btn {
+  border: 1px solid transparent;
+  color: #fff;
+}
+
+.accept-btn {
+  background: #1677ff;
+}
+
+.reject-btn {
+  background: #ef5360;
+}
+
+.bottom-actions button:disabled,
+.reject-modal button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.review-error {
+  margin: 0 0 14px;
+  color: #ef5360;
+  font-size: 13px;
+  text-align: center;
+}
+
+.modal-mask {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(20, 34, 52, 0.42);
+}
+
+.reject-modal {
+  width: min(460px, 100%);
+  overflow: hidden;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(20, 34, 52, 0.2);
+}
+
+.reject-modal-header,
+.reject-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+}
+
+.reject-modal-header {
+  border-bottom: 1px solid #edf1f5;
+}
+
+.reject-modal-header h2 {
+  margin: 0;
+  color: #253347;
+  font-size: 17px;
+}
+
+.reject-modal-header button {
+  border: 0;
+  background: transparent;
+  color: #7c8797;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.reject-modal-body {
+  padding: 20px;
+}
+
+.reject-modal-body > p:first-child {
+  margin: 0 0 10px;
+  color: #697586;
+  font-size: 13px;
+}
+
+.reject-modal textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid #cfd7e1;
+  border-radius: 6px;
+  color: #253347;
+  font: inherit;
+  line-height: 1.6;
+}
+
+.reject-modal textarea:focus {
+  border-color: #1677ff;
+  outline: none;
+}
+
+.reject-modal-footer {
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid #edf1f5;
+}
+
+.reject-modal-footer button {
+  min-width: 88px;
+  height: 36px;
+  border-radius: 5px;
 }
 
 .state-tip {

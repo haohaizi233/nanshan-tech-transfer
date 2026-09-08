@@ -3,7 +3,7 @@ import {
   createWebHistory
 } from 'vue-router'
 
-import { getToken } from '../api/client'
+import { getSavedUser, getToken } from '../api/client'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
 
@@ -23,6 +23,18 @@ import RequirementDetailView from '../views/admin/RequirementDetailView.vue'
 import CooperationView from '../views/admin/CooperationView.vue'
 
 import CooperationDetailView from '../views/admin/CooperationDetailView.vue'
+
+const isOrgAdminOnly = () => {
+  const roles = getSavedUser()?.roles || []
+  return roles.includes('org_admin') && !roles.includes('admin')
+}
+
+const orgAdminAllowedPaths = [
+  '/admin/achievements',
+  '/admin/requirements',
+  '/admin/cooperation',
+  '/admin/users'
+]
 
 const routes = [
   {
@@ -49,7 +61,7 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: '/admin/overview'
+        redirect: () => (isOrgAdminOnly() ? '/admin/achievements' : '/admin/overview')
       },
 
       {
@@ -196,7 +208,14 @@ router.beforeEach(to => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.path === '/login' && getToken()) {
-    return { path: '/admin/overview' }
+    return { path: isOrgAdminOnly() ? '/admin/achievements' : '/admin/overview' }
+  }
+  if (
+    isOrgAdminOnly() &&
+    to.path.startsWith('/admin') &&
+    !orgAdminAllowedPaths.some(path => to.path === path || to.path.startsWith(path + '/'))
+  ) {
+    return { path: '/admin/achievements' }
   }
 })
 
