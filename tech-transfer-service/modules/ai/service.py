@@ -19,7 +19,8 @@ from threading import Lock
 from db import get_cursor
 from core.errors import BizError
 from core.errors import (
-    TT_DMD_40401, TT_DMD_40301, TT_AI_40301, TT_AI_40401, TT_AI_42901,
+    TT_DMD_40401, TT_DMD_40301, TT_ACH_40401, TT_ACH_40301,
+    TT_AI_40301, TT_AI_40401, TT_AI_42901,
 )
 from modules.audit.service import record as audit_record
 
@@ -36,6 +37,12 @@ _rate_lock = Lock()
 SNAPSHOT_FIELDS = (
     "id", "title", "description", "org_name", "region", "category_name",
     "coop_mode", "budget_min_wan", "budget_max_wan", "status", "version",
+)
+
+# 成果评估快照字段（创建时刻的成果数据版本）
+SNAPSHOT_FIELDS_EVAL = (
+    "id", "title", "tech_intro", "maturity_level", "source_org_name",
+    "category_name", "status", "version",
 )
 
 
@@ -184,6 +191,144 @@ def get_match_task(user_id: int, task_id: int) -> dict:
                 }
                 for r in rows
             ]
+        return view
+
+
+def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, request_id=None) -> tuple[dict, bool]:
+    """创建成果评估任务。返回 (任务视图, 是否新建)。
+
+    数据权限：成果 owner only（评估触发权归成果方）。
+    去重/限流与 match 同模式：同成果活跃任务 10 分钟窗口复用；
+    仅真正新建消耗用户小时额度（与 match 共享）。
+    """
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "SELECT id, title, owner_user_id FROM achievement WHERE id = %s AND deleted_at IS NULL",
+            (achievement_id,),
+        )
+        achievement = cur.fetchone()
+        if not achievement:
+            code, message, status = TT_ACH_40401
+            raise BizError(code, "成果不存在", status)
+        if achievement["owner_user_id"] != user_id:
+            code, message, status = TT_ACH_40301
+            raise BizError(code, "非成果所有者", status)
+
+        # 去重：同成果活跃任务直接复用
+        cur.execute(
+            """
+            SELECT id, status, created_at FROM ai_task
+            WHERE task_type = 'evaluation' AND target_id = %s
+              AND status IN ('queued', 'running')
+              AND created_at > NOW() - INTERVAL '10 minutes'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (achievement_id,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            return _task_view(existing["id"]), False
+
+        # 限流：去重未命中才计数（与 match 共享小时额度）
+        _check_user_rate(user_id)
+
+        # 输入快照固化（任务创建时刻的成果数据版本）
+        cur.execute(
+            """
+            SELECT a.id, a.title, a.tech_intro, a.maturity_level,
+                   a.source_org_name, a.status, a.version,
+                   c.name AS category_name
+            FROM achievement a
+            LEFT JOIN achievement_category c ON a.category_id = c.id
+            WHERE a.id = %s
+            """,
+            (achievement_id,),
+        )
+        full = cur.fetchone() or {}
+        snapshot = {f: full.get(f) for f in SNAPSHOT_FIELDS_EVAL}
+        snapshot_raw = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
+        input_data_version = hashlib.sha256(snapshot_raw.encode("utf-8")).hexdigest()[:16]
+
+        cur.execute(
+            """
+            INSERT INTO ai_task
+                (task_type, status, created_by_user_id, target_type, target_id,
+                 input_snapshot, input_data_version)
+            VALUES ('evaluation', 'queued', %s, 'achievement', %s, %s, %s)
+            RETURNING id
+            """,
+            (user_id, achievement_id, snapshot_raw, input_data_version),
+        )
+        task_id = cur.fetchone()["id"]
+
+    audit_record(
+        "ai.task.create", "ai_task", resource_id=task_id,
+        actor_user_id=user_id, actor_user_no=user_no,
+        details={"taskType": "evaluation", "achievementId": achievement_id,
+                 "inputDataVersion": input_data_version},
+        request_id=request_id,
+    )
+    return _task_view(task_id), True
+
+
+def get_evaluation_task(user_id: int, task_id: int) -> dict:
+    """查询评估任务（仅创建者；succeeded 时带 evaluation 四维评分）"""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, task_type, status, created_by_user_id, target_id,
+                   input_data_version, model_version_id, fail_reason,
+                   created_at, started_at, finished_at
+            FROM ai_task WHERE id = %s AND task_type = 'evaluation'
+            """,
+            (task_id,),
+        )
+        task = cur.fetchone()
+        if not task:
+            code, message, status = TT_AI_40401
+            raise BizError(code, message, status)
+        if task["created_by_user_id"] != user_id:
+            code, message, status = TT_AI_40301
+            raise BizError(code, message, status)
+
+        view = {
+            "taskId": task["id"],
+            "status": task["status"],
+            "evaluation": None,
+            "failReason": task.get("fail_reason"),
+            "createdAt": _iso(task.get("created_at")),
+            "finishedAt": _iso(task.get("finished_at")),
+            "modelVersionLabel": None,
+            "inputDataVersion": task["input_data_version"],
+        }
+
+        if task["status"] == "succeeded":
+            # 结果仅由 worker 写入；此处只做读取组装（禁止假评分回填）
+            cur.execute(
+                """
+                SELECT e.*, a.title AS achievement_title
+                FROM ai_evaluation e
+                JOIN achievement a ON e.achievement_id = a.id
+                WHERE e.task_id = %s
+                """,
+                (task_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                view["evaluation"] = {
+                    "achievementId": row["achievement_id"],
+                    "achievementTitle": row["achievement_title"],
+                    "scores": {
+                        "techFeature": float(row["score_tech"]),
+                        "applyScope": float(row["score_application"]),
+                        "maturity": float(row["score_maturity"]),
+                        "cooperation": float(row["score_feasibility"]),
+                    },
+                    "totalScore": float(row["total_score"]),
+                    "conclusion": row.get("summary") or "",
+                    "highlights": _parse_reasons(row.get("suggestions")),
+                    "modelVersionLabel": None,
+                }
         return view
 
 

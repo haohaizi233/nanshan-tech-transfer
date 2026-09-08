@@ -95,17 +95,9 @@ resp = requests.get(f"{BASE}/achievements/99999", headers=headers, timeout=10)
 check("不存在成果返回data=null", resp.json().get("data") is None)
 print()
 
-# ── 8. 搜索接口 ─────────────────────────────────────────────
-resp = requests.get(f"{BASE}/search?type=achievement&keyword=AI", headers=headers, timeout=10)
-data = resp.json()["data"]
-check("搜索接口type=achievement返回结果", data["total"] > 0)
-check("搜索接口有分页结构", "page" in data and "totalPages" in data)
-print()
-
-# ── 9. 搜索接口 — 非成果类型 ────────────────────────────────
-resp = requests.get(f"{BASE}/search?type=demand", headers=headers, timeout=10)
-data = resp.json()["data"]
-check("非achievement类型返回空", data["total"] == 0)
+# ── 8. 搜索接口 ──────────────────────────────────────────────
+# Phase B 收口：/search 已迁至独立 search 域（q 必填 + 双类型聚合），
+# 本套件不再覆盖，见 test_search_api.py
 print()
 
 # ── 10. 权限 — 无Token访问 ──────────────────────────────────

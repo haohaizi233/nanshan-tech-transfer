@@ -1,11 +1,15 @@
 ﻿"""
-capital routes — 资本对接只读接口
+capital routes — 资本对接只读接口（legacy 兼容层）
+
+DEPRECATED since 2026-09-08: 前端已切统一机构接口 /api/tech-transfer/v1/institutions
+（routes/institution.py，institution 单表），本文件仅保留 legacy 三路径兼容期，
+响应格式零差异（modules/capital/service.py 适配 institution 表）。下线计划见 17-change-report。
 
 Architecture source: 06-api-design.md §capital
 Source: extracted from app.py inline code (Phase A)
 
 Phase A: 保留旧路径 (/api/platform-base, /api/invest-orgs, /api/service-orgs) 兼容
-Phase B: 迁移到 /api/tech-transfer/v1/capital/* 新路径
+Phase B: 数据源迁移至 institution 表（/institutions 新路径由 institution.py 承接）
 """
 
 from fastapi import APIRouter, Request

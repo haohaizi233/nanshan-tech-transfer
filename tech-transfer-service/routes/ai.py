@@ -10,7 +10,10 @@ from fastapi.responses import JSONResponse
 
 from core.response import success, get_request_id
 from core.middleware import identity, json_body
-from modules.ai.service import create_match_task, get_match_task
+from modules.ai.service import (
+    create_match_task, get_match_task,
+    create_evaluation_task, get_evaluation_task,
+)
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["ai"])
 
@@ -38,3 +41,26 @@ def match_tasks_create(request: Request, user: dict = Depends(identity), body: d
 @router.get("/ai/match-tasks/{task_id}")
 def match_task_detail(task_id: int, user: dict = Depends(identity)):
     return success(get_match_task(user["userId"], task_id))
+
+
+@router.post("/ai/evaluation-tasks", status_code=202)
+def evaluation_tasks_create(request: Request, user: dict = Depends(identity), body: dict = Depends(json_body)):
+    achievement_id = body.get("achievementId")
+    if not isinstance(achievement_id, int) or achievement_id <= 0:
+        from core.errors import bad_request
+        raise bad_request("achievementId 必须为正整数")
+    idem_key = request.headers.get("X-Idempotency-Key")
+    if idem_key:
+        print(f"[ai] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
+    task, is_new = create_evaluation_task(
+        user["userId"], user.get("userNo", ""), achievement_id,
+        request_id=get_request_id(),
+    )
+    if not is_new:
+        return JSONResponse(status_code=200, content=success(task, "任务进行中"))
+    return success(task, "任务已受理")
+
+
+@router.get("/ai/evaluation-tasks/{task_id}")
+def evaluation_task_detail(task_id: int, user: dict = Depends(identity)):
+    return success(get_evaluation_task(user["userId"], task_id))
