@@ -6,16 +6,16 @@
     </view>
 
     <view class="dev-cards">
-      <view class="dev-card" @tap="goTo('/pages/index/index')">
+      <view class="dev-card" @tap="goTo('/subpackages/tech-transfer/pages/home/home')">
         <view class="card-icon"><text class="card-icon-text">首</text></view>
         <text class="card-title">首页</text>
         <text class="card-desc">成果 · 需求 · 资本对接</text>
       </view>
 
-      <view class="dev-card" @tap="goTo('/pages/ai-match/ai-match')">
+      <view class="dev-card" @tap="goTo('/subpackages/tech-transfer/pages/ai-match/ai-match')">
         <view class="card-icon"><text class="card-icon-text">AI</text></view>
         <text class="card-title">AI 匹配</text>
-        <text class="card-desc">需求描述 → 成果匹配</text>
+        <text class="card-desc">需求 → 成果匹配任务</text>
       </view>
 
       <view class="dev-card" @tap="goTo('/subpackages/tech-transfer/pages/mine/mine')">

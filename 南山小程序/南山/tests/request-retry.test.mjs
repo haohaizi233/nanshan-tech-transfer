@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { retryRequest } from '../common/request-retry.js'
+import { retryRequest } from '../subpackages/tech-transfer/api/request-retry.js'
 
 test('returns the first successful request result without delaying', async () => {
   let delays = 0

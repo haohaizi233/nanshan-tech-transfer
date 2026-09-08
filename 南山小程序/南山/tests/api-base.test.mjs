@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveH5ApiBase } from '../common/api-base.js'
+import { resolveH5ApiBase } from '../host/local-adapter.js'
 
 test('uses the paired public API port when the H5 page is served through the tunnel', () => {
   assert.equal(

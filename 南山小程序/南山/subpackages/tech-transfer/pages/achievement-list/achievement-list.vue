@@ -93,7 +93,8 @@
 </template>
 
 <script>
-import { getAchievements, getAchievementCategories } from '../../../../common/achievement-api.js'
+import { getAchievements, getAchievementCategories } from '../../api/achievement.js'
+import HostBridge from '../../../../host/host-bridge.js'
 
 const MATURITY_LABELS = {
   '01_idea': '概念阶段',
@@ -207,9 +208,7 @@ export default {
       return `${min} 万`
     },
     openDetail(id) {
-      uni.navigateTo({
-        url: `/subpackages/tech-transfer/pages/achievement-detail/achievement-detail?id=${id}`,
-      })
+      HostBridge.navigate('pages/achievement-detail/achievement-detail', { id })
     },
   },
 }

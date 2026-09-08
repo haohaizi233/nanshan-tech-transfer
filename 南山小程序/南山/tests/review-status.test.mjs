@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getPublicationStatus, getPendingReviewCount } from '../common/review-status.js'
+import { getPublicationStatus, getPendingReviewCount } from '../subpackages/tech-transfer/constants/review-status.js'
 
 test('labels a rejected publication with the administrator reason', () => {
   assert.deepEqual(

@@ -120,7 +120,7 @@
 </template>
 
 <script>
-import { getAchievementDetail } from '../../../../common/achievement-api.js'
+import { getAchievementDetail } from '../../api/achievement.js'
 
 const PRICING_MODE_LABELS = {
   'negotiable': '面议',

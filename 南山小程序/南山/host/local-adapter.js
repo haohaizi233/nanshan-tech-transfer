@@ -12,6 +12,33 @@ const USER_KEY = 'tt_current_user'
 const TOKEN_EXPIRES_KEY = 'tt_token_expires_at'
 const AUTH_MODE_KEY = 'tt_auth_mode'
 
+const PRODUCTION_ENVS = ['staging', 'production']
+const TUNNEL_H5_PORT = '8077'
+const TUNNEL_API_PORT = '8076'
+const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
+
+/**
+ * Select the API origin for an H5 page without changing its public route.
+ *
+ * The dev launcher exposes H5 and FastAPI as a paired frp tunnel:
+ * :8077 for the page and :8076 for its API.  A phone must never inherit the
+ * developer machine's 127.0.0.1 API address from local.env.js.
+ */
+export function resolveH5ApiBase({ appEnv, localApiBase, pageLocation = globalThis.location } = {}) {
+  if (PRODUCTION_ENVS.includes(appEnv)) return ''
+
+  if (pageLocation && String(pageLocation.port) === TUNNEL_H5_PORT && pageLocation.hostname) {
+    const protocol = pageLocation.protocol === 'https:' ? 'https:' : 'http:'
+    return `${protocol}//${pageLocation.hostname}:${TUNNEL_API_PORT}`
+  }
+
+  return localApiBase || DEFAULT_LOCAL_API_BASE
+}
+
+function effectiveApiBase() {
+  return resolveH5ApiBase({ appEnv: APP_ENV, localApiBase: API_BASE })
+}
+
 function getStorageSync(key) {
   try {
     return uni.getStorageSync(key)
@@ -55,7 +82,7 @@ const LocalAdapter = {
     const { method = 'GET', path, query, body, headers = {} } = options
     const env = this._getEnvironment()
 
-    let url = env.apiBase + env.apiPrefix + path
+    let url = effectiveApiBase() + env.apiPrefix + path
     if (query && Object.keys(query).length > 0) {
       const qs = Object.entries(query)
         .filter(([, v]) => v !== undefined && v !== null)
@@ -92,7 +119,7 @@ const LocalAdapter = {
   async _upload(file, options = {}) {
     return new Promise((resolve, reject) => {
       uni.uploadFile({
-        url: API_BASE + API_PREFIX + '/uploads/presign',
+        url: effectiveApiBase() + API_PREFIX + '/uploads/presign',
         filePath: file,
         name: 'file',
         formData: options.formData || {},
