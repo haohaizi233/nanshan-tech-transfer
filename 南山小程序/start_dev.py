@@ -21,7 +21,6 @@
   python start_dev.py --doctor            # 环境诊断，只检测不启动
   python start_dev.py --status            # 查看运行状态，不启动
   python start_dev.py --build-h5          # H5 production build（不启动后端）
-  python start_dev.py --demo              # 恢复演示模式后退出
   python start_dev.py --strict            # 严格模式：任何组件失败即退出非 0
 
 说明：
@@ -61,7 +60,6 @@ ROOT = Path(__file__).resolve().parent
 FRONTEND_DIR = ROOT / "南山"
 ADMIN_FRONTEND_DIR = ROOT.parent / "nanshan-frontend"
 ADMIN_DIST_INDEX = ADMIN_FRONTEND_DIR / "dist" / "index.html"
-CONFIG_JS = FRONTEND_DIR / "common" / "config.js"
 API_SERVER_DIR = ROOT.parent / "tech-transfer-service"
 BACKEND_URL = "http://127.0.0.1:8787"
 HEALTH_URL = BACKEND_URL + "/api/health"
@@ -78,8 +76,6 @@ WECHAT_DEVTOOLS_DEFAULT = Path(r"D:\微信开发者工具\微信web开发者工�
 FRPC_SCAN_ROOTS = [Path.home() / "Desktop", Path("D:\\")]
 TUNNEL_API_PORT = 8076   # 远端 API 入口（→ 本地 8787，实际以 frpc.toml 解析为准）
 TUNNEL_H5_PORT = 8077    # 远端 H5 入口（→ 本地 5173，实际以 frpc.toml 解析为准）
-
-DEMO_RE = re.compile(r"(USE_CAPITAL_DEMO\s*=\s*)(true|false)")
 
 
 # ── 前端构建新鲜度 ───────────────────────────────────────────
@@ -118,7 +114,7 @@ def h5_source_files():
     return _source_files(
         FRONTEND_DIR,
         root_files=("App.vue", "main.js", "manifest.json", "pages.json"),
-        source_dirs=("pages", "packageA", "subpackages", "common", "components", "static"),
+        source_dirs=("pages", "subpackages", "components", "static", "host", "config"),
     )
 
 
@@ -180,27 +176,10 @@ class FrontendRuntime(str, Enum):
 # ── 进程生命周期 ──────────────────────────────────────────────
 # 只记录「本启动器 spawn 并拥有」的进程；复用的 backend / HBuilderX GUI 不在其中
 managed_processes = {}
-# ask_demo_switch 修改 config.js 前保存的原值，退出时恢复
-_config_js_backup = None
 
 
 def register_process(key, proc):
     managed_processes[key] = proc
-
-
-def restore_config_js():
-    global _config_js_backup
-    if _config_js_backup is None:
-        return
-    try:
-        if CONFIG_JS.exists() and DEMO_RE.search(CONFIG_JS.read_text(encoding="utf-8")):
-            return  # 用户中途手动改过，不覆盖
-        CONFIG_JS.write_text(_config_js_backup, encoding="utf-8")
-        print("  [OK] 已恢复 common/config.js 原始内容（USE_CAPITAL_DEMO 修改已还原）")
-    except Exception as e:
-        warn(f"恢复 config.js 失败：{e}")
-    finally:
-        _config_js_backup = None
 
 
 def shutdown_managed(kill_fallback=True):
@@ -227,7 +206,6 @@ def shutdown_managed(kill_fallback=True):
         except Exception as e:
             warn(f"停止 {key} 失败：{e}")
     managed_processes.clear()
-    restore_config_js()
 
 
 def _on_exit():
@@ -626,39 +604,6 @@ def start_backend(lan):
     return proc
 
 
-# ── config.js（Demo 开关） ────────────────────────────────────
-def read_config_js():
-    return CONFIG_JS.read_text(encoding="utf-8")
-
-
-def set_demo_flag(text, value):
-    return DEMO_RE.sub(lambda m: m.group(1) + value, text, count=1)
-
-
-def get_demo_flag():
-    m = DEMO_RE.search(read_config_js())
-    return m.group(2) == "true" if m else None
-
-
-def ask_demo_switch():
-    """USE_CAPITAL_DEMO 只影响资本对接模块（common/capital.js 消费），不改其它接口行为。"""
-    if get_demo_flag() is not True:
-        ok("前端已处于联调模式（USE_CAPITAL_DEMO = false）")
-        return
-    print("  [WARN] 当前为演示模式（USE_CAPITAL_DEMO = true），资本对接模块不会请求后端")
-    try:
-        ans = input("  是否自动改为 false 进行前后端联调？[y/N] ").strip().lower()
-    except EOFError:
-        ans = ""
-    if ans == "y":
-        global _config_js_backup
-        _config_js_backup = read_config_js()
-        CONFIG_JS.write_text(set_demo_flag(read_config_js(), "false"), encoding="utf-8")
-        print("  [OK] 已改为联调模式（退出启动器时自动恢复原值；恢复演示模式：python start_dev.py --demo）")
-    else:
-        print("  保留演示模式：本次后端仍会启动，但资本对接读的是本地演示数据")
-
-
 # ── CLI watch 进程派生（launch 命令均为阻塞式 watch 模式） ────
 def spawn_cli_watch(args_list, ready_markers):
     """Popen HBuilderX CLI 并回显输出；返回 (proc, ready_event, reader_thread)。
@@ -998,7 +943,7 @@ def run_doctor():
         has = importlib.util.find_spec(mod) is not None
         check(f"后端依赖 {pkg}", has, "" if has else f"import {mod} 失败（pip install {pkg}）")
 
-    for f in ("manifest.json", "pages.json", "common/config.js", "main.js", "App.vue"):
+    for f in ("manifest.json", "pages.json", "main.js", "App.vue", "config/local.env.js", "host/host-bridge.js"):
         check(f"前端 {f}", (FRONTEND_DIR / f).exists(), str(FRONTEND_DIR / f))
     manifest = FRONTEND_DIR / "manifest.json"
     if manifest.exists():
@@ -1214,7 +1159,6 @@ def parse_args():
     parser.add_argument("--doctor", action="store_true", help="环境诊断，只检测不启动")
     parser.add_argument("--status", action="store_true", help="查看当前运行状态，不启动")
     parser.add_argument("--build-h5", action="store_true", help="H5 production build（不启动 FastAPI）")
-    parser.add_argument("--demo", action="store_true", help="恢复演示模式(USE_CAPITAL_DEMO=true)后退出")
     parser.add_argument("--strict", action="store_true", help="严格模式：任何组件失败即退出非 0")
     return parser.parse_args()
 
@@ -1226,11 +1170,6 @@ def main():
         pass
 
     args = parse_args()
-
-    if args.demo:
-        CONFIG_JS.write_text(set_demo_flag(read_config_js(), "true"), encoding="utf-8")
-        print("[OK] 已恢复演示模式（USE_CAPITAL_DEMO = true）")
-        return 0
 
     if args.doctor:
         return 0 if run_doctor() else 1
@@ -1281,15 +1220,8 @@ def main():
     else:
         skip("无前端 Runtime 目标")
 
-    # [2/6] Demo 开关
-    print("[2/6] 检查前端联调开关（common/config.js）")
-    if runtimes:
-        ask_demo_switch()
-    else:
-        skip("无前端 Runtime 目标")
-
-    # [3/6] 后端环境
-    print("[3/6] 检查后端环境（依赖 / PostgreSQL）")
+    # [2/5] 后端环境
+    print("[2/5] 检查后端环境（依赖 / PostgreSQL）")
     if need_backend:
         deps_ok = ensure_backend_deps()
         if not deps_ok and args.strict:
@@ -1299,20 +1231,20 @@ def main():
         skip("跳过后端（--frontend-only）")
 
     # 公网后台由 FastAPI 静态托管 nanshan-frontend/dist；构建必须在后端启动前完成。
-    print("[3.5/6] 检查后台管理 H5")
+    print("[3/5] 检查后台管理 H5")
     if not ensure_admin_h5_current():
         return 1
 
-    # [4/6] 启动 FastAPI（唯一实例，8787 三分支）
-    print("[4/6] 启动 FastAPI 后端")
+    # [4/5] 启动 FastAPI（唯一实例，8787 三分支）
+    print("[4/5] 启动 FastAPI 后端")
     backend_proc = None
     if need_backend:
         backend_proc = resolve_backend(lan=args.lan)
     else:
         skip("跳过后端（--frontend-only）")
 
-    # [5/6] 启动前端 Runtime
-    print("[5/6] 启动前端 Runtime")
+    # [5/5] 启动前端 Runtime
+    print("[5/5] 启动前端 Runtime")
     status = {"backend": "READY" if (backend_proc is not None or fetch_health()[0]) else "OFF",
               "weixin": "OFF", "h5": "OFF", "tunnel": "OFF"}
 
@@ -1334,10 +1266,10 @@ def main():
         else:
             status["h5"] = "FAIL"
 
-    # [6/6] frp 外网隧道（默认开启，--no-tunnel 关闭）
+    # frp 外网隧道（默认开启，--no-tunnel 关闭）
     tunnel_urls = None
     tunnel_info = None
-    print("[6/6] frp 外网隧道")
+    print("frp 外网隧道")
     if args.tunnel:
         if not need_backend and not fetch_health()[0]:
             warn("后端未运行（--frontend-only），隧道 API 端点将不可用")
