@@ -6,6 +6,7 @@
  */
 
 import { apiRequest, setCurrentUser } from './client.js'
+import { normalizeOrganizationCertification } from './organization-certification-state.mjs'
 
 /** 拉取最新 /me 并刷新本地缓存（登录后机构状态变化时调用） */
 export async function fetchCurrentUser() {
@@ -18,6 +19,12 @@ export async function fetchCurrentUser() {
 export function getMembershipsFromUser(user) {
   const list = (user && user.organizationMemberships) || []
   return Array.isArray(list) ? list : []
+}
+
+/** 当前账号的实时机构认证状态；不依赖资料缓存。 */
+export async function getMyOrganizationCertification() {
+  const payload = await apiRequest('GET', '/me/organization-certification', null, null)
+  return normalizeOrganizationCertification(payload)
 }
 
 /** 搜索 canonical 机构（仅 active，复用公开机构目录接口） */

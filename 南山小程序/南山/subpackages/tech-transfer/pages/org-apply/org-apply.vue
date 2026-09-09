@@ -1,6 +1,10 @@
 <template>
 	<view class="page">
-		<view class="card">
+		<view v-if="!certification.canApply" class="card status-card">
+			<text class="card-title">{{ certification.label }}</text>
+			<text class="card-desc">{{ certificationHint }}</text>
+		</view>
+		<view v-if="certification.canApply" class="card">
 			<text class="card-title">机构入驻申请</text>
 			<text class="card-desc">机构尚未收录时，提交入驻申请。平台管理员审核通过后将创建机构，并授予您机构管理员身份</text>
 
@@ -60,7 +64,7 @@
 </template>
 
 <script>
-	import { applyOrganization } from '../../api/membership.js'
+	import { applyOrganization, getMyOrganizationCertification } from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
 
 	const TYPE_OPTIONS = [
@@ -76,6 +80,7 @@
 			return {
 				typeOptions: TYPE_OPTIONS,
 				submitting: false,
+				certification: { status: 'unverified', label: '未认证', canApply: true, pendingName: '' },
 				form: {
 					requestedName: '',
 					requestedType: '',
@@ -98,15 +103,29 @@
 			typeText() {
 				const opt = this.typeOptions.find((o) => o.value === this.form.requestedType)
 				return opt ? opt.label : ''
+			},
+			certificationHint() {
+				if (this.certification.status === 'membership_pending') return '正在申请加入：' + (this.certification.pendingName || '机构')
+				if (this.certification.status === 'organization_pending') return '机构入驻审核中：' + (this.certification.pendingName || '待命名机构')
+				return '已完成机构认证，无需重复申请。'
 			}
 		},
 		onShow() {
 			if (!isLoggedIn()) {
 				uni.showToast({ title: '请先登录', icon: 'none' })
 				setTimeout(() => uni.navigateBack(), 800)
+				return
 			}
+			this.loadCertification()
 		},
 		methods: {
+			async loadCertification() {
+				try {
+					this.certification = await getMyOrganizationCertification()
+				} catch (e) {
+					uni.showToast({ title: (e && e.message) || '认证状态加载失败', icon: 'none' })
+				}
+			},
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
 			},
@@ -115,6 +134,10 @@
 				this.form.requestedType = opt ? opt.value : ''
 			},
 			async onSubmit() {
+				if (!this.certification.canApply) {
+					uni.showToast({ title: '当前认证状态不允许重复申请', icon: 'none' })
+					return
+				}
 				const name = (this.form.requestedName || '').trim()
 				if (!name) {
 					uni.showToast({ title: '请填写机构名称', icon: 'none' })
@@ -193,6 +216,11 @@
 		color: #999999;
 		line-height: 1.6;
 		margin-bottom: 28rpx;
+	}
+
+	.status-card {
+		background: #fff8ea;
+		border-color: #f0d090;
 	}
 
 	.section-title {

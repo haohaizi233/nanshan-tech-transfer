@@ -160,29 +160,29 @@
 				</view>
 			</view>
 
-			<view class="org-card">
-				<text class="org-card-title">机构认证</text>
-				<view v-if="!memberships.length" class="org-none">
-					<text class="org-none-text">未认证</text>
-					<view class="org-none-actions">
-						<button class="org-action-btn" size="mini" @click="goOrgJoin">申请加入已有机构</button>
-						<button class="org-action-btn ghost" size="mini" @click="goOrgApply">申请机构入驻</button>
-					</view>
+			<view :class="'org-card org-card-' + certification.status">
+				<view class="org-card-heading">
+					<text class="org-card-title">机构认证</text>
+					<text class="org-role admin" v-if="certification.status === 'certified_admin'">机构管理员</text>
+					<text class="org-role" v-else-if="certification.status === 'certified_member'">认证成员</text>
 				</view>
-				<view v-else>
+				<view v-if="memberships.length">
 					<view v-for="m in memberships" :key="m.id" class="org-row">
 						<view class="org-info">
-							<text class="org-name">{{ m.orgName }}</text>
-							<text :class="m.role === 'admin' ? 'org-role admin' : 'org-role'">
-								{{ m.role === 'admin' ? '机构管理员 ✓' : '认证成员 ✓' }}
-							</text>
+							<view class="org-name-row">
+								<text class="org-name">{{ m.orgName }}</text>
+							</view>
 						</view>
-						<button
-							v-if="m.role === 'admin'"
-							class="org-manage-btn"
-							size="mini"
-							@click="goOrgManage()"
-						>进入机构管理</button>
+						<view v-if="m.role === 'admin'" class="org-actions">
+							<button class="org-manage-btn" size="mini" @click="goOrgManage()">进入机构管理</button>
+						</view>
+					</view>
+				</view>
+				<view v-else class="org-none">
+					<text class="org-none-text">{{ certificationHint }}</text>
+					<view v-if="certification.canApply" class="org-none-actions">
+						<button class="org-action-btn" size="mini" @click="goOrgJoin">申请加入已有机构</button>
+						<button class="org-action-btn ghost" size="mini" @click="goOrgApply">申请机构入驻</button>
 					</view>
 				</view>
 			</view>
@@ -191,14 +191,14 @@
 				<view class="module-box" @click="goMyList('demand')">
 					<view class="module-icon demand-icon">需</view>
 					<text class="module-title">我发布的需求</text>
-					<text class="module-count">{{ myDemandCount }} 条</text>
-					<text v-if="myDemandPendingCount" class="module-pending">待审核 {{ myDemandPendingCount }} 条</text>
+					<text class="module-count">已发布 {{ myDemandCount }} 条</text>
+					<text class="module-pending">待审核 {{ myDemandPendingCount }} 条</text>
 				</view>
 				<view class="module-box" @click="goMyList('result')">
 					<view class="module-icon result-icon">果</view>
 					<text class="module-title">我发布的成果</text>
-					<text class="module-count">{{ myResultCount }} 条</text>
-					<text v-if="myResultPendingCount" class="module-pending">待审核 {{ myResultPendingCount }} 条</text>
+					<text class="module-count">已发布 {{ myResultCount }} 条</text>
+					<text class="module-pending">待审核 {{ myResultPendingCount }} 条</text>
 				</view>
 				<view class="module-box" @click="goMyList('favorite')">
 					<view class="module-icon fav-icon">藏</view>
@@ -245,8 +245,7 @@
 	import { getMyDemands } from '../../api/demand.js'
 	import { getMyAchievements } from '../../api/achievement.js'
 	import { getMyFavorites, getMyCooperations } from '../../api/interaction.js'
-	import { fetchCurrentUser, getMembershipsFromUser } from '../../api/membership.js'
-	import { getCurrentUser } from '../../api/client.js'
+	import { fetchCurrentUser, getMyOrganizationCertification } from '../../api/membership.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 
 	export default {
@@ -283,7 +282,8 @@
 				myResultPendingCount: 0,
 				favoriteCount: 0,
 				intentionCount: 0,
-				memberships: []
+				memberships: [],
+				certification: { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
 			}
 		},
 		computed: {
@@ -302,6 +302,15 @@
 			},
 			subjectTypeText() {
 				return getSubjectTypeLabel(this.form.subjectType)
+			},
+			certificationHint() {
+				if (this.certification.status === 'membership_pending') {
+					return '正在申请加入：' + (this.certification.pendingName || '机构')
+				}
+				if (this.certification.status === 'organization_pending') {
+					return '机构入驻审核中：' + (this.certification.pendingName || '待命名机构')
+				}
+				return '选择认证方式后可绑定机构身份'
 			}
 		},
 		onShow() {
@@ -341,12 +350,16 @@
 			async loadMemberships() {
 				if (!isLoggedIn()) {
 					this.memberships = []
+					this.certification = { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
 					return
 				}
-				this.memberships = getMembershipsFromUser(getCurrentUser())
 				try {
-					const user = await fetchCurrentUser()
-					this.memberships = getMembershipsFromUser(user)
+					const [user, certification] = await Promise.all([
+						fetchCurrentUser(),
+						getMyOrganizationCertification()
+					])
+					this.certification = certification
+					this.memberships = certification.memberships
 					this.profile = getUserProfile()
 				} catch (e) {
 					console.error('[mine] loadMemberships failed:', e)
@@ -362,9 +375,9 @@
 				}
 				try {
 					const [demands, pendingDemands, achievements, pendingAchievements] = await Promise.all([
-						getMyDemands({ page: 1, pageSize: 1 }),
+						getMyDemands({ page: 1, pageSize: 1, status: 'published' }),
 						getMyDemands({ page: 1, pageSize: 1, status: 'pending_review' }),
-						getMyAchievements({ page: 1, pageSize: 1 }),
+						getMyAchievements({ page: 1, pageSize: 1, status: 'published' }),
 						getMyAchievements({ page: 1, pageSize: 1, status: 'pending_review' })
 					])
 					this.myDemandCount = demands.total || 0
@@ -939,12 +952,36 @@
 		border: 1rpx solid #e8ecf2;
 	}
 
+	.org-card-certified_admin {
+		background: #eef5ff;
+		border-color: #a9caff;
+	}
+
+	.org-card-certified_member {
+		background: #effaf4;
+		border-color: #a8dfc0;
+	}
+
+	.org-card-membership_pending,
+	.org-card-organization_pending {
+		background: #fff8ea;
+		border-color: #f0d090;
+	}
+
+	.org-card-heading {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: nowrap;
+		width: 100%;
+		margin-bottom: 18rpx;
+	}
+
 	.org-card-title {
-		display: block;
 		font-size: 28rpx;
 		font-weight: 600;
 		color: #1a1a1a;
-		margin-bottom: 18rpx;
 	}
 
 	.org-none-text {
@@ -985,11 +1022,20 @@
 	.org-info {
 		flex: 1;
 		min-width: 0;
+	}
+
+	.org-name-row {
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
+		align-items: center;
+		min-width: 0;
 	}
 
 	.org-name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		font-size: 28rpx;
 		color: #222222;
 		font-weight: 600;
@@ -997,8 +1043,8 @@
 	}
 
 	.org-role {
-		align-self: flex-start;
-		margin-top: 8rpx;
+		flex-shrink: 0;
+		margin-left: 12rpx;
 		font-size: 22rpx;
 		color: #0f9d58;
 		background: rgba(15, 157, 88, 0.1);
@@ -1011,8 +1057,21 @@
 		background: rgba(43, 115, 248, 0.12);
 	}
 
-	.org-manage-btn {
+	.org-card-heading .org-role {
+		margin-left: 12rpx;
+		margin-bottom: 0;
+	}
+
+	.org-actions {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		flex-shrink: 0;
 		margin-left: 16rpx;
+	}
+
+	.org-manage-btn {
+		margin-left: 0;
 		background: #ffffff;
 		color: #2b73f8;
 		border: 1rpx solid #2b73f8;

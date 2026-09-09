@@ -1,6 +1,11 @@
 <template>
 	<view class="page">
-		<view class="card">
+		<view v-if="!certification.canApply" class="card status-card">
+			<text class="card-title">{{ certification.label }}</text>
+			<text class="card-desc">{{ certificationHint }}</text>
+		</view>
+
+		<view v-if="certification.canApply" class="card">
 			<text class="card-title">搜索并选择您的机构</text>
 			<text class="card-desc">认证机构由平台机构目录统一管理，请搜索后选择所在机构提交申请，通过机构管理员审核后完成认证</text>
 
@@ -37,7 +42,7 @@
 			<view v-if="selectedOrg" class="selected-tip">已选择：{{ selectedOrg.name }}</view>
 		</view>
 
-		<view v-if="selectedOrg" class="card">
+		<view v-if="certification.canApply && selectedOrg" class="card">
 			<text class="card-title">申请信息</text>
 			<view class="form-item">
 				<text class="label">真实姓名 <text class="required">*</text></text>
@@ -72,7 +77,7 @@
 </template>
 
 <script>
-	import { searchInstitutions, applyMembership } from '../../api/membership.js'
+	import { searchInstitutions, applyMembership, getMyOrganizationCertification } from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 
@@ -94,6 +99,7 @@
 				candidates: [],
 				selectedOrg: null,
 				submitting: false,
+				certification: { status: 'unverified', label: '未认证', canApply: true, pendingName: '' },
 				form: {
 					realName: '',
 					department: '',
@@ -108,9 +114,25 @@
 			if (!isLoggedIn()) {
 				uni.showToast({ title: '请先登录', icon: 'none' })
 				setTimeout(() => uni.navigateBack(), 800)
+				return
+			}
+			this.loadCertification()
+		},
+		computed: {
+			certificationHint() {
+				if (this.certification.status === 'membership_pending') return '正在申请加入：' + (this.certification.pendingName || '机构')
+				if (this.certification.status === 'organization_pending') return '机构入驻审核中：' + (this.certification.pendingName || '待命名机构')
+				return '已完成机构认证，无需重复申请。'
 			}
 		},
 		methods: {
+			async loadCertification() {
+				try {
+					this.certification = await getMyOrganizationCertification()
+				} catch (e) {
+					uni.showToast({ title: (e && e.message) || '认证状态加载失败', icon: 'none' })
+				}
+			},
 			kindLabel(kind) {
 				return KIND_LABELS[kind] || '机构'
 			},
@@ -145,6 +167,10 @@
 				HostBridge.navigate('pages/org-apply/org-apply')
 			},
 			async onSubmit() {
+				if (!this.certification.canApply) {
+					uni.showToast({ title: '当前认证状态不允许重复申请', icon: 'none' })
+					return
+				}
 				if (!this.selectedOrg) {
 					uni.showToast({ title: '请先选择机构', icon: 'none' })
 					return
@@ -211,6 +237,11 @@
 		color: #999999;
 		line-height: 1.6;
 		margin-bottom: 24rpx;
+	}
+
+	.status-card {
+		background: #fff8ea;
+		border-color: #f0d090;
 	}
 
 	.search-row {

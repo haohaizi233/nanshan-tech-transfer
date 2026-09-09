@@ -124,8 +124,8 @@
 					this.adminOrgs = adminOrgs
 					if (!this.currentOrgId && adminOrgs.length) {
 						this.currentOrgId = adminOrgs[0].orgId
-						this.loadList()
 					}
+					if (this.currentOrgId) this.loadList()
 				} catch (e) {
 					uni.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
 				} finally {
@@ -414,8 +414,15 @@
 
 	.action-row {
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
+		align-items: center;
+		flex-shrink: 0;
 		margin-left: 16rpx;
+	}
+
+	.action-row .mini-btn {
+		margin: 0 0 0 12rpx;
+		min-width: 92rpx;
 	}
 
 	.mini-btn {
