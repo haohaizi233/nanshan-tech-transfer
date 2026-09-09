@@ -6,7 +6,7 @@ import {
   ref
 } from 'vue'
 
-import { api } from '../../api/client'
+import { api, getSavedUser } from '../../api/client'
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '正常' },
@@ -21,6 +21,8 @@ const USER_TYPE_LABELS = {
 }
 
 const typeLabel = v => USER_TYPE_LABELS[v] || v || '未填写'
+
+const isPlatformAdmin = computed(() => ((getSavedUser()?.roles) || []).includes('admin'))
 
 const membershipText = user => (user.organizationMemberships || [])
   .map(m => `${m.orgName}（${m.role === 'admin' ? '管理员' : '成员'}）`)
@@ -166,7 +168,8 @@ const grantAdmin = async m => {
 }
 
 const revokeAdmin = async m => {
-  const reason = window.prompt(`撤销「${m.orgName}」机构管理员身份，请填写原因：`)
+  if (!window.confirm(`确认撤销「${m.orgName}」的机构管理员身份？该操作会同时取消其机构认证，而不是降为普通成员。`)) return
+  const reason = window.prompt('请填写撤销原因：')
   if (reason === null) return
   const trimmed = reason.trim()
   if (!trimmed) {
@@ -555,7 +558,7 @@ const exportData = async () => {
                   </span>
 
                   <button
-                    v-if="m.role === 'member'"
+                    v-if="isPlatformAdmin && m.role === 'member'"
                     class="link-btn"
                     @click="grantAdmin(m)"
                   >
@@ -563,7 +566,7 @@ const exportData = async () => {
                   </button>
 
                   <button
-                    v-else
+                    v-else-if="isPlatformAdmin && m.role === 'admin'"
                     class="link-btn danger"
                     @click="revokeAdmin(m)"
                   >

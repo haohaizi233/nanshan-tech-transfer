@@ -89,10 +89,8 @@ onMounted(() => {
   fetchList()
   loadCategoryOptions()
   api('/admin/demand-categories').then(data => { formCategories.value = data || [] }).catch(() => { formCategories.value = [] })
-  if (isPlatformAdmin.value) {
-    api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } }).then(data => { ownerUsers.value = data.list || [] }).catch(() => { ownerUsers.value = [] })
-    api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
-  }
+  api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } }).then(data => { ownerUsers.value = data.list || [] }).catch(() => { ownerUsers.value = [] })
+  api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
 })
 
 const handleSearch = () => {
@@ -170,30 +168,55 @@ const formSaving = ref(false)
 const formError = ref('')
 const editingId = ref(null)
 const demandForm = reactive({ title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
-const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => Number(user.orgId) === Number(demandForm.orgId)))
+const belongsToOrg = (user, orgId) => {
+  const id = Number(orgId)
+  if ((user.organizationMemberships || []).some(m => Number(m.orgId) === id && m.status === 'active')) return true
+  return Number(user.orgId) === id
+}
+const primaryAdminOrgId = () => {
+  const memberships = currentUser.value.organizationMemberships || []
+  const admin = memberships.find(m => m.role === 'admin' && m.status === 'active')
+  return admin?.orgId || currentUser.value.orgId || ''
+}
+const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => belongsToOrg(user, demandForm.orgId)))
+const adminOrgLabel = computed(() => {
+  const memberships = currentUser.value.organizationMemberships || []
+  const matched = memberships.find(m => Number(m.orgId) === Number(demandForm.orgId))
+  const admin = matched || memberships.find(m => m.role === 'admin' && m.status === 'active')
+  return admin?.orgName || currentUser.value.orgName || '当前登录机构'
+})
 
 const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
 const resetDemandForm = () => Object.assign(demandForm, { title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
 const openCreate = () => {
   formMode.value = 'create'; editingId.value = null; formError.value = ''; resetDemandForm()
   if (!isPlatformAdmin.value) {
-    demandForm.orgId = currentUser.value.orgId || ''
+    demandForm.orgId = primaryAdminOrgId()
     demandForm.ownerUserId = currentUser.value.userId || ''
   }
   formVisible.value = true
 }
 const openEdit = async item => {
   resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formError.value = ''; formLoading.value = true; formVisible.value = true
-  try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
+  try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgId: data.orgId || '', ownerUserId: data.ownerUserId || '', categoryId: data.categoryId || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetMinWan: data.budgetMinWan ?? '', budgetMaxWan: data.budgetMaxWan ?? '', budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
+}
+const claimOrganization = async item => {
+  if (!window.confirm('确认将该历史需求归属到当前机构？归属后将由本机构统一管理。')) return
+  try {
+    await api(`/admin/demands/${item.id}/claim-organization`, { method: 'POST', body: { version: item.version } })
+    fetchList()
+  } catch (err) { loadError.value = err.message || '归属机构失败' }
 }
 const saveDemand = async (saveAction = 'draft') => {
-  if (formMode.value === 'create' && (!demandForm.categoryId || !demandForm.orgId || !demandForm.ownerUserId)) { formError.value = '请依次选择分类、所属机构和归属用户'; return }
+  if (formMode.value === 'create' && !demandForm.categoryId) { formError.value = '请选择需求分类'; return }
+  if (formMode.value === 'create' && isPlatformAdmin.value && (!demandForm.orgId || !demandForm.ownerUserId)) { formError.value = '请依次选择分类、所属机构和归属用户'; return }
+  if (formMode.value === 'create' && !isPlatformAdmin.value && !demandForm.orgId) { formError.value = '未绑定可管理的机构'; return }
   if (!demandForm.title.trim() || !demandForm.description.trim()) { formError.value = '请填写需求标题和需求描述'; return }
   formSaving.value = true; formError.value = ''
   try {
     const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable, saveAction }
     if (demandForm.categoryId) body.categoryId = Number(demandForm.categoryId)
-    if (isPlatformAdmin.value && demandForm.orgId) body.orgId = Number(demandForm.orgId)
+    if (demandForm.orgId) body.orgId = Number(demandForm.orgId)
     if (isPlatformAdmin.value && demandForm.ownerUserId) body.ownerUserId = Number(demandForm.ownerUserId)
     const optionalTextFields = { region: demandForm.region, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: demandForm.contactPhone }
     if (isPlatformAdmin.value) optionalTextFields.orgName = demandForm.orgName
@@ -360,6 +383,10 @@ const submitReject = async () => {
                 <div class="operation">
                   <button @click="openEdit(item)">编辑</button>
                   <span>|</span>
+                  <template v-if="item.pendingOrgAssignment">
+                    <button @click="claimOrganization(item)">归属本机构</button>
+                    <span>|</span>
+                  </template>
                   <button @click="openDetail(item)">查看</button>
                   <template v-if="isPlatformAdmin && item.status === 'pending_review'">
                     <span>|</span>
@@ -533,7 +560,11 @@ const submitReject = async () => {
           <p v-if="formLoading" class="modal-tip">加载中…</p>
           <template v-else>
             <template v-if="!isPlatformAdmin">
-              <label>所属机构</label><input :value="currentUser.orgName || '当前登录机构'" disabled />
+              <label>所属机构</label>
+              <select v-if="organizations.length > 1" v-model="demandForm.orgId">
+                <option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </select>
+              <input v-else :value="adminOrgLabel" disabled />
               <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
             </template>
             <label>需求标题 *</label><input v-model="demandForm.title" />

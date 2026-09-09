@@ -263,18 +263,45 @@ const openView = item => {
   fetchDetail(item.id)
 }
 
-const fetchOwnerUsers = async () => {
-  if (!isPlatformAdmin.value) {
-    ownerUsers.value = []
-    return
+const claimOrganization = async item => {
+  if (!window.confirm('确认将该历史成果归属到当前机构？归属后将由本机构统一管理。')) return
+  try {
+    await api(`/admin/achievements/${item.id}/claim-organization`, {
+      method: 'POST', body: { version: item.version },
+    })
+    fetchList()
+  } catch (err) {
+    loadError.value = err.message || '归属机构失败'
   }
+}
+
+const belongsToOrg = (user, orgId) => {
+  const id = Number(orgId)
+  if ((user.organizationMemberships || []).some(m => Number(m.orgId) === id && m.status === 'active')) return true
+  return Number(user.orgId) === id
+}
+
+const primaryAdminOrgId = () => {
+  const memberships = currentUser.value.organizationMemberships || []
+  const admin = memberships.find(m => m.role === 'admin' && m.status === 'active')
+  return admin?.orgId || currentUser.value.orgId || ''
+}
+
+const fetchOwnerUsers = async () => {
   try {
     const data = await api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } })
     ownerUsers.value = data.list || []
   } catch { ownerUsers.value = [] }
 }
 
-const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => Number(user.orgId) === Number(achievementForm.orgId)))
+const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => belongsToOrg(user, achievementForm.orgId)))
+
+const adminOrgLabel = computed(() => {
+  const memberships = currentUser.value.organizationMemberships || []
+  const matched = memberships.find(m => Number(m.orgId) === Number(achievementForm.orgId))
+  const admin = matched || memberships.find(m => m.role === 'admin' && m.status === 'active')
+  return admin?.orgName || currentUser.value.orgName || '当前登录机构'
+})
 
 const resetAchievementForm = () => {
   Object.assign(achievementForm, {
@@ -293,7 +320,7 @@ const openCreate = () => {
   formError.value = ''
   resetAchievementForm()
   if (!isPlatformAdmin.value) {
-    achievementForm.orgId = currentUser.value.orgId || ''
+    achievementForm.orgId = primaryAdminOrgId()
     achievementForm.ownerUserId = currentUser.value.userId || ''
   }
   formVisible.value = true
@@ -313,6 +340,7 @@ const openEdit = async item => {
       techRoute: data.techRoute || '', maturityLevel: data.maturityLevel || '02_lab',
       maturityDesc: data.maturityDesc || '', pricingMode: data.pricingMode || 'negotiable',
       priceMinWan: data.priceMinWan ?? '', priceMaxWan: data.priceMaxWan ?? '',
+      categoryId: data.categoryId || '', orgId: data.orgId || '', ownerUserId: data.ownerUserId || '',
       contactName: data.contactName || '', contactPhone: data.contactPhone || '',
       contactEmail: data.contactEmail || '',
       applicationFieldsText: (data.applicationFields || []).join('，'),
@@ -327,8 +355,16 @@ const openEdit = async item => {
 }
 
 const saveAchievement = async (saveAction = 'draft') => {
-  if (formMode.value === 'create' && (!achievementForm.categoryId || !achievementForm.orgId || !achievementForm.ownerUserId)) {
+  if (formMode.value === 'create' && !achievementForm.categoryId) {
+    formError.value = '请选择成果分类'
+    return
+  }
+  if (formMode.value === 'create' && isPlatformAdmin.value && (!achievementForm.orgId || !achievementForm.ownerUserId)) {
     formError.value = '请依次选择分类、所属机构和归属用户'
+    return
+  }
+  if (formMode.value === 'create' && !isPlatformAdmin.value && !achievementForm.orgId) {
+    formError.value = '未绑定可管理的机构'
     return
   }
   if (!achievementForm.title.trim()) {
@@ -348,7 +384,7 @@ const saveAchievement = async (saveAction = 'draft') => {
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (formMode.value === 'create' || achievementForm.applicationFieldsText.trim()) body.applicationFields = splitText(achievementForm.applicationFieldsText)
     if (achievementForm.categoryId) body.categoryId = Number(achievementForm.categoryId)
-    if (isPlatformAdmin.value && achievementForm.orgId) body.orgId = Number(achievementForm.orgId)
+    if (achievementForm.orgId) body.orgId = Number(achievementForm.orgId)
     if (isPlatformAdmin.value && achievementForm.ownerUserId) body.ownerUserId = Number(achievementForm.ownerUserId)
     if (achievementForm.priceMinWan !== '') body.priceMinWan = Number(achievementForm.priceMinWan)
     if (achievementForm.priceMaxWan !== '') body.priceMaxWan = Number(achievementForm.priceMaxWan)
@@ -598,9 +634,7 @@ onMounted(() => {
   fetchList()
   fetchCategories()
   fetchOwnerUsers()
-  if (isPlatformAdmin.value) {
-    api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
-  }
+  api('/admin/content-organizations').then(data => { organizations.value = data || [] }).catch(() => { organizations.value = [] })
 })
 </script>
 
@@ -800,6 +834,11 @@ onMounted(() => {
                     <button type="button" @click="openEdit(item)">编辑</button>
                     <span>|</span>
 
+                    <template v-if="item.pendingOrgAssignment">
+                      <button type="button" @click="claimOrganization(item)">归属本机构</button>
+                      <span>|</span>
+                    </template>
+
                     <button
                       type="button"
                       @click="openView(item)"
@@ -940,7 +979,11 @@ onMounted(() => {
           <p v-if="formLoading" class="modal-state">加载中…</p>
           <template v-else>
             <template v-if="!isPlatformAdmin">
-              <label>所属机构</label><input :value="currentUser.orgName || '当前登录机构'" disabled />
+              <label>所属机构</label>
+              <select v-if="organizations.length > 1" v-model="achievementForm.orgId">
+                <option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </select>
+              <input v-else :value="adminOrgLabel" disabled />
               <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
             </template>
             <label>成果名称 *</label><input v-model="achievementForm.title" />

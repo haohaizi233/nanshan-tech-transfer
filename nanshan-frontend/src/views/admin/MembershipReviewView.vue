@@ -3,15 +3,20 @@ import {
   computed,
   onMounted,
   reactive,
-  ref
+  ref,
+  watch
 } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { api } from '../../api/client'
 
 const TABS = [
   { value: 'organization', label: '机构入驻申请' },
-  { value: 'org-admin', label: '机构管理员申请' }
+  { value: 'org-admin', label: '机构管理员申请' },
+  { value: 'member', label: '成员认证申请' }
 ]
+
+const route = useRoute()
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: '待审核' },
@@ -84,9 +89,15 @@ const pages = computed(() => {
 })
 
 function listApi() {
-  return activeTab.value === 'organization'
-    ? '/admin/organization-applications'
-    : '/admin/organization-admin-applications'
+  if (activeTab.value === 'organization') return '/admin/organization-applications'
+  if (activeTab.value === 'org-admin') return '/admin/organization-admin-applications'
+  return '/admin/organization-membership-applications'
+}
+
+function actionApi(item, action) {
+  if (activeTab.value === 'organization') return `/admin/organization-applications/${item.id}/${action}`
+  if (activeTab.value === 'org-admin') return `/admin/organization-admin-applications/${item.id}/${action}`
+  return `/admin/organization-membership-applications/${item.id}/${action}`
 }
 
 async function loadList() {
@@ -114,7 +125,18 @@ async function loadList() {
   }
 }
 
-onMounted(loadList)
+onMounted(() => {
+  const requestedTab = String(route.query.tab || '')
+  if (TABS.some(item => item.value === requestedTab)) activeTab.value = requestedTab
+  loadList()
+})
+
+watch(() => route.query.tab, (tab) => {
+  if (!TABS.some(item => item.value === tab) || activeTab.value === tab) return
+  activeTab.value = tab
+  currentPage.value = 1
+  loadList()
+})
 
 const switchTab = tab => {
   if (activeTab.value === tab) return
@@ -154,14 +176,14 @@ const closeDetail = () => {
 const approve = async item => {
   const label = activeTab.value === 'organization'
     ? `通过机构「${item.requestedName}」的入驻申请（申请人 ${item.userNo}，通过后该机构上架且申请人成为其机构管理员）`
-    : `通过用户 ${item.userNo} 成为「${item.orgName}」机构管理员的申请`
+    : activeTab.value === 'org-admin'
+      ? `通过用户 ${item.userNo} 成为「${item.orgName}」机构管理员的申请`
+      : `通过用户 ${item.userNo} 加入「${item.orgName}」的成员认证申请`
   if (!window.confirm(`确认${label}？`)) return
   acting.value = true
   actionError.value = ''
   try {
-    const path = activeTab.value === 'organization'
-      ? `/admin/organization-applications/${item.id}/approve`
-      : `/admin/organization-admin-applications/${item.id}/approve`
+    const path = actionApi(item, 'approve')
     await api(path, {
       method: 'POST',
       body: { version: item.version }
@@ -186,9 +208,7 @@ const reject = async item => {
   acting.value = true
   actionError.value = ''
   try {
-    const path = activeTab.value === 'organization'
-      ? `/admin/organization-applications/${item.id}/reject`
-      : `/admin/organization-admin-applications/${item.id}/reject`
+    const path = actionApi(item, 'reject')
     await api(path, {
       method: 'POST',
       body: { version: item.version, reason: trimmed }
@@ -493,7 +513,7 @@ const reject = async item => {
     >
       <div class="modal">
         <div class="modal-header">
-          <h3>{{ activeTab === 'organization' ? '机构入驻申请详情' : '机构管理员申请详情' }}</h3>
+          <h3>{{ activeTab === 'organization' ? '机构入驻申请详情' : activeTab === 'org-admin' ? '机构管理员申请详情' : '成员认证申请详情' }}</h3>
 
           <button @click="closeDetail">
             ×
@@ -590,8 +610,8 @@ const reject = async item => {
             </div>
 
             <div class="full">
-              <label>申请理由</label>
-              <strong>{{ currentItem.reason || '-' }}</strong>
+              <label>{{ activeTab === 'member' ? '申请说明' : '申请理由' }}</label>
+              <strong>{{ currentItem.applyNote || currentItem.reason || '-' }}</strong>
             </div>
 
             <div class="full">

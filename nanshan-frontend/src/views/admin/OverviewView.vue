@@ -9,6 +9,17 @@ const router = useRouter()
 const fmtTime = (v) => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 const fmtNum = (v) => (v === null || v === undefined || v === '' ? '-' : Number(v).toLocaleString())
 
+const TODO_KIND_COLORS = {
+  achievement: 'blue',
+  demand: 'orange',
+  organization_application: 'green',
+  organization_admin_application: 'purple',
+  membership_application: 'green',
+  cooperation: 'red'
+}
+
+const todoKindColor = (kind) => TODO_KIND_COLORS[kind] || 'blue'
+
 const ACTION_LABELS = {
   'achievement.approve': '通过成果审核',
   'achievement.reject': '驳回成果',
@@ -73,6 +84,21 @@ const loadSummary = async () => {
   }
 }
 
+const pendingQueueRoute = (s) => {
+  if (!s) return '/admin/achievements'
+  const pendingAchievements = Number(s.pendingAchievements ?? 0)
+  const pendingDemands = Number(s.pendingDemands ?? 0)
+  const content = pendingAchievements + pendingDemands
+  const membership = Number(s.pendingOrganizationApplications ?? 0)
+    + Number(s.pendingOrganizationAdminApplications ?? 0)
+    + Number(s.pendingMembershipApplications ?? 0)
+  const coop = Number(s.pendingCooperations ?? 0)
+  if (membership >= content && membership >= coop && membership > 0) return '/admin/membership-review'
+  if (coop >= content && coop > 0) return '/admin/cooperation'
+  if (pendingDemands > pendingAchievements) return '/admin/requirements'
+  return '/admin/achievements'
+}
+
 const statCards = computed(() => {
   const s = summary.value
 
@@ -119,8 +145,10 @@ const statCards = computed(() => {
       value: s?.pendingTotal,
       icon: 'pending',
       color: 'yellow',
-      route: '/admin/achievements',
-      sub: s ? `成果 ${s.pendingAchievements ?? 0} · 需求 ${s.pendingDemands ?? 0}` : ''
+      route: pendingQueueRoute(s),
+      sub: s
+        ? `内容 ${(s.pendingAchievements ?? 0) + (s.pendingDemands ?? 0)} · 机构认证 ${(s.pendingOrganizationApplications ?? 0) + (s.pendingOrganizationAdminApplications ?? 0) + (s.pendingMembershipApplications ?? 0)} · 对接 ${s.pendingCooperations ?? 0}`
+        : ''
     }
   ]
 })
@@ -267,8 +295,7 @@ const userCircles = computed(() => createPointList(trend.value?.users ?? []))
 const achievementCircles = computed(() => createPointList(trend.value?.achievements ?? []))
 const requirementCircles = computed(() => createPointList(trend.value?.demands ?? []))
 
-const achievementQueue = ref([])
-const demandQueue = ref([])
+const todoItems = ref([])
 const todoLoading = ref(false)
 const todoError = ref('')
 
@@ -277,44 +304,15 @@ const loadTodo = async () => {
   todoError.value = ''
 
   try {
-    const [achievements, demands] = await Promise.all([
-      api('/admin/achievements/review-queue', { params: { page: 1, pageSize: 5 } }),
-      api('/admin/demands/review-queue', { params: { page: 1, pageSize: 5 } })
-    ])
-
-    achievementQueue.value = achievements?.list ?? []
-    demandQueue.value = demands?.list ?? []
+    const data = await api('/admin/dashboard/todos', { params: { limit: 5 } })
+    todoItems.value = data?.list ?? []
   } catch (error) {
-    achievementQueue.value = []
-    demandQueue.value = []
+    todoItems.value = []
     todoError.value = error.message || '待办数据加载失败'
   } finally {
     todoLoading.value = false
   }
 }
-
-const todoItems = computed(() =>
-  [
-    ...achievementQueue.value.map((item) => ({
-      id: `achievement-${item.id}`,
-      text: item.title,
-      tag: '成果待审',
-      tagClass: 'blue',
-      iconClass: 'blue',
-      time: fmtTime(item.submittedAt),
-      route: '/admin/achievements'
-    })),
-    ...demandQueue.value.map((item) => ({
-      id: `demand-${item.id}`,
-      text: item.title,
-      tag: '需求待审',
-      tagClass: 'orange',
-      iconClass: 'orange',
-      time: fmtTime(item.submittedAt),
-      route: '/admin/requirements'
-    }))
-  ].slice(0, 5)
-)
 
 const activityLogs = ref([])
 const activityLoading = ref(false)
@@ -866,13 +864,6 @@ onMounted(() => {
             </span>
           </div>
 
-          <button
-            type="button"
-            class="more-button"
-            @click="goPage('/admin/achievements')"
-          >
-            查看全部 ›
-          </button>
         </div>
 
         <div
@@ -914,7 +905,7 @@ onMounted(() => {
           >
             <div
               class="todo-icon"
-              :class="item.iconClass"
+              :class="todoKindColor(item.kind)"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -935,20 +926,20 @@ onMounted(() => {
 
             <div
               class="todo-text"
-              :title="item.text"
+              :title="item.title"
             >
-              {{ item.text }}
+              {{ item.title }}
             </div>
 
             <span
               class="todo-tag"
-              :class="item.tagClass"
+              :class="todoKindColor(item.kind)"
             >
-              {{ item.tag }}
+              {{ item.label }}
             </span>
 
             <span class="todo-time">
-              {{ item.time }}
+              {{ fmtTime(item.createdAt) }}
             </span>
 
             <button
