@@ -15,6 +15,15 @@ def _map_read_row(row: dict) -> dict:
     }
 
 
+def resolve_content_organization(cur, user_id: int, org_id) -> int | None:
+    """Validate the optional publication organization against current membership."""
+    if org_id is None:
+        return None
+    normalized_org_id = int(org_id)
+    assert_active_membership(cur, user_id, normalized_org_id)
+    return normalized_org_id
+
+
 def _read_page(cur, select_sql: str, from_sql: str, params: list, page: int, page_size: int) -> dict:
     cur.execute(f"SELECT COUNT(*) AS total {from_sql}", params)
     total = cur.fetchone()["total"]
@@ -35,12 +44,104 @@ def list_my_memberships(user: dict, page: int, page_size: int) -> dict:
         )
 
 
+def get_my_organization_certification(user: dict) -> dict:
+    """Return the caller's current certification and pending-application state."""
+    user_id = int(user["userId"])
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT m.id, m.org_id, o.name AS org_name, m.role, m.status, m.version
+            FROM organization_membership m
+            JOIN institution o ON o.id = m.org_id
+            WHERE m.user_id = %s AND m.status = 'active'
+            ORDER BY CASE WHEN m.role = 'admin' THEN 0 ELSE 1 END, m.id
+            """,
+            (user_id,),
+        )
+        memberships = [
+            {"id": row["id"], "orgId": row["org_id"], "orgName": row["org_name"],
+             "role": row["role"], "status": row["status"], "version": row["version"]}
+            for row in (cur.fetchall() or [])
+        ]
+
+        cur.execute(
+            """
+            SELECT a.id, a.org_id, o.name AS org_name, a.status, a.version, a.review_reason
+            FROM organization_membership_application a
+            JOIN institution o ON o.id = a.org_id
+            WHERE a.user_id = %s AND a.status = 'pending'
+            ORDER BY a.id DESC LIMIT 1
+            """,
+            (user_id,),
+        )
+        membership_application_row = cur.fetchone()
+        membership_application = None if not membership_application_row else {
+            "id": membership_application_row["id"],
+            "orgId": membership_application_row["org_id"],
+            "orgName": membership_application_row["org_name"],
+            "status": membership_application_row["status"],
+            "version": membership_application_row["version"],
+            "reviewReason": membership_application_row.get("review_reason"),
+        }
+
+        cur.execute(
+            """
+            SELECT a.id, a.requested_name, a.status, a.version, a.review_reason
+            FROM organization_application a
+            WHERE a.applicant_user_id = %s AND a.status = 'pending'
+            ORDER BY a.id DESC LIMIT 1
+            """,
+            (user_id,),
+        )
+        organization_application_row = cur.fetchone()
+        organization_application = None if not organization_application_row else {
+            "id": organization_application_row["id"],
+            "requestedName": organization_application_row["requested_name"],
+            "status": organization_application_row["status"],
+            "version": organization_application_row["version"],
+            "reviewReason": organization_application_row.get("review_reason"),
+        }
+
+    if any(item["role"] == "admin" for item in memberships):
+        status = "certified_admin"
+    elif memberships:
+        status = "certified_member"
+    elif membership_application:
+        status = "membership_pending"
+    elif organization_application:
+        status = "organization_pending"
+    else:
+        status = "unverified"
+    return {
+        "status": status,
+        "memberships": memberships,
+        "membershipApplication": membership_application,
+        "organizationApplication": organization_application,
+    }
+
+
 def list_org_members(admin: dict, org_id: int, status, page: int, page_size: int) -> dict:
     return _list_org_records(admin, org_id, "organization_membership", status, page, page_size)
 
 
 def list_membership_applications(admin: dict, org_id: int, status, page: int, page_size: int) -> dict:
     return _list_org_records(admin, org_id, "organization_membership_application", status, page, page_size)
+
+
+def list_organization_membership_applications(admin: dict, status, page: int, page_size: int) -> dict:
+    """System-admin queue for member-certification applications across organizations."""
+    with get_cursor() as cur:
+        _assert_system_admin(cur, admin)
+        sql = (
+            "FROM organization_membership_application a "
+            "JOIN app_user u ON u.id = a.user_id "
+            "JOIN institution o ON o.id = a.org_id"
+        )
+        params = []
+        if status is not None:
+            sql += " WHERE a.status = %s"
+            params.append(status)
+        return _read_page(cur, "a.*, u.user_no, o.name AS org_name", sql, params, page, page_size)
 
 
 def _list_org_records(admin, org_id, table, status, page, page_size):

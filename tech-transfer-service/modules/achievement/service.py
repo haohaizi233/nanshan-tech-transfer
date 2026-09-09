@@ -4,14 +4,14 @@
 Architecture source: 04-backend-domain-design.md §4.5, 05-data-model-design.md §4,
                      06-api-design.md §7（成果组）、§5.1（状态机）
 状态机（后端强校验，前端按钮仅引导）:
-  draft / rejected → pending_review   (submit)
+  draft / rejected / offline → pending_review   (submit)
   published        → offline          (offline)
-编辑仅允许 draft / rejected（published 编辑需先 offline）
+编辑允许 draft / rejected / offline（published 编辑需先 offline 再改）
 """
 import json
 
 from db import get_cursor
-from modules.membership.service import assert_active_membership
+from modules.membership.service import assert_active_membership, resolve_content_organization
 from core.errors import (
     bad_request,
     conflict,
@@ -22,17 +22,21 @@ from core.errors import (
 from core.masking import mask_contact
 from modules.audit.service import record as audit_record
 from modules.cooperation.service import has_accepted_intent
+from modules.achievement.maturity import (
+    MATURITY_LABELS,
+    MATURITY_LEVELS,
+    resolve_maturity_desc,
+)
 
-MATURITY_LEVELS = ("01_idea", "02_lab", "03_pilot_ready", "04_pilot_done", "05_mass_ready")
 PRICING_MODES = ("negotiable", "license", "transfer", "cooperation", "other")
 INVENTOR_PERSON_TYPES = ("first_inventor", "co_inventor", "team_member")
 
 TRANSITIONS = {
-    "submit": {"from": ("draft", "rejected"), "to": "pending_review", "action": "achievement.submit"},
+    "submit": {"from": ("draft", "rejected", "offline"), "to": "pending_review", "action": "achievement.submit"},
     "offline": {"from": ("published",), "to": "offline", "action": "achievement.offline"},
 }
 
-EDITABLE_STATUSES = ("draft", "rejected")
+EDITABLE_STATUSES = ("draft", "rejected", "offline")
 
 
 def _parse_page_args(args):
@@ -68,7 +72,7 @@ def _row_to_list_item(row, user_id=None):
         "categoryCode": row.get("category_code"),
         "techIntro": (row.get("tech_intro") or "")[:120],
         "maturityLevel": row.get("maturity_level"),
-        "maturityDesc": row.get("maturity_desc"),
+        "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
         "applicationFields": fields,
         "pricingMode": row.get("pricing_mode"),
         "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") else None,
@@ -138,32 +142,39 @@ def list_achievements(args, user_id=None):
 
 def get_achievement_detail(ach_id: int, user_id=None):
     # 详情访问量以 SQL 自增实现，避免并发访问时发生“读-改-写”丢失。
-    # 仅已发布且未删除的成果可进入该路径。
+    # 已发布内容对登录用户可见；未发布内容仅 owner 可见（与需求详情、OpenAPI 一致）。
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            """
-            UPDATE achievement
-            SET view_count = view_count + 1
-            WHERE id=%s AND status='published' AND deleted_at IS NULL
-            RETURNING view_count
-            """,
-            (ach_id,),
-        )
-        if not cur.fetchone():
-            return None
-
         cur.execute(
             """
             SELECT a.*, c.name AS category_name, c.code AS category_code
             FROM achievement a
             LEFT JOIN achievement_category c ON a.category_id=c.id
-            WHERE a.id=%s AND a.status='published' AND a.deleted_at IS NULL
+            WHERE a.id=%s AND a.deleted_at IS NULL
             """,
             (ach_id,),
         )
         row = cur.fetchone()
         if not row:
             return None
+
+        is_owner = user_id is not None and row.get("owner_user_id") == user_id
+        if row.get("status") != "published" and not is_owner:
+            return None
+
+        if row.get("status") == "published":
+            cur.execute(
+                """
+                UPDATE achievement
+                SET view_count = view_count + 1
+                WHERE id=%s AND status='published' AND deleted_at IS NULL
+                RETURNING view_count
+                """,
+                (ach_id,),
+            )
+            updated = cur.fetchone()
+            if updated:
+                row = dict(row)
+                row["view_count"] = updated["view_count"]
 
         # 联系方式：仅发布方本人或已被接受的对接（accepted/confirmed/completed）可见明文
         contact_visible = (
@@ -218,7 +229,7 @@ def get_achievement_detail(ach_id: int, user_id=None):
         "techIntro": row.get("tech_intro"),
         "techRoute": row.get("tech_route"),
         "maturityLevel": row.get("maturity_level"),
-        "maturityDesc": row.get("maturity_desc"),
+        "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
         "applicationFields": fields,
         "innovationPoints": innovations,
         "pricingMode": row.get("pricing_mode"),
@@ -227,6 +238,8 @@ def get_achievement_detail(ach_id: int, user_id=None):
         **contact,
         "viewCount": row.get("view_count", 0),
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
+        "status": row.get("status"),
+        "version": row.get("version"),
         "isMine": user_id is not None and row.get("owner_user_id") == user_id,
         "platformAssisted": row.get("owner_user_id") is None,
         "inventors": [
@@ -318,6 +331,9 @@ def _parse_upsert_body(body: dict, partial: bool):
                 raise bad_request(f"{key} 单项长度不能超过 128")
             column = "application_fields" if key == "applicationFields" else "innovation_points"
             fields[column] = json.dumps(items, ensure_ascii=False)
+
+    if fields.get("maturity_level") and not fields.get("maturity_desc"):
+        fields["maturity_desc"] = MATURITY_LABELS.get(fields["maturity_level"])
 
     for key in ("priceMinWan", "priceMaxWan"):
         if key in body and body[key] is not None:
@@ -482,7 +498,7 @@ def _owner_detail(cur, ach_id: int, user_id=None):
         "techIntro": row.get("tech_intro"),
         "techRoute": row.get("tech_route"),
         "maturityLevel": row.get("maturity_level"),
-        "maturityDesc": row.get("maturity_desc"),
+        "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
         "applicationFields": as_list(row.get("application_fields")),
         "innovationPoints": as_list(row.get("innovation_points")),
         "pricingMode": row.get("pricing_mode"),
@@ -525,12 +541,9 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
             raise bad_request("priceMinWan 不能大于 priceMaxWan")
 
     with get_cursor(commit=True) as cur:
-        # 已绑定机构的普通用户发布内容时，机构归属只能取本人 profile.org_id。
-        # _validate_refs 会据此同步 source_org_name，避免伪造来源机构。
-        cur.execute("SELECT org_id FROM user_profile WHERE user_id=%s", (user_id,))
-        profile = cur.fetchone()
-        if profile and profile.get("org_id") is not None:
-            fields["org_id"] = profile["org_id"]
+        selected_org_id = resolve_content_organization(cur, user_id, fields.get("org_id"))
+        if selected_org_id is not None:
+            fields["org_id"] = selected_org_id
         _validate_refs(cur, fields)
         cur.execute(
             """
@@ -596,7 +609,7 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
             raise achievement_forbidden()
         if row["status"] not in EDITABLE_STATUSES:
             raise achievement_conflict(
-                f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected 可编辑）"
+                f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected/offline 可编辑）"
             )
 
         if "org_id" in fields:
@@ -736,7 +749,7 @@ def _my_list_item(row):
         "categoryCode": row.get("category_code"),
         "techIntro": (row.get("tech_intro") or "")[:120],
         "maturityLevel": row.get("maturity_level"),
-        "maturityDesc": row.get("maturity_desc"),
+        "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
         "applicationFields": fields,
         "pricingMode": row.get("pricing_mode"),
         "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") else None,

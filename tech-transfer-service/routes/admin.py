@@ -26,6 +26,7 @@ from modules.admin.service import (
     submit_demand_admin,
     list_demand_categories_admin,
     list_content_organizations_admin,
+    claim_unassigned_content,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
@@ -86,6 +87,18 @@ def admin_achievement_update(
         request_id=get_request_id(),
     )
     return success(result, "成果更新成功")
+
+
+@router.post("/admin/achievements/{ach_id}/claim-organization")
+def admin_achievement_claim_organization(
+    ach_id: int,
+    body: dict = Depends(json_body),
+    scope: dict = Depends(backend_identity),
+):
+    return success(
+        claim_unassigned_content(scope, "achievement", ach_id, body.get("version"), get_request_id()),
+        "已归属到当前机构",
+    )
 
 
 @router.post("/admin/achievements/{ach_id}/submit")
@@ -160,6 +173,18 @@ def admin_demand_update(
         request_id=get_request_id(),
     )
     return success(result, "需求更新成功")
+
+
+@router.post("/admin/demands/{demand_id}/claim-organization")
+def admin_demand_claim_organization(
+    demand_id: int,
+    body: dict = Depends(json_body),
+    scope: dict = Depends(backend_identity),
+):
+    return success(
+        claim_unassigned_content(scope, "demand", demand_id, body.get("version"), get_request_id()),
+        "已归属到当前机构",
+    )
 
 
 @router.post("/admin/demands/{demand_id}/submit")

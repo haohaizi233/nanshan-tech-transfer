@@ -20,6 +20,11 @@ def my_memberships(request: Request, user: dict = Depends(identity)):
     return success(service.list_my_memberships(user, page, page_size))
 
 
+@router.get("/me/organization-certification")
+def my_organization_certification(user: dict = Depends(identity)):
+    return success(service.get_my_organization_certification(user))
+
+
 @router.post("/me/organization-membership-applications")
 def apply_membership(body: schemas.MembershipApplicationRequest, user: dict = Depends(identity)):
     return success(service.apply_membership(user, body.model_dump(exclude_unset=True)))
@@ -73,6 +78,25 @@ def revoke_member(membership_id: int, body: schemas.MembershipRevocationRequest,
 def organization_applications(request: Request, status: ApplicationStatus = None, admin: dict = Depends(admin_identity)):
     page, page_size, _ = parse_page_args(request)
     return success(service.list_organization_applications(admin, status, page, page_size))
+
+
+@router.get("/admin/organization-membership-applications")
+def organization_membership_applications(request: Request, status: ApplicationStatus = None,
+                                         admin: dict = Depends(admin_identity)):
+    page, page_size, _ = parse_page_args(request)
+    return success(service.list_organization_membership_applications(admin, status, page, page_size))
+
+
+@router.post("/admin/organization-membership-applications/{application_id}/approve")
+def approve_organization_membership(application_id: int, body: schemas.MembershipReviewRequest,
+                                    admin: dict = Depends(admin_identity)):
+    return success(service.approve_membership_application(admin, application_id, body.version, request_id=get_request_id()))
+
+
+@router.post("/admin/organization-membership-applications/{application_id}/reject")
+def reject_organization_membership(application_id: int, body: schemas.MembershipRejectionRequest,
+                                   admin: dict = Depends(admin_identity)):
+    return success(service.reject_membership_application(admin, application_id, body.version, body.reason, request_id=get_request_id()))
 
 
 @router.post("/admin/organization-applications/{application_id}/approve")

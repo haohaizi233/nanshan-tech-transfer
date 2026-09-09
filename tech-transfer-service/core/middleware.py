@@ -124,14 +124,18 @@ def backend_identity(request: Request) -> dict:
             JOIN institution i ON i.id = m.org_id AND i.status = 'active'
             WHERE m.user_id = %s AND m.role = 'admin' AND m.status = 'active'
             ORDER BY m.org_id
-            LIMIT 1
             """,
             (user["userId"],),
         )
-        row = cur.fetchone()
+        org_ids = [int(row["org_id"]) for row in (cur.fetchall() or [])]
 
-    if row:
-        return {**user, "isPlatformAdmin": False, "orgId": int(row["org_id"])}
+    if org_ids:
+        return {
+            **user,
+            "isPlatformAdmin": False,
+            "orgId": org_ids[0],
+            "orgIds": org_ids,
+        }
 
     code, message, status = TT_ADMIN_40301
     raise BizError(code, message, status)

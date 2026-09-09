@@ -22,7 +22,7 @@ from core.errors import (
 from core.masking import mask_contact
 from modules.audit.service import record as audit_record
 from modules.cooperation.service import has_accepted_intent
-from modules.membership.service import assert_active_membership
+from modules.membership.service import assert_active_membership, resolve_content_organization
 
 # 状态流转表（06 §5.5 权限矩阵）
 TRANSITIONS = {
@@ -181,8 +181,16 @@ def _validate_refs(cur, fields):
             raise bad_request("orgId 不存在")
 
 
-def _resolve_name_refs(cur, fields):
-    """Legacy administrative entry only; never used by user create/update paths."""
+def _resolve_name_refs(cur, fields, *, allow_org_mutate=True):
+    """Legacy administrative entry only; never used by user create/update paths.
+
+    Institution administrators must not resolve orgName into a different org_id.
+    """
+    if not allow_org_mutate:
+        fields.pop("org_name_snapshot", None)
+        fields.pop("org_intro", None)
+        _resolve_category_name(cur, fields)
+        return
     org_name = fields.pop("org_name_snapshot", None)
     org_intro = fields.pop("org_intro", None)
     if org_intro and not org_name:
@@ -438,8 +446,16 @@ def get_demand_detail(demand_id: int, user_id: int):
         row = _get_demand_row(cur, demand_id)
         if not row:
             raise demand_not_found()
-        if row["status"] != "published" and row["owner_user_id"] != user_id:
-            # 防探测：非公开需求对非 owner 一律 404
+        is_confirmed_counterpart = (
+            row["status"] == "matched"
+            and has_accepted_intent(cur, "demand", demand_id, user_id)
+        )
+        if (
+            row["status"] != "published"
+            and row["owner_user_id"] != user_id
+            and not is_confirmed_counterpart
+        ):
+            # 防探测：非公开需求仅 owner 或已确认对接的发起方可见。
             raise demand_not_found()
 
         # 草稿/驳回等非公开内容不计入浏览量；已发布内容在同一事务中原子累加。
@@ -474,13 +490,11 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
             raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
 
     with get_cursor(commit=True) as cur:
-        _resolve_name_refs(cur, fields)
-        # 已绑定机构的普通用户发布内容时，机构归属只能取本人 profile.org_id。
-        # 不信任请求体中的 orgId / orgName，避免内容与归属用户的机构不一致。
-        cur.execute("SELECT org_id FROM user_profile WHERE user_id=%s", (user_id,))
-        profile = cur.fetchone()
-        if profile and profile.get("org_id") is not None:
-            fields["org_id"] = profile["org_id"]
+        # 用户填写的机构名称只保留为展示快照；canonical 归属必须来自 orgId。
+        _resolve_category_name(cur, fields)
+        selected_org_id = resolve_content_organization(cur, user_id, fields.get("org_id"))
+        if selected_org_id is not None:
+            fields["org_id"] = selected_org_id
         _validate_refs(cur, fields)
         cur.execute(
             """

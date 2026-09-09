@@ -35,6 +35,27 @@ def _normalize_type_key(type_key: str) -> str:
     return (type_key or "").strip().lower()
 
 
+def institution_search_order(keyword: str, auxiliary_fields: tuple = ("intro", "support_unit", "label")) -> tuple[str, tuple]:
+    """Build relevance ordering for institution-directory keyword searches.
+
+    A broad word often appears in every institution introduction.  Keep those
+    matches searchable, but always surface direct name matches first so a user
+    selecting an organization sees the most likely candidate at the top.
+    """
+    kw = (keyword or "").strip()
+    contains = f"%{kw}%"
+    auxiliary_match = " OR ".join(f"{field} ILIKE %s" for field in auxiliary_fields) or "FALSE"
+    order_sql = (
+        " ORDER BY CASE"
+        " WHEN name ILIKE %s THEN 0"
+        " WHEN name ILIKE %s THEN 1"
+        " WHEN name ILIKE %s THEN 2"
+        f" WHEN {auxiliary_match} THEN 3"
+        " ELSE 4 END, sort_order ASC, source_pk ASC"
+    )
+    return order_sql, (kw, f"{kw}%", contains, *([contains] * len(auxiliary_fields)))
+
+
 def _query(
     page: int,
     page_size: int,
@@ -68,7 +89,11 @@ def _query(
 
     where_sql = " WHERE " + " AND ".join(where)
 
-    if platform_order:
+    order_params = ()
+    if keyword and keyword_fields:
+        auxiliary_fields = tuple(field for field in keyword_fields if field != "name")
+        order_sql, order_params = institution_search_order(keyword, auxiliary_fields)
+    elif platform_order:
         order_sql = " ORDER BY serial_no ASC"
     else:
         order_sql = " ORDER BY sort_order ASC, source_pk ASC"
@@ -79,7 +104,7 @@ def _query(
         offset = (page - 1) * page_size
         cur.execute(
             "SELECT * FROM institution" + where_sql + order_sql + " LIMIT %s OFFSET %s",
-            params + [page_size, offset],
+            params + list(order_params) + [page_size, offset],
         )
         rows = cur.fetchall() or []
 

@@ -8,6 +8,14 @@
        终态后重新发起、事件时间线、/me/cooperations 视角过滤
 依赖：后端已启动（127.0.0.1:8787），005 迁移已执行，etl_demands.py 演示数据在库
 """
+import os
+
+# 该脚本包含历史遗留的清理 SQL，默认永久停用，防止误删开发数据。
+# 需要重建为隔离测试库后，才允许显式移除此保护。
+if os.environ.get("RUN_UNSAFE_INTERACTION_TEST") != "1":
+    print("[DISABLED] test_interaction_api.py 已停用：该脚本会清理开发库数据，禁止直接运行。")
+    raise SystemExit(2)
+
 import psycopg2
 import psycopg2.extras
 import requests
@@ -264,7 +272,8 @@ resp = requests.get(f"{BASE}/demands/{d1}", headers=h_b, timeout=10)
 check("confirm副作用:需求→matched", resp.json()["data"]["status"] == "matched",
       f"got {resp.json().get('data', {}).get('status')}")
 resp = requests.get(f"{BASE}/demands/{d1}", headers=h_a, timeout=10)
-check("matched后非owner不可见(404)", resp.status_code == 404)
+check("matched后已确认对接发起人可查看详情", resp.status_code == 200,
+      f"got {resp.status_code} {resp.text[:150]}")
 
 resp = requests.post(f"{BASE}/cooperations/{iid1}/cancel", headers=h_a, json={"version": 99}, timeout=10)
 check("错误version乐观锁409", resp.status_code == 409 and resp.json()["code"] == "TT_COMMON_40902",

@@ -63,14 +63,89 @@ def list_demand_categories_admin() -> list[dict]:
         return [{"id": row["id"], "code": row["code"], "name": row["name"]} for row in (cur.fetchall() or [])]
 
 
+def scope_org_ids(scope: dict) -> list[int]:
+    """Canonical institutions an org-admin may manage; empty for platform admins."""
+    if scope.get("isPlatformAdmin"):
+        return []
+    raw = scope.get("orgIds")
+    if raw:
+        return [int(item) for item in raw]
+    if scope.get("orgId") is not None:
+        return [int(scope["orgId"])]
+    return []
+
+
+def _sql_in(column: str, values: list) -> tuple[str, list]:
+    placeholders = ",".join(["%s"] * len(values))
+    return f"{column} IN ({placeholders})", list(values)
+
+
+def _coop_org_visibility_sql(scope: dict) -> tuple[str, list]:
+    org_ids = scope_org_ids(scope)
+    if not org_ids:
+        raise forbidden("机构管理员未绑定有效机构")
+    placeholders = ",".join(["%s"] * len(org_ids))
+    sql = (
+        f"(COALESCE(ci.target_org_id, d.org_id, a.org_id) IN ({placeholders})"
+        f" OR EXISTS (SELECT 1 FROM organization_membership m"
+        f" WHERE m.user_id = ci.initiator_user_id AND m.status = 'active'"
+        f" AND m.org_id IN ({placeholders})))"
+    )
+    return sql, list(org_ids) + list(org_ids)
+
+
+def _user_membership_scope_sql(scope: dict) -> tuple[str, list]:
+    org_ids = scope_org_ids(scope)
+    if not org_ids:
+        raise forbidden("机构管理员未绑定有效机构")
+    placeholders = ",".join(["%s"] * len(org_ids))
+    sql = (
+        "EXISTS (SELECT 1 FROM organization_membership om"
+        " WHERE om.user_id = u.id AND om.status = 'active'"
+        f" AND om.org_id IN ({placeholders}))"
+    )
+    return sql, list(org_ids)
+
+
+def append_org_row_filter(where: list, params: list, scope: dict, column: str = "org_id") -> None:
+    org_ids = scope_org_ids(scope)
+    if not org_ids:
+        return
+    clause, values = _sql_in(column, org_ids)
+    where.append(clause)
+    params.extend(values)
+
+
+def _restrict_org_admin_fields(scope: dict, fields: dict, *, is_create: bool, kind: str) -> None:
+    if scope.get("isPlatformAdmin"):
+        return
+    fields.pop("org_name", None)
+    fields.pop("org_intro", None)
+    fields.pop("org_name_snapshot", None)
+    if kind == "achievement":
+        fields.pop("source_org_name", None)
+    if not is_create:
+        fields.pop("org_id", None)
+        return
+    requested = fields.get("org_id")
+    org_ids = scope_org_ids(scope)
+    if requested is not None and org_ids and int(requested) not in org_ids:
+        fields.pop("org_id", None)
+
+
 def list_content_organizations_admin(scope: dict) -> list[dict]:
     """后台内容录入使用的已启用机构（统一机构目录 institution）。
 
     平台管理员返回全部活跃机构；机构管理员只返回本机构
     （创建/编辑内容的机构归属由服务端强制为本机构，此处仅控制下拉展示）。
     """
-    org_filter = "" if scope.get("isPlatformAdmin") else " AND id = %s"
-    params: list = [scope["orgId"]] if org_filter else []
+    org_ids = scope_org_ids(scope)
+    if org_ids:
+        clause, params = _sql_in("id", org_ids)
+        org_filter = f" AND {clause}"
+    else:
+        org_filter = ""
+        params = []
     with get_cursor() as cur:
         cur.execute(
             f"""
@@ -406,6 +481,14 @@ def dashboard_summary() -> dict:
                 WHERE status = 'pending_review' AND deleted_at IS NULL)         AS pending_achievements,
               (SELECT COUNT(*) FROM demand
                 WHERE status = 'pending_review' AND deleted_at IS NULL)         AS pending_demands,
+              (SELECT COUNT(*) FROM organization_application
+                WHERE status = 'pending')                                        AS pending_organization_applications,
+              (SELECT COUNT(*) FROM organization_admin_application
+                WHERE status = 'pending')                                        AS pending_organization_admin_applications,
+              (SELECT COUNT(*) FROM organization_membership_application
+                WHERE status = 'pending')                                        AS pending_membership_applications,
+              (SELECT COUNT(*) FROM cooperation_intent
+                WHERE status = 'pending')                                        AS pending_cooperations,
               (SELECT COUNT(*) FROM institution WHERE status = 'active')        AS institutions
             """
         )
@@ -421,7 +504,10 @@ def dashboard_summary() -> dict:
         )
         dmd_status = {row["status"]: int(row["c"]) for row in (cur.fetchall() or [])}
 
-    pending_total = int(r["pending_achievements"]) + int(r["pending_demands"])
+    pending_total = sum(int(r[key]) for key in (
+        "pending_achievements", "pending_demands", "pending_organization_applications",
+        "pending_organization_admin_applications", "pending_membership_applications", "pending_cooperations",
+    ))
     return {
         "users": int(r["users"]),
         "achievements": int(r["achievements"]),
@@ -429,11 +515,95 @@ def dashboard_summary() -> dict:
         "cooperations": int(r["cooperations"]),
         "pendingAchievements": int(r["pending_achievements"]),
         "pendingDemands": int(r["pending_demands"]),
+        "pendingOrganizationApplications": int(r["pending_organization_applications"]),
+        "pendingOrganizationAdminApplications": int(r["pending_organization_admin_applications"]),
+        "pendingMembershipApplications": int(r["pending_membership_applications"]),
+        "pendingCooperations": int(r["pending_cooperations"]),
         "pendingTotal": pending_total,
         "institutions": int(r["institutions"]),
         "achievementStatusCounts": ach_status,
         "demandStatusCounts": dmd_status,
     }
+
+
+def dashboard_todos(limit: int = 20) -> dict:
+    """Unified system-admin work queue; organization applications appear only once."""
+    limit = max(1, min(int(limit or 20), 100))
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT kind, id, title, created_at
+            FROM (
+                SELECT 'achievement' AS kind, a.id, a.title,
+                       COALESCE(a.updated_at, a.created_at) AS created_at
+                FROM achievement a
+                WHERE a.status = 'pending_review' AND a.deleted_at IS NULL
+                UNION ALL
+                SELECT 'demand' AS kind, d.id, d.title,
+                       COALESCE(d.updated_at, d.created_at) AS created_at
+                FROM demand d
+                WHERE d.status = 'pending_review' AND d.deleted_at IS NULL
+                UNION ALL
+                SELECT 'organization_application' AS kind, a.id, a.requested_name AS title, a.created_at
+                FROM organization_application a
+                WHERE a.status = 'pending'
+                UNION ALL
+                SELECT 'organization_admin_application' AS kind, a.id,
+                       CONCAT(COALESCE(u.user_no, '用户'), ' 申请成为 ', COALESCE(o.name, '机构'), ' 管理员') AS title,
+                       a.created_at
+                FROM organization_admin_application a
+                JOIN app_user u ON u.id = a.user_id
+                JOIN institution o ON o.id = a.org_id
+                WHERE a.status = 'pending'
+                UNION ALL
+                SELECT 'membership_application' AS kind, a.id,
+                       CONCAT(COALESCE(u.user_no, '用户'), ' 申请加入 ', COALESCE(o.name, '机构')) AS title,
+                       a.created_at
+                FROM organization_membership_application a
+                JOIN app_user u ON u.id = a.user_id
+                JOIN institution o ON o.id = a.org_id
+                WHERE a.status = 'pending'
+                UNION ALL
+                SELECT 'cooperation' AS kind, c.id,
+                       COALESCE(a.title, d.title, '待处理合作对接') AS title, c.created_at
+                FROM cooperation_intent c
+                LEFT JOIN achievement a ON c.target_type = 'achievement' AND c.target_id = a.id
+                LEFT JOIN demand d ON c.target_type = 'demand' AND c.target_id = d.id
+                WHERE c.status = 'pending'
+            ) AS todo
+            ORDER BY created_at ASC, id ASC
+            """
+        )
+        rows = cur.fetchall() or []
+
+    routes = {
+        "achievement": "/admin/achievements",
+        "demand": "/admin/requirements",
+        "organization_application": "/admin/membership-review?tab=organization",
+        "organization_admin_application": "/admin/membership-review?tab=org-admin",
+        "membership_application": "/admin/membership-review?tab=member",
+        "cooperation": "/admin/cooperation",
+    }
+    labels = {
+        "achievement": "成果待审",
+        "demand": "需求待审",
+        "organization_application": "机构入驻审核",
+        "organization_admin_application": "机构管理员审核",
+        "membership_application": "成员认证审核",
+        "cooperation": "待处理对接",
+    }
+    items = [
+        {
+            "id": f"{row['kind']}-{row['id']}",
+            "kind": row["kind"],
+            "title": row.get("title") or "待处理事项",
+            "label": labels[row["kind"]],
+            "route": routes[row["kind"]],
+            "createdAt": row.get("created_at"),
+        }
+        for row in rows
+    ]
+    return {"total": len(items), "list": items[:limit]}
 
 
 def dashboard_trend(days) -> dict:
@@ -788,8 +958,9 @@ def list_cooperations_admin(args, scope: dict) -> dict:
 
     where, params = [], []
     if not scope.get("isPlatformAdmin"):
-        where.append("(ip.org_id = %s OR tp.org_id = %s)")
-        params.extend([scope["orgId"], scope["orgId"]])
+        clause, values = _coop_org_visibility_sql(scope)
+        where.append(clause)
+        params.extend(values)
     if status:
         where.append("ci.status = %s")
         params.append(status)
@@ -826,8 +997,9 @@ def get_cooperation_admin(intent_id: int, scope: dict) -> dict:
         where = ["ci.id = %s"]
         params = [intent_id]
         if not scope.get("isPlatformAdmin"):
-            where.append("(ip.org_id = %s OR tp.org_id = %s)")
-            params.extend([scope["orgId"], scope["orgId"]])
+            clause, values = _coop_org_visibility_sql(scope)
+            where.append(clause)
+            params.extend(values)
         cur.execute(_COOP_LIST_SQL + " WHERE " + " AND ".join(where), params)
         row = cur.fetchone()
         if not row:
@@ -850,11 +1022,12 @@ def get_cooperation_admin(intent_id: int, scope: dict) -> dict:
 
     detail["canReview"] = bool(
         row["status"] == "pending"
+        and int(row.get("initiator_user_id") or 0) != int(scope.get("userId") or 0)
         and (
             is_platform_admin
             or (
                 target_org_id is not None
-                and int(target_org_id) == int(scope.get("orgId") or 0)
+                and int(target_org_id) in set(scope_org_ids(scope))
             )
         )
     )
@@ -922,17 +1095,15 @@ def _can_review_cooperation(scope: dict, row: dict) -> bool:
     if row["status"] != "pending":
         return False
 
+    if int(row.get("initiator_user_id") or 0) == int(scope.get("userId") or 0):
+        return False
+
     if scope.get("isPlatformAdmin"):
         return True
 
     target_org_id = row.get("target_org_id")
-    scope_org_id = scope.get("orgId")
-
-    return (
-        target_org_id is not None
-        and scope_org_id is not None
-        and int(target_org_id) == int(scope_org_id)
-    )
+    org_ids = set(scope_org_ids(scope))
+    return target_org_id is not None and int(target_org_id) in org_ids
 
 
 def admin_review_cooperation(
@@ -977,6 +1148,8 @@ def admin_review_cooperation(
                 ci.target_owner_user_id,
                 ci.status,
                 ci.version,
+                ci.handling_mode,
+                ci.assist_status,
                 COALESCE(d.org_id, a.org_id) AS target_org_id
             FROM cooperation_intent ci
             LEFT JOIN demand d
@@ -1000,6 +1173,9 @@ def admin_review_cooperation(
 
         if row["status"] != "pending":
             raise coop_conflict("只有待处理的对接申请可以接受或驳回")
+
+        if action == "accept" and (row.get("handling_mode") or "direct") == "assisted":
+            raise coop_conflict("平台协助对接须待目标机构明确同意后，通过协助处理流程接受")
 
         cur.execute(
             f"""
@@ -1115,6 +1291,83 @@ _DMD_STATUS_LABELS = {
 }
 
 
+def organization_content_scope(scope: dict, alias: str) -> tuple[str | None, list]:
+    """Return the content visibility predicate for a platform/org administrator.
+
+    Institution administrators manage their institution's content.  Their own
+    pre-certification publications have no canonical organization yet, so they
+    remain visible as explicitly claimable legacy content rather than being
+    silently assigned to an institution.
+    """
+    if scope.get("isPlatformAdmin"):
+        return None, []
+    org_ids = scope_org_ids(scope)
+    if not org_ids:
+        return (
+            f"({alias}.org_id = %s OR ({alias}.org_id IS NULL AND {alias}.owner_user_id = %s))",
+            [scope.get("orgId"), scope["userId"]],
+        )
+    org_clause, org_params = _sql_in(f"{alias}.org_id", org_ids)
+    return (
+        f"({org_clause} OR ({alias}.org_id IS NULL AND {alias}.owner_user_id = %s))",
+        org_params + [scope["userId"]],
+    )
+
+
+def can_claim_unassigned_content(scope: dict, row: dict) -> bool:
+    return bool(
+        not scope.get("isPlatformAdmin")
+        and scope.get("orgId")
+        and row.get("org_id") is None
+        and row.get("owner_user_id") == scope.get("userId")
+    )
+
+
+def claim_unassigned_content(scope: dict, content_type: str, content_id: int, version: int, request_id=None) -> dict:
+    """Attach an administrator's own legacy publication to their active institution."""
+    tables = {"achievement": "achievement", "demand": "demand"}
+    table = tables.get(content_type)
+    if not table:
+        raise bad_request("contentType 必须是 achievement 或 demand")
+    org_ids = scope_org_ids(scope)
+    if scope.get("isPlatformAdmin") or not org_ids:
+        raise forbidden("仅机构管理员可归属自己的历史内容")
+    claim_org_id = org_ids[0] if len(org_ids) == 1 else int(scope.get("orgId") or org_ids[0])
+    if not isinstance(version, int) or version < 1:
+        raise bad_request("归属内容必须携带正整数 version")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            f"SELECT id, org_id, owner_user_id, version FROM {table} "
+            "WHERE id=%s AND deleted_at IS NULL FOR UPDATE",
+            (content_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise achievement_not_found() if content_type == "achievement" else demand_not_found()
+        if not can_claim_unassigned_content(scope, row):
+            raise forbidden("只能归属本人尚未关联机构的历史内容")
+        if row["version"] != version:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        cur.execute(
+            f"UPDATE {table} SET org_id=%s, version=version+1 "
+            "WHERE id=%s AND version=%s RETURNING id, org_id, version",
+            (claim_org_id, content_id, version),
+        )
+        updated = cur.fetchone()
+
+    audit_record(
+        f"{content_type}.organization_claim",
+        table,
+        resource_id=content_id,
+        actor_user_id=scope["userId"],
+        actor_user_no=scope.get("userNo", ""),
+        details={"orgId": claim_org_id, "previousOrgId": None},
+        request_id=request_id,
+    )
+    return {"id": updated["id"], "orgId": updated["org_id"], "version": updated["version"]}
+
+
 def _ach_admin_item(r) -> dict:
     status = r["status"]
     owner_id = r.get("owner_user_id")
@@ -1150,10 +1403,10 @@ def list_achievements_admin(args, scope: dict) -> dict:
     where = ["a.deleted_at IS NULL"]
     params = []
 
-    # 机构管理员只能看自己机构的成果；平台管理员不加此条件。
-    if not scope.get("isPlatformAdmin"):
-        where.append("a.org_id = %s")
-        params.append(scope["orgId"])
+    scope_predicate, scope_params = organization_content_scope(scope, "a")
+    if scope_predicate:
+        where.append(scope_predicate)
+        params.extend(scope_params)
 
     if status:
         where.append("a.status = %s")
@@ -1181,7 +1434,7 @@ def list_achievements_admin(args, scope: dict) -> dict:
         offset = (page - 1) * page_size
         cur.execute(
             f"""
-            SELECT a.id, a.title, a.status, a.version, a.tech_intro, a.source_org_name,
+            SELECT a.id, a.title, a.status, a.version, a.org_id, a.tech_intro, a.source_org_name,
                    a.view_count, a.reject_reason, a.published_at, a.created_at, a.updated_at,
                    a.owner_user_id,
                    c.name AS category_name, c.code AS category_code,
@@ -1197,7 +1450,10 @@ def list_achievements_admin(args, scope: dict) -> dict:
             params + [page_size, offset],
         )
         rows = cur.fetchall() or []
-    return _page_of(rows, page, page_size, total, _ach_admin_item)
+    items = _page_of(rows, page, page_size, total, _ach_admin_item)
+    for item, row in zip(items["list"], rows):
+        item["pendingOrgAssignment"] = can_claim_unassigned_content(scope, row)
+    return items
 
 
 def get_achievement_admin(ach_id: int, scope: dict) -> dict:
@@ -1218,9 +1474,10 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
     where = ["a.id = %s", "a.deleted_at IS NULL"]
     params = [ach_id]
 
-    if not scope.get("isPlatformAdmin"):
-        where.append("a.org_id = %s")
-        params.append(scope["orgId"])
+    scope_predicate, scope_params = organization_content_scope(scope, "a")
+    if scope_predicate:
+        where.append(scope_predicate)
+        params.extend(scope_params)
 
     with get_cursor() as cur:
         cur.execute(
@@ -1253,8 +1510,14 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
     detail = _ach_admin_item(row)
     detail.update({
         "techIntro": row.get("tech_intro"),
+        "techRoute": row.get("tech_route"),
         "maturityLevel": row.get("maturity_level"),
         "maturityDesc": row.get("maturity_desc"),
+        "pricingMode": row.get("pricing_mode"),
+        "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") is not None else None,
+        "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") is not None else None,
+        "categoryId": row.get("category_id"),
+        "orgId": row.get("org_id"),
         "contactName": row.get("contact_name"),
         "contactPhone": row.get("contact_phone"),
         "contactEmail": row.get("contact_email"),
@@ -1267,6 +1530,13 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
             for inv in inventors
         ],
     })
+    application_fields = row.get("application_fields")
+    if application_fields and isinstance(application_fields, str):
+        try:
+            application_fields = json.loads(application_fields)
+        except (ValueError, TypeError):
+            application_fields = []
+    detail["applicationFields"] = application_fields if isinstance(application_fields, list) else []
     innovations = row.get("innovation_points")
     if innovations and isinstance(innovations, str):
         try:
@@ -1322,10 +1592,10 @@ def list_demands_admin(args, scope: dict) -> dict:
     where = ["d.deleted_at IS NULL"]
     params = []
 
-    # 机构管理员只能查看本机构需求；平台管理员查看全部。
-    if not scope.get("isPlatformAdmin"):
-        where.append("d.org_id = %s")
-        params.append(scope["orgId"])
+    scope_predicate, scope_params = organization_content_scope(scope, "d")
+    if scope_predicate:
+        where.append(scope_predicate)
+        params.extend(scope_params)
 
     if status:
         where.append("d.status = %s")
@@ -1354,7 +1624,7 @@ def list_demands_admin(args, scope: dict) -> dict:
         offset = (page - 1) * page_size
         cur.execute(
             f"""
-            SELECT d.id, d.title, d.status, d.version, d.region,
+            SELECT d.id, d.title, d.status, d.version, d.org_id, d.region,
                    d.budget_min_wan, d.budget_max_wan, d.budget_negotiable,
                    d.reject_reason, d.published_at, d.created_at, d.updated_at,
                    d.owner_user_id,
@@ -1372,7 +1642,10 @@ def list_demands_admin(args, scope: dict) -> dict:
             params + [page_size, offset],
         )
         rows = cur.fetchall() or []
-    return _page_of(rows, page, page_size, total, _dmd_admin_item)
+    items = _page_of(rows, page, page_size, total, _dmd_admin_item)
+    for item, row in zip(items["list"], rows):
+        item["pendingOrgAssignment"] = can_claim_unassigned_content(scope, row)
+    return items
 
 
 def get_demand_admin(demand_id: int, scope: dict) -> dict:
@@ -1380,9 +1653,10 @@ def get_demand_admin(demand_id: int, scope: dict) -> dict:
     where = ["d.id = %s", "d.deleted_at IS NULL"]
     params = [demand_id]
 
-    if not scope.get("isPlatformAdmin"):
-        where.append("d.org_id = %s")
-        params.append(scope["orgId"])
+    scope_predicate, scope_params = organization_content_scope(scope, "d")
+    if scope_predicate:
+        where.append(scope_predicate)
+        params.extend(scope_params)
 
     with get_cursor() as cur:
         cur.execute(
@@ -1418,6 +1692,10 @@ def get_demand_admin(demand_id: int, scope: dict) -> dict:
         "description": row.get("description"),
         "coopMode": row.get("coop_mode"),
         "orgIntro": row.get("org_intro"),
+        "categoryId": row.get("category_id"),
+        "orgId": row.get("org_id"),
+        "budgetMinWan": float(row["budget_min_wan"]) if row.get("budget_min_wan") is not None else None,
+        "budgetMaxWan": float(row["budget_max_wan"]) if row.get("budget_max_wan") is not None else None,
         "tags": tags,
         "contactName": row.get("contact_name"),
         "contactTitle": row.get("contact_title"),
@@ -1480,8 +1758,9 @@ def list_users_admin(args, scope: dict) -> dict:
     where = ["u.deleted_at IS NULL"]
     params = []
     if not scope.get("isPlatformAdmin"):
-        where.append("p.org_id = %s")
-        params.append(scope["orgId"])
+        clause, values = _user_membership_scope_sql(scope)
+        where.append(clause)
+        params.extend(values)
     if status:
         where.append("u.status = %s")
         params.append(status)
@@ -1509,8 +1788,9 @@ def get_user_admin(user_id: int, scope: dict) -> dict:
         where = ["u.id = %s", "u.deleted_at IS NULL"]
         params = [user_id]
         if not scope.get("isPlatformAdmin"):
-            where.append("p.org_id = %s")
-            params.append(scope["orgId"])
+            clause, values = _user_membership_scope_sql(scope)
+            where.append(clause)
+            params.extend(values)
         cur.execute(_USER_LIST_SQL + " WHERE " + " AND ".join(where), params)
         row = cur.fetchone()
         if not row:
@@ -1558,11 +1838,13 @@ def _admin_owner_user_id(cur, body: dict, org_id: int):
         """
         SELECT u.id
         FROM app_user u
-        JOIN user_profile p ON p.user_id = u.id
         WHERE u.id = %s
           AND u.status = 'active'
           AND u.deleted_at IS NULL
-          AND p.org_id = %s
+          AND EXISTS (
+            SELECT 1 FROM organization_membership m
+            WHERE m.user_id = u.id AND m.org_id = %s AND m.status = 'active'
+          )
         """,
         (owner_user_id, org_id),
     )
@@ -1589,12 +1871,21 @@ def _content_write_context(cur, scope: dict, body: dict, fields: dict) -> tuple[
         owner_user_id = _admin_owner_user_id(cur, body, org_id)
         return org_id, owner_user_id, actor_user_id
 
-    # 机构管理员：机构和归属人均由登录身份决定，绝不信任请求体。
-    org_id = scope.get("orgId")
-    if org_id is None:
+    # 机构管理员：机构和归属人均由登录身份决定，绝不信任请求体中的外机构 ID。
+    org_ids = scope_org_ids(scope)
+    if not org_ids:
         raise bad_request("机构管理员未绑定有效机构")
 
-    org_id = int(org_id)
+    requested = fields.get("org_id")
+    if requested is not None:
+        org_id = int(requested)
+        if org_id not in org_ids:
+            raise forbidden("机构管理员只能归属自己管理的机构")
+    elif len(org_ids) == 1:
+        org_id = org_ids[0]
+    else:
+        raise bad_request("管理多家机构时必须指定 orgId")
+
     fields["org_id"] = org_id
 
     owner_user_id = _admin_owner_user_id(
@@ -1663,10 +1954,7 @@ def create_achievement_admin(
         is_create=True,
     )
 
-    # 机构管理员不可指定或伪造机构名称、机构 ID。
-    if not scope.get("isPlatformAdmin"):
-        fields.pop("org_id", None)
-        fields.pop("source_org_name", None)
+    _restrict_org_admin_fields(scope, fields, is_create=True, kind="achievement")
 
     min_price = fields.get("price_min_wan")
     max_price = fields.get("price_max_wan")
@@ -1802,11 +2090,7 @@ def update_achievement_admin(
         is_create=False,
     )
 
-    # 机构管理员不能通过编辑把成果迁移到其他机构，
-    # 也不能伪造来源机构名称。
-    if not scope.get("isPlatformAdmin"):
-        fields.pop("org_id", None)
-        fields.pop("source_org_name", None)
+    _restrict_org_admin_fields(scope, fields, is_create=False, kind="achievement")
 
     version = body.get("version")
     if not isinstance(version, int) or version < 1:
@@ -1818,10 +2102,7 @@ def update_achievement_admin(
     with get_cursor(commit=True) as cur:
         where = ["id = %s", "deleted_at IS NULL"]
         params = [ach_id]
-
-        if not scope.get("isPlatformAdmin"):
-            where.append("org_id = %s")
-            params.append(scope["orgId"])
+        append_org_row_filter(where, params, scope)
 
         cur.execute(
             f"""
@@ -1853,9 +2134,9 @@ def update_achievement_admin(
             # 机构管理员只能把草稿或已驳回内容送审。
             if (
                 target_status == "pending_review"
-                and current["status"] not in ("draft", "rejected")
+                and current["status"] not in ("draft", "rejected", "offline")
             ):
-                raise bad_request("只有草稿或已驳回的成果可以提交审核")
+                raise bad_request("只有草稿、已驳回或已下架的成果可以提交审核")
 
             set_clauses.append("status=%s")
             set_values.append(target_status)
@@ -1878,10 +2159,7 @@ def update_achievement_admin(
             "deleted_at IS NULL",
         ]
         update_params = set_values + [ach_id, version]
-
-        if not scope.get("isPlatformAdmin"):
-            update_where.append("org_id = %s")
-            update_params.append(scope["orgId"])
+        append_org_row_filter(update_where, update_params, scope)
 
         cur.execute(
             f"""
@@ -1938,11 +2216,7 @@ def create_demand_admin(
         is_create=True,
     )
 
-    # 机构管理员不能通过旧字段 orgName / orgIntro 自动创建或改绑机构。
-    if not scope.get("isPlatformAdmin"):
-        fields.pop("org_id", None)
-        fields.pop("org_name", None)
-        fields.pop("org_intro", None)
+    _restrict_org_admin_fields(scope, fields, is_create=True, kind="demand")
 
     min_budget = fields.get("budget_min_wan")
     max_budget = fields.get("budget_max_wan")
@@ -1958,8 +2232,10 @@ def create_demand_admin(
             cur, scope, body, fields
         )
 
-        # orgName / categoryName 自动转换或创建对应机构、分类。
-        _resolve_demand_name_refs(cur, fields)
+        # orgName / categoryName：仅平台管理员可通过名称改绑机构。
+        _resolve_demand_name_refs(
+            cur, fields, allow_org_mutate=bool(scope.get("isPlatformAdmin"))
+        )
         _validate_demand_refs(cur, fields)
 
         cur.execute(
@@ -2075,10 +2351,7 @@ def update_demand_admin(
         is_create=False,
     )
 
-    if not scope.get("isPlatformAdmin"):
-        fields.pop("org_id", None)
-        fields.pop("org_name", None)
-        fields.pop("org_intro", None)
+    _restrict_org_admin_fields(scope, fields, is_create=False, kind="demand")
 
     version = body.get("version")
     if not isinstance(version, int) or version < 1:
@@ -2090,10 +2363,7 @@ def update_demand_admin(
     with get_cursor(commit=True) as cur:
         where = ["id = %s", "deleted_at IS NULL"]
         params = [demand_id]
-
-        if not scope.get("isPlatformAdmin"):
-            where.append("org_id = %s")
-            params.append(scope["orgId"])
+        append_org_row_filter(where, params, scope)
 
         cur.execute(
             f"""
@@ -2109,7 +2379,9 @@ def update_demand_admin(
             raise demand_not_found()
 
         # orgName / categoryName 在这里转成真正的 ID。
-        _resolve_demand_name_refs(cur, fields)
+        _resolve_demand_name_refs(
+            cur, fields, allow_org_mutate=bool(scope.get("isPlatformAdmin"))
+        )
         _validate_demand_refs(cur, fields)
 
         # PATCH 只传一个预算字段时，仍与数据库中的另一个预算字段一起校验。
@@ -2150,10 +2422,7 @@ def update_demand_admin(
             "deleted_at IS NULL",
         ]
         update_params = set_values + [demand_id, version]
-
-        if not scope.get("isPlatformAdmin"):
-            update_where.append("org_id = %s")
-            update_params.append(scope["orgId"])
+        append_org_row_filter(update_where, update_params, scope)
 
         cur.execute(
             f"""

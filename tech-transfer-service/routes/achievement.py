@@ -70,7 +70,7 @@ def _version_body(body: dict):
     return version
 
 
-@router.post("/achievements/{ach_id}/submit", summary="提交审核（draft/rejected → pending_review）")
+@router.post("/achievements/{ach_id}/submit", summary="提交审核（draft/rejected/offline → pending_review）")
 def achievement_submit(ach_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     result = submit_achievement(
         user["userId"], user.get("userNo", ""), ach_id, _version_body(body),

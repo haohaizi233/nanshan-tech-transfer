@@ -491,13 +491,34 @@ def refresh_session(refresh_token: str) -> dict:
             raise BizError(code, message, status)
 
         cur.execute(
+            """
+            SELECT au.user_no, au.status AS user_status, uc.status AS cred_status
+            FROM app_user au
+            LEFT JOIN user_credential uc ON uc.user_id = au.id
+            WHERE au.id = %s AND au.deleted_at IS NULL
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if (
+            not row
+            or row["user_status"] != "active"
+            or (row["cred_status"] is not None and row["cred_status"] != "active")
+        ):
+            cur.execute(
+                "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
+                "WHERE user_id=%s AND status='active'",
+                (user_id,),
+            )
+            from core.errors import BizError, TT_AUTH_40106
+            code, message, status = TT_AUTH_40106
+            raise BizError(code, message, status)
+        user_no = row["user_no"] or ""
+
+        cur.execute(
             "UPDATE auth_session SET status='consumed' WHERE refresh_jti=%s",
             (jti,),
         )
-
-        cur.execute("SELECT user_no FROM app_user WHERE id=%s", (user_id,))
-        row = cur.fetchone()
-        user_no = row["user_no"] if row else ""
 
         roles = _get_roles(cur, user_id)
         access_token = sign_access_token(user_id, user_no, roles)
