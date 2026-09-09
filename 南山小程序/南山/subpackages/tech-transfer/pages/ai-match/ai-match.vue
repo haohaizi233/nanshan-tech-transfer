@@ -144,7 +144,7 @@
 				return STATUS_TEXT[status] || status
 			},
 			openResult(r) {
-				HostBridge.navigate('pages/achievement-detail/achievement-detail', { id: r.achievementId })
+				HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: r.achievementId })
 			},
 			async onCreateTask(d) {
 				if (d._taskLoading) return

@@ -61,7 +61,7 @@
           </view>
           <view class="meta-row">
             <text class="meta-source">{{ item.sourceOrgName }}</text>
-            <text v-if="item.maturityDesc" class="meta-maturity">{{ item.maturityDesc }}</text>
+            <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
           </view>
           <text class="tech-intro">{{ item.techIntro }}</text>
           <view v-if="item.applicationFields && item.applicationFields.length" class="field-tags">
@@ -196,6 +196,9 @@ export default {
       this.activeCategory = code
       this.loadList(true)
     },
+    formatMaturity(item) {
+      return MATURITY_LABELS[item.maturityLevel] || item.maturityDesc || ''
+    },
     formatPrice(item) {
       if (item.pricingMode === 'negotiable' || !item.priceMinWan) {
         return PRICING_LABELS[item.pricingMode] || '面议'
@@ -208,7 +211,9 @@ export default {
       return `${min} 万`
     },
     openDetail(id) {
-      HostBridge.navigate('pages/achievement-detail/achievement-detail', { id })
+      // 需求与成果统一走 dock-detail：该页包含详情、联系方式、对接状态与动作，
+      // 不再经过冗余的“成果详情 → 成果对接”两步流程。
+      HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id })
     },
   },
 }

@@ -18,7 +18,7 @@
         <text class="title">{{ detail.title }}</text>
         <view class="header-meta">
           <text v-if="detail.categoryName" class="badge">{{ detail.categoryName }}</text>
-          <text v-if="detail.maturityDesc" class="maturity-tag">{{ detail.maturityDesc }}</text>
+          <text v-if="maturityText" class="maturity-tag">{{ maturityText }}</text>
         </view>
       </view>
 
@@ -126,6 +126,7 @@
 
 <script>
 import { getAchievementDetail } from '../../api/achievement.js'
+import { formatMaturityLabel } from '../../api/achievement-dock-card.mjs'
 import { ensureLoginForDock } from '../../api/user.js'
 import HostBridge from '../../../../host/host-bridge.js'
 
@@ -146,6 +147,11 @@ export default {
     }
   },
   computed: {
+    maturityText() {
+      const d = this.detail || {}
+      const text = formatMaturityLabel(d.maturityLevel, d.maturityDesc)
+      return text === '未填写' ? '' : text
+    },
     // innovationPoints 存在两种形态：
     // 导入数据 [{title, content(\n 分行)}]，API 自建数据 [string]。
     // 归一化为 [{title, lines}] 分组渲染。

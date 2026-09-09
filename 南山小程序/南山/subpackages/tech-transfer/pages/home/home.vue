@@ -184,7 +184,8 @@
 	import AppTabbar from '../../components/app-tabbar.vue'
 	import { ensureLoginForDock, getUserProfile } from '../../api/user.js'
 	import { getCapitalGroups } from '../../constants/capital-modules.js'
-	import { getAchievements, formatAchPrice } from '../../api/achievement.js'
+	import { getAchievements } from '../../api/achievement.js'
+	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
 	import { getDemands, toDemandCard } from '../../api/demand.js'
 	import { addFavorite, removeFavorite, getFavoriteIdSet } from '../../api/interaction.js'
 	import { retryRequest } from '../../api/request-retry.js'
@@ -296,15 +297,9 @@
 				// 成果列表（真实 API）
 				try {
 					const data = await retryRequest(() => getAchievements({ page: 1, pageSize: 10 }))
-					this.resultList = (data.list || []).map((item) => ({
-						id: String(item.id),
-						title: item.title,
-						source: item.sourceOrgName || '',
-						techIntro: item.techIntro || '',
-						price: formatAchPrice(item),
-						favorited: favResultIds.has(String(item.id)),
-						canDock: true
-					}))
+					this.resultList = (data.list || []).map((item) =>
+						toAchievementPreviewCard(item, favResultIds.has(String(item.id)))
+					)
 				} catch (e) {
 					console.error('[index] loadAchievements failed:', e)
 					this.resultList = []
@@ -374,7 +369,7 @@
 			openDetail(type, id) {
 				if (!ensureLoginForDock()) return
 				if (type === 'result') {
-					HostBridge.navigate('pages/achievement-detail/achievement-detail', { id })
+					HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id })
 					return
 				}
 				HostBridge.navigate('pages/dock-detail/dock-detail', { type, id })

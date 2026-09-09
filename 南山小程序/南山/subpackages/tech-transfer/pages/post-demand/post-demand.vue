@@ -2,6 +2,7 @@
 	<view class="page">
 		<view class="section">
 			<text class="section-title">需求信息</text>
+			<view v-if="organizations.length" class="form-item"><text class="label">发布主体</text><picker mode="selector" :range="organizationNames" :value="organizationIndex" @change="onOrganizationChange"><view class="picker-value">{{ organizationNames[organizationIndex] }}</view></picker></view>
 			<view class="form-item">
 				<text class="label">需求标题 <text class="required">*</text></text>
 				<input class="input" v-model="form.title" placeholder="例如：高精度视觉检测算法合作需求" maxlength="50" />
@@ -81,6 +82,7 @@
 <script>
 	import { createDemand, submitDemand } from '../../api/demand.js'
 	import { getSessionPhone, getUserProfile, ensureLoginForDock } from '../../api/user.js'
+	import { getMyOrganizationCertification } from '../../api/membership.js'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -114,6 +116,7 @@
 			payload.orgName = data.company
 			if (data.companyIntro) payload.orgIntro = data.companyIntro
 		}
+		if (data.orgId) payload.orgId = data.orgId
 		if (data.cooperationType) {
 			payload.coopMode = data.cooperationType
 				.split(/[\/、,，]/)
@@ -131,7 +134,9 @@
 	export default {
 		data() {
 			return {
+				organizations: [],
 				form: {
+					orgId: '',
 					title: '',
 					company: '',
 					location: '',
@@ -150,9 +155,14 @@
 				submitting: false
 			}
 		},
+		computed: {
+			organizationNames() { return this.organizations.map((item) => item.orgName) },
+			organizationIndex() { const index = this.organizations.findIndex((item) => String(item.orgId) === String(this.form.orgId)); return index < 0 ? 0 : index }
+		},
 		onLoad() {
 			if (!ensureLoginForDock()) return
 			this.prefillFromProfile()
+			this.loadOrganizations()
 		},
 		onShow() {
 			if (!getSessionPhone()) {
@@ -173,10 +183,12 @@
 					if (!this.form.wechat) this.form.wechat = profile.wechat || ''
 				}
 			},
+			async loadOrganizations() { try { const data = await getMyOrganizationCertification(); this.organizations = data.memberships || []; if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId } catch (e) { this.organizations = [] } },
+			onOrganizationChange(e) { const org = this.organizations[Number(e.detail.value)]; if (org) this.form.orgId = org.orgId },
 			trimForm() {
 				const result = {}
 				Object.keys(this.form).forEach((key) => {
-					result[key] = (this.form[key] || '').trim()
+					result[key] = key === 'orgId' ? this.form[key] : (this.form[key] || '').trim()
 				})
 				return result
 			},

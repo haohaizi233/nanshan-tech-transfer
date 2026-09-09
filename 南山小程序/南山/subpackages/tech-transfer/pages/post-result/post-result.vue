@@ -14,6 +14,7 @@
 		<block v-else>
 			<view class="section">
 				<text class="section-title">成果信息</text>
+				<view v-if="organizations.length" class="form-item"><text class="label">发布主体</text><picker mode="selector" :range="organizationNames" :value="organizationIndex" @change="onOrganizationChange"><view class="picker-value">{{ organizationNames[organizationIndex] }}</view></picker></view>
 				<view class="form-item">
 					<text class="label">成果名称 <text class="required">*</text></text>
 					<input class="input" v-model="form.title" placeholder="请输入成果/专利名称" />
@@ -25,7 +26,7 @@
 				<view class="form-item">
 					<text class="label">成熟度 <text class="required">*</text></text>
 					<picker mode="selector" :range="maturityLabels" :value="maturityIndex" @change="onMaturityChange">
-						<view class="picker-value">{{ maturityLabels[maturityIndex] || '请选择成熟度' }}</view>
+						<view class="picker-value">{{ maturityLabel }}</view>
 					</picker>
 				</view>
 				<view class="form-item">
@@ -106,6 +107,7 @@
 	import { getSessionPhone, getUserProfile, ensureLoginForDock } from '../../api/user.js'
 	import { createAchievement, submitAchievement } from '../../api/achievement.js'
 	import { createEvaluationTask } from '../../api/ai.js'
+	import { getMyOrganizationCertification } from '../../api/membership.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 
 	const MATURITY_OPTIONS = [
@@ -134,14 +136,16 @@
 	export default {
 		data() {
 			return {
+				organizations: [],
 				submitting: false,
 				evaluating: false,
 				submitted: false,
 				submittedId: null,
 				form: {
+					orgId: '',
 					title: '',
 					sourceOrgName: '',
-					maturityLevel: '',
+					maturityLevel: '01_idea',
 					pricingMode: 'negotiable',
 					priceMinWan: '',
 					priceMaxWan: '',
@@ -160,6 +164,10 @@
 			maturityLabels() {
 				return MATURITY_OPTIONS.map((o) => o.label)
 			},
+			maturityLabel() {
+				const opt = MATURITY_OPTIONS.find((o) => o.value === this.form.maturityLevel)
+				return opt ? opt.label : '请选择成熟度'
+			},
 			pricingLabels() {
 				return PRICING_OPTIONS.map((o) => o.label)
 			},
@@ -171,10 +179,13 @@
 				const idx = PRICING_OPTIONS.findIndex((o) => o.value === this.form.pricingMode)
 				return idx >= 0 ? idx : 0
 			}
+			, organizationNames() { return this.organizations.map((item) => item.orgName) }
+			, organizationIndex() { const index = this.organizations.findIndex((item) => String(item.orgId) === String(this.form.orgId)); return index < 0 ? 0 : index }
 		},
 		onLoad() {
 			if (!ensureLoginForDock()) return
 			this.prefillFromProfile()
+			this.loadOrganizations()
 		},
 		onShow() {
 			if (!getSessionPhone()) {
@@ -194,6 +205,8 @@
 					if (!this.form.contactWechat) this.form.contactWechat = profile.wechat || ''
 				}
 			},
+			async loadOrganizations() { try { const data = await getMyOrganizationCertification(); this.organizations = data.memberships || []; if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId } catch (e) { this.organizations = [] } },
+			onOrganizationChange(e) { const org = this.organizations[Number(e.detail.value)]; if (org) this.form.orgId = org.orgId },
 			onMaturityChange(e) {
 				const opt = MATURITY_OPTIONS[Number(e.detail.value)]
 				if (opt) this.form.maturityLevel = opt.value
@@ -243,9 +256,11 @@
 			buildBody() {
 				const f = this.form
 				const body = {
+					orgId: f.orgId || undefined,
 					title: f.title.trim(),
 					sourceOrgName: f.sourceOrgName.trim() || undefined,
 					maturityLevel: f.maturityLevel,
+					maturityDesc: (MATURITY_OPTIONS.find((o) => o.value === f.maturityLevel) || {}).label,
 					pricingMode: f.pricingMode,
 					techIntro: f.techIntro.trim(),
 					applicationFields: splitLines(f.applicationFields),

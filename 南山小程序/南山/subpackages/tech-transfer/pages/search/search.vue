@@ -105,6 +105,7 @@
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { searchAchievements } from '../../api/achievement.js'
+	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
 	import { getDemands, toDemandCard } from '../../api/demand.js'
 
 	export default {
@@ -176,13 +177,7 @@
 			async loadResults(keyword) {
 				try {
 					const data = await searchAchievements({ keyword: keyword || '', page: 1, pageSize: 50 })
-					this.resultList = (data.list || []).map((item) => ({
-						id: String(item.id),
-						title: item.title,
-						source: item.sourceOrgName || '',
-						techIntro: item.techIntro || '',
-						canDock: true
-					}))
+					this.resultList = (data.list || []).map((item) => toAchievementPreviewCard(item))
 				} catch (e) {
 					console.error('[search] loadResults failed:', e)
 					this.resultList = []
@@ -242,7 +237,7 @@
 			openDetail(type, id) {
 				if (!ensureLoginForDock()) return
 				if (type === 'result') {
-					HostBridge.navigate('pages/achievement-detail/achievement-detail', { id })
+					HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id })
 					return
 				}
 				HostBridge.navigate('pages/dock-detail/dock-detail', { type, id })

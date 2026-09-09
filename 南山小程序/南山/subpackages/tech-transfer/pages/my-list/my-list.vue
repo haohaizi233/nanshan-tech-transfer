@@ -1,5 +1,17 @@
 <template>
 	<view class="page">
+		<!-- 我的需求 / 成果：按发布状态筛选，草稿仅在“全部”保留。 -->
+		<scroll-view v-if="isPublicationList" class="publication-tabs" :scroll-x="true" :show-scrollbar="false">
+			<view class="publication-tabs-inner">
+				<view
+					v-for="tab in publicationTabs"
+					:key="tab.value"
+					:class="publicationTab === tab.value ? 'publication-tab active' : 'publication-tab'"
+					@click="selectPublicationTab(tab.value)"
+				>{{ tab.label }}</view>
+			</view>
+		</scroll-view>
+
 		<!-- 意向请求：提出 / 收到 -->
 		<view v-if="pageType === 'intention'" class="intent-tabs">
 			<view class="intent-tab" @click="switchIntentTab(0)">
@@ -73,12 +85,32 @@
 		data() {
 			return {
 				pageType: 'demand',
+				publicationTab: 'published',
 				intentTab: 0,
 				intentAutoSwitched: false,
 				list: []
 			}
 		},
 		computed: {
+			isPublicationList() {
+				return this.pageType === 'demand' || this.pageType === 'result'
+			},
+			publicationTabs() {
+				const common = [
+					{ value: 'all', label: '全部' },
+					{ value: 'pending_review', label: '待审核' },
+					{ value: 'rejected', label: '已驳回' },
+					{ value: 'published', label: '已发布' }
+				]
+				if (this.pageType === 'result') {
+					return common.concat([{ value: 'offline', label: '已下架' }])
+				}
+				return common.concat([
+					{ value: 'matched', label: '已对接' },
+					{ value: 'cancelled', label: '已取消' },
+					{ value: 'offline', label: '已下架' }
+				])
+			},
 			emptyTitle() {
 				if (this.pageType === 'favorite') return '暂无收藏'
 				if (this.pageType === 'intention') {
@@ -99,6 +131,9 @@
 		},
 		onLoad(options) {
 			this.pageType = options.type || 'demand'
+			if (this.pageType === 'demand' || this.pageType === 'result') {
+				this.publicationTab = 'published'
+			}
 			const titleMap = {
 				demand: '我发布的需求',
 				result: '我发布的成果',
@@ -113,6 +148,23 @@
 			this.loadList()
 		},
 		methods: {
+			selectPublicationTab(tab) {
+				if (this.publicationTab === tab) return
+				this.publicationTab = tab
+				this.loadList()
+			},
+			async loadPublicationList(fetchList, mapRow) {
+				const status = this.publicationTab === 'all' ? '' : this.publicationTab
+				if (status === 'offline') {
+					const [offline, closed] = await Promise.all([
+						fetchList({ page: 1, pageSize: 50, status: 'offline' }),
+						fetchList({ page: 1, pageSize: 50, status: 'closed' })
+					])
+					return [...(offline.list || []), ...(closed.list || [])].map(mapRow)
+				}
+				const data = await fetchList({ page: 1, pageSize: 50, status })
+				return (data.list || []).map(mapRow)
+			},
 			switchIntentTab(index) {
 				this.intentTab = index
 				this.loadList()
@@ -151,10 +203,9 @@
 				})
 			},
 			async loadList() {
-				if (this.pageType === 'demand') {
+			if (this.pageType === 'demand') {
 					try {
-						const data = await getMyDemands({ page: 1, pageSize: 50 })
-						this.list = (data.list || []).map((item) => {
+						this.list = await this.loadPublicationList(getMyDemands, (item) => {
 							const card = toDemandCard(item)
 							return {
 								...card,
@@ -165,7 +216,8 @@
 								_desc: card.demandDesc,
 								_status: card.status,
 								_statusLabel: card.statusLabel,
-								_statusCls: card.statusCls
+								_statusCls: card.statusCls,
+								_statusHint: card.statusHint
 							}
 						})
 					} catch (e) {
@@ -174,10 +226,9 @@
 					}
 					return
 				}
-				if (this.pageType === 'result') {
+			if (this.pageType === 'result') {
 					try {
-						const data = await getMyAchievements({ page: 1, pageSize: 50 })
-						this.list = (data.list || []).map((item) => {
+						this.list = await this.loadPublicationList(getMyAchievements, (item) => {
 							const card = toAchievementCard(item)
 							return {
 								...card,
@@ -244,7 +295,7 @@
 							})
 							return
 						}
-						const offline = sum.status && sum.status !== 'published'
+						const offline = ['offline', 'closed', 'cancelled'].includes(sum.status)
 						rows.push({
 							id: fav.targetId,
 							_key: feType + '-' + fav.targetId,
@@ -314,6 +365,44 @@
 		padding: 24rpx;
 		padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
 		box-sizing: border-box;
+	}
+
+	.publication-tabs {
+		width: calc(100% + 48rpx);
+		white-space: nowrap;
+		margin: 0 0 20rpx -24rpx;
+		box-sizing: border-box;
+	}
+
+	.publication-tabs-inner {
+		display: inline-block;
+		min-width: 100%;
+		padding: 4rpx 24rpx;
+		box-sizing: border-box;
+	}
+
+	.publication-tab {
+		display: inline-block;
+		vertical-align: middle;
+		margin-right: 16rpx;
+		padding: 12rpx 22rpx;
+		border-radius: 28rpx;
+		background: #ffffff;
+		border: 1rpx solid #dfe5ee;
+		color: #637083;
+		font-size: 26rpx;
+		line-height: 1.3;
+	}
+
+	.publication-tab:last-child {
+		margin-right: 0;
+	}
+
+	.publication-tab.active {
+		background: #2f6df6;
+		border-color: #2f6df6;
+		color: #ffffff;
+		font-weight: 600;
 	}
 
 	.intent-tabs {

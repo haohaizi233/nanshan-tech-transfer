@@ -57,6 +57,9 @@
 			<!-- 成果详情 -->
 			<block v-else>
 				<text class="main-title">{{ detail.title }}</text>
+				<view v-if="detail.isMine && detail.statusLabel" class="mine-status-row">
+					<text class="mine-status-text">状态：{{ detail.statusLabel }}</text>
+				</view>
 				<view class="meta-row">
 					<view class="meta-item meta-full">
 						<text class="meta-label">来源</text>
@@ -126,9 +129,16 @@
 					<text class="intent-type-label">合作意向</text>
 					<text class="intent-type-value">{{ intentionIntentLabel }}</text>
 				</view>
+				<!-- 本人发布内容：下架 -->
+				<button
+					v-if="actionMode === 'offline'"
+					class="confirm-btn confirm-btn-cancel"
+					@click="openConfirm('offline')"
+				>下架</button>
+
 				<!-- 发起对接 / 取消待定 -->
 				<button
-					v-if="actionMode === 'propose'"
+					v-else-if="actionMode === 'propose'"
 					class="confirm-btn"
 					@click="onProposeDock"
 				>申请对接</button>
@@ -220,8 +230,9 @@
 </template>
 
 <script>
-	import { getDemandDetail, toDemandCard } from '../../api/demand.js'
-	import { getAchievementDetail, formatAchPrice } from '../../api/achievement.js'
+	import { getDemandDetail, toDemandCard, closeDemand } from '../../api/demand.js'
+	import { getAchievementDetail, offlineAchievement } from '../../api/achievement.js'
+	import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
 	import {
 		addFavorite,
@@ -318,23 +329,27 @@
 			},
 			actionMode() {
 				const row = this.intention
-				if (!row) {
-					if (this.detail && !canProposeDock(this.type, this.detail)) return 'blocked'
-					return 'propose'
-				}
-				// assisted 模式：目标方没有平台账号，永远不显示接收方操作按钮
-				if (row.handlingMode === 'assisted') {
-					if (row.status === 'pending' && row.myRole === 'initiator') {
-						return 'cancel_pending'
+				if (row) {
+					if (row.handlingMode === 'assisted') {
+						if (row.status === 'pending' && row.myRole === 'initiator') {
+							return 'cancel_pending'
+						}
+						return 'status'
 					}
+					if (row.status === 'pending') {
+						return row.myRole === 'target_owner' ? 'receiver_decide' : 'cancel_pending'
+					}
+					if (row.status === 'accepted') return 'confirm_or_cancel'
+					if (row.status === 'confirmed') return 'complete'
 					return 'status'
 				}
-				if (row.status === 'pending') {
-					return row.myRole === 'target_owner' ? 'receiver_decide' : 'cancel_pending'
+				if (this.detail && this.detail.isMine) {
+					const canOffline = this.detail.status === 'published'
+						|| (this.type === 'demand' && this.detail.status === 'matched')
+					return canOffline ? 'offline' : 'blocked'
 				}
-				if (row.status === 'accepted') return 'confirm_or_cancel'
-				if (row.status === 'confirmed') return 'complete'
-				return 'status'
+				if (this.detail && !canProposeDock(this.type, this.detail)) return 'blocked'
+				return 'propose'
 			},
 			blockHint() {
 				return getDockBlockMessage(this.type, this.detail)
@@ -345,7 +360,8 @@
 					reject: '确认拒绝该对接意向？',
 					confirm: '确认与对方建立对接？',
 					cancel: '确认取消该对接？',
-					complete: '确认本次对接已完成？'
+					complete: '确认本次对接已完成？',
+					offline: '确认下架这条内容？'
 				}
 				return titles[this.confirmOp] || '确认操作？'
 			}
@@ -399,24 +415,7 @@
 				try {
 					const data = await getAchievementDetail(id)
 					if (!data) throw new Error('未找到对应信息')
-					this.detail = {
-						id: data.id,
-						title: data.title,
-						source: data.sourceOrgName || '未填写',
-						price: formatAchPrice(data),
-						techIntro: data.techIntro || '',
-						purpose: (data.applicationFields || []).join(' / ') || '未填写',
-						techPath: data.techRoute || '未填写',
-						patentHolder: (data.inventors || []).map((v) => v.name).join('、') || '未填写',
-						patentNo: '详见成果详情',
-						maturity: data.maturityDesc || data.maturityLevel || '未填写',
-						contactName: data.contactName || '暂无',
-						contactTitle: data.contactTitle || '',
-						phone: data.contactPhone || '',
-						email: data.contactEmail || '',
-						wechat: data.contactWechat || '',
-						isMine: false
-					}
+					this.detail = toAchievementDockCard(data)
 				} catch (e) {
 					console.error('[dock-detail] loadResult failed:', e)
 					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
@@ -456,7 +455,7 @@
 			},
 			openConfirm(op) {
 				if (!ensureLoginForDock()) return
-				if (!this.intention) return
+				if (!this.intention && op !== 'offline') return
 				this.clearConfirmTimer()
 				this.confirmOp = op
 				this.confirmLeft = 5
@@ -480,14 +479,23 @@
 			},
 			stopBubble() {},
 			async onConfirmAction() {
-				if (!this.confirmReady || !this.intention) return
-				const intentId = this.intention.id
-				const version = this.intention.version
+				if (!this.confirmReady || (!this.intention && this.confirmOp !== 'offline')) return
+				const intentId = this.intention && this.intention.id
+				const version = this.intention && this.intention.version
 				const op = this.confirmOp
 				this.closeConfirm()
 				try {
 					let next = null
-					if (op === 'accept') {
+					if (op === 'offline') {
+						if (this.type === 'demand') {
+							await closeDemand(this.detail.id, this.detail.version)
+							await this.loadDemandDetail(this.detail.id)
+						} else {
+							await offlineAchievement(this.detail.id, this.detail.version)
+							await this.loadResultDetail(this.detail.id)
+						}
+						uni.showToast({ title: '已下架', icon: 'success' })
+					} else if (op === 'accept') {
 						next = await acceptCooperation(intentId, version)
 					} else if (op === 'reject') {
 						next = await rejectCooperation(intentId, version, '对方拒绝了该对接意向')
@@ -978,6 +986,19 @@
 		padding: 32rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
 		box-sizing: border-box;
 	}
+
+	/* #ifdef H5 */
+	.sheet {
+		width: 680rpx;
+		max-width: calc(100vw - 48rpx);
+		left: 50%;
+		right: auto;
+		bottom: 24rpx;
+		transform: translateX(-50%);
+		border-radius: 24rpx;
+		box-shadow: 0 16rpx 48rpx rgba(0, 0, 0, 0.18);
+	}
+	/* #endif */
 
 	.sheet-title {
 		display: block;
