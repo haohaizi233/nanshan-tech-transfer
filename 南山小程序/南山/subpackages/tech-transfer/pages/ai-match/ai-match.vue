@@ -1,79 +1,147 @@
 <template>
 	<view class="page">
-		<view class="header">
-			<text class="header__title">AI 需求匹配</text>
-			<text class="header__desc">选择我的需求发起 AI 匹配，为您推荐合适的技术成果</text>
+		<view v-if="!aiEnabled" class="coming-soon-page">
+			<view class="coming-soon">
+				<text class="coming-soon__title">功能即将开放</text>
+				<text class="coming-soon__desc">智能匹配正在建设中，敬请期待。</text>
+			</view>
+			<AppTabbar active="home" />
 		</view>
-
-		<view v-if="loading" class="empty-box">
-			<text class="empty-title">加载中…</text>
-		</view>
-
-		<view v-else-if="demands.length === 0" class="empty-box">
-			<text class="empty-title">暂无进行中的需求</text>
-			<text class="empty-desc">发布需求并通过审核后，即可在这里发起 AI 匹配</text>
-			<button class="primary-btn" size="mini" @click="goPostDemand">去发布需求</button>
-		</view>
-
 		<block v-else>
-			<view v-for="d in demands" :key="d.id" class="card">
-				<view class="card__head">
-					<text class="card__title">{{ d.title }}</text>
-					<text class="tag">{{ d.statusLabel }}</text>
-				</view>
-				<text class="card__desc">{{ d.demandDesc || '（无需求说明）' }}</text>
-				<view class="card__foot">
-					<button class="primary-btn" size="mini" :disabled="d._taskLoading" @click="onCreateTask(d)">
-						{{ d._taskLoading ? '提交中…' : '发起 AI 匹配' }}
-					</button>
+		<view class="header">
+			<text class="header__title">AI 智能匹配</text>
+			<text class="header__desc">对话描述需求，或输入 / 调用技能</text>
+			<AiGeneratedMark class="header__mark" />
+		</view>
+
+		<scroll-view
+			class="chat-scroll"
+			scroll-y
+			:scroll-into-view="scrollIntoView"
+			scroll-with-animation
+		>
+			<view
+				v-for="msg in messages"
+				:id="'msg-' + msg.id"
+				:key="msg.id"
+			>
+				<view v-if="msg.type === 'text'" :class="msg.role === 'user' ? 'msg msg--user' : 'msg msg--bot'">
+					<AiGeneratedMark v-if="msg.role !== 'user'" mode="badge" />
+					<view :class="msg.role === 'user' ? 'bubble bubble--user' : 'bubble bubble--bot'">
+						<text class="bubble__text">{{ msg.content }}</text>
+					</view>
 				</view>
 
-				<view v-if="d._task" class="task-box">
-					<view class="task-box__head">
-						<text class="task-label">匹配任务 #{{ d._task.taskId }}</text>
-						<text :class="'task-status task-status--' + d._task.status">{{ statusText(d._task.status) }}</text>
-					</view>
+				<view v-else class="msg msg--bot msg--block">
+					<AiGeneratedMark mode="badge" />
+					<view class="panel">
+						<text v-if="msg.content" class="panel__text">{{ msg.content }}</text>
 
-					<view v-if="d._task.status === 'queued'" class="task-hint">
-						<text>任务已排队 · AI 服务接入中，结果生成后将在此展示</text>
-					</view>
-					<view v-else-if="d._task.status === 'running'" class="task-hint">
-						<text>AI 正在匹配，请稍候…</text>
-					</view>
-					<view v-else-if="d._task.status === 'failed'" class="task-hint task-hint--fail">
-						<text>匹配失败：{{ d._task.failReason || '未知原因，请稍后重试' }}</text>
-					</view>
-					<block v-else-if="d._task.status === 'succeeded'">
-						<view v-if="!d._task.results || d._task.results.length === 0" class="task-hint">
-							<text>本轮未匹配到合适成果，可完善需求说明后重新发起</text>
+						<view v-if="msg.type === 'demand-empty'" class="panel__actions">
+							<button class="primary-btn" size="mini" @click="goPostDemand">去发布需求</button>
 						</view>
-						<view
-							v-for="(r, i) in d._task.results"
-							:key="i"
-							class="match-item"
-							@click="openResult(r)"
-						>
-							<view class="match-item__head">
-								<text class="match-item__title">{{ r.achievementTitle }}</text>
-								<text class="match-item__score">{{ r.score }} 分</text>
-							</view>
-							<text v-if="r.orgName" class="match-item__org">{{ r.orgName }}</text>
-							<view v-if="r.matchReasons && r.matchReasons.length" class="match-item__reasons">
-								<text v-for="(reason, j) in r.matchReasons" :key="j" class="reason-chip">{{ reason }}</text>
+
+						<view v-else-if="msg.type === 'demand-picker'">
+							<view
+								v-for="d in (msg.payload && msg.payload.demands) || []"
+								:key="d.id"
+								class="pick-item"
+								@click="onPickDemand(d)"
+							>
+								<text class="pick-item__title">{{ d.title }}</text>
+								<text class="pick-item__meta">{{ d.statusLabel }} · {{ d.demandDesc || '无需求说明' }}</text>
 							</view>
 						</view>
-					</block>
+
+						<view v-else-if="msg.type === 'match-task'">
+							<view class="task-head">
+								<text class="task-label">匹配任务 #{{ msg.payload.taskId }}</text>
+								<text :class="'task-status task-status--' + (msg.payload.status || '')">{{ statusText(msg.payload.status) }}</text>
+							</view>
+							<text class="panel__hint">{{ formatMatchProgress(msg.payload.status, msg.payload.failReason) }}</text>
+							<view
+								v-for="(r, i) in msg.payload.results || []"
+								:key="i"
+								class="match-item"
+								@click="openResult(r)"
+							>
+								<view class="match-item__head">
+									<text class="match-item__title">{{ r.achievementTitle }}</text>
+									<text class="match-item__score">{{ r.score }} 分</text>
+								</view>
+								<text v-if="r.orgName" class="match-item__org">{{ r.orgName }}</text>
+								<view v-if="r.matchReasons && r.matchReasons.length" class="match-item__reasons">
+									<text v-for="(reason, j) in r.matchReasons" :key="j" class="reason-chip">{{ reason }}</text>
+								</view>
+							</view>
+						</view>
+					</view>
 				</view>
 			</view>
-		</block>
 
-		<!-- 底部导航（分包业务壳统一 tab：首页 / AI匹配 / 我的） -->
+			<view v-if="typing" class="msg msg--bot">
+				<AiGeneratedMark mode="badge" />
+				<view class="bubble bubble--bot bubble--typing">
+					<text class="bubble__text">人工智能正在生成…</text>
+				</view>
+			</view>
+
+			<view v-if="showSuggestions" class="suggest-wrap">
+				<text class="suggest-label">可以这样问</text>
+				<view
+					v-for="(item, index) in suggestions"
+					:key="index"
+					class="suggest-item"
+					@click="onSuggest(item)"
+				>
+					<text class="suggest-text">{{ item }}</text>
+				</view>
+			</view>
+
+			<view id="msg-bottom" class="scroll-pad"></view>
+		</scroll-view>
+
+		<view v-if="skillOptions.length" class="skill-sheet">
+			<text class="skill-sheet__label">技能</text>
+			<view
+				v-for="skill in skillOptions"
+				:key="skill.id"
+				class="skill-item"
+				@click="onPickSkill(skill)"
+			>
+				<text class="skill-item__cmd">{{ skill.cmd }}</text>
+				<view class="skill-item__meta">
+					<text class="skill-item__label">{{ skill.label }}</text>
+					<text class="skill-item__desc">{{ skill.desc }}</text>
+				</view>
+			</view>
+		</view>
+
+		<view class="composer">
+			<text class="composer__hint">回答由人工智能生成，请注意甄别</text>
+			<view class="composer__row">
+			<input
+				class="composer__input"
+				type="text"
+				:value="inputText"
+				placeholder="输入问题，或 / 调用技能"
+				confirm-type="send"
+				:disabled="typing"
+				@input="onInput"
+				@confirm="onSend"
+			/>
+			<button class="composer__btn" size="mini" :disabled="typing" @click="onSend">发送</button>
+			</view>
+		</view>
+
 		<AppTabbar active="ai" />
+		</block>
 	</view>
 </template>
 
 <script>
 	import AppTabbar from '../../components/app-tabbar.vue'
+	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 	import { getMyDemands, toDemandCard } from '../../api/demand.js'
 	import {
 		createMatchTask,
@@ -82,9 +150,20 @@
 		POLL_INTERVAL_MS,
 		POLL_MAX_MS
 	} from '../../api/ai.js'
+	import {
+		createWelcomeMessage,
+		getChatSuggestions,
+		buildDemoReply,
+		createMessage,
+		isSlashDraft,
+		filterSkills,
+		resolveSkillCommand,
+		formatMatchProgress
+	} from '../../api/ai-chat.mjs'
+	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 
-	/** 可发起匹配的需求状态（draft/待审/驳回等不可见成果，不参与匹配） */
 	const ACTIVE_STATUSES = ['published', 'matched']
 
 	const STATUS_TEXT = {
@@ -97,15 +176,31 @@
 	export default {
 		components: {
 			AppTabbar,
+			AiGeneratedMark
 		},
 		data() {
 			return {
-				loading: false,
-				demands: []
+				aiEnabled: AI_FEATURE_ENABLED,
+				messages: [createWelcomeMessage()],
+				suggestions: getChatSuggestions(),
+				inputText: '',
+				typing: false,
+				scrollIntoView: '',
+				pollers: {}
 			}
 		},
-		onShow() {
-			this.loadDemands()
+		computed: {
+			showSuggestions() {
+				return !this.typing && this.messages.length <= 1
+			},
+			skillOptions() {
+				return isSlashDraft(this.inputText) ? filterSkills(this.inputText) : []
+			}
+		},
+		onLoad() {
+			if (!this.aiEnabled) {
+				uni.setNavigationBarTitle({ title: '南山科转通' })
+			}
 		},
 		onHide() {
 			this.stopAllPolling()
@@ -114,182 +209,352 @@
 			this.stopAllPolling()
 		},
 		methods: {
-			async loadDemands() {
-				this.loading = true
-				try {
-					const data = await getMyDemands({ page: 1, pageSize: 50 })
-					const rows = (data.list || [])
-						.map(toDemandCard)
-						.filter((d) => ACTIVE_STATUSES.indexOf(d.status) >= 0)
-					rows.forEach((d) => {
-						d._task = null
-						d._taskLoading = false
-						d._timer = null
-					})
-					this.stopAllPolling()
-					this.demands = rows
-				} catch (e) {
-					console.error('[ai-match] loadDemands failed:', e)
-					this.stopAllPolling()
-					this.demands = []
-					uni.showToast({ title: (e && e.message) || '需求加载失败', icon: 'none' })
-				} finally {
-					this.loading = false
+			formatMatchProgress,
+			statusText(status) {
+				return STATUS_TEXT[status] || status
+			},
+			onInput(e) {
+				this.inputText = e.detail.value
+			},
+			onSuggest(text) {
+				this.inputText = text
+				this.onSend()
+			},
+			onPickSkill(skill) {
+				this.inputText = skill.cmd
+				this.onSend()
+			},
+			scrollToBottom() {
+				this.scrollIntoView = ''
+				this.$nextTick(() => {
+					this.scrollIntoView = 'msg-bottom'
+				})
+			},
+			pushMessage(role, content, extra) {
+				this.messages.push(createMessage(role, content, extra))
+				this.scrollToBottom()
+			},
+			onSend() {
+				if (!this.aiEnabled) return
+				const text = (this.inputText || '').trim()
+				if (!text || this.typing) return
+				this.inputText = ''
+				this.messages.push(createMessage('user', text))
+				this.scrollToBottom()
+				const skill = resolveSkillCommand(text)
+				if (skill && skill.id === 'match') {
+					this.runMatchSkill()
+					return
 				}
+				if (text.startsWith('/')) {
+					this.pushMessage('assistant', '未识别的技能。输入 / 查看可用技能，当前支持 /匹配。')
+					return
+				}
+				this.typing = true
+				setTimeout(() => {
+					this.pushMessage('assistant', buildDemoReply(text))
+					this.typing = false
+				}, 500)
 			},
 			goPostDemand() {
 				HostBridge.navigate('pages/post-demand/post-demand')
 			},
-			statusText(status) {
-				return STATUS_TEXT[status] || status
-			},
 			openResult(r) {
 				HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: r.achievementId })
 			},
-			async onCreateTask(d) {
-				if (d._taskLoading) return
-				d._taskLoading = true
+			async runMatchSkill() {
+				if (!this.aiEnabled) return
+				if (!ensureLoginForDock()) return
+				this.typing = true
 				try {
-					const task = await createMatchTask(d.id)
-					d._task = task
-					if (!isTerminalStatus(task.status)) {
-						this.startPolling(d)
+					const data = await getMyDemands({ page: 1, pageSize: 50 })
+					const demands = (data.list || [])
+						.map(toDemandCard)
+						.filter((d) => ACTIVE_STATUSES.indexOf(d.status) >= 0)
+					if (!demands.length) {
+						this.pushMessage(
+							'assistant',
+							'暂无进行中的需求。发布需求并通过审核后，即可在这里发起 AI 匹配。',
+							{ type: 'demand-empty' }
+						)
+						return
 					}
+					this.pushMessage('assistant', '请选择一条已发布需求，我将为它推荐合适的技术成果：', {
+						type: 'demand-picker',
+						payload: { demands }
+					})
 				} catch (e) {
-					console.error('[ai-match] createMatchTask failed:', e)
-					uni.showToast({ title: (e && e.message) || '发起失败', icon: 'none' })
+					this.pushMessage('assistant', (e && e.message) || '需求加载失败，请稍后重试。')
 				} finally {
-					d._taskLoading = false
+					this.typing = false
+					this.scrollToBottom()
 				}
 			},
-			startPolling(d) {
-				this.stopPolling(d)
+			async onPickDemand(demand) {
+				if (!this.aiEnabled || this.typing) return
+				this.typing = true
+				this.pushMessage('user', '匹配需求：' + demand.title)
+				try {
+					const task = await createMatchTask(demand.id)
+					const extra = {
+						type: 'match-task',
+						payload: {
+							taskId: task.taskId,
+							status: task.status,
+							results: task.results || [],
+							failReason: task.failReason || '',
+							demandId: demand.id
+						}
+					}
+					this.pushMessage('assistant', formatMatchProgress(task.status, task.failReason), extra)
+					const card = this.messages[this.messages.length - 1]
+					if (!isTerminalStatus(task.status)) this.startPolling(card)
+				} catch (e) {
+					this.pushMessage('assistant', (e && e.message) || '发起匹配失败，请稍后重试。')
+				} finally {
+					this.typing = false
+				}
+			},
+			startPolling(card) {
+				this.stopPolling(card.id)
 				const startedAt = Date.now()
-				const taskId = d._task.taskId
-				d._timer = setInterval(async () => {
+				const taskId = card.payload && card.payload.taskId
+				if (!taskId) return
+				this.pollers[card.id] = setInterval(async () => {
 					try {
 						const task = await getMatchTask(taskId)
-						if (task && task.taskId === taskId) {
-							d._task = task
+						if (task) {
+							const idx = this.messages.findIndex((m) => m.id === card.id)
+							if (idx >= 0) {
+								const next = Object.assign({}, this.messages[idx], {
+									content: formatMatchProgress(task.status, task.failReason),
+									payload: Object.assign({}, this.messages[idx].payload, {
+										status: task.status,
+										results: task.results || [],
+										failReason: task.failReason || ''
+									})
+								})
+								this.$set(this.messages, idx, next)
+							}
 						}
-						if (!d._task || isTerminalStatus(d._task.status) || Date.now() - startedAt > POLL_MAX_MS) {
-							this.stopPolling(d)
+						if (!task || isTerminalStatus(task.status) || Date.now() - startedAt > POLL_MAX_MS) {
+							this.stopPolling(card.id)
 						}
 					} catch (e) {
-						// 轮询失败（网络抖动等）：停止本轮轮询，保留最后已知状态
-						this.stopPolling(d)
+						this.stopPolling(card.id)
 					}
 				}, POLL_INTERVAL_MS)
 			},
-			stopPolling(d) {
-				if (d._timer) {
-					clearInterval(d._timer)
-					d._timer = null
+			stopPolling(id) {
+				if (this.pollers[id]) {
+					clearInterval(this.pollers[id])
+					this.pollers[id] = null
 				}
 			},
 			stopAllPolling() {
-				this.demands.forEach((d) => this.stopPolling(d))
+				Object.keys(this.pollers).forEach((id) => this.stopPolling(id))
 			}
 		}
 	}
 </script>
 
 <style>
+	page {
+		height: 100%;
+		overflow: hidden;
+	}
+
 	.page {
-		min-height: 100vh;
+		height: 100%;
+		display: flex;
+		flex-direction: column;
 		background-color: #f5f6f8;
-		padding: 24rpx;
-		padding-bottom: calc(60rpx + env(safe-area-inset-bottom));
+		box-sizing: border-box;
+		overflow: hidden;
+	}
+
+	.coming-soon-page {
+		flex: 1;
+		min-height: 100%;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.coming-soon {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 48rpx;
 		box-sizing: border-box;
 	}
 
+	.coming-soon__title {
+		font-size: 36rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+	}
+
+	.coming-soon__desc {
+		margin-top: 16rpx;
+		font-size: 26rpx;
+		color: #888888;
+		line-height: 1.5;
+		text-align: center;
+	}
+
 	.header {
-		padding: 16rpx 8rpx 24rpx;
+		flex: 0 0 auto;
+		padding: 24rpx 28rpx 16rpx;
+		background: #ffffff;
+		border-bottom: 1rpx solid #eef1f5;
 	}
 
 	.header__title {
 		display: block;
-		font-size: 38rpx;
+		font-size: 32rpx;
 		font-weight: 600;
 		color: #1a1a1a;
 	}
 
 	.header__desc {
 		display: block;
-		margin-top: 10rpx;
-		font-size: 26rpx;
+		margin-top: 8rpx;
+		font-size: 24rpx;
 		color: #888888;
+		line-height: 1.45;
 	}
 
-	.card {
-		background-color: #ffffff;
-		border-radius: 16rpx;
-		border: 1rpx solid #e8ecf2;
-		padding: 28rpx;
-		margin-bottom: 24rpx;
+	.header__mark {
+		margin-top: 16rpx;
 	}
 
-	.card__head {
+	.chat-scroll {
+		flex: 1 1 auto;
+		height: 0;
+		min-height: 0;
+		padding: 24rpx 24rpx 8rpx;
+		box-sizing: border-box;
+	}
+
+	.msg {
 		display: flex;
-		flex-direction: row;
-		align-items: flex-start;
-		margin-bottom: 16rpx;
+		margin-bottom: 20rpx;
 	}
 
-	.card__title {
-		flex: 1;
-		font-size: 32rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-		line-height: 1.4;
-		padding-right: 16rpx;
-	}
-
-	.tag {
-		flex-shrink: 0;
-		font-size: 22rpx;
-		color: #2b73f8;
-		background: rgba(43, 115, 248, 0.1);
-		border-radius: 8rpx;
-		padding: 4rpx 12rpx;
-	}
-
-	.card__desc {
-		display: block;
-		font-size: 26rpx;
-		color: #555555;
-		line-height: 1.6;
-	}
-
-	.card__foot {
-		margin-top: 20rpx;
-		display: flex;
+	.msg--user {
 		justify-content: flex-end;
 	}
 
-	.primary-btn {
-		background-color: #2b73f8 !important;
-		color: #ffffff !important;
-		font-size: 26rpx !important;
-		border-radius: 8rpx !important;
-		margin: 0;
-		padding: 0 28rpx;
-		line-height: 60rpx;
+	.msg--bot {
+		flex-direction: column;
+		align-items: flex-start;
+		justify-content: flex-start;
 	}
 
-	.task-box {
-		margin-top: 24rpx;
-		background-color: #f7f9fc;
-		border-radius: 12rpx;
+	.msg--block {
+		width: 100%;
+	}
+
+	.bubble {
+		max-width: 82%;
+		padding: 20rpx 24rpx;
+		border-radius: 20rpx;
+		box-sizing: border-box;
+	}
+
+	.bubble--bot {
+		background: #ffffff;
+		border: 1rpx solid #e8ecf2;
+		border-top-left-radius: 8rpx;
+	}
+
+	.bubble--user {
+		background: #2b73f8;
+		border-top-right-radius: 8rpx;
+	}
+
+	.bubble--typing {
+		opacity: 0.85;
+	}
+
+	.bubble__text {
+		font-size: 28rpx;
+		line-height: 1.55;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.bubble--bot .bubble__text {
+		color: #333333;
+	}
+
+	.bubble--user .bubble__text {
+		color: #ffffff;
+	}
+
+	.panel {
+		width: 100%;
+		background: #ffffff;
+		border: 1rpx solid #e8ecf2;
+		border-radius: 16rpx;
 		padding: 24rpx;
+		box-sizing: border-box;
 	}
 
-	.task-box__head {
+	.panel__text {
+		display: block;
+		font-size: 28rpx;
+		color: #333333;
+		line-height: 1.55;
+		margin-bottom: 16rpx;
+	}
+
+	.panel__hint {
+		display: block;
+		font-size: 24rpx;
+		color: #888888;
+		line-height: 1.55;
+	}
+
+	.panel__actions {
+		margin-top: 8rpx;
+	}
+
+	.pick-item {
+		padding: 20rpx 0;
+		border-top: 1rpx solid #eef1f5;
+	}
+
+	.pick-item:first-child {
+		border-top: none;
+		padding-top: 0;
+	}
+
+	.pick-item__title {
+		display: block;
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+	}
+
+	.pick-item__meta {
+		display: block;
+		margin-top: 6rpx;
+		font-size: 22rpx;
+		color: #888888;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.task-head {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 16rpx;
+		margin-bottom: 12rpx;
 	}
 
 	.task-label {
@@ -324,19 +589,8 @@
 		background: #fdecec;
 	}
 
-	.task-hint {
-		font-size: 24rpx;
-		color: #888888;
-		line-height: 1.6;
-	}
-
-	.task-hint--fail {
-		color: #d9534f;
-	}
-
 	.match-item {
-		background-color: #ffffff;
-		border: 1rpx solid #e8ecf2;
+		background: #f7f9fc;
 		border-radius: 12rpx;
 		padding: 20rpx;
 		margin-top: 16rpx;
@@ -382,30 +636,136 @@
 	.reason-chip {
 		font-size: 22rpx;
 		color: #555555;
-		background: #f0f4fa;
+		background: #ffffff;
 		border-radius: 8rpx;
 		padding: 4rpx 12rpx;
 		margin: 0 8rpx 8rpx 0;
 	}
 
-	.empty-box {
-		background-color: #ffffff;
+	.primary-btn {
+		background-color: #2b73f8 !important;
+		color: #ffffff !important;
+		font-size: 26rpx !important;
+		border-radius: 8rpx !important;
+		margin: 0;
+		padding: 0 28rpx;
+		line-height: 60rpx;
+	}
+
+	.suggest-wrap {
+		margin-top: 8rpx;
+		margin-bottom: 12rpx;
+	}
+
+	.suggest-label {
+		display: block;
+		font-size: 22rpx;
+		color: #999999;
+		margin-bottom: 12rpx;
+	}
+
+	.suggest-item {
+		display: inline-flex;
+		margin: 0 12rpx 12rpx 0;
+		padding: 12rpx 20rpx;
+		background: #ffffff;
+		border: 1rpx solid #dce6f8;
+		border-radius: 28rpx;
+	}
+
+	.suggest-text {
+		font-size: 24rpx;
+		color: #2b73f8;
+	}
+
+	.scroll-pad {
+		height: 24rpx;
+	}
+
+	.skill-sheet {
+		flex: 0 0 auto;
+		margin: 0 20rpx 8rpx;
+		background: #ffffff;
+		border: 1rpx solid #e8ecf2;
 		border-radius: 16rpx;
-		padding: 120rpx 40rpx;
+		padding: 12rpx 8rpx;
+	}
+
+	.skill-sheet__label {
+		display: block;
+		padding: 8rpx 16rpx 4rpx;
+		font-size: 22rpx;
+		color: #999999;
+	}
+
+	.skill-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 16rpx 16rpx;
+	}
+
+	.skill-item__cmd {
+		flex-shrink: 0;
+		font-size: 26rpx;
+		font-weight: 600;
+		color: #2b73f8;
+		margin-right: 16rpx;
+	}
+
+	.skill-item__meta {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
+	}
+
+	.skill-item__label {
+		font-size: 26rpx;
+		color: #222222;
+	}
+
+	.skill-item__desc {
+		margin-top: 4rpx;
+		font-size: 22rpx;
+		color: #999999;
+	}
+
+	.composer {
+		flex: 0 0 auto;
+		padding: 12rpx 20rpx 16rpx;
+		background: #ffffff;
+		border-top: 1rpx solid #eef1f5;
+	}
+
+	.composer__hint {
+		display: block;
+		margin-bottom: 10rpx;
+		font-size: 20rpx;
+		color: #999999;
+	}
+
+	.composer__row {
+		display: flex;
+		flex-direction: row;
 		align-items: center;
 	}
 
-	.empty-title {
-		font-size: 30rpx;
-		color: #666666;
+	.composer__input {
+		flex: 1;
+		height: 72rpx;
+		padding: 0 24rpx;
+		background: #f5f6f8;
+		border-radius: 36rpx;
+		font-size: 28rpx;
+		color: #333333;
 	}
 
-	.empty-desc {
-		margin-top: 16rpx;
-		font-size: 24rpx;
-		color: #bbbbbb;
-		margin-bottom: 28rpx;
+	.composer__btn {
+		margin-left: 16rpx;
+		margin-right: 0;
+		background: #2b73f8 !important;
+		color: #ffffff !important;
+		border-radius: 12rpx;
 	}
 </style>

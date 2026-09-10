@@ -10,12 +10,26 @@ from fastapi.responses import JSONResponse
 
 from core.response import success, get_request_id
 from core.middleware import identity, json_body
+from core.errors import ai_unavailable
 from modules.ai.service import (
     create_match_task, get_match_task,
     create_evaluation_task, get_evaluation_task,
 )
 
-router = APIRouter(prefix="/api/tech-transfer/v1", tags=["ai"])
+# 与小程序 config/feature-flags.js 同步。false 时 /ai/* 直接 503，路由与 service 代码保留。
+AI_FEATURE_ENABLED = False
+
+
+def require_ai_enabled():
+    if not AI_FEATURE_ENABLED:
+        raise ai_unavailable("该功能即将开放")
+
+
+router = APIRouter(
+    prefix="/api/tech-transfer/v1",
+    tags=["ai"],
+    dependencies=[Depends(require_ai_enabled)],
+)
 
 
 @router.post("/ai/match-tasks", status_code=202)

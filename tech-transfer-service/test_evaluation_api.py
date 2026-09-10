@@ -7,7 +7,7 @@
      用户级限流 429（与 match 共享 5 次/小时）、
      审计 ai.task.create 落库（taskType=evaluation）、
      边界：无 worker 时任务保持 queued，ai_evaluation 表不产生任何假评分
-依赖：后端已启动，013 迁移（ai_evaluation 表）已执行
+依赖：后端已启动，013 迁移（ai_evaluation 表）已执行；routes/ai.py 中 AI_FEATURE_ENABLED=True
 """
 import json
 import time

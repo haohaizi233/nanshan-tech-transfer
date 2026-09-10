@@ -4,7 +4,7 @@ AI 域 API 测试（P0-2）
      去重（同需求 10 分钟窗口返回同 taskId 200）、
      用户级限流 429、查询（创建者可见 queued/results=null、非创建者 403、
      不存在 404）、审计 ai.task.create 落库
-依赖：后端已启动，004 迁移已执行
+依赖：后端已启动，004 迁移已执行；routes/ai.py 中 AI_FEATURE_ENABLED=True
 边界验证：无 worker 时任务保持 queued，GET results 恒为 null（禁止假 AI）
 """
 import time

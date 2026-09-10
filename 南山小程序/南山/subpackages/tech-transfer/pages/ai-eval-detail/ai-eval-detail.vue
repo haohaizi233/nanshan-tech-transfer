@@ -1,5 +1,11 @@
 <template>
 	<view class="page">
+		<view v-if="!aiEnabled" class="coming-soon">
+			<text class="coming-soon__title">功能即将开放</text>
+			<text class="coming-soon__desc">智能评估正在建设中，敬请期待。</text>
+		</view>
+		<block v-else>
+		<AiGeneratedMark class="page-mark" :notice="evalNotice" />
 		<!-- 初始加载 -->
 		<view v-if="loading" class="state-section">
 			<text class="state-title">加载中…</text>
@@ -61,7 +67,7 @@
 							<text class="total-num">{{ evaluation.totalScore }}</text>
 							<text class="total-unit">/ 100</text>
 						</view>
-						<text class="tip">四维评分由 AI 评估任务生成</text>
+						<text class="tip">四维评分由人工智能生成，仅供参考</text>
 					</view>
 
 					<view class="section">
@@ -78,7 +84,10 @@
 					</view>
 
 					<view v-if="evaluation.conclusion" class="section">
-						<text class="section-title">简要结论</text>
+						<view class="section-head">
+							<text class="section-title">简要结论</text>
+							<AiGeneratedMark mode="badge" />
+						</view>
 						<text class="conclusion">{{ evaluation.conclusion }}</text>
 					</view>
 
@@ -96,6 +105,7 @@
 				<button class="btn" @click="goDock">查看成果对接详情</button>
 			</view>
 		</block>
+		</block>
 	</view>
 </template>
 
@@ -107,7 +117,10 @@
 		POLL_INTERVAL_MS,
 		POLL_MAX_MS
 	} from '../../api/ai.js'
+	import { AI_EVAL_NOTICE } from '../../api/ai-disclosure.mjs'
+	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 
 	const SCORE_DIMENSIONS = [
 		{ key: 'techFeature', label: '技术特点' },
@@ -124,8 +137,13 @@
 	}
 
 	export default {
+		components: {
+			AiGeneratedMark
+		},
 		data() {
 			return {
+				aiEnabled: AI_FEATURE_ENABLED,
+				evalNotice: AI_EVAL_NOTICE,
 				taskId: null,
 				achievementId: null,
 				task: null,
@@ -169,6 +187,10 @@
 			}
 		},
 		onLoad(options) {
+			if (!this.aiEnabled) {
+				uni.setNavigationBarTitle({ title: '南山科转通' })
+				return
+			}
 			const taskId = parseInt(options.taskId, 10)
 			this.achievementId = parseInt(options.achievementId, 10) || null
 			if (!taskId) {
@@ -180,6 +202,7 @@
 			this.fetchTask()
 		},
 		onShow() {
+			if (!this.aiEnabled) return
 			// 页面回前台：任务未终态且轮询已停（如轮询出错）时恢复
 			if (this.taskId && this.task && !isTerminalStatus(this.task.status) && !this.timer) {
 				this.fetchTask()
@@ -193,6 +216,7 @@
 		},
 		methods: {
 			async fetchTask() {
+				if (!this.aiEnabled) return
 				this.loading = !this.task
 				this.loadError = ''
 				try {
@@ -234,7 +258,7 @@
 				}
 			},
 			async onRetry() {
-				if (!this.achievementId || this.retrying) return
+				if (!this.aiEnabled || !this.achievementId || this.retrying) return
 				this.retrying = true
 				try {
 					this.stopPolling()
@@ -271,6 +295,34 @@
 		padding: 24rpx;
 		padding-bottom: calc(60rpx + env(safe-area-inset-bottom));
 		box-sizing: border-box;
+	}
+
+	.coming-soon {
+		min-height: 70vh;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 48rpx 24rpx;
+		box-sizing: border-box;
+	}
+
+	.coming-soon__title {
+		font-size: 36rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+	}
+
+	.coming-soon__desc {
+		margin-top: 16rpx;
+		font-size: 26rpx;
+		color: #888888;
+		line-height: 1.5;
+		text-align: center;
+	}
+
+	.page-mark {
+		margin-bottom: 20rpx;
 	}
 
 	.section {
@@ -407,6 +459,18 @@
 		font-weight: 600;
 		color: #1a1a1a;
 		margin-bottom: 20rpx;
+	}
+
+	.section-head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 20rpx;
+	}
+
+	.section-head .section-title {
+		margin-bottom: 0;
 	}
 
 	.dim-item {

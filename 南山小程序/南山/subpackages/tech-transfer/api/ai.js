@@ -6,9 +6,13 @@
  * 无 worker 时任务保持 queued（无假数据回填）。
  *
  * 任务状态机：queued → running → succeeded | failed
+ *
+ * 运行时开关：AI_FEATURE_ENABLED=false 时本模块拒绝发起请求，
+ * 页面与函数保留，后续打开开关即可恢复。
  */
 
 import { apiRequest } from './client.js'
+import { AI_FEATURE_ENABLED } from '../../../config/feature-flags.js'
 
 /** 任务处于未终态时前端轮询参数 */
 export const POLL_INTERVAL_MS = 3000
@@ -18,6 +22,13 @@ export function isTerminalStatus(status) {
   return status === 'succeeded' || status === 'failed'
 }
 
+export function assertAiRuntimeEnabled() {
+  if (AI_FEATURE_ENABLED) return
+  const err = new Error('该功能即将开放')
+  err.code = 'AI_DISABLED'
+  throw err
+}
+
 // ── 需求匹配 ──────────────────────────────────────────────────
 
 /**
@@ -25,6 +36,7 @@ export function isTerminalStatus(status) {
  * @returns {Promise<{taskId:number, status:string}>}
  */
 export async function createMatchTask(demandId) {
+  assertAiRuntimeEnabled()
   return apiRequest('POST', '/ai/match-tasks', null, { demandId })
 }
 
@@ -34,6 +46,7 @@ export async function createMatchTask(demandId) {
  * succeeded 时 results: [{achievementId, achievementTitle, orgName, score, matchReasons}]
  */
 export async function getMatchTask(taskId) {
+  assertAiRuntimeEnabled()
   return apiRequest('GET', `/ai/match-tasks/${taskId}`)
 }
 
@@ -44,6 +57,7 @@ export async function getMatchTask(taskId) {
  * @returns {Promise<{taskId:number, status:string}>}
  */
 export async function createEvaluationTask(achievementId) {
+  assertAiRuntimeEnabled()
   return apiRequest('POST', '/ai/evaluation-tasks', null, { achievementId })
 }
 
@@ -54,5 +68,6 @@ export async function createEvaluationTask(achievementId) {
  * applyScope, maturity, cooperation}, totalScore, conclusion, highlights}
  */
 export async function getEvaluationTask(taskId) {
+  assertAiRuntimeEnabled()
   return apiRequest('GET', `/ai/evaluation-tasks/${taskId}`)
 }
