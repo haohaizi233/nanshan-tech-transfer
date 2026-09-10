@@ -1,0 +1,2 @@
+# 本机联调：域名解析在 VPS 上，ACME 无法签发，用内部证书；curl 加 -k
+tls internal

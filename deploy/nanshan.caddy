@@ -1,0 +1,24 @@
+# 南山科转通 · Caddy 反向代理片段（被 Caddyfile / Caddyfile.h5 import）
+
+(nanshan_api) {
+	reverse_proxy {$NS_API_UPSTREAM:127.0.0.1:8025} {
+		header_up Host {host}
+		header_up X-Request-Id {header.X-Request-Id}
+		header_up X-Idempotency-Key {header.X-Idempotency-Key}
+		header_up Authorization {header.Authorization}
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 60s
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+}
+
+(nanshan_h5) {
+	reverse_proxy {$NS_H5_UPSTREAM:127.0.0.1:5173} {
+		header_up Host {host}
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+	}
+}

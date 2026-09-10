@@ -19,7 +19,11 @@
         <text class="card-desc">成果 · 需求 · 资本对接</text>
       </view>
 
-      <view class="dev-card" @tap="goTo('/subpackages/tech-transfer/pages/ai-match/ai-match')">
+      <view
+        v-if="showAiMatchEntry"
+        class="dev-card"
+        @tap="goTo('/subpackages/tech-transfer/pages/ai-match/ai-match')"
+      >
         <view class="card-icon"><text class="card-icon-text">AI</text></view>
         <text class="card-title">AI 匹配</text>
         <text class="card-desc">需求 → 成果匹配任务</text>
@@ -37,12 +41,14 @@
 <script>
 import { APP_ENV, API_BASE } from '../../config/local.env.js'
 import { resolveH5ApiBase } from '../../host/local-adapter.js'
+import { SHOW_AI_MATCH_ENTRY } from '../../config/feature-flags.js'
 
 export default {
   data() {
     return {
       healthOk: false,
       apiBase: '',
+      showAiMatchEntry: SHOW_AI_MATCH_ENTRY,
     }
   },
   onShow() {
@@ -58,7 +64,7 @@ export default {
     },
     async checkHealth() {
       // API 地址随页面访问来源配对：本地→127.0.0.1:8787，
-      // 公网隧道 :8077→同主机 :8076，局域网 IP→同主机 :8787
+      // Caddy :80/:443→同源 /api，公网隧道 :8077→同主机 :8076，局域网 IP→同主机 :8787
       this.apiBase = resolveH5ApiBase({ appEnv: APP_ENV, localApiBase: API_BASE })
       try {
         const res = await new Promise((resolve, reject) => {

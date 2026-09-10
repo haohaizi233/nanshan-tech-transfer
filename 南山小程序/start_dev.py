@@ -6,16 +6,21 @@
     uni-app (Vue3) ──┬── mp-weixin（微信开发者工具）──┐
                      └── H5（HBuilderX dev server）──┤
                                                     ├── FastAPI :8787 ── PostgreSQL
-                                    Admin Web(未来) ─┘
+                                    Admin Web ──────┘
+                          Caddy ── https://inanshan.centips.com
+                                    /health+/api → :8025（VPS；本机 start_dev 仍反代 :8787）
+                                    /h5          → :5173
+                                    其余         → FastAPI（后台 SPA）
                           frpc 隧道 ── 43.138.138.200:8076(API)/8077(H5)
 
 用法：
-  python start_dev.py                     # 默认全部拉起 = FastAPI + 微信 + H5 + frp 隧道（同 --all）
-  python start_dev.py --all               # FastAPI + 微信 + H5 + 隧道（与默认相同）
-  python start_dev.py --weixin            # FastAPI + 仅微信小程序 + 隧道
-  python start_dev.py --h5                # FastAPI + 仅 H5 + 隧道
+  python start_dev.py                     # 默认全部拉起 = FastAPI + 微信 + H5 + frp 隧道 + Caddy（同 --all）
+  python start_dev.py --all               # FastAPI + 微信 + H5 + 隧道 + Caddy（与默认相同）
+  python start_dev.py --weixin            # FastAPI + 仅微信小程序 + 隧道 + Caddy
+  python start_dev.py --h5                # FastAPI + 仅 H5 + 隧道 + Caddy
   python start_dev.py --no-tunnel         # 关闭 frp 外网隧道（纯本地联调）
-  python start_dev.py --backend-only      # 仅 FastAPI（+ 隧道）
+  python start_dev.py --no-caddy          # 不启动 Caddy（https://inanshan.centips.com）
+  python start_dev.py --backend-only      # 仅 FastAPI（+ 隧道 + Caddy）
   python start_dev.py --frontend-only --weixin|h5|all   # 仅前端，不起后端
   python start_dev.py --h5 --lan          # H5 + FastAPI 局域网模式（输出 LAN 地址）
   python start_dev.py --doctor            # 环境诊断，只检测不启动
@@ -25,19 +30,24 @@
 
 说明：
   - HBuilderX CLI 运行 H5 / 微信均为「HBuilderX owned」进程，启动器不强制关闭它们；
-    Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI / frpc）。
+    Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI / frpc / caddy）。
   - 8787 已有健康的南山 FastAPI 时自动复用，退出启动器不会终止它；
     但若后端源码比监听进程新（如 git pull 之后），会先终止旧进程再重新启动，
     避免复用旧代码导致「前端拉到最新但接口还是旧行为」。
   - 外网转发使用 frp（frpc.toml：serverAddr + 8076→8787 + 8077→5173），
     默认随启动器一起拉起 frpc 并做外网端到端健康验证（--no-tunnel 关闭）；
     frpc 目录检测顺序：FRPC_HOME 环境变量 > 桌面 frp* 扫描。
+  - Caddy 默认随启动器拉起（--no-caddy 关闭）：deploy/Caddyfile 把
+    https://inanshan.centips.com/health+/api 与后台 SPA 转到本机 8787，/h5 转到 5173；
+    VPS 上未设 NS_API_UPSTREAM 时默认反代 127.0.0.1:8025；
+    检测顺序：CADDY_HOME > PATH > 桌面 caddy*。
   - 启动器 spawn 的后端进程退出时（如崩溃）keep-alive 循环会自动重启。
 """
 
 import argparse
 import atexit
 import hashlib
+import http.client
 import importlib.util
 import ipaddress
 import json
@@ -45,6 +55,7 @@ import os
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -66,7 +77,9 @@ HEALTH_URL = BACKEND_URL + "/api/health"
 API_ROOT = BACKEND_URL + "/api/tech-transfer/v1"
 BACKEND_PORT = 8787
 H5_PORT = 5173
+H5_PUBLIC_PATH = "/h5/"
 H5_URL = f"http://127.0.0.1:{H5_PORT}"
+H5_PAGE_URL = f"{H5_URL}{H5_PUBLIC_PATH}"
 
 HBX_CLI_DEFAULT = Path(r"D:\HBuilderX\HBuilderX.5.15.2026070915\HBuilderX\cli.exe")
 HBX_ROOT_DIRS = [Path(r"D:\HBuilderX"), Path(r"C:\Program Files\HBuilderX")]
@@ -76,6 +89,12 @@ WECHAT_DEVTOOLS_DEFAULT = Path(r"D:\微信开发者工具\微信web开发者工�
 FRPC_SCAN_ROOTS = [Path.home() / "Desktop", Path("D:\\")]
 TUNNEL_API_PORT = 8076   # 远端 API 入口（→ 本地 8787，实际以 frpc.toml 解析为准）
 TUNNEL_H5_PORT = 8077    # 远端 H5 入口（→ 本地 5173，实际以 frpc.toml 解析为准）
+
+# Caddy 反向代理（deploy/Caddyfile：VPS /health+/api+后台 → 8025，本机 start_dev 仍反代 8787；/h5 → 5173）
+CADDY_SCAN_ROOTS = [Path.home() / "Desktop", Path("D:\\")]
+CADDYFILE = ROOT.parent / "deploy" / "Caddyfile"
+CADDY_HTTPS_PORT = 443
+CADDY_SITE_DEFAULT = "inanshan.centips.com"
 
 
 # ── 前端构建新鲜度 ───────────────────────────────────────────
@@ -700,15 +719,15 @@ def run_h5(hbx_cli, lan):
             error(f"H5 dev server 在 {H5_URL} 上未就绪（进程可能仍在编译，请手动访问确认）")
         return False
 
-    ok(f"H5 已就绪：{H5_URL}")
+    ok(f"H5 已就绪：{H5_PAGE_URL}")
     mark_h5_current()
     lan_ips = get_lan_ips()
     if lan:
         print("  局域网访问：")
         for ip in lan_ips[:3]:
-            print(f"    http://{ip}:{H5_PORT}")
+            print(f"    http://{ip}:{H5_PORT}{H5_PUBLIC_PATH}")
     elif lan_ips:
-        print(f"  局域网访问：http://{lan_ips[0]}:{H5_PORT}（完整列表用 --lan 查看）")
+        print(f"  局域网访问：http://{lan_ips[0]}:{H5_PORT}{H5_PUBLIC_PATH}（完整列表用 --lan 查看）")
     return True
 
 
@@ -925,6 +944,231 @@ def run_tunnel():
     return False, None
 
 
+# ── Caddy 反向代理 ────────────────────────────────────────────
+def caddy_site():
+    return os.environ.get("NS_SITE", CADDY_SITE_DEFAULT).strip() or CADDY_SITE_DEFAULT
+
+
+def find_caddy():
+    """检测 caddy.exe。顺序：CADDY_HOME > PATH > 桌面/D 盘 caddy* 扫描。
+
+    返回 (caddy_exe|None, 来源)。
+    """
+    names = ("caddy.exe", "caddy") if os.name == "nt" else ("caddy",)
+
+    env_val = os.environ.get("CADDY_HOME", "").strip('"')
+    if env_val:
+        root = Path(env_val)
+        if root.is_file() and root.name.lower().startswith("caddy"):
+            return root, "环境变量 CADDY_HOME"
+        for name in names:
+            candidate = root / name
+            if candidate.is_file():
+                return candidate, "环境变量 CADDY_HOME"
+        warn(f"CADDY_HOME={env_val} 缺少 caddy.exe，忽略")
+
+    for name in names:
+        found = which(name)
+        if found:
+            return Path(found), "PATH"
+
+    for scan_root in CADDY_SCAN_ROOTS:
+        if not scan_root.is_dir():
+            continue
+        for d in sorted(scan_root.glob("caddy*"), reverse=True):
+            if d.is_file() and d.name.lower() in ("caddy.exe", "caddy"):
+                return d, f"扫描 {d}"
+            if not d.is_dir():
+                continue
+            for sub in [d] + list(d.glob("caddy*")):
+                for name in names:
+                    candidate = sub / name if sub.is_dir() else None
+                    if candidate is not None and candidate.is_file():
+                        return candidate, f"扫描 {sub}"
+    return None, ""
+
+
+def caddy_process_running():
+    try:
+        image = "caddy.exe" if os.name == "nt" else "caddy"
+        out = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {image}"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return False
+    return "caddy" in out.lower()
+
+
+def caddy_listening():
+    return port_listening(CADDY_HTTPS_PORT)
+
+
+def caddy_api_healthy(timeout=4):
+    """本机 :443 + SNI/Host 域名请求 /api/health。返回 (healthy, body)。
+
+    不走 80：证书校验关闭（连的是 127.0.0.1），SNI 仍用站点名让 Caddy 选对证书。
+    本机失败再试公网 https://域名/api/health。
+    """
+    site = caddy_site()
+    conn = None
+    sock = None
+    try:
+        ctx = ssl._create_unverified_context()
+        sock = socket.create_connection(("127.0.0.1", CADDY_HTTPS_PORT), timeout=timeout)
+        ssock = ctx.wrap_socket(sock, server_hostname=site)
+        conn = http.client.HTTPSConnection("127.0.0.1", CADDY_HTTPS_PORT, timeout=timeout, context=ctx)
+        conn.sock = ssock
+        conn.request("GET", "/api/health", headers={"Host": site})
+        resp = conn.getresponse()
+        raw = resp.read().decode("utf-8")
+        status = resp.status
+        if status in (301, 302, 307, 308):
+            return _caddy_public_https_healthy(site, timeout)
+        if status == 200:
+            body = json.loads(raw)
+            return body.get("code") == 0, body
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        elif sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    return _caddy_public_https_healthy(site, timeout)
+
+
+def _caddy_public_https_healthy(site, timeout=4):
+    url = f"https://{site}/api/health"
+    try:
+        with _no_proxy_opener().open(url, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("code") == 0, body
+    except Exception:
+        return False, None
+
+
+def _caddy_log_path():
+    return Path(tempfile.gettempdir()) / "nanshan-caddy.log"
+
+
+_caddy_log_handle = None
+
+
+def spawn_caddy(caddy_exe, caddyfile):
+    """拉起 caddy 并注册为启动器托管进程（Ctrl+C 时一并终止）。
+
+    ACME 签证书不能走系统代理（Clash 会劫持 Let's Encrypt），这里清掉代理变量。
+    """
+    global _caddy_log_handle
+    env = os.environ.copy()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    env["NO_PROXY"] = "*"
+    env["no_proxy"] = "*"
+    env.setdefault("NS_SITE", caddy_site())
+    env.setdefault("NS_API_UPSTREAM", "127.0.0.1:8787")
+    env.setdefault("NS_H5_UPSTREAM", "127.0.0.1:5173")
+    # 域名解析在 VPS，本机 ACME 签不出证书，握手会 TLS internal error，反代看起来像后端挂了
+    env.setdefault("NS_TLS_SNIPPET", "tls-local.caddy")
+    if _caddy_log_handle is not None:
+        try:
+            _caddy_log_handle.close()
+        except OSError:
+            pass
+    _caddy_log_handle = open(_caddy_log_path(), "ab", buffering=0)
+    proc = subprocess.Popen(
+        [str(caddy_exe), "run", "--config", str(caddyfile), "--adapter", "caddyfile"],
+        stdout=_caddy_log_handle, stderr=subprocess.STDOUT,
+        env=env, cwd=str(caddyfile.parent),
+    )
+    register_process("caddy", proc)
+    return proc
+
+
+def _caddy_log_tail(n=20):
+    path = _caddy_log_path()
+    if not path.is_file():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-n:])
+    except OSError:
+        return ""
+
+
+def run_caddy():
+    """启动 Caddy 并做本机端到端验证。返回 (True/False, info|None)。
+
+    复用条件：本机 :443 已在听且 /api/health 经 Caddy 返回 code=0。
+    """
+    site = caddy_site()
+    public_url = f"https://{site}"
+    info = {"site": site, "caddyfile": CADDYFILE, "public_url": public_url,
+            "health_url": f"{public_url}/api/health", "caddy_exe": None}
+
+    if not CADDYFILE.is_file():
+        error(f"未找到 Caddyfile：{CADDYFILE}")
+        return False, None
+
+    caddy_exe, source = find_caddy()
+    if caddy_exe is None:
+        error("未找到 caddy.exe（可设置 CADDY_HOME，或把 caddy 目录加入 PATH）")
+        return False, None
+    info["caddy_exe"] = caddy_exe
+    ok(f"caddy：{caddy_exe}（{source}）")
+    print(f"  站点：{public_url} → 127.0.0.1:{BACKEND_PORT}")
+
+    healthy, _body = caddy_api_healthy()
+    if healthy:
+        ok(f"检测到 Caddy 已就绪，复用现有进程：{public_url}")
+        return True, info
+
+    if caddy_process_running() or caddy_listening():
+        for _ in range(10):
+            healthy, _body = caddy_api_healthy()
+            if healthy:
+                ok(f"Caddy 已恢复健康，复用现有进程：{public_url}")
+                return True, info
+            time.sleep(1)
+        if caddy_listening() and not caddy_process_running():
+            error(f"端口 {CADDY_HTTPS_PORT} 已被其他进程占用"
+                  f"（PID={port_pid(CADDY_HTTPS_PORT)}），无法启动 Caddy")
+            return False, None
+        warn(f"caddy 在运行但 {public_url}/api/health 10s 内未恢复（本地后端未启动？），跳过 Caddy")
+        return False, None
+
+    print(f"  启动 caddy（{CADDYFILE.name}）")
+    spawn_caddy(caddy_exe, CADDYFILE)
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        proc = managed_processes.get("caddy")
+        if proc is not None and proc.poll() is not None:
+            tail = _caddy_log_tail()
+            error("caddy 进程异常退出（常见原因：443 被占 / Caddyfile 语法错误 / ACME 失败）")
+            if tail:
+                print(tail)
+            return False, None
+        healthy, _body = caddy_api_healthy()
+        if healthy:
+            ok(f"Caddy 已就绪：{public_url}/api/health")
+            return True, info
+        time.sleep(1)
+    error(f"caddy 已启动但 {public_url}/api/health 30s 内未通过健康检查")
+    tail = _caddy_log_tail()
+    if tail:
+        print(tail)
+    return False, None
+
+
 # ── Doctor / Status ───────────────────────────────────────────
 def run_doctor():
     print("=" * 60)
@@ -965,6 +1209,24 @@ def run_doctor():
         if server and pairs:
             mapping_detail = f"{server}，" + "，".join(f"{lp}→{rp}" for lp, rp in sorted(pairs.items()))
         check("frpc.toml 代理映射", bool(server) and BACKEND_PORT in pairs, mapping_detail)
+
+    caddy_exe, caddy_source = find_caddy()
+    check("caddy（HTTPS 反代）", caddy_exe is not None,
+          f"{caddy_exe}（{caddy_source}）" if caddy_exe else "未找到（可设置 CADDY_HOME；不影响本地 :8787）")
+    check("Caddyfile", CADDYFILE.is_file(), str(CADDYFILE))
+    if CADDYFILE.is_file():
+        text = CADDYFILE.read_text(encoding="utf-8")
+        check("Caddyfile 站点", CADDY_SITE_DEFAULT in text or "NS_SITE" in text, caddy_site())
+        if caddy_exe:
+            try:
+                ret = subprocess.run(
+                    [str(caddy_exe), "validate", "--config", str(CADDYFILE), "--adapter", "caddyfile"],
+                    capture_output=True, text=True, timeout=15, cwd=str(CADDYFILE.parent),
+                )
+                detail = "validate ok" if ret.returncode == 0 else (ret.stderr or ret.stdout).strip()[:200]
+                check("Caddyfile 语法", ret.returncode == 0, detail)
+            except Exception as e:
+                check("Caddyfile 语法", False, str(e))
 
     try:
         import psycopg2
@@ -1047,26 +1309,43 @@ def run_status():
     frpc_exe, frpc_toml, _ = find_frpc()
     if frpc_exe is None:
         print("  Tunnel      N/A      未找到 frpc（--tunnel 不可用）")
-        return True
-    server, pairs = parse_frpc_config(frpc_toml)
-    if not server or BACKEND_PORT not in pairs:
-        print("  Tunnel      N/A      frpc.toml 解析失败（缺 serverAddr / 8787 映射）")
-        return True
-    api_tunnel = f"http://{server}:{pairs[BACKEND_PORT]}"
-    healthy, _body = tunnel_api_healthy(server, pairs[BACKEND_PORT], timeout=4)
-    if healthy:
-        print(f"  Tunnel      RUNNING  {api_tunnel}（外网 API 入口健康）")
-    elif frpc_process_running():
-        print(f"  Tunnel      DEGRADED frpc 进程在跑但 {api_tunnel} 不健康（本地后端未启动？）")
     else:
-        print("  Tunnel      STOPPED  frpc 未运行（start_dev.py 默认随启动器拉起）")
-    if H5_PORT in pairs:
-        h5_tunnel = f"http://{server}:{pairs[H5_PORT]}"
-        reachable, st = fetch_url_status(h5_tunnel, timeout=4)
-        if reachable and st == 200:
-            print(f"  Tunnel(H5)  RUNNING  {h5_tunnel}")
+        server, pairs = parse_frpc_config(frpc_toml)
+        if not server or BACKEND_PORT not in pairs:
+            print("  Tunnel      N/A      frpc.toml 解析失败（缺 serverAddr / 8787 映射）")
         else:
-            print(f"  Tunnel(H5)  OFF      {h5_tunnel}（需 H5 dev server + 隧道运行中）")
+            api_tunnel = f"http://{server}:{pairs[BACKEND_PORT]}"
+            healthy, _body = tunnel_api_healthy(server, pairs[BACKEND_PORT], timeout=4)
+            if healthy:
+                print(f"  Tunnel      RUNNING  {api_tunnel}（外网 API 入口健康）")
+            elif frpc_process_running():
+                print(f"  Tunnel      DEGRADED frpc 进程在跑但 {api_tunnel} 不健康（本地后端未启动？）")
+            else:
+                print("  Tunnel      STOPPED  frpc 未运行（start_dev.py 默认随启动器拉起）")
+            if H5_PORT in pairs:
+                h5_tunnel = f"http://{server}:{pairs[H5_PORT]}"
+                reachable, st = fetch_url_status(h5_tunnel, timeout=4)
+                if reachable and st == 200:
+                    print(f"  Tunnel(H5)  RUNNING  {h5_tunnel}")
+                else:
+                    print(f"  Tunnel(H5)  OFF      {h5_tunnel}（需 H5 dev server + 隧道运行中）")
+
+    site = caddy_site()
+    public_url = f"https://{site}"
+    if not CADDYFILE.is_file():
+        print(f"  Caddy       N/A      未找到 {CADDYFILE}")
+        return True
+    caddy_exe, _ = find_caddy()
+    if caddy_exe is None:
+        print("  Caddy       N/A      未找到 caddy.exe（--caddy 不可用）")
+        return True
+    healthy, _body = caddy_api_healthy(timeout=4)
+    if healthy:
+        print(f"  Caddy       RUNNING  {public_url}（/api/health 经反代健康）")
+    elif caddy_process_running() or caddy_listening():
+        print(f"  Caddy       DEGRADED 进程/端口在但 {public_url}/api/health 不健康")
+    else:
+        print(f"  Caddy       STOPPED  {public_url}（start_dev.py 默认随启动器拉起）")
     return True
 
 
@@ -1097,7 +1376,7 @@ def run_build_h5(hbx_cli):
 
 
 # ── 汇总面板 ──────────────────────────────────────────────────
-def print_summary(runtimes, lan, tunnel_urls=None):
+def print_summary(runtimes, lan, tunnel_urls=None, caddy_info=None):
     lan_ips = get_lan_ips()
     print()
     print("=" * 60)
@@ -1124,14 +1403,22 @@ def print_summary(runtimes, lan, tunnel_urls=None):
     if FrontendRuntime.H5 in runtimes:
         print()
         print("H5")
-        print(f"  Local         {H5_URL}")
+        print(f"  Local         {H5_PAGE_URL}")
         if lan_ips:
-            print(f"  LAN           http://{lan_ips[0]}:{H5_PORT}")
+            print(f"  LAN           http://{lan_ips[0]}:{H5_PORT}{H5_PUBLIC_PATH}")
     if tunnel_urls:
         print()
         print("Tunnel（外网入口，经 frp 转发本机）")
         for label, url in tunnel_urls:
             print(f"  {label:13} {url}")
+    if caddy_info:
+        print()
+        print("Caddy（HTTPS 反代）")
+        print(f"  Site          {caddy_info['public_url']}")
+        print(f"  Admin         {caddy_info['public_url']}/login")
+        print(f"  H5            {caddy_info['public_url']}{H5_PUBLIC_PATH}")
+        print(f"  API           {caddy_info['public_url']}/api/")
+        print(f"  Health        {caddy_info['health_url']}")
     print()
     print("真机调试（微信小程序，改 config/local.env.js 的 API_BASE）：")
     print("  模拟器/本地  http://127.0.0.1:8787（默认，无需修改）")
@@ -1140,6 +1427,8 @@ def print_summary(runtimes, lan, tunnel_urls=None):
     api_tunnel_url = next((u for label, u in tunnel_urls if label == "API"), None) if tunnel_urls else None
     if api_tunnel_url:
         print(f"  外网（frp）  {api_tunnel_url}")
+    if caddy_info:
+        print(f"  外网（Caddy） {caddy_info['public_url']}")
     print("=" * 60)
 
 
@@ -1155,6 +1444,10 @@ def parse_args():
                         help="启动 frpc 外网隧道（默认开启；frpc.toml：8076→8787 / 8077→5173）并做端到端健康验证")
     parser.add_argument("--no-tunnel", dest="tunnel", action="store_false",
                         help="不启动 frp 外网隧道（纯本地联调）")
+    parser.add_argument("--caddy", dest="caddy", action="store_true", default=True,
+                        help="启动 Caddy（默认开启；deploy/Caddyfile：https://inanshan.centips.com /health+/api+/admin → 本机 8787 或 VPS 8025，/h5 → 5173）")
+    parser.add_argument("--no-caddy", dest="caddy", action="store_false",
+                        help="不启动 Caddy 反向代理")
     parser.add_argument("--lan", action="store_true", help="局域网模式：FastAPI 绑定 0.0.0.0，输出 LAN 地址")
     parser.add_argument("--doctor", action="store_true", help="环境诊断，只检测不启动")
     parser.add_argument("--status", action="store_true", help="查看当前运行状态，不启动")
@@ -1246,7 +1539,7 @@ def main():
     # [5/5] 启动前端 Runtime
     print("[5/5] 启动前端 Runtime")
     status = {"backend": "READY" if (backend_proc is not None or fetch_health()[0]) else "OFF",
-              "weixin": "OFF", "h5": "OFF", "tunnel": "OFF"}
+              "weixin": "OFF", "h5": "OFF", "tunnel": "OFF", "caddy": "OFF"}
 
     if FrontendRuntime.WEIXIN in runtimes:
         if hbx_cli is None:
@@ -1286,12 +1579,27 @@ def main():
     else:
         skip("已关闭（--no-tunnel）")
 
-    print_summary(runtimes, args.lan, tunnel_urls)
+    # Caddy HTTPS 反代（默认开启，--no-caddy 关闭）
+    caddy_info = None
+    print("Caddy 反向代理")
+    if args.caddy:
+        if not need_backend and not fetch_health()[0]:
+            warn("后端未运行（--frontend-only），Caddy /api 将返回 502")
+        caddy_ok, caddy_info = run_caddy()
+        if caddy_ok:
+            status["caddy"] = "READY"
+        else:
+            status["caddy"] = "FAIL"
+            caddy_info = None
+    else:
+        skip("已关闭（--no-caddy）")
 
-    # 结果判定：核心组件失败即退出；仅隧道失败不影响本地联调（--strict 除外）
+    print_summary(runtimes, args.lan, tunnel_urls, caddy_info)
+
+    # 结果判定：核心组件失败即退出；仅隧道/Caddy 失败不影响本地联调（--strict 除外）
     failed = [k for k, v in status.items() if v == "FAIL"]
     if failed:
-        core_failed = [k for k in failed if k != "tunnel"]
+        core_failed = [k for k in failed if k not in ("tunnel", "caddy")]
         if core_failed:
             error(f"启动失败：{', '.join(core_failed)}")
             return 1
@@ -1305,8 +1613,11 @@ def main():
     print("  按 Ctrl+C 停止（仅终止本启动器启动的进程；复用的后端 / HBuilderX GUI 不受影响）")
     if status.get("tunnel") == "READY":
         print("  外网访问需保持本启动器运行（frpc 由其托管）")
+    if status.get("caddy") == "READY":
+        print("  HTTPS 入口需保持本启动器运行（caddy 由其托管）")
 
     tunnel_restarts = 0
+    caddy_restarts = 0
     try:
         while True:
             time.sleep(5)
@@ -1334,6 +1645,21 @@ def main():
                         ok(f"frpc 已重启（PID {new_proc.pid}）")
                     except Exception as e:
                         warn(f"frpc 重启失败：{e}")
+            # caddy watchdog：仅看护本启动器 spawn 的 caddy，最多重启 3 次
+            cproc = managed_processes.get("caddy")
+            if cproc is not None and cproc.poll() is not None and caddy_info is not None:
+                if caddy_restarts >= 3:
+                    warn("caddy 反复退出，不再自动重启（HTTPS 入口不可用，本地联调不受影响）")
+                    managed_processes.pop("caddy", None)
+                else:
+                    caddy_restarts += 1
+                    warn(f"检测到 caddy 进程退出，5s 后自动重启（第 {caddy_restarts}/3 次）...")
+                    time.sleep(5)
+                    try:
+                        new_proc = spawn_caddy(caddy_info["caddy_exe"], caddy_info["caddyfile"])
+                        ok(f"caddy 已重启（PID {new_proc.pid}）")
+                    except Exception as e:
+                        warn(f"caddy 重启失败：{e}")
     except KeyboardInterrupt:
         pass
     finally:

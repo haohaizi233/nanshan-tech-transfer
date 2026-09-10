@@ -68,3 +68,36 @@ test('uses same-origin API paths for a production H5 build', () => {
     '',
   )
 })
+
+test('uses same-origin API paths when H5 is served through Caddy on :80', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      pageLocation: new URL('http://43.138.138.200/#/pages/index/index'),
+    }),
+    '',
+  )
+})
+
+test('uses same-origin API paths when H5 is served through Caddy HTTPS', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      pageLocation: new URL('https://nanshan.example.com/pages/home/home'),
+    }),
+    '',
+  )
+})
+
+test('uses same-origin API paths when H5 is under /h5 on the public Caddy host', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      pageLocation: new URL('https://inanshan.centips.com/h5/#/pages/home/home'),
+    }),
+    '',
+  )
+})

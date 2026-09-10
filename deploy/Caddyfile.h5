@@ -1,0 +1,3 @@
+# 已并入 Caddyfile：同一域名同时反代 /api、后台 SPA、小程序 H5。
+# 旧命令 `caddy run --config deploy/Caddyfile.h5` 仍然有效。
+import Caddyfile

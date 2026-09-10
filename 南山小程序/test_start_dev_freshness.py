@@ -1,5 +1,6 @@
 """一键启动器的前端新鲜度判断测试。"""
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +97,55 @@ class SpawnChildDetectionTests(unittest.TestCase):
                 self.assertEqual(start_dev._python_processes_with_cmdline(), expected)
         finally:
             start_dev.subprocess.run = original_run
+
+
+class CaddyLauncherTests(unittest.TestCase):
+    def test_default_site_is_inanshan(self):
+        previous = os.environ.pop("NS_SITE", None)
+        try:
+            self.assertEqual(start_dev.caddy_site(), "inanshan.centips.com")
+        finally:
+            if previous is None:
+                os.environ.pop("NS_SITE", None)
+            else:
+                os.environ["NS_SITE"] = previous
+
+    def test_ns_site_env_overrides_domain(self):
+        previous = os.environ.get("NS_SITE")
+        os.environ["NS_SITE"] = "demo.example.com"
+        try:
+            self.assertEqual(start_dev.caddy_site(), "demo.example.com")
+        finally:
+            if previous is None:
+                os.environ.pop("NS_SITE", None)
+            else:
+                os.environ["NS_SITE"] = previous
+
+    def test_find_caddy_uses_caddy_home(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            exe = Path(temp_dir) / "caddy.exe"
+            exe.write_bytes(b"fake")
+            previous = os.environ.get("CADDY_HOME")
+            os.environ["CADDY_HOME"] = str(Path(temp_dir))
+            try:
+                found, source = start_dev.find_caddy()
+                self.assertEqual(found, exe)
+                self.assertEqual(source, "环境变量 CADDY_HOME")
+            finally:
+                if previous is None:
+                    os.environ.pop("CADDY_HOME", None)
+                else:
+                    os.environ["CADDY_HOME"] = previous
+
+    def test_caddy_on_by_default_and_no_caddy_disables(self):
+        original = sys.argv
+        try:
+            sys.argv = ["start_dev.py"]
+            self.assertTrue(start_dev.parse_args().caddy)
+            sys.argv = ["start_dev.py", "--no-caddy"]
+            self.assertFalse(start_dev.parse_args().caddy)
+        finally:
+            sys.argv = original
 
 
 if __name__ == "__main__":

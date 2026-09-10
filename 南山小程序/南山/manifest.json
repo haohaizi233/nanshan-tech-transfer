@@ -67,10 +67,11 @@
         "usingComponents" : true
     },
     /* H5 特有相关 */
-    "h5" : {
+	"h5" : {
         "title" : "南山科转通",
         "router" : {
-            "mode" : "hash"
+            "mode" : "hash",
+            "base" : "/h5/"
         },
         "devServer" : {
             "port" : 5173,

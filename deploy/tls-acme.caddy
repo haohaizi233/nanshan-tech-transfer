@@ -1,0 +1,6 @@
+# VPS / 公网：Let's Encrypt（DNS A 记录指向本机时使用）
+tls {
+	issuer acme {
+		disable_http_challenge
+	}
+}
