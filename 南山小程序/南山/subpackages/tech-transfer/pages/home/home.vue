@@ -78,18 +78,21 @@
 							@click.stop="onToggleFavorite('demand', item)"
 						>{{ item.favorited ? '★' : '☆' }}</text>
 					</view>
-					<text v-if="item.company" class="card-sub">{{ item.company }}</text>
-					<view class="meta-row">
-						<view class="meta-item">
+					<view v-if="item.company" class="card-sub-row">
+						<text class="card-sub">{{ item.company }}</text>
+						<text v-if="item.orgCertified" class="cert-badge">认证</text>
+					</view>
+					<view v-if="item.location || item.budget" class="meta-row">
+						<view v-if="item.location" class="meta-item">
 							<text class="meta-label">地点</text>
 							<text class="meta-value">{{ item.location }}</text>
 						</view>
-						<view class="meta-item">
+						<view v-if="item.budget" class="meta-item">
 							<text class="meta-label">预算</text>
 							<text class="meta-value meta-value-em">{{ item.budget }}</text>
 						</view>
 					</view>
-					<view class="info-block">
+					<view v-if="item.demandDesc" class="info-block">
 						<text class="info-label">需求说明</text>
 						<text class="info-text">{{ item.demandDesc }}</text>
 					</view>
@@ -118,13 +121,16 @@
 								@click.stop="onToggleFavorite('result', item)"
 							>{{ item.favorited ? '★' : '☆' }}</text>
 						</view>
-						<view class="meta-row">
+						<view v-if="item.source" class="meta-row">
 							<view class="meta-item meta-item-full">
 								<text class="meta-label">来源</text>
-								<text class="meta-value">{{ item.source }}</text>
+								<view class="meta-value-row">
+									<text class="meta-value">{{ item.source }}</text>
+									<text v-if="item.orgCertified" class="cert-badge">认证</text>
+								</view>
 							</view>
 						</view>
-						<view class="info-block">
+						<view v-if="item.techIntro" class="info-block">
 							<text class="info-label">技术简介</text>
 							<text class="info-text">{{ item.techIntro }}</text>
 						</view>
@@ -307,9 +313,9 @@
 			},
 			switchTab(index) {
 				const tab = this.tabs[index]
-				// 「检索」：跳分包内搜索页（外部小程序通道保留在 api/external-miniprogram.js，C-08 确认后启用）
+				// 「检索」：专利检索（需求/成果搜索仍走顶部搜索框 → search.vue）
 				if (tab && tab.key === 'search') {
-					HostBridge.navigate('pages/search/search')
+					HostBridge.navigate('pages/patent-list/patent-list')
 					return
 				}
 				this.activeTab = index
@@ -322,15 +328,18 @@
 			goSearchPage() {
 				HostBridge.navigate('pages/search/search')
 			},
-			/** 扫码：先调起扫码界面；码内容解析待客户提供规则/接口后再接 */
+			/** 扫码：直接展示识别到的网址或文本 */
 			onScanCode() {
 				uni.scanCode({
 					onlyFromCamera: false,
 					scanType: ['qrCode', 'barCode'],
-					success() {
-						uni.showToast({
-							title: '扫码成功，成果对接待开通',
-							icon: 'none'
+					success(res) {
+						const result = String((res && res.result) || '').trim()
+						uni.showModal({
+							title: '识别结果',
+							content: result || '未识别到内容',
+							showCancel: false,
+							confirmText: '知道了'
 						})
 					},
 					fail(err) {
@@ -612,6 +621,23 @@
 		font-size: 26rpx;
 		color: #666666;
 		margin: -8rpx 0 20rpx;
+	}
+
+	.card-sub-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin: -8rpx 0 20rpx;
+	}
+
+	.card-sub-row .card-sub {
+		margin: 0;
+	}
+
+	.meta-value-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
 	}
 
 	.star-btn {

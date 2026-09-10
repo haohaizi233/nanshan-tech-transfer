@@ -16,6 +16,7 @@ const PRODUCTION_ENVS = ['staging', 'production']
 const TUNNEL_H5_PORT = '8077'
 const TUNNEL_API_PORT = '8076'
 const LOCAL_API_PORT = '8787'
+const SAME_ORIGIN_PORTS = new Set(['', '80', '443'])
 const LOCALHOST_HOSTNAMES = ['localhost', '127.0.0.1', '::1', '[::1]']
 const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
 
@@ -24,6 +25,7 @@ const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
  *
  * The page's own origin decides which API it can reach — a visitor's browser
  * must never inherit the developer machine's 127.0.0.1 API address:
+ *   - :80 / :443 Caddy reverse proxy（含 /h5/）→ same-origin relative /api
  *   - :8077 frp tunnel page  → paired :8076 tunnel API on the same host
  *   - LAN hostname (phone/other PC on the same WiFi) → same host, direct :8787
  *   - localhost / mini-program (no location) → localApiBase as configured
@@ -33,7 +35,11 @@ export function resolveH5ApiBase({ appEnv, localApiBase, pageLocation = globalTh
 
   if (pageLocation && pageLocation.hostname) {
     const protocol = pageLocation.protocol === 'https:' ? 'https:' : 'http:'
-    if (String(pageLocation.port) === TUNNEL_H5_PORT) {
+    const port = String(pageLocation.port || (protocol === 'https:' ? '443' : '80'))
+    if (SAME_ORIGIN_PORTS.has(port)) {
+      return ''
+    }
+    if (port === TUNNEL_H5_PORT) {
       return `${protocol}//${pageLocation.hostname}:${TUNNEL_API_PORT}`
     }
     if (!LOCALHOST_HOSTNAMES.includes(pageLocation.hostname)) {
@@ -114,7 +120,7 @@ const LocalAdapter = {
         method: method.toUpperCase(),
         data: body,
         header: headers,
-        timeout: 30000,
+        timeout: 60000,
         success: (res) => {
           resolve(res.data)
         },

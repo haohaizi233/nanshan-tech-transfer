@@ -88,6 +88,25 @@
 					}
 				},
 				{
+					"path": "pages/patent-list/patent-list",
+					"style": {
+						"navigationBarTitleText": "专利检索",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8",
+						"enablePullDownRefresh": true
+					}
+				},
+				{
+					"path": "pages/patent-detail/patent-detail",
+					"style": {
+						"navigationBarTitleText": "专利详情",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black",
+						"backgroundColor": "#F5F6F8"
+					}
+				},
+				{
 					"path": "pages/dock-detail/dock-detail",
 					"style": {
 						"navigationBarTitleText": "对接详情",
