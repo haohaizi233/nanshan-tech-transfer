@@ -18,6 +18,7 @@ import re
 
 import psycopg2
 
+from core.contact_validation import validate_email, validate_phone
 from core.errors import bad_request, conflict, not_found
 from db import get_cursor, transaction
 from modules.audit.service import record as audit_record
@@ -48,11 +49,7 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
         raise bad_request("联系人姓名必填")
     if len(contact_name) > 64:
         raise bad_request("联系人姓名长度不能超过 64")
-    contact_phone = str(body.get("contactPhone") or "").strip()
-    if not contact_phone:
-        raise bad_request("联系电话必填")
-    if len(contact_phone) > 32:
-        raise bad_request("联系电话长度不能超过 32")
+    contact_phone = validate_phone(body.get("contactPhone"), required=True, field_name="联系电话")
     username = str(body.get("username") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.-]{4,64}", username):
         raise bad_request("登录账号须为 4-64 位字母、数字或 . _ -")
@@ -66,9 +63,7 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
     credit_code = str(body.get("creditCode") or "").strip() or None
     if credit_code and len(credit_code) > 64:
         raise bad_request("creditCode 长度不能超过 64")
-    email = str(body.get("email") or "").strip() or None
-    if email and len(email) > 128:
-        raise bad_request("email 长度不能超过 128")
+    email = validate_email(body.get("email"), required=False)
     # 申请表无独立 intro 列：简介暂存 proof_material，审核通过后回填 institution.intro
     intro = str(body.get("intro") or "").strip() or None
     if intro and len(intro) > 5000:
@@ -80,6 +75,9 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
                 cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
                 if cur.fetchone():
                     raise conflict("该登录账号已存在")
+                cur.execute("SELECT 1 FROM institution WHERE name=%s", (name,))
+                if cur.fetchone():
+                    raise conflict("同名机构已存在")
 
                 user_id, user_no = create_password_account(
                     cur, username, password,

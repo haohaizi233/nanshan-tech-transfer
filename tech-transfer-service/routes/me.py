@@ -3,6 +3,7 @@
 from core.response import success
 from core.middleware import identity, json_body
 from modules.profile.service import get_my_profile, update_my_profile
+from modules.identity.service import change_password
 from modules.demand.service import list_my_demands
 from modules.achievement.service import list_my_achievements
 from modules.favorite.service import list_my_favorites
@@ -21,6 +22,16 @@ def get_me(user: dict = Depends(identity)):
 def patch_my_profile(user: dict = Depends(identity), body: dict = Depends(json_body)):
     profile = update_my_profile(user["userId"], body)
     return success(profile)
+
+
+@router.post("/password")
+def post_my_password(user: dict = Depends(identity), body: dict = Depends(json_body)):
+    result = change_password(
+        user["userId"],
+        body.get("currentPassword") or "",
+        body.get("newPassword") or "",
+    )
+    return success(result, "密码已更新")
 
 
 @router.get("/demands")

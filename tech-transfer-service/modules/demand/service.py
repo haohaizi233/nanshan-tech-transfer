@@ -12,6 +12,7 @@ import json
 import re
 
 from db import get_cursor
+from core.contact_validation import validate_email, validate_phone
 from core.errors import (
     bad_request,
     conflict,
@@ -21,7 +22,7 @@ from core.errors import (
 )
 from core.masking import mask_contact
 from modules.audit.service import record as audit_record
-from modules.cooperation.service import has_accepted_intent
+from modules.cooperation.service import can_access_target, has_accepted_intent, is_accepted_dock_party
 from modules.membership.service import assert_active_membership, resolve_content_organization
 
 # 状态流转表（06 §5.5 权限矩阵）
@@ -102,6 +103,10 @@ def _parse_upsert_body(body: dict, partial: bool):
             if len(val) > max_len:
                 raise bad_request(f"{key} 长度不能超过 {max_len}")
             fields[column] = val or None
+    if fields.get("contact_phone"):
+        fields["contact_phone"] = validate_phone(fields["contact_phone"], field_name="联系电话")
+    if fields.get("contact_email"):
+        fields["contact_email"] = validate_email(fields["contact_email"], field_name="联系邮箱")
 
     if "coopMode" in body and body["coopMode"] is not None:
         modes = body["coopMode"]
@@ -291,6 +296,11 @@ def _sync_tags(cur, demand_id: int, tag_names):
         )
 
 
+def _org_cert_payload(row):
+    org_id = row.get("org_id")
+    return {"orgId": org_id, "orgCertified": org_id is not None}
+
+
 # ── 行转 DTO ─────────────────────────────────────────────────
 
 def _parse_json(raw):
@@ -308,6 +318,8 @@ def _row_to_summary(row, tags, user_id):
         "id": row["id"],
         "title": row["title"],
         "orgName": row.get("org_name"),
+        "orgId": row.get("org_id"),
+        "orgCertified": row.get("org_id") is not None,
         "region": row.get("region"),
         "coopMode": _parse_json(row.get("coop_mode")),
         "budgetMinWan": float(row["budget_min_wan"]) if row.get("budget_min_wan") is not None else None,
@@ -362,7 +374,11 @@ def _row_to_detail(row, tags, user_id, contact_visible=False):
 # ── 查询 ─────────────────────────────────────────────────────
 
 _BASE_SELECT = """
-    SELECT d.*, COALESCE(d.org_name_snapshot, o.name) AS org_name, o.intro AS org_intro,
+    SELECT d.*, CASE
+               WHEN d.org_id IS NOT NULL THEN COALESCE(o.name, d.org_name_snapshot)
+               ELSE d.org_name_snapshot
+           END AS org_name,
+           o.intro AS org_intro,
            c.name AS category_name, c.code AS category_code
     FROM demand d
     LEFT JOIN institution o ON d.org_id = o.id
@@ -382,7 +398,7 @@ def list_demands(args, user_id: int):
     params = [user_id] if include_mine else []
 
     if keyword:
-        where += " AND (d.title LIKE %s OR d.description LIKE %s OR COALESCE(d.org_name_snapshot, o.name) LIKE %s)"
+        where += " AND (d.title LIKE %s OR d.description LIKE %s OR CASE WHEN d.org_id IS NOT NULL THEN COALESCE(o.name, d.org_name_snapshot) ELSE d.org_name_snapshot END LIKE %s)"
         like = f"%{keyword}%"
         params.extend([like, like, like])
 
@@ -446,16 +462,16 @@ def get_demand_detail(demand_id: int, user_id: int):
         row = _get_demand_row(cur, demand_id)
         if not row:
             raise demand_not_found()
-        is_confirmed_counterpart = (
-            row["status"] == "matched"
-            and has_accepted_intent(cur, "demand", demand_id, user_id)
-        )
-        if (
-            row["status"] != "published"
-            and row["owner_user_id"] != user_id
-            and not is_confirmed_counterpart
+        dock_party = False
+        if row["status"] != "published" and row["owner_user_id"] != user_id:
+            dock_party = is_accepted_dock_party(cur, "demand", demand_id, user_id)
+        if not can_access_target(
+            user_id,
+            owner_user_id=row["owner_user_id"],
+            status=row["status"],
+            is_dock_party=dock_party,
         ):
-            # 防探测：非公开需求仅 owner 或已确认对接的发起方可见。
+            # 防探测：非公开需求仅 owner 或已接受对接的双方可见。
             raise demand_not_found()
 
         # 草稿/驳回等非公开内容不计入浏览量；已发布内容在同一事务中原子累加。

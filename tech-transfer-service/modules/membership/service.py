@@ -2,6 +2,7 @@
 
 import psycopg2
 
+from core.contact_validation import validate_email, validate_phone
 from core.errors import bad_request, conflict, forbidden, not_found
 from db import get_cursor, transaction
 from modules.audit.service import record as audit_record
@@ -24,11 +25,18 @@ def resolve_content_organization(cur, user_id: int, org_id) -> int | None:
     return normalized_org_id
 
 
-def _read_page(cur, select_sql: str, from_sql: str, params: list, page: int, page_size: int) -> dict:
+_ORDER_BY_ID = "a.id"
+_ORDER_BY_CREATED_DESC = "a.created_at DESC, a.id DESC"
+
+
+def _read_page(cur, select_sql: str, from_sql: str, params: list, page: int, page_size: int,
+               order_by=_ORDER_BY_ID) -> dict:
+    if order_by not in {_ORDER_BY_ID, _ORDER_BY_CREATED_DESC}:
+        raise ValueError("unsupported order")
     cur.execute(f"SELECT COUNT(*) AS total {from_sql}", params)
     total = cur.fetchone()["total"]
     cur.execute(
-        f"SELECT {select_sql} {from_sql} ORDER BY a.id LIMIT %s OFFSET %s",
+        f"SELECT {select_sql} {from_sql} ORDER BY {order_by} LIMIT %s OFFSET %s",
         [*params, page_size, (page - 1) * page_size],
     )
     return {"list": [_map_read_row(row) for row in cur.fetchall()],
@@ -41,6 +49,23 @@ def list_my_memberships(user: dict, page: int, page_size: int) -> dict:
             cur, "a.*, o.name AS org_name, o.kind AS org_type",
             "FROM organization_membership a JOIN institution o ON o.id = a.org_id WHERE a.user_id = %s",
             [user["userId"]], page, page_size,
+        )
+
+
+def list_my_membership_applications(user: dict, status, page: int, page_size: int) -> dict:
+    """GET /me/organization-membership-applications —— 本人提交的加入机构申请。"""
+    with get_cursor() as cur:
+        sql = (
+            "FROM organization_membership_application a "
+            "JOIN institution o ON o.id = a.org_id WHERE a.user_id = %s"
+        )
+        params = [user["userId"]]
+        if status is not None:
+            sql += " AND a.status = %s"
+            params.append(status)
+        return _read_page(
+            cur, "a.*, o.name AS org_name, o.kind AS org_type", sql, params, page, page_size,
+            order_by=_ORDER_BY_CREATED_DESC,
         )
 
 
@@ -141,7 +166,10 @@ def list_organization_membership_applications(admin: dict, status, page: int, pa
         if status is not None:
             sql += " WHERE a.status = %s"
             params.append(status)
-        return _read_page(cur, "a.*, u.user_no, o.name AS org_name", sql, params, page, page_size)
+        return _read_page(
+            cur, "a.*, u.user_no, o.name AS org_name", sql, params, page, page_size,
+            order_by=_ORDER_BY_CREATED_DESC,
+        )
 
 
 def _list_org_records(admin, org_id, table, status, page, page_size):
@@ -180,7 +208,59 @@ def _list_system_applications(admin, table, status, page, page_size):
         if status is not None:
             sql += " WHERE a.status = %s"
             params.append(status)
-        return _read_page(cur, columns, sql, params, page, page_size)
+        return _read_page(
+            cur, columns, sql, params, page, page_size, order_by=_ORDER_BY_CREATED_DESC,
+        )
+
+
+def list_all_certification_applications(admin: dict, status, page: int, page_size: int) -> dict:
+    """System-admin queue mixing organization, org-admin and member applications."""
+    status_sql = " WHERE a.status = %s" if status is not None else ""
+    params = [status, status, status] if status is not None else []
+    from_sql = f"""
+        FROM (
+            SELECT a.id, a.status, a.version, a.created_at, a.updated_at,
+                   a.reviewed_by_user_id, a.reviewed_at, a.review_reason, a.proof_material,
+                   u.user_no, 'organization'::text AS application_kind,
+                   a.requested_name AS org_name, a.requested_name, a.requested_type,
+                   a.credit_code, a.website, a.region, a.address,
+                   a.contact_name, a.contact_phone, a.contact_email,
+                   NULL::bigint AS org_id, a.contact_name AS real_name,
+                   NULL::varchar AS department, NULL::varchar AS title,
+                   NULL::varchar AS work_email, NULL::text AS apply_note,
+                   NULL::text AS reason, a.applicant_user_id AS user_id
+            FROM organization_application a
+            JOIN app_user u ON u.id = a.applicant_user_id
+            {status_sql}
+            UNION ALL
+            SELECT a.id, a.status, a.version, a.created_at, a.updated_at,
+                   a.reviewed_by_user_id, a.reviewed_at, a.review_reason, a.proof_material,
+                   u.user_no, 'org-admin'::text AS application_kind,
+                   o.name AS org_name, NULL, NULL, NULL, NULL, NULL, NULL,
+                   NULL, NULL, NULL, a.org_id, a.real_name, a.department, a.title,
+                   a.work_email, NULL, a.reason, a.user_id
+            FROM organization_admin_application a
+            JOIN app_user u ON u.id = a.user_id
+            JOIN institution o ON o.id = a.org_id
+            {status_sql}
+            UNION ALL
+            SELECT a.id, a.status, a.version, a.created_at, a.updated_at,
+                   a.reviewed_by_user_id, a.reviewed_at, a.review_reason, a.proof_material,
+                   u.user_no, 'member'::text AS application_kind,
+                   o.name AS org_name, NULL, NULL, NULL, NULL, NULL, NULL,
+                   NULL, NULL, NULL, a.org_id, a.real_name, a.department, a.title,
+                   a.work_email, a.apply_note, NULL, a.user_id
+            FROM organization_membership_application a
+            JOIN app_user u ON u.id = a.user_id
+            JOIN institution o ON o.id = a.org_id
+            {status_sql}
+        ) a
+    """
+    with get_cursor() as cur:
+        _assert_system_admin(cur, admin)
+        return _read_page(
+            cur, "a.*", from_sql, params, page, page_size, order_by=_ORDER_BY_CREATED_DESC,
+        )
 
 
 def cancel_membership_application(user: dict, application_id: int, version: int, request_id=None) -> dict:
@@ -717,6 +797,12 @@ def apply_organization(user: dict, body: dict) -> dict:
                 )
                 if cur.fetchone():
                     raise conflict("已有待审核的机构入驻申请")
+                requested_name = body["requestedName"].strip()
+                cur.execute("SELECT 1 FROM institution WHERE name = %s", (requested_name,))
+                if cur.fetchone():
+                    raise conflict("同名机构已存在，请改为申请加入该机构")
+                contact_phone = validate_phone(body.get("contactPhone"), required=True, field_name="联系电话")
+                contact_email = validate_email(body.get("contactEmail"), required=False, field_name="联系邮箱")
                 cur.execute(
                     """
                     INSERT INTO organization_application
@@ -727,10 +813,10 @@ def apply_organization(user: dict, body: dict) -> dict:
                     RETURNING id, applicant_user_id, status, version
                     """,
                     (
-                        user_id, body["requestedName"].strip(), body.get("requestedType"),
+                        user_id, requested_name, body.get("requestedType"),
                         body.get("creditCode"), body.get("website"), body.get("region"),
-                        body.get("address"), body.get("contactName"), body.get("contactPhone"),
-                        body.get("contactEmail"), body.get("proofMaterial"),
+                        body.get("address"), body.get("contactName"), contact_phone,
+                        contact_email, body.get("proofMaterial"),
                     ),
                 )
                 return _map_application(cur.fetchone())

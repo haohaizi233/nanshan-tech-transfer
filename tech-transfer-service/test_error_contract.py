@@ -81,6 +81,9 @@ except requests.RequestException as e:
 print("\n[0] 基础端点不受异常层影响")
 check("GET /api/health = 200 code=0", health.status_code == 200 and health.json().get("code") == 0,
       health.text[:120])
+liveness = requests.get(f"{BASE}/health", timeout=5)
+check("GET /health = 200 code=0", liveness.status_code == 200 and liveness.json().get("code") == 0,
+      liveness.text[:120])
 resp = requests.get(f"{BASE}/docs", timeout=10)
 check("GET /docs = 200", resp.status_code == 200, f"got {resp.status_code}")
 resp = requests.get(f"{BASE}/openapi.json", timeout=10)

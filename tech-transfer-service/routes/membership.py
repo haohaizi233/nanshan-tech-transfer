@@ -25,6 +25,14 @@ def my_organization_certification(user: dict = Depends(identity)):
     return success(service.get_my_organization_certification(user))
 
 
+@router.get("/me/organization-membership-applications")
+def my_membership_applications(
+    request: Request, status: ApplicationStatus = None, user: dict = Depends(identity)
+):
+    page, page_size, _ = parse_page_args(request)
+    return success(service.list_my_membership_applications(user, status, page, page_size))
+
+
 @router.post("/me/organization-membership-applications")
 def apply_membership(body: schemas.MembershipApplicationRequest, user: dict = Depends(identity)):
     return success(service.apply_membership(user, body.model_dump(exclude_unset=True)))
@@ -72,6 +80,12 @@ def reject_membership(application_id: int, body: schemas.MembershipRejectionRequ
 @router.post("/org-admin/members/{membership_id}/revoke")
 def revoke_member(membership_id: int, body: schemas.MembershipRevocationRequest, admin: dict = Depends(org_admin_identity)):
     return success(service.revoke_membership(admin, membership_id, body.version, body.reason, request_id=get_request_id()))
+
+
+@router.get("/admin/certification-applications")
+def certification_applications(request: Request, status: ApplicationStatus = None, admin: dict = Depends(admin_identity)):
+    page, page_size, _ = parse_page_args(request)
+    return success(service.list_all_certification_applications(admin, status, page, page_size))
 
 
 @router.get("/admin/organization-applications")

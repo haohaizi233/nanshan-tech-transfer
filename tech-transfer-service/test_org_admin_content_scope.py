@@ -10,18 +10,23 @@ def main():
     single, single_params = organization_content_scope(
         {"isPlatformAdmin": False, "orgId": 17, "userId": 8}, "a"
     )
-    assert single == "(a.org_id IN (%s) OR (a.org_id IS NULL AND a.owner_user_id = %s))"
-    assert single_params == [17, 8]
+    assert "a.org_id IN (%s)" in single
+    assert "organization_membership" in single
+    assert single_params == [17, 17]
 
     predicate, params = organization_content_scope(
         {"isPlatformAdmin": False, "orgIds": [17, 19], "userId": 8}, "a"
     )
-    assert predicate == "(a.org_id IN (%s,%s) OR (a.org_id IS NULL AND a.owner_user_id = %s))"
-    assert params == [17, 19, 8]
+    assert "a.org_id IN (%s,%s)" in predicate
+    assert params == [17, 19, 17, 19]
 
     assert can_claim_unassigned_content(
         {"isPlatformAdmin": False, "orgId": 17, "userId": 8},
         {"org_id": None, "owner_user_id": 8},
+    )
+    assert can_claim_unassigned_content(
+        {"isPlatformAdmin": False, "orgId": 17, "userId": 8},
+        {"org_id": None, "owner_user_id": 9, "owner_in_org": True},
     )
     assert not can_claim_unassigned_content(
         {"isPlatformAdmin": False, "orgId": 17, "userId": 8},
@@ -29,18 +34,25 @@ def main():
     )
     assert not can_claim_unassigned_content(
         {"isPlatformAdmin": False, "orgId": 17, "userId": 8},
-        {"org_id": 17, "owner_user_id": 8},
+        {"org_id": 21, "owner_user_id": 8, "owner_in_org": True},
     )
 
     class ClaimCursor:
         def __init__(self):
             self.row = None
+            self.sqls = []
 
         def execute(self, sql, params):
-            if sql.strip().startswith("SELECT"):
+            self.sqls.append(sql)
+            text = sql.strip()
+            if "FROM organization_membership" in text:
+                self.row = {"ok": 1}
+            elif "FROM institution" in text:
+                self.row = {"name": "恒程创新"}
+            elif text.startswith("SELECT"):
                 self.row = {"id": 41, "org_id": None, "owner_user_id": 8, "version": 3}
-            elif sql.strip().startswith("UPDATE"):
-                assert params == (17, 41, 3)
+            elif text.startswith("UPDATE"):
+                assert params == (17, "恒程创新", 41, 3)
                 self.row = {"id": 41, "org_id": 17, "version": 4}
             else:
                 raise AssertionError(sql)
@@ -67,7 +79,7 @@ def main():
         admin_service.get_cursor = original_cursor
         admin_service.audit_record = original_audit
     assert claimed == {"id": 41, "orgId": 17, "version": 4}
-    print("PASS: organization admin can see and claim only own unassigned legacy content")
+    print("PASS: organization admin can see and claim member unassigned legacy content")
 
 
 if __name__ == "__main__":

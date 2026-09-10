@@ -7,6 +7,7 @@ from modules.identity.context import IdentityContext
 from modules.identity.provider import ExternalIdentity
 from core.jwt_utils import sign_access_token, sign_refresh_token
 from core.password import hash_password, verify_password
+from core.contact_validation import is_valid_phone, validate_email, validate_phone
 from core.errors import BizError, TT_COMMON_40903, bad_request
 from modules.audit.service import record as audit_record
 
@@ -240,9 +241,10 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
     """
     from core.errors import BizError, TT_AUTH_40901, TT_COMMON_40001
     from core.password import hash_password
-    import re
 
-    if not phone or not re.match(r"^\d{11}$", phone):
+    try:
+        phone = validate_phone(phone, required=True)
+    except BizError:
         raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "请输入11位手机号")
     if not password or len(password) < 6:
         raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "密码至少6位")
@@ -374,9 +376,7 @@ def create_password_account(cur, username: str, password: str,
     填写的 11 位手机号除 user_profile.phone 外同时写入 user_credential.phone
     （小程序端可用手机号+密码登录）；手机号已被注册时抛冲突。
     """
-    import re
-
-    cred_phone = phone if (phone and re.fullmatch(r"\d{11}", phone)) else None
+    cred_phone = phone if is_valid_phone(phone) else None
     if cred_phone:
         cur.execute(
             "SELECT 1 FROM user_credential WHERE phone = %s "
@@ -421,8 +421,8 @@ def register_password_user(body: dict, request_id: str | None = None) -> dict:
     username = str(body.get("username") or "").strip()
     password = body.get("password") or ""
     display_name = str(body.get("displayName") or "").strip() or None
-    phone = str(body.get("phone") or "").strip() or None
-    email = str(body.get("email") or "").strip() or None
+    phone = validate_phone(body.get("phone"), required=False)
+    email = validate_email(body.get("email"), required=False)
 
     if not re.fullmatch(r"[A-Za-z0-9_.-]{4,64}", username):
         raise bad_request("用户名须为 4-64 位字母、数字或 . _ -")
@@ -563,3 +563,31 @@ def logout_session(refresh_token: str) -> dict:
         pass
 
     return {"revoked": revoked}
+
+
+def change_password(user_id: int, current_password: str, new_password: str) -> dict:
+    """Update the signed-in account password after verifying the current one."""
+    current_password = current_password or ""
+    new_password = new_password or ""
+    if not current_password:
+        raise bad_request("请填写当前密码")
+    if len(new_password) < 8 or len(new_password) > 128:
+        raise bad_request("新密码长度须为 8-128 位")
+    if current_password == new_password:
+        raise bad_request("新密码不能与当前密码相同")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "SELECT password_hash FROM user_credential WHERE user_id=%s",
+            (user_id,),
+        )
+        cred = cur.fetchone()
+        if not cred:
+            raise bad_request("当前账号不支持密码登录")
+        if not verify_password(current_password, cred["password_hash"]):
+            raise bad_request("当前密码不正确")
+        cur.execute(
+            "UPDATE user_credential SET password_hash=%s WHERE user_id=%s",
+            (hash_password(new_password), user_id),
+        )
+    return {"ok": True}

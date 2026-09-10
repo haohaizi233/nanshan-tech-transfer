@@ -2,6 +2,7 @@ from psycopg2.extras import Json
 
 from db import get_cursor
 from modules.identity.service import build_user_response
+from core.contact_validation import validate_email, validate_phone
 from core.errors import BizError, TT_COMMON_40902, bad_request
 
 
@@ -84,6 +85,10 @@ def update_my_profile(user_id: int, body: dict) -> dict:
                     raise bad_request("companyText 长度不能超过 128")
                 if not val:
                     val = None
+                elif db_col == "phone":
+                    val = validate_phone(val, required=False)
+                elif db_col == "email":
+                    val = validate_email(val, required=False)
             fields[db_col] = val
 
     allowed_types = {"enterprise_staff", "researcher", "investor", "service_org", "other"}

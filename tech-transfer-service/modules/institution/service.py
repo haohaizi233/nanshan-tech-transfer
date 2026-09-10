@@ -38,9 +38,11 @@ def _normalize_type_key(type_key: str) -> str:
 def institution_search_order(keyword: str, auxiliary_fields: tuple = ("intro", "support_unit", "label")) -> tuple[str, tuple]:
     """Build relevance ordering for institution-directory keyword searches.
 
-    A broad word often appears in every institution introduction.  Keep those
-    matches searchable, but always surface direct name matches first so a user
-    selecting an organization sees the most likely candidate at the top.
+    A broad word often appears in every institution introduction. Keep those
+    matches searchable, but rank concentrated name hits first: exact name,
+    then names that start or end with the keyword (short names like 恒程创新
+    beat long titles that merely begin with 创新), then other name contains,
+    then auxiliary fields.
     """
     kw = (keyword or "").strip()
     contains = f"%{kw}%"
@@ -48,12 +50,12 @@ def institution_search_order(keyword: str, auxiliary_fields: tuple = ("intro", "
     order_sql = (
         " ORDER BY CASE"
         " WHEN name ILIKE %s THEN 0"
-        " WHEN name ILIKE %s THEN 1"
+        " WHEN name ILIKE %s OR name ILIKE %s THEN 1"
         " WHEN name ILIKE %s THEN 2"
         f" WHEN {auxiliary_match} THEN 3"
-        " ELSE 4 END, sort_order ASC, source_pk ASC"
+        " ELSE 4 END, CHAR_LENGTH(COALESCE(name, '')) ASC, sort_order ASC, source_pk ASC"
     )
-    return order_sql, (kw, f"{kw}%", contains, *([contains] * len(auxiliary_fields)))
+    return order_sql, (kw, f"{kw}%", f"%{kw}", contains, *([contains] * len(auxiliary_fields)))
 
 
 def _query(

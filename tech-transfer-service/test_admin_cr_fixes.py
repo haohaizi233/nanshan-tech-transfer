@@ -1,13 +1,16 @@
 """Unit checks for CR fixes: org forge, self-accept, membership owner, offline submit."""
 
 from modules.admin.service import (
+    _assert_admin_status_transition,
     _can_review_cooperation,
     _restrict_org_admin_fields,
+    append_content_scope,
     organization_content_scope,
     scope_org_ids,
 )
 from modules.achievement.service import EDITABLE_STATUSES, TRANSITIONS
 from modules.demand.service import _resolve_name_refs
+from core.errors import BizError
 
 
 def main():
@@ -19,7 +22,8 @@ def main():
         {"isPlatformAdmin": False, "orgId": 17, "userId": 8}, "a"
     )
     assert "a.org_id IN (%s)" in predicate or "a.org_id = %s" in predicate
-    assert 17 in params and 8 in params
+    assert "organization_membership" in predicate
+    assert params == [17, 17]
 
     row = {"status": "pending", "initiator_user_id": 8, "target_org_id": 17}
     assert not _can_review_cooperation({"userId": 8, "orgIds": [17]}, row)
@@ -31,6 +35,47 @@ def main():
     assert not _can_review_cooperation(
         {"userId": 1, "isPlatformAdmin": True},
         {"status": "pending", "initiator_user_id": 1, "target_org_id": 99},
+    )
+    assert _can_review_cooperation(
+        {"userId": 9, "orgIds": [17]},
+        {
+            "status": "pending",
+            "initiator_user_id": 8,
+            "target_org_id": None,
+            "target_owner_user_id": 9,
+        },
+    )
+    assert not _can_review_cooperation(
+        {"userId": 9, "orgIds": [17]},
+        {
+            "status": "pending",
+            "initiator_user_id": 8,
+            "target_org_id": None,
+            "target_owner_user_id": 4,
+        },
+    )
+
+    class MembershipCursor:
+        def __init__(self, hit):
+            self.hit = hit
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+        def fetchone(self):
+            return {"ok": 1} if self.hit else None
+
+    inbound = {
+        "status": "pending",
+        "initiator_user_id": 8,
+        "target_org_id": None,
+        "target_owner_user_id": 4,
+    }
+    assert _can_review_cooperation(
+        {"userId": 9, "orgIds": [17]}, inbound, MembershipCursor(True)
+    )
+    assert not _can_review_cooperation(
+        {"userId": 9, "orgIds": [17]}, inbound, MembershipCursor(False)
     )
 
     fields = {"org_id": 17, "org_name_snapshot": "伪造机构", "org_intro": "x"}
@@ -64,6 +109,34 @@ def main():
 
     assert "offline" in EDITABLE_STATUSES
     assert "offline" in TRANSITIONS["submit"]["from"]
+
+    where = ["id = %s"]
+    params = [41]
+    append_content_scope(
+        where,
+        params,
+        {"isPlatformAdmin": False, "orgIds": [17], "userId": 8},
+        "demand",
+    )
+    assert "demand.org_id IN (%s)" in where[1]
+    assert "organization_membership" in where[1]
+    assert params == [41, 17, 17]
+
+    _assert_admin_status_transition("demand", "draft", "pending_review", False)
+    _assert_admin_status_transition("demand", "published", None, False)
+    try:
+        _assert_admin_status_transition("demand", "published", "pending_review", False)
+        raise AssertionError("org admin must not submit published demand")
+    except BizError as err:
+        assert err.http_status == 400
+        assert "草稿或已驳回" in err.message
+    try:
+        _assert_admin_status_transition("demand", "matched", "published", True)
+        raise AssertionError("platform admin must not publish matched demand")
+    except BizError as err:
+        assert err.http_status == 400
+    _assert_admin_status_transition("achievement", "offline", "pending_review", False)
+
     print("PASS: admin CR fixes for org scope, self-accept, and demand name forge")
 
 

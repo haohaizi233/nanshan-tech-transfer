@@ -7,10 +7,12 @@ Architecture source: 04-backend-domain-design.md §4.9, 05-data-model-design.md 
 - 取消收藏即物理 DELETE（收藏是纯关系，无审计价值，审计走 audit_log）
 - PUT/DELETE 均幂等：重复 PUT 返回既有记录；DELETE 不存在返回成功
 - 列表内嵌目标摘要；目标已下线（非 published）仍返回并标注，不静默丢失收藏
+- 新增收藏：公开内容、本人内容、或已接受对接的双方（确认后离开列表仍可收藏）
 """
 from db import get_cursor
 from core.errors import bad_request, favorite_not_found
 from modules.audit.service import record as audit_record
+from modules.cooperation.service import can_access_target, is_accepted_dock_party
 
 TARGET_TYPES = ("achievement", "demand")
 
@@ -82,8 +84,15 @@ def add_favorite(user_id: int, user_no: str, target_type: str, target_id: int, r
         target = _load_target(cur, target_type, target_id)
         if not target:
             raise favorite_not_found()
-        # 可见性：published 或本人内容（草稿也可收藏自己的）
+        dock_party = False
         if target["status"] != "published" and target["owner_user_id"] != user_id:
+            dock_party = is_accepted_dock_party(cur, target_type, target_id, user_id)
+        if not can_access_target(
+            user_id,
+            owner_user_id=target["owner_user_id"],
+            status=target["status"],
+            is_dock_party=dock_party,
+        ):
             raise favorite_not_found()
 
         cur.execute(

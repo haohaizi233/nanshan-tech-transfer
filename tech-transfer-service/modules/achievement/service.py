@@ -12,6 +12,7 @@ import json
 
 from db import get_cursor
 from modules.membership.service import assert_active_membership, resolve_content_organization
+from core.contact_validation import validate_email, validate_phone
 from core.errors import (
     bad_request,
     conflict,
@@ -21,7 +22,7 @@ from core.errors import (
 )
 from core.masking import mask_contact
 from modules.audit.service import record as audit_record
-from modules.cooperation.service import has_accepted_intent
+from modules.cooperation.service import can_access_target, has_accepted_intent, is_accepted_dock_party
 from modules.achievement.maturity import (
     MATURITY_LABELS,
     MATURITY_LEVELS,
@@ -37,6 +38,17 @@ TRANSITIONS = {
 }
 
 EDITABLE_STATUSES = ("draft", "rejected", "offline")
+
+
+def _org_cert_payload(row):
+    org_id = row.get("org_id")
+    return {"orgId": org_id, "orgCertified": org_id is not None}
+
+
+def _display_source_org(row):
+    if row.get("org_id"):
+        return row.get("certified_org_name") or row.get("source_org_name")
+    return row.get("source_org_name")
 
 
 def _parse_page_args(args):
@@ -67,7 +79,9 @@ def _row_to_list_item(row, user_id=None):
     return {
         "id": row["id"],
         "title": row["title"],
-        "sourceOrgName": row.get("source_org_name"),
+        "sourceOrgName": _display_source_org(row),
+        "orgId": row.get("org_id"),
+        "orgCertified": row.get("org_id") is not None,
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
         "techIntro": (row.get("tech_intro") or "")[:120],
@@ -113,10 +127,12 @@ def list_achievements(args, user_id=None):
         SELECT a.id, a.title, a.source_org_name, a.tech_intro,
                a.maturity_level, a.maturity_desc, a.application_fields,
                a.pricing_mode, a.price_min_wan, a.price_max_wan,
-               a.view_count, a.published_at, a.owner_user_id,
+               a.view_count, a.published_at, a.owner_user_id, a.org_id,
+               o.name AS certified_org_name,
                c.name AS category_name, c.code AS category_code
         FROM achievement a
         LEFT JOIN achievement_category c ON a.category_id=c.id
+        LEFT JOIN institution o ON a.org_id=o.id
         {where}
         ORDER BY a.published_at DESC, a.id DESC
         LIMIT %s OFFSET %s
@@ -142,13 +158,15 @@ def list_achievements(args, user_id=None):
 
 def get_achievement_detail(ach_id: int, user_id=None):
     # 详情访问量以 SQL 自增实现，避免并发访问时发生“读-改-写”丢失。
-    # 已发布内容对登录用户可见；未发布内容仅 owner 可见（与需求详情、OpenAPI 一致）。
+    # 已发布内容对登录用户可见；未发布内容仅 owner 或已接受对接的双方可见。
     with get_cursor(commit=True) as cur:
         cur.execute(
             """
-            SELECT a.*, c.name AS category_name, c.code AS category_code
+            SELECT a.*, c.name AS category_name, c.code AS category_code,
+                   o.name AS certified_org_name
             FROM achievement a
             LEFT JOIN achievement_category c ON a.category_id=c.id
+            LEFT JOIN institution o ON a.org_id=o.id
             WHERE a.id=%s AND a.deleted_at IS NULL
             """,
             (ach_id,),
@@ -157,8 +175,15 @@ def get_achievement_detail(ach_id: int, user_id=None):
         if not row:
             return None
 
-        is_owner = user_id is not None and row.get("owner_user_id") == user_id
-        if row.get("status") != "published" and not is_owner:
+        dock_party = False
+        if row.get("status") != "published" and row.get("owner_user_id") != user_id:
+            dock_party = is_accepted_dock_party(cur, "achievement", ach_id, user_id)
+        if not can_access_target(
+            user_id,
+            owner_user_id=row.get("owner_user_id"),
+            status=row.get("status"),
+            is_dock_party=dock_party,
+        ):
             return None
 
         if row.get("status") == "published":
@@ -223,7 +248,9 @@ def get_achievement_detail(ach_id: int, user_id=None):
     return {
         "id": row["id"],
         "title": row["title"],
-        "sourceOrgName": row.get("source_org_name"),
+        "sourceOrgName": _display_source_org(row),
+        "orgId": row.get("org_id"),
+        "orgCertified": row.get("org_id") is not None,
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
         "techIntro": row.get("tech_intro"),
@@ -320,6 +347,11 @@ def _parse_upsert_body(body: dict, partial: bool):
             if len(val) > max_len:
                 raise bad_request(f"{key} 长度不能超过 {max_len}")
             fields[column] = val or None
+
+    if fields.get("contact_phone"):
+        fields["contact_phone"] = validate_phone(fields["contact_phone"], field_name="联系电话")
+    if fields.get("contact_email"):
+        fields["contact_email"] = validate_email(fields["contact_email"], field_name="联系邮箱")
 
     for key in ("applicationFields", "innovationPoints"):
         if key in body and body[key] is not None:
@@ -492,7 +524,9 @@ def _owner_detail(cur, ach_id: int, user_id=None):
     return {
         "id": row["id"],
         "title": row["title"],
-        "sourceOrgName": row.get("source_org_name"),
+        "sourceOrgName": _display_source_org(row),
+        "orgId": row.get("org_id"),
+        "orgCertified": row.get("org_id") is not None,
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
         "techIntro": row.get("tech_intro"),
@@ -710,9 +744,11 @@ def list_my_achievements(user_id: int, args):
                    a.maturity_level, a.maturity_desc, a.application_fields,
                    a.pricing_mode, a.price_min_wan, a.price_max_wan,
                    a.view_count, a.published_at, a.version, a.reject_reason,
+                   a.org_id, o.name AS certified_org_name,
                    c.name AS category_name, c.code AS category_code
             FROM achievement a
             LEFT JOIN achievement_category c ON a.category_id=c.id
+            LEFT JOIN institution o ON a.org_id=o.id
             {where}
             ORDER BY a.created_at DESC, a.id DESC
             LIMIT %s OFFSET %s
@@ -744,7 +780,9 @@ def _my_list_item(row):
     return {
         "id": row["id"],
         "title": row["title"],
-        "sourceOrgName": row.get("source_org_name"),
+        "sourceOrgName": _display_source_org(row),
+        "orgId": row.get("org_id"),
+        "orgCertified": row.get("org_id") is not None,
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
         "techIntro": (row.get("tech_intro") or "")[:120],

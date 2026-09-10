@@ -480,6 +480,12 @@ def check_http_flows():
             call("POST", "/me/organization-membership-applications", body={"orgId": orgs[2]}, status=404)
             application = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0], "realName": "申请人", "proofMaterial": "proof"})
             aid = application["id"]
+            mine_apps = call("GET", "/me/organization-membership-applications")
+            check(
+                "applicant can list own membership applications",
+                any(row["id"] == aid and row.get("orgName") == names[0] for row in mine_apps["list"]),
+            )
+            call("GET", "/me/organization-membership-applications", who=None, status=401)
             call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]}, status=409)
             call("GET", f"/org-admin/members?orgId={orgs[0]}", status=403)
             queue = all_pages(f"/org-admin/membership-applications?orgId={orgs[0]}&status=pending", who=1)
@@ -547,14 +553,14 @@ def check_http_flows():
             call("POST", path + "/reject", who=3, body={"version": 1, "reason": "补材料"})
             admin_app = call("POST", "/me/organization-admin-applications", body={"orgId": orgs[0]})
             call("POST", f"/admin/organization-admin-applications/{admin_app['id']}/approve", who=3, body={"version": 1})
-            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise", "contactName": "申请人"})
+            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise", "contactName": "申请人", "contactPhone": "13800138000"})
             path = f"/admin/organization-applications/{org_app['id']}"
             call("GET", "/admin/organization-applications", who=1, status=403)
             queue = all_pages("/admin/organization-applications?status=pending", who=3)
             check("new organization queue includes requested fields", any(row["id"] == org_app["id"] and row["requestedName"] == names[4] for row in queue["list"]))
             call("POST", path + "/approve", who=1, body={"version": 1}, status=403)
             call("POST", path + "/reject", who=3, body={"version": 1, "reason": "补材料"})
-            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise"})
+            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise", "contactPhone": "13800138000"})
             created = call("POST", f"/admin/organization-applications/{org_app['id']}/approve", who=3, body={"version": 1})
             orgs.append(created["orgId"])
             check("new organization grants active administrator", created["membership"]["orgId"] == created["orgId"] and created["membership"]["role"] == "admin" and created["membership"]["status"] == "active")

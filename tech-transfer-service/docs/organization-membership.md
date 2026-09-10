@@ -3,7 +3,7 @@
 > 落地时间：2026-09-07
 > 迁移：`migrations/pg/011_organization_membership.sql`（幂等，可重跑）
 > 代码：`modules/membership/`（service + schemas）+ `routes/membership.py`
-> 测试：`test_organization_membership.py`（213 项，全过）
+> 测试：`test_organization_membership.py`（218 项，全过）
 
 ## 1. 解决的问题
 
@@ -170,6 +170,7 @@ POST /org-admin/members/{membershipId}/revoke {version, reason}
 | Method | Path                                                   | 说明                          |
 | ------ | ------------------------------------------------------ | --------------------------- |
 | GET    | `/me/organization-memberships`                         | 我的认证机构列表（含 orgName/orgType） |
+| GET    | `/me/organization-membership-applications`             | 我提交的加入机构申请列表（可按 status 过滤） |
 | POST   | `/me/organization-membership-applications`             | 申请加入已有机构（必须带后端返回的 orgId）    |
 | POST   | `/me/organization-membership-applications/{id}/cancel` | 撤回待审申请                      |
 | POST   | `/me/organization-admin-applications`                  | 申请成为机构管理员                   |
@@ -242,7 +243,7 @@ pages.json 已注册三个 packageA 页面。
 
 ## 8. 测试与运维
 
-- 主套件：`python test_organization_membership.py`（213 项：状态机、权限边界、乐观锁、审计、fallback 审核链）。
+- 主套件：`python test_organization_membership.py`（218 项：状态机、权限边界、乐观锁、审计、fallback 审核链）。
 
 - 全量回归（2026-09-07）：17 个测试套件 + `tools/smoke_release.py` 103 项 + compileall 全部通过。
 

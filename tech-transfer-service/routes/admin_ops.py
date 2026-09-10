@@ -22,6 +22,8 @@ from modules.admin.service import (
     create_institution,
     update_institution,
     set_institution_status,
+    import_institutions,
+    delete_institution,
     list_cooperations_admin,
     get_cooperation_admin,
     admin_review_cooperation,
@@ -133,6 +135,21 @@ def admin_institutions_update(
         admin, institution_id, body.model_dump(exclude_unset=True), request_id=get_request_id(),
     )
     return success(data)
+
+
+@router.post("/admin/institutions/import", tags=["admin-institutions"])
+def admin_institutions_import(
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    data = import_institutions(admin, body, request_id=get_request_id())
+    return success(data, f"导入完成：新增 {data['created']}，更新 {data['updated']}")
+
+
+@router.delete("/admin/institutions/{institution_id}", tags=["admin-institutions"])
+def admin_institutions_delete(institution_id: int, admin: dict = Depends(admin_identity)):
+    data = delete_institution(admin, institution_id, request_id=get_request_id())
+    return success(data, "机构已删除")
 
 
 @router.post("/admin/institutions/{institution_id}/online", tags=["admin-institutions"])

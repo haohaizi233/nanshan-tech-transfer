@@ -137,6 +137,36 @@ def has_accepted_intent(cur, target_type: str, target_id: int, user_id) -> bool:
     return cur.fetchone() is not None
 
 
+def is_accepted_dock_party(cur, target_type: str, target_id: int, user_id) -> bool:
+    """该用户是否为已接受对接的任一方（发起方或目标方）。
+
+    需求确认后会离开公开列表（matched），成果下架后同样不再出现在列表中；
+    对接双方仍应从详情页收藏/查看，不能只按 published 判断。
+    """
+    if user_id is None:
+        return False
+    cur.execute(
+        """
+        SELECT 1 FROM cooperation_intent
+        WHERE target_type=%s AND target_id=%s
+          AND status IN ('accepted', 'confirmed', 'completed')
+          AND (initiator_user_id=%s OR target_owner_user_id=%s)
+        LIMIT 1
+        """,
+        (target_type, target_id, user_id, user_id),
+    )
+    return cur.fetchone() is not None
+
+
+def can_access_target(user_id, *, owner_user_id, status, is_dock_party=False) -> bool:
+    """公开内容任何人可见；非公开内容仅发布方或已接受对接的双方可见。"""
+    if status == "published":
+        return True
+    if user_id is not None and owner_user_id == user_id:
+        return True
+    return user_id is not None and bool(is_dock_party)
+
+
 def _load_target(cur, target_type: str, target_id: int):
     """加载对接目标（须 published）；owner_user_id 为 NULL 表示平台代录（assisted）"""
     if target_type == "demand":
