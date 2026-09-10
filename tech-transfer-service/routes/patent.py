@@ -1,0 +1,50 @@
+"""
+专利检索路由 —— GET /patents、GET /patents/{publicationNo}、GET /patents/{publicationNo}/pdf
+
+前端只消费本服务契约。上游 PDF / 源站地址不会出现在 JSON 响应里。
+"""
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
+
+from core.errors import patent_not_found
+from core.middleware import identity
+from core.pagination import parse_page_args
+from core.response import success
+from modules.patent.service import get_patent, iter_patent_pdf, search_patents
+
+router = APIRouter(prefix="/api/tech-transfer/v1", tags=["patents"])
+
+
+@router.get("/patents")
+def list_patents(request: Request, user: dict = Depends(identity)):
+    page, page_size, keyword = parse_page_args(request)
+    assignee = (request.query_params.get("assignee") or "").strip()
+    return success(search_patents(keyword, assignee, page, page_size))
+
+
+@router.get("/patents/{publication_no}/pdf")
+def patent_pdf(publication_no: str, user: dict = Depends(identity)):
+    filename = f"{publication_no.strip()}.pdf"
+    stream = iter_patent_pdf(publication_no)
+    first = next(stream, b"")
+    if not first:
+        raise patent_not_found()
+
+    def body():
+        yield first
+        yield from stream
+
+    return StreamingResponse(
+        body(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
+
+
+@router.get("/patents/{publication_no}")
+def patent_detail(publication_no: str, user: dict = Depends(identity)):
+    return success(get_patent(publication_no))

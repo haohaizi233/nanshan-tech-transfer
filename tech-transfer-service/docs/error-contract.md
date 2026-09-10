@@ -47,7 +47,7 @@
 | 403 | `TT_ADMIN_40301` | 非管理员（user_role 实时校验） |
 | 404 | `TT_COMMON_40401` | 路由不存在 / 路径参数类型不匹配（Flask `<int:>` 兼容，如 `/demands/abc`） |
 | 404 | `TT_COMMON_40402` | 通用资源不存在 |
-| 404 | `TT_ACH_40401` / `TT_DMD_40401` / `TT_COOP_40401` / `TT_INST_40401` / `TT_AI_40401` / `TT_FAV_40401` / `TT_FILE_40401` | 各域业务对象不存在（防探测 404 同样走域码） |
+| 404 | `TT_ACH_40401` / `TT_DMD_40401` / `TT_COOP_40401` / `TT_INST_40401` / `TT_AI_40401` / `TT_FAV_40401` / `TT_FILE_40401` / `TT_PATENT_40401` | 各域业务对象不存在（防探测 404 同样走域码） |
 | 405 | `TT_COMMON_40501` | Method Not Allowed（如 `POST /api/health`） |
 | 409 | `TT_COMMON_40901` | 幂等键冲突，请勿重复提交 |
 | 409 | `TT_COMMON_40902` | 资源版本冲突（乐观锁 version 不匹配） |

@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     )
     FILE_CACHE_DIR: str = "cache/logos"  # 相对 BASE_DIR，也可配绝对路径
 
+    # ── 专利检索 Provider（密钥只在服务端，禁止下发前端）──
+    PATENT_PROVIDER_BASE: str = ""
+    PATENT_PROVIDER_KEY: str = ""
+    PATENT_PROVIDER_TIMEOUT: int = 45
+    PATENT_PDF_TIMEOUT: int = 60
+
     @field_validator("APP_ENV")
     @classmethod
     def _validate_app_env(cls, v: str) -> str:

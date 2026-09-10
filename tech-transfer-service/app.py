@@ -34,6 +34,7 @@ from routes.capital import router as capital_router
 from routes.institution import router as institution_router
 from routes.ai import router as ai_router
 from routes.search import router as search_router
+from routes.patent import router as patent_router
 from routes.admin import router as admin_router
 from routes.admin_ops import router as admin_ops_router
 from routes.file import router as file_router
@@ -89,6 +90,7 @@ app.include_router(capital_router)
 app.include_router(institution_router)
 app.include_router(ai_router)
 app.include_router(search_router)
+app.include_router(patent_router)
 app.include_router(admin_router)
 app.include_router(admin_ops_router)
 app.include_router(file_router)
@@ -159,6 +161,7 @@ register_exception_handlers(app)
 
 
 # ── 健康检查 ─────────────────────────────────────────────────
+@app.get("/health", tags=["health"], summary="存活检查（Caddy / 负载均衡探针）")
 @app.get("/api/health", tags=["health"], summary="健康检查（DB 连通 + 运行环境）")
 def health():
     try:
@@ -196,7 +199,8 @@ if __name__ == "__main__":
 
     print(f"tech-transfer-service listening on http://{settings.HOST}:{settings.PORT}")
     print(f"  API prefix: {settings.API_PREFIX}")
-    print(f"  Health:     http://127.0.0.1:{settings.PORT}/api/health")
+    print(f"  Health:     http://127.0.0.1:{settings.PORT}/health")
+    print(f"  API health: http://127.0.0.1:{settings.PORT}/api/health")
     print(f"  Bootstrap:  POST http://127.0.0.1:{settings.PORT}{settings.API_PREFIX}/auth/bootstrap")
     print(f"  Get Me:     GET  http://127.0.0.1:{settings.PORT}{settings.API_PREFIX}/me")
     uvicorn.run(
