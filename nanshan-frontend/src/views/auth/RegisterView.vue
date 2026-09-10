@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
+import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
 
 const router = useRouter()
 const mode = ref('user')
@@ -33,8 +34,16 @@ const submitUserRegistration = async () => {
   if (error) throw new Error(error)
   const body = { username: userForm.username.trim(), password: userForm.password }
   if (userForm.displayName.trim()) body.displayName = userForm.displayName.trim()
-  if (userForm.phone.trim()) body.phone = userForm.phone.trim()
-  if (userForm.email.trim()) body.email = userForm.email.trim()
+  if (userForm.phone.trim()) {
+    const phoneCheck = validatePhone(userForm.phone, { required: false })
+    if (!phoneCheck.ok) throw new Error(phoneCheck.message)
+    body.phone = phoneCheck.value
+  }
+  if (userForm.email.trim()) {
+    const emailCheck = validateEmail(userForm.email, { required: false })
+    if (!emailCheck.ok) throw new Error(emailCheck.message)
+    body.email = emailCheck.value
+  }
   await api('/auth/register', { method: 'POST', body })
   successMessage.value = '普通用户注册成功，请从小程序或用户端登录；后台管理端仅供平台管理员和机构管理员使用。'
 }
@@ -43,17 +52,23 @@ const submitInstitutionRegistration = async () => {
   if (!institutionForm.name.trim() || !institutionForm.contactName.trim() || !institutionForm.contactPhone.trim()) {
     throw new Error('请填写机构名称、联系人和联系电话。')
   }
+  const phoneCheck = validatePhone(institutionForm.contactPhone, { required: true, label: '联系电话' })
+  if (!phoneCheck.ok) throw new Error(phoneCheck.message)
   const error = validatePassword(institutionForm)
   if (error) throw new Error(error)
   const body = {
     kind: institutionForm.kind, name: institutionForm.name.trim(),
-    contactName: institutionForm.contactName.trim(), contactPhone: institutionForm.contactPhone.trim(),
+    contactName: institutionForm.contactName.trim(), contactPhone: phoneCheck.value,
     username: institutionForm.username.trim(), password: institutionForm.password,
   }
   if (institutionForm.region.trim()) body.region = institutionForm.region.trim()
   if (institutionForm.creditCode.trim()) body.creditCode = institutionForm.creditCode.trim()
   if (institutionForm.intro.trim()) body.intro = institutionForm.intro.trim()
-  if (institutionForm.email.trim()) body.email = institutionForm.email.trim()
+  if (institutionForm.email.trim()) {
+    const emailCheck = validateEmail(institutionForm.email, { required: false })
+    if (!emailCheck.ok) throw new Error(emailCheck.message)
+    body.email = emailCheck.value
+  }
   await api('/institution-registrations', { method: 'POST', body })
   successMessage.value = '机构申请已提交，请等待平台审核；审核通过后可使用该管理员账号登录后台。'
 }

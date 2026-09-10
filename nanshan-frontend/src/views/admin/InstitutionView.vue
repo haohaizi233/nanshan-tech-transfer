@@ -7,6 +7,8 @@ import {
 } from 'vue'
 
 import { api } from '../../api/client'
+import { confirmDialog } from '../../utils/appDialog.js'
+import { validatePhone } from '../../utils/contactValidation.js'
 
 const KIND_OPTIONS = [
   { value: 'platform', label: '平台' },
@@ -194,7 +196,13 @@ const openRegistrationReview = () => {
 }
 
 const approveRegistration = async item => {
-  if (!window.confirm(`确认通过“${item.name}”的机构注册申请吗？`)) return
+  const ok = await confirmDialog({
+    title: '通过注册申请',
+    message: `确认通过“${item.name}”的机构注册申请吗？`,
+    confirmText: '确认通过',
+    tone: 'primary',
+  })
+  if (!ok) return
   reviewingRegistrationId.value = item.id
   registrationError.value = ''
   try {
@@ -299,6 +307,11 @@ const save = async () => {
     modalError.value = '请输入机构名称'
     return
   }
+  const phoneCheck = validatePhone(form.phone, { required: false, label: '联系电话' })
+  if (!phoneCheck.ok) {
+    modalError.value = phoneCheck.message
+    return
+  }
 
   saving.value = true
   modalError.value = ''
@@ -312,7 +325,7 @@ const save = async () => {
     }
     if (form.kind === 'platform') {
       body.contact = form.contact.trim()
-      body.phone = form.phone.trim()
+      body.phone = phoneCheck.value
       body.unit = form.unit.trim()
     }
 
@@ -337,9 +350,13 @@ const toggleStatus = async item => {
   const goingOnline = item.status !== 'active'
   const action = goingOnline ? '上架' : '下架'
 
-  if (!window.confirm(`确定${action}机构《${item.name}》吗？`)) {
-    return
-  }
+  const ok = await confirmDialog({
+    title: `${action}机构`,
+    message: `确定${action}机构《${item.name}》吗？`,
+    confirmText: `确定${action}`,
+    tone: goingOnline ? 'primary' : 'danger',
+  })
+  if (!ok) return
 
   actionError.value = ''
   try {

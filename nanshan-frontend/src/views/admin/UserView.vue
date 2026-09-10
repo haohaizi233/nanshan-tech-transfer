@@ -7,6 +7,7 @@ import {
 } from 'vue'
 
 import { api, getSavedUser } from '../../api/client'
+import { confirmDialog, promptDialog } from '../../utils/appDialog.js'
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '正常' },
@@ -154,7 +155,13 @@ const reloadDetail = async () => {
 }
 
 const grantAdmin = async m => {
-  if (!window.confirm(`确认将该成员设为「${m.orgName}」的机构管理员？`)) return
+  const ok = await confirmDialog({
+    title: '设置机构管理员',
+    message: `确认将该成员设为「${m.orgName}」的机构管理员？`,
+    confirmText: '确认设置',
+    tone: 'primary',
+  })
+  if (!ok) return
   modalActionError.value = ''
   try {
     await api(`/admin/organization-memberships/${m.id}/grant-admin`, {
@@ -168,9 +175,13 @@ const grantAdmin = async m => {
 }
 
 const revokeAdmin = async m => {
-  if (!window.confirm(`确认撤销「${m.orgName}」的机构管理员身份？该操作会同时取消其机构认证，而不是降为普通成员。`)) return
-  const reason = window.prompt('请填写撤销原因：')
-  if (reason === null) return
+  const reason = await promptDialog({
+    title: '撤销机构管理员',
+    message: `确认撤销「${m.orgName}」的机构管理员身份？该操作会同时取消其机构认证，而不是降为普通成员。`,
+    placeholder: '请填写撤销原因',
+    confirmText: '确认撤销',
+  })
+  if (reason == null) return
   const trimmed = reason.trim()
   if (!trimmed) {
     modalActionError.value = '撤销机构管理员必须填写原因'

@@ -2,6 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, getSavedUser } from '../../api/client'
+import { resolveContentFormActions } from '../../utils/contentFormActions.js'
+import { confirmDialog } from '../../utils/appDialog.js'
+import { validatePhone } from '../../utils/contactValidation.js'
 
 const router = useRouter()
 
@@ -167,7 +170,14 @@ const formLoading = ref(false)
 const formSaving = ref(false)
 const formError = ref('')
 const editingId = ref(null)
+const formStatus = ref('')
 const demandForm = reactive({ title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
+const formActions = computed(() => resolveContentFormActions({
+  kind: 'demand',
+  isPlatformAdmin: isPlatformAdmin.value,
+  formMode: formMode.value,
+  status: formStatus.value,
+}))
 const belongsToOrg = (user, orgId) => {
   const id = Number(orgId)
   if ((user.organizationMemberships || []).some(m => Number(m.orgId) === id && m.status === 'active')) return true
@@ -189,7 +199,7 @@ const adminOrgLabel = computed(() => {
 const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
 const resetDemandForm = () => Object.assign(demandForm, { title: '', description: '', region: '', orgId: '', ownerUserId: '', categoryId: '', orgName: '', categoryName: '', coopModeText: '', budgetMinWan: '', budgetMaxWan: '', budgetNegotiable: false, contactName: '', contactPhone: '', tagsText: '', version: null })
 const openCreate = () => {
-  formMode.value = 'create'; editingId.value = null; formError.value = ''; resetDemandForm()
+  formMode.value = 'create'; editingId.value = null; formStatus.value = ''; formError.value = ''; resetDemandForm()
   if (!isPlatformAdmin.value) {
     demandForm.orgId = primaryAdminOrgId()
     demandForm.ownerUserId = currentUser.value.userId || ''
@@ -197,28 +207,46 @@ const openCreate = () => {
   formVisible.value = true
 }
 const openEdit = async item => {
-  resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formError.value = ''; formLoading.value = true; formVisible.value = true
-  try { const data = await api(`/admin/demands/${item.id}`); Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgId: data.orgId || '', ownerUserId: data.ownerUserId || '', categoryId: data.categoryId || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetMinWan: data.budgetMinWan ?? '', budgetMaxWan: data.budgetMaxWan ?? '', budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version }) } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
+  resetDemandForm(); formMode.value = 'edit'; editingId.value = item.id; formStatus.value = item.status || ''; formError.value = ''; formLoading.value = true; formVisible.value = true
+  try {
+    const data = await api(`/admin/demands/${item.id}`)
+    formStatus.value = data.status || formStatus.value
+    Object.assign(demandForm, { title: data.title || '', description: data.description || '', region: data.region || '', orgId: data.orgId || '', ownerUserId: data.ownerUserId || '', categoryId: data.categoryId || '', orgName: data.orgName || '', categoryName: data.categoryName || '', coopModeText: (data.coopMode || []).join('，'), budgetMinWan: data.budgetMinWan ?? '', budgetMaxWan: data.budgetMaxWan ?? '', budgetNegotiable: Boolean(data.budgetNegotiable), contactName: data.contactName || '', contactPhone: data.contactPhone || '', tagsText: (data.tags || []).join('，'), version: data.version })
+  } catch (err) { formError.value = err.message || '加载需求详情失败' } finally { formLoading.value = false }
 }
 const claimOrganization = async item => {
-  if (!window.confirm('确认将该历史需求归属到当前机构？归属后将由本机构统一管理。')) return
+  const ok = await confirmDialog({
+    title: '归属机构',
+    message: '确认将该历史需求归属到当前机构？归属后将由本机构统一管理。',
+    confirmText: '确认归属',
+    tone: 'primary',
+  })
+  if (!ok) return
   try {
     await api(`/admin/demands/${item.id}/claim-organization`, { method: 'POST', body: { version: item.version } })
     fetchList()
   } catch (err) { loadError.value = err.message || '归属机构失败' }
 }
-const saveDemand = async (saveAction = 'draft') => {
+const saveDemand = async (saveAction = null) => {
+  const actions = formActions.value
+  if (saveAction === 'draft' && !actions.canSaveDraft) { formError.value = '当前状态不能保存为草稿'; return }
+  if (saveAction === 'submit' && !actions.canSubmit) { formError.value = '当前状态不能提交审核'; return }
+  if (saveAction === 'publish' && !actions.canPublish) { formError.value = '当前状态不能直接发布'; return }
+  if (saveAction == null && !actions.canSaveContent) { formError.value = '当前状态不能保存'; return }
   if (formMode.value === 'create' && !demandForm.categoryId) { formError.value = '请选择需求分类'; return }
   if (formMode.value === 'create' && isPlatformAdmin.value && (!demandForm.orgId || !demandForm.ownerUserId)) { formError.value = '请依次选择分类、所属机构和归属用户'; return }
   if (formMode.value === 'create' && !isPlatformAdmin.value && !demandForm.orgId) { formError.value = '未绑定可管理的机构'; return }
   if (!demandForm.title.trim() || !demandForm.description.trim()) { formError.value = '请填写需求标题和需求描述'; return }
+  const phoneCheck = validatePhone(demandForm.contactPhone, { required: false, label: '联系电话' })
+  if (!phoneCheck.ok) { formError.value = phoneCheck.message; return }
   formSaving.value = true; formError.value = ''
   try {
-    const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable, saveAction }
+    const body = { title: demandForm.title.trim(), description: demandForm.description.trim(), budgetNegotiable: demandForm.budgetNegotiable }
+    if (saveAction) body.saveAction = saveAction
     if (demandForm.categoryId) body.categoryId = Number(demandForm.categoryId)
     if (demandForm.orgId) body.orgId = Number(demandForm.orgId)
     if (isPlatformAdmin.value && demandForm.ownerUserId) body.ownerUserId = Number(demandForm.ownerUserId)
-    const optionalTextFields = { region: demandForm.region, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: demandForm.contactPhone }
+    const optionalTextFields = { region: demandForm.region, categoryName: demandForm.categoryName, contactName: demandForm.contactName, contactPhone: phoneCheck.value }
     if (isPlatformAdmin.value) optionalTextFields.orgName = demandForm.orgName
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (demandForm.coopModeText.trim()) body.coopMode = splitText(demandForm.coopModeText)
@@ -555,7 +583,7 @@ const submitReject = async () => {
 
     <div v-if="formVisible" class="modal-mask" @click.self="formVisible = false">
       <div class="modal form-modal">
-        <div class="modal-header"><h3>{{ formMode === 'create' ? '新增需求' : '编辑需求' }}</h3><button type="button" @click="formVisible = false">×</button></div>
+        <div class="modal-header"><h3>{{ formMode === 'create' ? '新增需求' : '编辑需求' }}<span v-if="formMode === 'edit' && formActions.statusLabel" class="form-status-label">{{ formActions.statusLabel }}</span></h3><button type="button" @click="formVisible = false">×</button></div>
         <div class="modal-body form-content" :class="{ 'org-admin-form': !isPlatformAdmin }">
           <p v-if="formLoading" class="modal-tip">加载中…</p>
           <template v-else>
@@ -582,14 +610,16 @@ const submitReject = async () => {
             </div>
             <label>标签（逗号分隔）</label><input v-model="demandForm.tagsText" placeholder="AI，智能制造" />
             <label class="checkbox-label"><input v-model="demandForm.budgetNegotiable" type="checkbox" /> 预算可议</label>
+            <p v-if="formActions.hint" class="form-action-hint">{{ formActions.hint }}</p>
             <p v-if="formError" class="error-text">{{ formError }}</p>
           </template>
         </div>
         <div class="modal-footer">
           <button class="plain-btn" :disabled="formSaving" @click="formVisible = false">取消</button>
-          <button class="plain-btn" :disabled="formLoading || formSaving" @click="saveDemand('draft')">{{ formSaving ? '保存中…' : '保存草稿' }}</button>
-          <button v-if="isPlatformAdmin" class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand('publish')">{{ formSaving ? '保存中…' : '直接发布' }}</button>
-          <button v-else class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand('submit')">{{ formSaving ? '保存中…' : '提交审核' }}</button>
+          <button v-if="formActions.canSaveDraft" class="plain-btn" :disabled="formLoading || formSaving" @click="saveDemand('draft')">{{ formSaving ? '保存中…' : '保存草稿' }}</button>
+          <button v-if="formActions.canSaveContent" class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand(null)">{{ formSaving ? '保存中…' : '保存修改' }}</button>
+          <button v-if="formActions.canPublish" class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand('publish')">{{ formSaving ? '保存中…' : '直接发布' }}</button>
+          <button v-if="formActions.canSubmit" class="approve-btn" :disabled="formLoading || formSaving" @click="saveDemand('submit')">{{ formSaving ? '保存中…' : '提交审核' }}</button>
         </div>
       </div>
     </div>
@@ -964,9 +994,28 @@ tbody tr:hover {
 }
 
 .modal-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   color: #223044;
   font-size: 17px;
+}
+
+.form-status-label {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #edf4ff;
+  color: #317dea;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-action-hint {
+  margin: 4px 0 0;
+  color: #7d8897;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .modal-header button {

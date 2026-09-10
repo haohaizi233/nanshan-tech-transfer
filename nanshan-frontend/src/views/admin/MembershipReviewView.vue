@@ -9,8 +9,10 @@ import {
 import { useRoute } from 'vue-router'
 
 import { api } from '../../api/client'
+import { confirmDialog, promptDialog } from '../../utils/appDialog.js'
 
 const TABS = [
+  { value: 'all', label: '全部' },
   { value: 'organization', label: '机构入驻申请' },
   { value: 'org-admin', label: '机构管理员申请' },
   { value: 'member', label: '成员认证申请' }
@@ -39,13 +41,21 @@ const STATUS_LABELS = {
   cancelled: '已取消'
 }
 
+const KIND_LABELS = {
+  organization: '机构入驻申请',
+  'org-admin': '机构管理员申请',
+  member: '成员认证申请'
+}
+
 const typeLabel = v => TYPE_LABELS[v] || v || '-'
 
 const statusLabel = v => STATUS_LABELS[v] || v || '-'
 
+const kindLabel = v => KIND_LABELS[v] || v || '-'
+
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
-const activeTab = ref('organization')
+const activeTab = ref('all')
 
 const filters = reactive({
   status: 'pending'
@@ -88,15 +98,27 @@ const pages = computed(() => {
   return [1, '...', currentPage.value - 1, currentPage.value, currentPage.value + 1, '...', count]
 })
 
+const colCount = computed(() => {
+  if (activeTab.value === 'organization') return 9
+  if (activeTab.value === 'all') return 7
+  return 8
+})
+
+function itemKind(item) {
+  return item?.applicationKind || activeTab.value
+}
+
 function listApi() {
+  if (activeTab.value === 'all') return '/admin/certification-applications'
   if (activeTab.value === 'organization') return '/admin/organization-applications'
   if (activeTab.value === 'org-admin') return '/admin/organization-admin-applications'
   return '/admin/organization-membership-applications'
 }
 
 function actionApi(item, action) {
-  if (activeTab.value === 'organization') return `/admin/organization-applications/${item.id}/${action}`
-  if (activeTab.value === 'org-admin') return `/admin/organization-admin-applications/${item.id}/${action}`
+  const kind = itemKind(item)
+  if (kind === 'organization') return `/admin/organization-applications/${item.id}/${action}`
+  if (kind === 'org-admin') return `/admin/organization-admin-applications/${item.id}/${action}`
   return `/admin/organization-membership-applications/${item.id}/${action}`
 }
 
@@ -174,12 +196,19 @@ const closeDetail = () => {
 }
 
 const approve = async item => {
-  const label = activeTab.value === 'organization'
+  const kind = itemKind(item)
+  const label = kind === 'organization'
     ? `通过机构「${item.requestedName}」的入驻申请（申请人 ${item.userNo}，通过后该机构上架且申请人成为其机构管理员）`
-    : activeTab.value === 'org-admin'
+    : kind === 'org-admin'
       ? `通过用户 ${item.userNo} 成为「${item.orgName}」机构管理员的申请`
       : `通过用户 ${item.userNo} 加入「${item.orgName}」的成员认证申请`
-  if (!window.confirm(`确认${label}？`)) return
+  const ok = await confirmDialog({
+    title: '通过申请',
+    message: `确认${label}？`,
+    confirmText: '确认通过',
+    tone: 'primary',
+  })
+  if (!ok) return
   acting.value = true
   actionError.value = ''
   try {
@@ -198,8 +227,13 @@ const approve = async item => {
 }
 
 const reject = async item => {
-  const reason = window.prompt('驳回申请必须填写原因：')
-  if (reason === null) return
+  const reason = await promptDialog({
+    title: '驳回申请',
+    message: '驳回申请必须填写原因。',
+    placeholder: '请填写驳回原因',
+    confirmText: '确认驳回',
+  })
+  if (reason == null) return
   const trimmed = reason.trim()
   if (!trimmed) {
     actionError.value = '驳回申请必须填写原因'
@@ -226,7 +260,7 @@ const reject = async item => {
 <template>
   <div class="review-page">
     <section class="filter-card">
-      <div class="tab-row">
+      <div class="toolbar">
         <button
           v-for="tab in TABS"
           :key="tab.value"
@@ -235,9 +269,7 @@ const reject = async item => {
         >
           {{ tab.label }}
         </button>
-      </div>
 
-      <div class="filter-row">
         <div class="filter-item">
           <label>状态</label>
           <select v-model="filters.status">
@@ -254,14 +286,12 @@ const reject = async item => {
           </select>
         </div>
 
-        <div class="actions">
-          <button
-            class="primary-btn"
-            @click="search"
-          >
-            查询
-          </button>
-        </div>
+        <button
+          class="primary-btn"
+          @click="search"
+        >
+          查询
+        </button>
       </div>
 
       <div
@@ -273,9 +303,19 @@ const reject = async item => {
     </section>
 
     <section class="table-card">
-      <table>
+      <table :class="`review-table tab-${activeTab}`">
         <thead>
-          <tr v-if="activeTab === 'organization'">
+          <tr v-if="activeTab === 'all'">
+            <th>ID</th>
+            <th>申请类型</th>
+            <th>申请人</th>
+            <th>机构</th>
+            <th>状态</th>
+            <th>申请时间</th>
+            <th>操作</th>
+          </tr>
+
+          <tr v-else-if="activeTab === 'organization'">
             <th>ID</th>
             <th>申请人</th>
             <th>机构名称</th>
@@ -300,7 +340,58 @@ const reject = async item => {
         </thead>
 
         <tbody>
-          <template v-if="activeTab === 'organization'">
+          <template v-if="activeTab === 'all'">
+            <tr
+              v-for="item in rows"
+              :key="`${item.applicationKind}-${item.id}`"
+            >
+              <td>{{ item.id }}</td>
+
+              <td>{{ kindLabel(item.applicationKind) }}</td>
+
+              <td>{{ item.userNo }}</td>
+
+              <td
+                class="org-name"
+                :title="item.orgName || item.requestedName"
+              >
+                {{ item.orgName || item.requestedName || '-' }}
+              </td>
+
+              <td>
+                <span :class="['status-tag', item.status]">
+                  {{ statusLabel(item.status) }}
+                </span>
+              </td>
+
+              <td>{{ fmtTime(item.createdAt) }}</td>
+
+              <td>
+                <div class="operation">
+                  <button @click="openDetail(item)">
+                    查看
+                  </button>
+
+                  <button
+                    v-if="item.status === 'pending'"
+                    @click="approve(item)"
+                  >
+                    通过
+                  </button>
+
+                  <button
+                    v-if="item.status === 'pending'"
+                    class="danger"
+                    @click="reject(item)"
+                  >
+                    驳回
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+
+          <template v-else-if="activeTab === 'organization'">
             <tr
               v-for="item in rows"
               :key="item.id"
@@ -418,7 +509,7 @@ const reject = async item => {
 
           <tr v-if="loading">
             <td
-              :colspan="activeTab === 'organization' ? 9 : 8"
+              :colspan="colCount"
               class="state-row"
             >
               加载中…
@@ -427,7 +518,7 @@ const reject = async item => {
 
           <tr v-else-if="loadError">
             <td
-              :colspan="activeTab === 'organization' ? 9 : 8"
+              :colspan="colCount"
               class="state-row error"
             >
               {{ loadError }}
@@ -443,7 +534,7 @@ const reject = async item => {
 
           <tr v-else-if="rows.length === 0">
             <td
-              :colspan="activeTab === 'organization' ? 9 : 8"
+              :colspan="colCount"
               class="state-row"
             >
               暂无符合条件的申请
@@ -513,7 +604,7 @@ const reject = async item => {
     >
       <div class="modal">
         <div class="modal-header">
-          <h3>{{ activeTab === 'organization' ? '机构入驻申请详情' : activeTab === 'org-admin' ? '机构管理员申请详情' : '成员认证申请详情' }}</h3>
+          <h3>{{ kindLabel(itemKind(currentItem)) }}详情</h3>
 
           <button @click="closeDetail">
             ×
@@ -531,7 +622,7 @@ const reject = async item => {
             <strong>{{ currentItem.userNo }}</strong>
           </div>
 
-          <template v-if="activeTab === 'organization'">
+          <template v-if="itemKind(currentItem) === 'organization'">
             <div class="full">
               <label>机构名称</label>
               <strong>{{ currentItem.requestedName }}</strong>
@@ -610,7 +701,7 @@ const reject = async item => {
             </div>
 
             <div class="full">
-              <label>{{ activeTab === 'member' ? '申请说明' : '申请理由' }}</label>
+              <label>{{ itemKind(currentItem) === 'member' ? '申请说明' : '申请理由' }}</label>
               <strong>{{ currentItem.applyNote || currentItem.reason || '-' }}</strong>
             </div>
 
@@ -693,19 +784,21 @@ const reject = async item => {
   padding: 20px 27px 25px;
 }
 
-.tab-row {
+.toolbar {
   display: flex;
-  gap: 10px;
-  margin-bottom: 18px;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
 }
 
 .tab-btn {
-  height: 38px;
-  padding: 0 20px;
+  height: 42px;
+  padding: 0 16px;
   border: 1px solid #dce4ee;
   border-radius: 5px;
   background: white;
   color: #536073;
+  white-space: nowrap;
 }
 
 .tab-btn.active {
@@ -714,22 +807,21 @@ const reject = async item => {
   color: white;
 }
 
-.filter-row {
+.filter-item {
   display: flex;
-  align-items: end;
-  gap: 24px;
+  align-items: center;
+  gap: 8px;
 }
 
 .filter-item label {
-  display: block;
-  margin-bottom: 9px;
   color: #283447;
   font-size: 14px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .filter-item select {
-  width: 180px;
+  width: 140px;
   height: 42px;
   padding: 0 13px;
   border: 1px solid #dce4ee;
@@ -738,16 +830,13 @@ const reject = async item => {
   background: white;
 }
 
-.actions {
-  margin-left: auto;
-}
-
 .primary-btn,
 .default-btn,
 .danger-btn {
   height: 42px;
   padding: 0 23px;
   border-radius: 5px;
+  white-space: nowrap;
 }
 
 .primary-btn {
@@ -799,6 +888,49 @@ td {
 th {
   color: #273346;
   font-weight: 600;
+}
+
+th:nth-child(1) {
+  width: 72px;
+}
+
+th:nth-child(2) {
+  width: 140px;
+}
+
+th:last-child {
+  width: 150px;
+}
+
+.tab-all th:nth-child(3),
+.tab-organization th:nth-child(2),
+.tab-org-admin th:nth-child(2),
+.tab-member th:nth-child(2) {
+  width: 120px;
+}
+
+.tab-all th:nth-child(5),
+.tab-organization th:nth-child(7),
+.tab-org-admin th:nth-child(6),
+.tab-member th:nth-child(6) {
+  width: 90px;
+}
+
+.tab-all th:nth-child(6),
+.tab-organization th:nth-child(8),
+.tab-org-admin th:nth-child(7),
+.tab-member th:nth-child(7) {
+  width: 160px;
+}
+
+.tab-org-admin th:nth-child(4),
+.tab-member th:nth-child(4) {
+  width: 100px;
+}
+
+.tab-org-admin th:nth-child(5),
+.tab-member th:nth-child(5) {
+  width: 130px;
 }
 
 tbody tr:hover {

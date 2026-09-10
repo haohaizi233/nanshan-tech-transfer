@@ -61,5 +61,16 @@ export const useAuthStore = defineStore('auth', () => {
     clearSession()
   }
 
-  return { token, user, isLoggedIn, displayName, login, logout }
+  function setUser(nextUser) {
+    user.value = nextUser
+    saveSession(token.value, nextUser, getRefreshToken())
+  }
+
+  async function refreshUser() {
+    const data = await api('/me')
+    setUser(data)
+    return data
+  }
+
+  return { token, user, isLoggedIn, displayName, login, logout, setUser, refreshUser }
 })

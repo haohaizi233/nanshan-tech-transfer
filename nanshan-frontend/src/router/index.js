@@ -24,6 +24,7 @@ import RequirementDetailView from '../views/admin/RequirementDetailView.vue'
 import CooperationView from '../views/admin/CooperationView.vue'
 
 import CooperationDetailView from '../views/admin/CooperationDetailView.vue'
+import CapitalView from '../views/admin/CapitalView.vue'
 
 const isOrgAdminOnly = () => {
   const roles = getSavedUser()?.roles || []
@@ -142,6 +143,16 @@ const routes = [
 
           title:
             '对接详情'
+        }
+      },
+
+      {
+        path: 'capital',
+        name: 'capital',
+        component: CapitalView,
+        meta: {
+          parent: '资本对接管理',
+          title: '资源列表'
         }
       },
 

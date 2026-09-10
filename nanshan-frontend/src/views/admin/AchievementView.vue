@@ -7,6 +7,9 @@ import {
 } from 'vue'
 
 import { api, getSavedUser } from '../../api/client'
+import { resolveContentFormActions } from '../../utils/contentFormActions.js'
+import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
+import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
 
 const achievements = ref([])
 
@@ -65,12 +68,19 @@ const formLoading = ref(false)
 const formSaving = ref(false)
 const formError = ref('')
 const editingId = ref(null)
+const formStatus = ref('')
 const achievementForm = reactive({
   title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
   maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
   priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
   applicationFieldsText: '', inventorNamesText: '', version: null,
 })
+const formActions = computed(() => resolveContentFormActions({
+  kind: 'achievement',
+  isPlatformAdmin: isPlatformAdmin.value,
+  formMode: formMode.value,
+  status: formStatus.value,
+}))
 
 const fmtTime = v =>
   v ? String(v).replace('T', ' ').slice(0, 16) : '-'
@@ -264,7 +274,13 @@ const openView = item => {
 }
 
 const claimOrganization = async item => {
-  if (!window.confirm('确认将该历史成果归属到当前机构？归属后将由本机构统一管理。')) return
+  const ok = await confirmDialog({
+    title: '归属机构',
+    message: '确认将该历史成果归属到当前机构？归属后将由本机构统一管理。',
+    confirmText: '确认归属',
+    tone: 'primary',
+  })
+  if (!ok) return
   try {
     await api(`/admin/achievements/${item.id}/claim-organization`, {
       method: 'POST', body: { version: item.version },
@@ -317,6 +333,7 @@ const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim
 const openCreate = () => {
   formMode.value = 'create'
   editingId.value = null
+  formStatus.value = ''
   formError.value = ''
   resetAchievementForm()
   if (!isPlatformAdmin.value) {
@@ -330,11 +347,13 @@ const openEdit = async item => {
   resetAchievementForm()
   formMode.value = 'edit'
   editingId.value = item.id
+  formStatus.value = item.status || ''
   formError.value = ''
   formLoading.value = true
   formVisible.value = true
   try {
     const data = await api(`/admin/achievements/${item.id}`)
+    formStatus.value = data.status || formStatus.value
     Object.assign(achievementForm, {
       title: data.title || '', sourceOrgName: data.orgName || '', techIntro: data.techIntro || '',
       techRoute: data.techRoute || '', maturityLevel: data.maturityLevel || '02_lab',
@@ -354,7 +373,24 @@ const openEdit = async item => {
   }
 }
 
-const saveAchievement = async (saveAction = 'draft') => {
+const saveAchievement = async (saveAction = null) => {
+  const actions = formActions.value
+  if (saveAction === 'draft' && !actions.canSaveDraft) {
+    formError.value = '当前状态不能保存为草稿'
+    return
+  }
+  if (saveAction === 'submit' && !actions.canSubmit) {
+    formError.value = '当前状态不能提交审核'
+    return
+  }
+  if (saveAction === 'publish' && !actions.canPublish) {
+    formError.value = '当前状态不能直接发布'
+    return
+  }
+  if (saveAction == null && !actions.canSaveContent) {
+    formError.value = '当前状态不能保存'
+    return
+  }
   if (formMode.value === 'create' && !achievementForm.categoryId) {
     formError.value = '请选择成果分类'
     return
@@ -371,15 +407,26 @@ const saveAchievement = async (saveAction = 'draft') => {
     formError.value = '请输入成果名称'
     return
   }
+  const phoneCheck = validatePhone(achievementForm.contactPhone, { required: false, label: '联系电话' })
+  if (!phoneCheck.ok) {
+    formError.value = phoneCheck.message
+    return
+  }
+  const emailCheck = validateEmail(achievementForm.contactEmail, { required: false, label: '联系邮箱' })
+  if (!emailCheck.ok) {
+    formError.value = emailCheck.message
+    return
+  }
   formSaving.value = true
   formError.value = ''
   try {
-    const body = { title: achievementForm.title.trim(), maturityLevel: achievementForm.maturityLevel, pricingMode: achievementForm.pricingMode, saveAction }
+    const body = { title: achievementForm.title.trim(), maturityLevel: achievementForm.maturityLevel, pricingMode: achievementForm.pricingMode }
+    if (saveAction) body.saveAction = saveAction
     const optionalTextFields = {
       sourceOrgName: achievementForm.sourceOrgName, techIntro: achievementForm.techIntro,
       techRoute: achievementForm.techRoute, maturityDesc: achievementForm.maturityDesc,
-      contactName: achievementForm.contactName, contactPhone: achievementForm.contactPhone,
-      contactEmail: achievementForm.contactEmail,
+      contactName: achievementForm.contactName, contactPhone: phoneCheck.value,
+      contactEmail: emailCheck.value,
     }
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (formMode.value === 'create' || achievementForm.applicationFieldsText.trim()) body.applicationFields = splitText(achievementForm.applicationFieldsText)
@@ -624,7 +671,10 @@ const exportData = async () => {
 
     URL.revokeObjectURL(url)
   } catch (err) {
-    window.alert(`导出失败：${err.message || '请稍后重试'}`)
+    await alertDialog({
+      title: '导出失败',
+      message: err.message || '请稍后重试',
+    })
   } finally {
     exporting.value = false
   }
@@ -974,7 +1024,7 @@ onMounted(() => {
 
     <div v-if="formVisible" class="modal-mask" @click.self="!formSaving && (formVisible = false)">
       <div class="modal form-modal">
-        <div class="modal-header"><h3>{{ formMode === 'create' ? '新增成果' : '编辑成果' }}</h3><button type="button" class="close-button" @click="formVisible = false">×</button></div>
+        <div class="modal-header"><h3>{{ formMode === 'create' ? '新增成果' : '编辑成果' }}<span v-if="formMode === 'edit' && formActions.statusLabel" class="form-status-label">{{ formActions.statusLabel }}</span></h3><button type="button" class="close-button" @click="formVisible = false">×</button></div>
         <div class="form-content" :class="{ 'org-admin-form': !isPlatformAdmin }">
           <p v-if="formLoading" class="modal-state">加载中…</p>
           <template v-else>
@@ -997,14 +1047,16 @@ onMounted(() => {
             <label>发明人（逗号分隔）</label><input v-model="achievementForm.inventorNamesText" />
             <div class="form-grid"><div><label>联系人</label><input v-model="achievementForm.contactName" /></div><div><label>联系电话</label><input v-model="achievementForm.contactPhone" /></div></div>
             <label>联系邮箱</label><input v-model="achievementForm.contactEmail" />
+            <p v-if="formActions.hint" class="form-action-hint">{{ formActions.hint }}</p>
             <p v-if="formError" class="audit-error">{{ formError }}</p>
           </template>
         </div>
         <div class="modal-footer">
           <button type="button" class="default-button" :disabled="formSaving" @click="formVisible = false">取消</button>
-          <button type="button" class="default-button" :disabled="formLoading || formSaving" @click="saveAchievement('draft')">{{ formSaving ? '保存中…' : '保存草稿' }}</button>
-          <button v-if="isPlatformAdmin" type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement('publish')">{{ formSaving ? '保存中…' : '直接发布' }}</button>
-          <button v-else type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement('submit')">{{ formSaving ? '保存中…' : '提交审核' }}</button>
+          <button v-if="formActions.canSaveDraft" type="button" class="default-button" :disabled="formLoading || formSaving" @click="saveAchievement('draft')">{{ formSaving ? '保存中…' : '保存草稿' }}</button>
+          <button v-if="formActions.canSaveContent" type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement(null)">{{ formSaving ? '保存中…' : '保存修改' }}</button>
+          <button v-if="formActions.canPublish" type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement('publish')">{{ formSaving ? '保存中…' : '直接发布' }}</button>
+          <button v-if="formActions.canSubmit" type="button" class="primary-button" :disabled="formLoading || formSaving" @click="saveAchievement('submit')">{{ formSaving ? '保存中…' : '提交审核' }}</button>
         </div>
       </div>
     </div>
@@ -1635,8 +1687,27 @@ tbody tr:hover {
 }
 
 .modal-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: 18px;
+}
+
+.form-status-label {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #edf4ff;
+  color: #317dea;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-action-hint {
+  margin: 4px 0 0;
+  color: #7d8897;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .close-button {

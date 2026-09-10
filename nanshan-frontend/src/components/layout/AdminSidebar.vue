@@ -47,6 +47,11 @@ const menuList = [
     icon: 'cooperation'
   },
   {
+    name: '资本对接管理',
+    path: '/admin/capital',
+    icon: 'capital'
+  },
+  {
     name: '机构管理',
     path: '/admin/institutions',
     icon: 'institution'
@@ -173,6 +178,17 @@ const isActive = (path) => {
           >
             <path d="M4 12 9 7l4 4 3-3 4 4" />
             <path d="m8 12 4 4 8-8" />
+          </svg>
+
+          <svg
+            v-else-if="item.icon === 'capital'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+          >
+            <rect x="3" y="10" width="4" height="10" rx="1" />
+            <rect x="10" y="6" width="4" height="14" rx="1" />
+            <rect x="17" y="3" width="4" height="17" rx="1" />
           </svg>
 
           <svg

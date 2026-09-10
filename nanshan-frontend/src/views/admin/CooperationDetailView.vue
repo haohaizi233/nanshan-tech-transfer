@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api/client'
+import { confirmDialog } from '../../utils/appDialog.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -78,7 +79,13 @@ const goBack = () => {
 
 const acceptCooperation = async () => {
   if (!detail.value || reviewing.value) return
-  if (!window.confirm('确认接受该对接申请吗？')) return
+  const ok = await confirmDialog({
+    title: '接受对接',
+    message: '确认接受该对接申请吗？',
+    confirmText: '接受对接',
+    tone: 'primary',
+  })
+  if (!ok) return
 
   reviewing.value = true
   reviewError.value = ''
@@ -128,6 +135,13 @@ const rejectCooperation = async () => {
     reviewing.value = false
   }
 }
+
+const canReview = computed(() => (
+  Boolean(detail.value?.canReview) && detail.value?.status === 'pending'
+))
+const isAssisted = computed(() => (detail.value?.handlingMode || 'direct') === 'assisted')
+const canAccept = computed(() => canReview.value && !isAssisted.value)
+const canReject = computed(() => canReview.value)
 
 const initiatorText = computed(() => {
   const d = detail.value || {}
@@ -476,7 +490,7 @@ const operatorText = event => {
       <section class="bottom-actions">
 
         <button
-          v-if="detail.canReview"
+          v-if="canAccept"
           class="accept-btn"
           :disabled="reviewing"
           @click="acceptCooperation"
@@ -485,7 +499,7 @@ const operatorText = event => {
         </button>
 
         <button
-          v-if="detail.canReview"
+          v-if="canReject"
           class="reject-btn"
           :disabled="reviewing"
           @click="openReject"

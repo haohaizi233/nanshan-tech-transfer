@@ -179,27 +179,26 @@ const actionText = (action) => ACTION_LABELS[action] || action || '-'
 
 const resourceTypeText = (type) => RESOURCE_TYPE_LABELS[type] || type || '-'
 
-const detailsView = (details) => {
-  if (details === null || details === undefined || details === '') {
-    return { text: '-', title: '' }
-  }
-
-  const full = typeof details === 'string' ? details : JSON.stringify(details)
-
-  return {
-    text: full.length > 40 ? `${full.slice(0, 40)}…` : full,
-    title: full
-  }
-}
-
-const shortText = (value, length) => {
+const displayText = (value) => {
   if (value === null || value === undefined || value === '') {
     return '-'
   }
 
-  const text = String(value)
+  if (typeof value === 'string') {
+    return value
+  }
 
-  return text.length > length ? `${text.slice(0, length)}…` : text
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+const cellTitle = (value) => {
+  const text = displayText(value)
+
+  return text === '-' ? '' : text
 }
 </script>
 
@@ -271,6 +270,17 @@ const shortText = (value, length) => {
 
     <section class="table-card">
       <table>
+        <colgroup>
+          <col class="col-id">
+          <col class="col-actor">
+          <col class="col-action">
+          <col class="col-type">
+          <col class="col-target">
+          <col class="col-details">
+          <col class="col-request">
+          <col class="col-time">
+        </colgroup>
+
         <thead>
           <tr>
             <th>ID</th>
@@ -324,41 +334,35 @@ const shortText = (value, length) => {
               v-for="row in tableData"
               :key="row.id"
             >
-              <td>
+              <td :title="cellTitle(row.id)">
                 {{ row.id }}
               </td>
 
-              <td>
+              <td :title="cellTitle(row.actorUserNo)">
                 {{ row.actorUserNo || '-' }}
               </td>
 
-              <td :title="row.action || ''">
+              <td :title="cellTitle(row.action)">
                 {{ actionText(row.action) }}
               </td>
 
-              <td :title="row.resourceType || ''">
+              <td :title="cellTitle(row.resourceType)">
                 {{ resourceTypeText(row.resourceType) }}
               </td>
 
-              <td>
+              <td :title="cellTitle(row.resourceId)">
                 {{ row.resourceId ?? '-' }}
               </td>
 
-              <td
-                class="ellipsis-cell"
-                :title="detailsView(row.details).title"
-              >
-                {{ detailsView(row.details).text }}
+              <td :title="cellTitle(row.details)">
+                {{ displayText(row.details) }}
               </td>
 
-              <td
-                class="ellipsis-cell"
-                :title="row.requestId || ''"
-              >
-                {{ shortText(row.requestId, 12) }}
+              <td :title="cellTitle(row.requestId)">
+                {{ row.requestId || '-' }}
               </td>
 
-              <td>
+              <td :title="cellTitle(fmtTime(row.createdAt))">
                 {{ fmtTime(row.createdAt) }}
               </td>
             </tr>
@@ -504,19 +508,54 @@ const shortText = (value, length) => {
 
 table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 1100px;
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+.col-id {
+  width: 68px;
+}
+
+.col-actor {
+  width: 118px;
+}
+
+.col-action {
+  width: 210px;
+}
+
+.col-type {
+  width: 84px;
+}
+
+.col-target {
+  width: 76px;
+}
+
+.col-details {
+  width: 36%;
+}
+
+.col-request {
+  width: 20%;
+}
+
+.col-time {
+  width: 148px;
 }
 
 th,
 td {
   height: 56px;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 1px solid #edf1f5;
   color: #4d596a;
   font-size: 13px;
   text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 th {
@@ -524,49 +563,18 @@ th {
   font-weight: 600;
 }
 
-th:nth-child(1) {
-  width: 80px;
-}
-
-th:nth-child(2) {
-  width: 110px;
-}
-
-th:nth-child(3) {
-  width: 130px;
-}
-
-th:nth-child(4) {
-  width: 100px;
-}
-
-th:nth-child(5) {
-  width: 120px;
-}
-
-th:nth-child(7) {
-  width: 130px;
-}
-
-th:nth-child(8) {
-  width: 150px;
-}
-
 tbody tr:hover {
   background: #fafcff;
 }
 
-.ellipsis-cell {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .table-state {
   height: 140px;
+  overflow: visible;
   color: #929dab;
   font-size: 13px;
   text-align: center;
+  white-space: normal;
+  text-overflow: clip;
 }
 
 .table-state.error {

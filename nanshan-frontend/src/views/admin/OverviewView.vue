@@ -1503,7 +1503,7 @@ onMounted(() => {
   grid-template-columns:
     34px
     minmax(0, 1fr)
-    72px
+    max-content
     104px
     60px;
 
@@ -1577,11 +1577,13 @@ onMounted(() => {
 
   min-height: 25px;
 
-  padding: 3px 7px;
+  padding: 3px 8px;
 
   border-radius: 4px;
 
   font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .todo-tag.blue {
