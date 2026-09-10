@@ -48,7 +48,7 @@
 			<view class="card-foot">
 				<button v-if="!item._gone" class="btn" size="mini" @click="onOpen(item)">查看详情</button>
 				<button
-					v-if="pageType === 'result'"
+					v-if="pageType === 'result' && aiEnabled"
 					class="btn ghost"
 					size="mini"
 					:disabled="item._evalLoading"
@@ -70,6 +70,7 @@
 	import { getMyAchievements, toAchievementCard } from '../../api/achievement.js'
 	import { createEvaluationTask } from '../../api/ai.js'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 	import {
 		getMyFavorites,
 		removeFavorite,
@@ -84,6 +85,7 @@
 	export default {
 		data() {
 			return {
+				aiEnabled: AI_FEATURE_ENABLED,
 				pageType: 'demand',
 				publicationTab: 'published',
 				intentTab: 0,
@@ -328,7 +330,7 @@
 				HostBridge.navigate('pages/dock-detail/dock-detail', params)
 			},
 			async onStartEval(item) {
-				if (item._evalLoading) return
+				if (!this.aiEnabled || item._evalLoading) return
 				item._evalLoading = true
 				try {
 					// 去重命中时返回既有未终态任务，直接跳转查看

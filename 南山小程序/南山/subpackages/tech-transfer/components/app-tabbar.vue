@@ -3,7 +3,7 @@
 		<!-- 占位：固定导航条不占文档流，用同高占位避免内容被遮挡 -->
 		<view class="app-tabbar-spacer"></view>
 		<view class="app-tabbar">
-			<view v-for="item in tabs" :key="item.key" class="tabbar-item" @click="go(item)">
+			<view v-for="item in visibleTabs" :key="item.key" class="tabbar-item" @click="go(item)">
 				<image
 					class="tabbar-icon"
 					:src="active === item.key ? item.activeIcon : item.icon"
@@ -16,6 +16,8 @@
 </template>
 
 <script>
+	import { SHOW_AI_MATCH_ENTRY } from '../../../config/feature-flags.js'
+
 	const SUBPACKAGE_ROOT = '/subpackages/tech-transfer/'
 
 	export default {
@@ -43,6 +45,7 @@
 						path: 'pages/ai-match/ai-match',
 						icon: '/static/tab/ai.png',
 						activeIcon: '/static/tab/ai-active.png',
+						hidden: !SHOW_AI_MATCH_ENTRY,
 					},
 					{
 						key: 'mine',
@@ -53,6 +56,11 @@
 					},
 				],
 			}
+		},
+		computed: {
+			visibleTabs() {
+				return this.tabs.filter((item) => !item.hidden)
+			},
 		},
 		methods: {
 			go(item) {

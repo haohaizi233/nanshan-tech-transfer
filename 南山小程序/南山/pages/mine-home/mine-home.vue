@@ -12,7 +12,7 @@
 
 		<!-- 功能入口：全部跳业务分包 -->
 		<view class="grid">
-			<view v-for="m in modules" :key="m.key" class="grid-item" @click="go(m)">
+			<view v-for="m in visibleModules" :key="m.key" class="grid-item" @click="go(m)">
 				<view class="grid-icon"><text class="grid-icon-text">{{ m.icon }}</text></view>
 				<text class="grid-label">{{ m.name }}</text>
 			</view>
@@ -26,6 +26,7 @@
 
 <script>
 	import HostBridge from '../../host/host-bridge.js'
+	import { SHOW_AI_MATCH_ENTRY } from '../../config/feature-flags.js'
 
 	export default {
 		data() {
@@ -59,6 +60,9 @@
 			avatarText() {
 				const name = this.displayName
 				return name ? name.slice(0, 1) : '客'
+			},
+			visibleModules() {
+				return this.modules.filter((m) => m.key !== 'ai' || SHOW_AI_MATCH_ENTRY)
 			}
 		},
 		onShow() {

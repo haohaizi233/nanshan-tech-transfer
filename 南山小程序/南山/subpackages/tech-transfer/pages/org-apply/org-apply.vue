@@ -10,8 +10,9 @@
 
 			<view class="form-item">
 				<text class="label">机构名称 <text class="required">*</text></text>
-				<input class="input" :value="form.requestedName" placeholder="请输入机构全称" @input="onFieldInput('requestedName', $event)" />
-				<text class="tip">请先在「申请加入机构」页搜索确认机构未被收录</text>
+				<input class="input" :value="form.requestedName" placeholder="请输入机构全称" @input="onNameInput" />
+				<text v-if="nameError" class="error-tip">{{ nameError }}</text>
+				<text v-else class="tip">请先在「申请加入机构」页搜索确认机构未被收录</text>
 			</view>
 			<view class="form-item">
 				<text class="label">机构类型 <text class="required">*</text></text>
@@ -56,7 +57,7 @@
 				<textarea class="textarea" :value="form.proofMaterial" placeholder="如营业执照、法人授权等材料说明（文字描述）" @input="onFieldInput('proofMaterial', $event)" />
 			</view>
 
-			<button class="submit-btn" type="primary" :disabled="submitting" @click="onSubmit">
+			<button class="submit-btn" type="primary" :disabled="submitting || !!nameError" @click="onSubmit">
 				{{ submitting ? '提交中...' : '提交申请' }}
 			</button>
 		</view>
@@ -64,8 +65,9 @@
 </template>
 
 <script>
-	import { applyOrganization, getMyOrganizationCertification } from '../../api/membership.js'
+	import { applyOrganization, getMyOrganizationCertification, searchInstitutions } from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
+	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 
 	const TYPE_OPTIONS = [
 		{ label: '企业', value: 'enterprise' },
@@ -80,6 +82,8 @@
 			return {
 				typeOptions: TYPE_OPTIONS,
 				submitting: false,
+				nameError: '',
+				nameChecking: false,
 				certification: { status: 'unverified', label: '未认证', canApply: true, pendingName: '' },
 				form: {
 					requestedName: '',
@@ -129,6 +133,29 @@
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
 			},
+			onNameInput(e) {
+				this.form.requestedName = e.detail.value
+				this.scheduleNameCheck()
+			},
+			scheduleNameCheck() {
+				clearTimeout(this._nameTimer)
+				this.nameError = ''
+				const name = (this.form.requestedName || '').trim()
+				if (!name) return
+				this._nameTimer = setTimeout(() => this.checkExistingName(name), 300)
+			},
+			async checkExistingName(name) {
+				this.nameChecking = true
+				try {
+					const data = await searchInstitutions(name, 1, 50)
+					const hit = (data.list || []).find((item) => String(item.name || '').trim() === name)
+					this.nameError = hit ? '该机构已存在，请前往「申请加入机构」提交认证' : ''
+				} catch (e) {
+					this.nameError = ''
+				} finally {
+					this.nameChecking = false
+				}
+			},
 			onTypeChange(e) {
 				const opt = this.typeOptions[Number(e.detail.value)] || this.typeOptions[0]
 				this.form.requestedType = opt ? opt.value : ''
@@ -143,6 +170,11 @@
 					uni.showToast({ title: '请填写机构名称', icon: 'none' })
 					return
 				}
+				await this.checkExistingName(name)
+				if (this.nameError) {
+					uni.showToast({ title: this.nameError, icon: 'none' })
+					return
+				}
 				if (!this.form.requestedType) {
 					uni.showToast({ title: '请选择机构类型', icon: 'none' })
 					return
@@ -152,9 +184,14 @@
 					uni.showToast({ title: '请填写联系人', icon: 'none' })
 					return
 				}
-				const contactPhone = (this.form.contactPhone || '').trim()
-				if (!contactPhone) {
-					uni.showToast({ title: '请填写联系电话', icon: 'none' })
+				const phoneCheck = validatePhone(this.form.contactPhone, { required: true, label: '联系电话' })
+				if (!phoneCheck.ok) {
+					uni.showToast({ title: phoneCheck.message, icon: 'none' })
+					return
+				}
+				const emailCheck = validateEmail(this.form.contactEmail, { required: false, label: '联系邮箱' })
+				if (!emailCheck.ok) {
+					uni.showToast({ title: emailCheck.message, icon: 'none' })
 					return
 				}
 				this.submitting = true
@@ -168,8 +205,8 @@
 						region: (this.form.region || '').trim() || undefined,
 						address: (this.form.address || '').trim() || undefined,
 						contactName,
-						contactPhone,
-						contactEmail: (this.form.contactEmail || '').trim() || undefined,
+						contactPhone: phoneCheck.value,
+						contactEmail: emailCheck.value || undefined,
 						proofMaterial: (this.form.proofMaterial || '').trim() || undefined
 					})
 					uni.hideLoading()
@@ -252,6 +289,13 @@
 		display: block;
 		font-size: 22rpx;
 		color: #999999;
+		margin-top: 8rpx;
+	}
+
+	.error-tip {
+		display: block;
+		font-size: 22rpx;
+		color: #e74c3c;
 		margin-top: 8rpx;
 	}
 

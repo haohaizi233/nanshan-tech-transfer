@@ -27,18 +27,10 @@
 			<button class="retry-btn" size="mini" @click="loadData">重试</button>
 		</view>
 
-		<!-- 专利价值评估：待定占位 -->
-		<view v-else-if="pending" class="pending-box">
-			<view class="pending-card">
-				<text class="pending-card__title">专利价值评估</text>
-				<text class="pending-card__line">AI 初步评估 + 专家评估</text>
-				<text class="pending-card__line">参考价值区间（待接入）</text>
-				<text class="pending-card__tip">转让 / 许可 / 质押 / 作价入股定价参考</text>
-			</view>
-			<view class="empty">
-				<text class="empty__title">数据待定</text>
-				<text class="empty__desc">接口与评估模型确认后将在此展示结果卡片</text>
-			</view>
+		<!-- 待定子模块：入口已隐藏，直接访问时仅提示暂未开放 -->
+		<view v-else-if="pending" class="empty">
+			<text class="empty__title">该服务暂未开放</text>
+			<text class="empty__desc">评估服务入口已下线，请从资本对接其他栏目进入</text>
 		</view>
 
 		<!-- 概念验证 / 中小试（数据库） -->

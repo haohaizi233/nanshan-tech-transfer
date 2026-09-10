@@ -9,7 +9,11 @@
 			</view>
 			<view class="form-item">
 				<text class="label">公司名称 <text class="required">*</text></text>
-				<input class="input" v-model="form.company" placeholder="请输入公司名称" />
+				<view v-if="certifiedCompanyLocked" class="locked-row">
+					<input class="input input-disabled" disabled :value="form.company" />
+					<text class="cert-badge">认证</text>
+				</view>
+				<input v-else class="input" v-model="form.company" placeholder="请输入公司名称" />
 			</view>
 			<view class="form-item">
 				<text class="label">地点 <text class="required">*</text></text>
@@ -83,6 +87,7 @@
 	import { createDemand, submitDemand } from '../../api/demand.js'
 	import { getSessionPhone, getUserProfile, ensureLoginForDock } from '../../api/user.js'
 	import { getMyOrganizationCertification } from '../../api/membership.js'
+	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -157,7 +162,8 @@
 		},
 		computed: {
 			organizationNames() { return this.organizations.map((item) => item.orgName) },
-			organizationIndex() { const index = this.organizations.findIndex((item) => String(item.orgId) === String(this.form.orgId)); return index < 0 ? 0 : index }
+			organizationIndex() { const index = this.organizations.findIndex((item) => String(item.orgId) === String(this.form.orgId)); return index < 0 ? 0 : index },
+			certifiedCompanyLocked() { return this.organizations.length > 0 }
 		},
 		onLoad() {
 			if (!ensureLoginForDock()) return
@@ -183,8 +189,27 @@
 					if (!this.form.wechat) this.form.wechat = profile.wechat || ''
 				}
 			},
-			async loadOrganizations() { try { const data = await getMyOrganizationCertification(); this.organizations = data.memberships || []; if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId } catch (e) { this.organizations = [] } },
-			onOrganizationChange(e) { const org = this.organizations[Number(e.detail.value)]; if (org) this.form.orgId = org.orgId },
+			async loadOrganizations() {
+				try {
+					const data = await getMyOrganizationCertification()
+					this.organizations = data.memberships || []
+					if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId
+					this.syncCertifiedCompany()
+				} catch (e) {
+					this.organizations = []
+				}
+			},
+			syncCertifiedCompany() {
+				const org = this.organizations.find((item) => String(item.orgId) === String(this.form.orgId)) || this.organizations[0]
+				if (org && org.orgName) this.form.company = org.orgName
+			},
+			onOrganizationChange(e) {
+				const org = this.organizations[Number(e.detail.value)]
+				if (org) {
+					this.form.orgId = org.orgId
+					this.syncCertifiedCompany()
+				}
+			},
 			trimForm() {
 				const result = {}
 				Object.keys(this.form).forEach((key) => {
@@ -210,8 +235,13 @@
 						return false
 					}
 				}
-				if (!/^\d{11}$/.test(data.phone)) {
+				if (!validatePhone(data.phone, { required: true }).ok) {
 					uni.showToast({ title: '请输入11位手机号码', icon: 'none' })
+					return false
+				}
+				const emailCheck = validateEmail(data.email, { required: false })
+				if (!emailCheck.ok) {
+					uni.showToast({ title: emailCheck.message, icon: 'none' })
 					return false
 				}
 				return true
@@ -314,6 +344,21 @@
 		padding: 0 24rpx;
 		font-size: 28rpx;
 		color: #222222;
+	}
+
+	.input-disabled {
+		color: #666666;
+	}
+
+	.locked-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 12rpx;
+	}
+
+	.locked-row .input {
+		flex: 1;
 	}
 
 	.textarea {

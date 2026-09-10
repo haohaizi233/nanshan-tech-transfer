@@ -34,3 +34,9 @@ test('my-list keeps demand reject hints and does not mark matched favorites offl
   assert.match(myList, /const offline = \['offline', 'closed', 'cancelled'\]\.includes\(sum\.status\)/)
   assert.match(myList, /if \(this\.pageType === 'result'\)/)
 })
+
+test('dock-detail keeps the favorite star available after confirmation', () => {
+  assert.match(dock, /:class="favorited \? 'star-btn star-on' : 'star-btn'"/)
+  assert.match(dock, /async onToggleFavorite\(\)/)
+  assert.doesNotMatch(dock, /onToggleFavorite[\s\S]{0,200}status === 'published'/)
+})

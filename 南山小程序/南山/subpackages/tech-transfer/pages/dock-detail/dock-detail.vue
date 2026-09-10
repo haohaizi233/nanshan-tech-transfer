@@ -16,41 +16,44 @@
 				<view v-if="detail.isMine && detail.statusLabel" class="mine-status-row">
 					<text class="mine-status-text">状态：{{ detail.statusLabel }}</text>
 				</view>
-				<view class="meta-row">
-					<view class="meta-item">
+				<view v-if="detail.company || detail.location" class="meta-row">
+					<view v-if="detail.company" class="meta-item">
 						<text class="meta-label">公司名称</text>
-						<text class="meta-value">{{ detail.company || '未填写' }}</text>
+						<view class="meta-value-row">
+							<text class="meta-value">{{ detail.company }}</text>
+							<text v-if="detail.orgCertified" class="cert-badge">认证</text>
+						</view>
 					</view>
-					<view class="meta-item">
+					<view v-if="detail.location" class="meta-item">
 						<text class="meta-label">地点</text>
-						<text class="meta-value">{{ detail.location || '未填写' }}</text>
+						<text class="meta-value">{{ detail.location }}</text>
 					</view>
 				</view>
-				<view class="meta-row">
-					<view class="meta-item">
+				<view v-if="detail.budget || detail.deadline" class="meta-row">
+					<view v-if="detail.budget" class="meta-item">
 						<text class="meta-label">预算</text>
-						<text class="meta-value meta-em">{{ detail.budget || '未填写' }}</text>
+						<text class="meta-value meta-em">{{ detail.budget }}</text>
 					</view>
-					<view class="meta-item">
+					<view v-if="detail.deadline" class="meta-item">
 						<text class="meta-label">期望周期</text>
-						<text class="meta-value">{{ detail.deadline || '待沟通' }}</text>
+						<text class="meta-value">{{ detail.deadline }}</text>
 					</view>
 				</view>
-				<view class="field">
+				<view v-if="detail.industry" class="field">
 					<text class="field-label">所属行业</text>
-					<text class="field-value">{{ detail.industry || '未填写' }}</text>
+					<text class="field-value">{{ detail.industry }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.cooperationType" class="field">
 					<text class="field-label">合作方式</text>
-					<text class="field-value">{{ detail.cooperationType || '面议' }}</text>
+					<text class="field-value">{{ detail.cooperationType }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.demandDesc" class="field">
 					<text class="field-label">需求说明</text>
 					<text class="field-value">{{ detail.demandDesc }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.companyIntro" class="field">
 					<text class="field-label">公司简介</text>
-					<text class="field-value field-muted">{{ detail.companyIntro || '暂无简介' }}</text>
+					<text class="field-value field-muted">{{ detail.companyIntro }}</text>
 				</view>
 			</block>
 
@@ -60,37 +63,40 @@
 				<view v-if="detail.isMine && detail.statusLabel" class="mine-status-row">
 					<text class="mine-status-text">状态：{{ detail.statusLabel }}</text>
 				</view>
-				<view class="meta-row">
+				<view v-if="detail.source" class="meta-row">
 					<view class="meta-item meta-full">
 						<text class="meta-label">来源</text>
-						<text class="meta-value">{{ detail.source }}</text>
+						<view class="meta-value-row">
+							<text class="meta-value">{{ detail.source }}</text>
+							<text v-if="detail.orgCertified" class="cert-badge">认证</text>
+						</view>
 					</view>
 				</view>
 				<view class="price-box">
 					<text class="price-label">期望报价</text>
 					<text class="price-value">{{ detail.price }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.techIntro" class="field">
 					<text class="field-label">技术简介</text>
 					<text class="field-value">{{ detail.techIntro }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.purpose" class="field">
 					<text class="field-label">成果用途</text>
 					<text class="field-value">{{ detail.purpose }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.techPath" class="field">
 					<text class="field-label">技术路径</text>
 					<text class="field-value">{{ detail.techPath }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.patentHolder" class="field">
 					<text class="field-label">专利持有人</text>
 					<text class="field-value">{{ detail.patentHolder }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.patentNo" class="field">
 					<text class="field-label">专利号</text>
 					<text class="field-value">{{ detail.patentNo }}</text>
 				</view>
-				<view class="field">
+				<view v-if="detail.maturity" class="field">
 					<text class="field-label">成熟度</text>
 					<text class="field-value">{{ detail.maturity }}</text>
 				</view>
@@ -105,17 +111,17 @@
 			<view class="contact-card">
 				<view class="contact-row">
 					<text class="contact-label">联系人</text>
-					<text class="contact-value">{{ detail.contactName }}（{{ detail.contactTitle }}）</text>
+					<text class="contact-value">{{ detail.contactName }}{{ detail.contactTitle ? '（' + detail.contactTitle + '）' : '' }}</text>
 				</view>
-				<view class="contact-row" @click="onCall">
+				<view v-if="detail.phone" class="contact-row" @click="onCall">
 					<text class="contact-label">电话</text>
 					<text class="contact-value contact-link">{{ detail.phone }}</text>
 				</view>
-				<view class="contact-row" @click="onCopy(detail.email, '邮箱')">
+				<view v-if="detail.email" class="contact-row" @click="onCopy(detail.email, '邮箱')">
 					<text class="contact-label">邮箱</text>
 					<text class="contact-value contact-link">{{ detail.email }}</text>
 				</view>
-				<view class="contact-row" @click="onCopy(detail.wechat, '微信号')">
+				<view v-if="detail.wechat" class="contact-row" @click="onCopy(detail.wechat, '微信号')">
 					<text class="contact-label">微信</text>
 					<text class="contact-value contact-link">{{ detail.wechat }}</text>
 				</view>
@@ -722,6 +728,13 @@
 		font-size: 26rpx;
 		color: #555555;
 		font-weight: 400;
+	}
+
+	.meta-value-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		flex-wrap: wrap;
 	}
 
 	.meta-em {

@@ -45,16 +45,6 @@ export const CAPITAL_MODULES = [
 		sourceLabel: '投融资对接',
 		pending: false,
 		iconText: '投'
-	},
-	{
-		key: 'patent',
-		name: '专利价值评估',
-		desc: '转让 / 许可 / 质押 / 作价入股定价参考',
-		cardHint: 'AI初评 + 专家评估 / 参考价值区间',
-		source: 'eval',
-		sourceLabel: '评估服务',
-		pending: true,
-		iconText: '评'
 	}
 ]
 
@@ -74,7 +64,7 @@ export function getCapitalGroups() {
 		}
 		map[mod.source].modules.push(mod)
 	})
-	return ['platform', 'finance', 'eval']
+	return ['platform', 'finance']
 		.map((key) => map[key])
 		.filter(Boolean)
 }

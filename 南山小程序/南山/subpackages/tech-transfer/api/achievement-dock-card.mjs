@@ -16,7 +16,7 @@ export function formatMaturityLabel(level, desc) {
   const text = String(desc || '').trim()
   if (text && MATURITY_LABELS[text]) return MATURITY_LABELS[text]
   if (text) return text
-  return MATURITY_LABELS[level] || '未填写'
+  return MATURITY_LABELS[level] || ''
 }
 
 export function toAchievementDockCard(data = {}) {
@@ -35,15 +35,16 @@ export function toAchievementDockCard(data = {}) {
   return {
     id: data.id,
     title: data.title || '',
-    source: data.sourceOrgName || '未填写',
+    source: data.sourceOrgName || '',
+    orgCertified: !!data.orgCertified,
     price,
-    techIntro: data.techIntro || '未填写',
-    purpose: (data.applicationFields || []).join(' / ') || '未填写',
-    techPath: data.techRoute || '未填写',
-    patentHolder: (data.inventors || []).map((v) => v.name).join('、') || '未填写',
-    patentNo: '详见成果详情',
+    techIntro: data.techIntro || '',
+    purpose: (data.applicationFields || []).join(' / '),
+    techPath: data.techRoute || '',
+    patentHolder: (data.inventors || []).map((v) => v.name).filter(Boolean).join('、'),
+    patentNo: '',
     maturity: formatMaturityLabel(data.maturityLevel, data.maturityDesc),
-    contactName: data.contactName || '暂无',
+    contactName: data.contactName || '',
     contactTitle: data.contactTitle || '',
     phone: data.contactPhone || '',
     email: data.contactEmail || '',
@@ -73,6 +74,7 @@ export function toAchievementPreviewCard(item = {}, favorited = false) {
     id: String(item.id),
     title: item.title || '',
     source: item.sourceOrgName || '',
+    orgCertified: !!item.orgCertified,
     techIntro: item.techIntro || '',
     price,
     favorited,

@@ -45,6 +45,14 @@ test('shows Chinese maturity labels instead of raw callback codes', () => {
   )
 })
 
+test('omits placeholder copy for empty optional achievement fields', () => {
+  const empty = toAchievementDockCard({})
+  assert.equal(empty.patentHolder, '')
+  assert.equal(empty.patentNo, '')
+  assert.equal(empty.maturity, '')
+  assert.equal(empty.source, '')
+})
+
 test('publish form defaults maturity to the visible first option', () => {
   const source = readFileSync(
     new URL('../subpackages/tech-transfer/pages/post-result/post-result.vue', import.meta.url),

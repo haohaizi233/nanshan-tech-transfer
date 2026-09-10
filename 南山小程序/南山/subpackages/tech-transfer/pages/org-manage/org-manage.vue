@@ -64,7 +64,14 @@
 		<view v-if="dialogVisible" class="dialog-mask" @click="closeDialog">
 			<view class="dialog-panel" @click.stop>
 				<text class="dialog-title">{{ dialogTitle }}</text>
-				<textarea class="dialog-textarea" :value="dialogReason" placeholder="请填写原因（必填）" @input="onReasonInput" />
+				<text class="dialog-desc">请填写原因后再确认，提交后不可撤销</text>
+				<textarea
+					class="dialog-textarea"
+					:value="dialogReason"
+					placeholder="请填写原因（必填）"
+					maxlength="200"
+					@input="onReasonInput"
+				/>
 				<view class="dialog-actions">
 					<button class="dialog-btn cancel" @click="closeDialog">取消</button>
 					<button class="dialog-btn confirm" :disabled="dialogSubmitting" @click="confirmDialog">
@@ -454,55 +461,83 @@
 		align-items: center;
 		justify-content: center;
 		padding: 48rpx;
+		box-sizing: border-box;
 	}
 
+	/* #ifdef H5 */
+	.dialog-mask {
+		left: var(--window-left, 0px);
+		right: var(--window-right, 0px);
+	}
+	/* #endif */
+
 	.dialog-panel {
-		width: 100%;
+		width: 560rpx;
+		max-width: 100%;
 		background: #ffffff;
-		border-radius: 16rpx;
-		padding: 32rpx;
+		border-radius: 20rpx;
+		padding: 36rpx 32rpx 28rpx;
 		box-sizing: border-box;
 	}
 
 	.dialog-title {
 		display: block;
-		font-size: 30rpx;
+		font-size: 32rpx;
 		font-weight: 600;
 		color: #1a1a1a;
-		margin-bottom: 20rpx;
+		text-align: center;
+		margin-bottom: 8rpx;
+	}
+
+	.dialog-desc {
+		display: block;
+		font-size: 24rpx;
+		color: #888888;
+		text-align: center;
+		line-height: 1.5;
+		margin-bottom: 24rpx;
 	}
 
 	.dialog-textarea {
 		width: 100%;
-		min-height: 140rpx;
+		height: 160rpx;
+		min-height: 160rpx;
 		background: #f7f9fc;
 		border-radius: 12rpx;
-		padding: 20rpx 24rpx;
+		padding: 18rpx 20rpx;
 		font-size: 26rpx;
+		line-height: 1.5;
 		box-sizing: border-box;
-		margin-bottom: 24rpx;
+		margin-bottom: 28rpx;
 	}
 
 	.dialog-actions {
 		display: flex;
 		flex-direction: row;
+		align-items: center;
 	}
 
 	.dialog-btn {
 		flex: 1;
+		height: 80rpx;
+		line-height: 80rpx;
 		margin: 0 8rpx;
+		padding: 0;
 		font-size: 28rpx;
 		border-radius: 12rpx;
 	}
 
+	.dialog-btn::after {
+		border: none;
+	}
+
 	.dialog-btn.cancel {
-		background: #ffffff;
-		color: #666666;
-		border: 1rpx solid #dddddd;
+		background: #f4f6fa !important;
+		color: #666666 !important;
 	}
 
 	.dialog-btn.confirm {
-		background: #2b73f8;
-		color: #ffffff;
+		background: #2b73f8 !important;
+		color: #ffffff !important;
 	}
 </style>

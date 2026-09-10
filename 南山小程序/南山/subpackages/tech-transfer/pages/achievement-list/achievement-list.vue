@@ -59,11 +59,12 @@
             <text class="card-title">{{ item.title }}</text>
             <text v-if="item.categoryName" class="badge">{{ item.categoryName }}</text>
           </view>
-          <view class="meta-row">
+          <view v-if="item.sourceOrgName" class="meta-row">
             <text class="meta-source">{{ item.sourceOrgName }}</text>
+            <text v-if="item.orgCertified" class="cert-badge">认证</text>
             <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
           </view>
-          <text class="tech-intro">{{ item.techIntro }}</text>
+          <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
           <view v-if="item.applicationFields && item.applicationFields.length" class="field-tags">
             <text v-for="(field, idx) in item.applicationFields.slice(0, 3)" :key="idx" class="field-tag">{{ field }}</text>
           </view>

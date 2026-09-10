@@ -20,6 +20,7 @@ import {
 } from './client.js'
 import { apiRequest } from './client.js'
 import HostBridge from '../../../host/host-bridge.js'
+import { validateEmail, validatePhone } from './contact-validation.mjs'
 
 const HISTORY_PHONES_KEY = 'ns_user_history_phones'
 
@@ -100,6 +101,17 @@ export function getSessionPhone() {
 	return user && user.phone ? String(user.phone).trim() : ''
 }
 
+function getActiveMemberships(user) {
+	const list = (user && user.organizationMemberships) || []
+	return Array.isArray(list) ? list.filter((item) => item && item.status === 'active') : []
+}
+
+function resolveCompanyName(user) {
+	const memberships = getActiveMemberships(user)
+	if (memberships.length && memberships[0].orgName) return memberships[0].orgName
+	return String((user && (user.companyText || user.orgTitle)) || '').trim()
+}
+
 /** 历史登录过的手机号列表（仅用于登录页快速填入） */
 export function listCachedAccounts() {
 	const currentPhone = getSessionPhone()
@@ -109,7 +121,7 @@ export function listCachedAccounts() {
 			phone,
 			hasPassword: true,
 			nickname: phone === currentPhone ? (currentUser && currentUser.displayName) || '' : '',
-			company: phone === currentPhone ? (currentUser && currentUser.orgTitle) || '' : '',
+			company: phone === currentPhone ? resolveCompanyName(currentUser) : '',
 			profileComplete: phone === currentPhone ? isProfileComplete(getUserProfile()) : false
 		}))
 		.sort((a, b) => a.phone.localeCompare(b.phone))
@@ -122,7 +134,7 @@ export function getUserProfile() {
 	return {
 		avatar: user.avatar || '/static/logo.png',
 		nickname: user.displayName || '',
-		company: user.orgTitle || '',
+		company: resolveCompanyName(user),
 		subjectType: user.subjectType || '',
 		businessCapabilities: user.businessCapabilities || [],
 		phone: user.phone || '',
@@ -185,7 +197,8 @@ export function getDockBlockMessage(type, detail) {
 export async function registerAccount(phone, password) {
 	const p = (phone || '').trim()
 	const pwd = (password || '').trim()
-	if (!/^\d{11}$/.test(p)) return { ok: false, message: '请输入11位手机号' }
+	const phoneCheck = validatePhone(p, { required: true })
+	if (!phoneCheck.ok) return { ok: false, message: phoneCheck.message }
 	if (pwd.length < 6) return { ok: false, message: '密码至少6位' }
 	try {
 		await authRegister(p, pwd)
@@ -203,7 +216,8 @@ export async function registerAccount(phone, password) {
 export async function loginAccount(phone, password) {
 	const p = (phone || '').trim()
 	const pwd = (password || '').trim()
-	if (!/^\d{11}$/.test(p)) return { ok: false, message: '请输入11位手机号' }
+	const phoneCheck = validatePhone(p, { required: true })
+	if (!phoneCheck.ok) return { ok: false, message: phoneCheck.message }
 	if (!pwd) return { ok: false, message: '请输入密码' }
 	try {
 		await authLogin(p, pwd)
@@ -225,15 +239,31 @@ export async function saveUserProfile(profile) {
 		? profile.subjectType
 		: ''
 	const current = getCurrentUser() || {}
+	const emailCheck = validateEmail(profile.email, { required: false })
+	if (!emailCheck.ok) {
+		uni.showToast({ title: emailCheck.message, icon: 'none' })
+		return null
+	}
+	const phoneCheck = validatePhone(profile.phone, { required: false })
+	if (!phoneCheck.ok) {
+		uni.showToast({ title: phoneCheck.message, icon: 'none' })
+		return null
+	}
 	const body = {
 		version: current.version || 1,
 		displayName: (profile.nickname || '').trim() || undefined,
 		subjectType: subjectType || undefined,
 		businessCapabilities: normalizeCapabilities(profile.businessCapabilities),
-		phone: (profile.phone || '').trim() || undefined,
-		email: (profile.email || '').trim() || undefined,
+		phone: phoneCheck.value || undefined,
+		email: emailCheck.value || undefined,
 		wechat: (profile.wechat || '').trim() || undefined,
-		orgTitle: (profile.company || '').trim() || undefined
+	}
+	if (!getActiveMemberships(current).length) {
+		const company = (profile.company || '').trim()
+		if (company) {
+			body.companyText = company
+			body.orgTitle = company
+		}
 	}
 
 	try {

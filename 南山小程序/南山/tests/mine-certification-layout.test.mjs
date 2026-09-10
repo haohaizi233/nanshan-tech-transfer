@@ -20,3 +20,13 @@ test('organization certification places the administrator role on the title row'
   assert.match(source, /\.org-card-certified_admin\s*\{/)
   assert.doesNotMatch(source, /\.org-card-certified-admin\s*\{/)
 })
+
+test('profile card stacks identity, company, and contact instead of a cramped side-by-side row', () => {
+  assert.match(source, /class="profile-head"/)
+  assert.match(source, /class="name-row"/)
+  assert.match(source, /<view v-if="displayCompany" class="company-row">/)
+  assert.match(source, /class="contact-list"/)
+  assert.match(source, /<text class="contact-label">电话<\/text>/)
+  assert.doesNotMatch(source, /class="profile-divider"/)
+  assert.doesNotMatch(source, /class="contact-side"/)
+})

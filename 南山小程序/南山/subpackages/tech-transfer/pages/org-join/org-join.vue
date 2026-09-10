@@ -79,6 +79,7 @@
 <script>
 	import { searchInstitutions, applyMembership, getMyOrganizationCertification } from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
+	import { validateEmail } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 
 	const KIND_LABELS = {
@@ -180,6 +181,11 @@
 					uni.showToast({ title: '请填写真实姓名', icon: 'none' })
 					return
 				}
+				const emailCheck = validateEmail(this.form.workEmail, { required: false, label: '工作邮箱' })
+				if (!emailCheck.ok) {
+					uni.showToast({ title: emailCheck.message, icon: 'none' })
+					return
+				}
 				this.submitting = true
 				uni.showLoading({ title: '提交中', mask: true })
 				try {
@@ -188,7 +194,7 @@
 						realName,
 						department: (this.form.department || '').trim() || undefined,
 						title: (this.form.title || '').trim() || undefined,
-						workEmail: (this.form.workEmail || '').trim() || undefined,
+						workEmail: emailCheck.value || undefined,
 						proofMaterial: (this.form.proofMaterial || '').trim() || undefined,
 						applyNote: (this.form.applyNote || '').trim() || undefined
 					})

@@ -54,4 +54,21 @@
 	button {
 		box-sizing: border-box;
 	}
+
+	.cert-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin-left: 8rpx;
+		padding: 0 10rpx;
+		height: 32rpx;
+		border-radius: 8rpx;
+		border: 1rpx solid #7dcea0;
+		background: #eaf8f0;
+		color: #1a8f55;
+		font-size: 20rpx;
+		font-weight: 600;
+		line-height: 32rpx;
+		vertical-align: middle;
+	}
 </style>

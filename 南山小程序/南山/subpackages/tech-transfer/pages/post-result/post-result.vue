@@ -4,8 +4,8 @@
 		<view v-if="submitted" class="success-box">
 			<text class="success-icon">✓</text>
 			<text class="success-title">成果已提交审核</text>
-			<text class="success-desc">审核通过后将在成果列表展示；现在可以先发起 AI 评估，评估任务将在排队后执行</text>
-			<button class="eval-btn" size="mini" :disabled="evaluating" @click="onStartEvaluation">
+			<text class="success-desc">{{ aiEnabled ? '审核通过后将在成果列表展示；现在可以先发起 AI 评估，评估任务将在排队后执行' : '审核通过后将在成果列表展示' }}</text>
+			<button v-if="aiEnabled" class="eval-btn" size="mini" :disabled="evaluating" @click="onStartEvaluation">
 				{{ evaluating ? '提交中…' : '发起 AI 评估' }}
 			</button>
 			<button class="back-btn" size="mini" @click="goMyResults">查看我的成果</button>
@@ -21,7 +21,11 @@
 				</view>
 				<view class="form-item">
 					<text class="label">来源 <text class="required">*</text></text>
-					<input class="input" v-model="form.sourceOrgName" placeholder="例如：某高校 · 某学院/研究所" />
+					<view v-if="certifiedCompanyLocked" class="locked-row">
+						<input class="input input-disabled" disabled :value="form.sourceOrgName" />
+						<text class="cert-badge">认证</text>
+					</view>
+					<input v-else class="input" v-model="form.sourceOrgName" placeholder="例如：某高校 · 某学院/研究所" />
 				</view>
 				<view class="form-item">
 					<text class="label">成熟度 <text class="required">*</text></text>
@@ -108,7 +112,9 @@
 	import { createAchievement, submitAchievement } from '../../api/achievement.js'
 	import { createEvaluationTask } from '../../api/ai.js'
 	import { getMyOrganizationCertification } from '../../api/membership.js'
+	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 
 	const MATURITY_OPTIONS = [
 		{ value: '01_idea', label: '概念阶段' },
@@ -136,6 +142,7 @@
 	export default {
 		data() {
 			return {
+				aiEnabled: AI_FEATURE_ENABLED,
 				organizations: [],
 				submitting: false,
 				evaluating: false,
@@ -181,6 +188,7 @@
 			}
 			, organizationNames() { return this.organizations.map((item) => item.orgName) }
 			, organizationIndex() { const index = this.organizations.findIndex((item) => String(item.orgId) === String(this.form.orgId)); return index < 0 ? 0 : index }
+			, certifiedCompanyLocked() { return this.organizations.length > 0 }
 		},
 		onLoad() {
 			if (!ensureLoginForDock()) return
@@ -205,8 +213,27 @@
 					if (!this.form.contactWechat) this.form.contactWechat = profile.wechat || ''
 				}
 			},
-			async loadOrganizations() { try { const data = await getMyOrganizationCertification(); this.organizations = data.memberships || []; if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId } catch (e) { this.organizations = [] } },
-			onOrganizationChange(e) { const org = this.organizations[Number(e.detail.value)]; if (org) this.form.orgId = org.orgId },
+			async loadOrganizations() {
+				try {
+					const data = await getMyOrganizationCertification()
+					this.organizations = data.memberships || []
+					if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId
+					this.syncCertifiedCompany()
+				} catch (e) {
+					this.organizations = []
+				}
+			},
+			syncCertifiedCompany() {
+				const org = this.organizations.find((item) => String(item.orgId) === String(this.form.orgId)) || this.organizations[0]
+				if (org && org.orgName) this.form.sourceOrgName = org.orgName
+			},
+			onOrganizationChange(e) {
+				const org = this.organizations[Number(e.detail.value)]
+				if (org) {
+					this.form.orgId = org.orgId
+					this.syncCertifiedCompany()
+				}
+			},
 			onMaturityChange(e) {
 				const opt = MATURITY_OPTIONS[Number(e.detail.value)]
 				if (opt) this.form.maturityLevel = opt.value
@@ -231,8 +258,13 @@
 						return false
 					}
 				}
-				if (!/^\d{11}$/.test(f.contactPhone)) {
+				if (!validatePhone(f.contactPhone, { required: true }).ok) {
 					uni.showToast({ title: '请输入11位手机号码', icon: 'none' })
+					return false
+				}
+				const emailCheck = validateEmail(f.contactEmail, { required: false })
+				if (!emailCheck.ok) {
+					uni.showToast({ title: emailCheck.message, icon: 'none' })
 					return false
 				}
 				if (f.pricingMode !== 'negotiable' && (f.priceMinWan || f.priceMaxWan)) {
@@ -300,7 +332,7 @@
 				}
 			},
 			async onStartEvaluation() {
-				if (!this.submittedId || this.evaluating) return
+				if (!this.aiEnabled || !this.submittedId || this.evaluating) return
 				this.evaluating = true
 				try {
 					const task = await createEvaluationTask(this.submittedId)
@@ -373,6 +405,21 @@
 		padding: 0 24rpx;
 		font-size: 28rpx;
 		color: #222222;
+	}
+
+	.input-disabled {
+		color: #666666;
+	}
+
+	.locked-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 12rpx;
+	}
+
+	.locked-row .input {
+		flex: 1;
 	}
 
 	.picker-value {

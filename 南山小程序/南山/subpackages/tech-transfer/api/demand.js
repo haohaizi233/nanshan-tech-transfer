@@ -62,6 +62,8 @@ export function toDemandCard(d) {
     id: d.id,
     title: d.title,
     company: d.orgName || '',
+    orgCertified: !!d.orgCertified,
+    orgId: d.orgId || null,
     companyIntro: d.orgIntro || '',
     location: d.region || '',
     budget,

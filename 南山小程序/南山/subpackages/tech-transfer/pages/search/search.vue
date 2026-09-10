@@ -67,7 +67,10 @@
 						<text class="card-title">{{ item.title }}</text>
 						<text class="badge badge-d">需求</text>
 					</view>
-					<text class="meta">{{ item.metaLine }}</text>
+					<view v-if="item.metaLine || item.orgCertified" class="meta-row-inline">
+						<text v-if="item.metaLine" class="meta">{{ item.metaLine }}</text>
+						<text v-if="item.orgCertified" class="cert-badge">认证</text>
+					</view>
 					<text class="desc">{{ item.demandDesc }}</text>
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn" size="mini" @click.stop="openDetail('demand', item.id)">我要对接</button>
@@ -82,13 +85,22 @@
 						<text class="card-title">{{ item.title }}</text>
 						<text class="badge badge-r">高校成果</text>
 					</view>
-					<text class="meta">{{ item.source }}</text>
-					<text class="desc">{{ item.techIntro }}</text>
+					<view v-if="item.source" class="meta-row-inline">
+						<text class="meta">{{ item.source }}</text>
+						<text v-if="item.orgCertified" class="cert-badge">认证</text>
+					</view>
+					<text v-if="item.techIntro" class="desc">{{ item.techIntro }}</text>
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn" size="mini" @click.stop="openDetail('result', item.id)">我要对接</button>
 					</view>
 				</view>
 			</block>
+
+			<view v-if="currentList.length > 0" class="load-more">
+				<text v-if="loading">加载中...</text>
+				<text v-else-if="!currentHasMore">没有更多了</text>
+				<text v-else>上拉加载更多</text>
+			</view>
 		</view>
 	</view>
 </template>
@@ -104,7 +116,7 @@
 	} from '../../api/search.js'
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
-	import { searchAchievements } from '../../api/achievement.js'
+	import { getAchievements, searchAchievements } from '../../api/achievement.js'
 	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
 	import { getDemands, toDemandCard } from '../../api/demand.js'
 
@@ -116,7 +128,13 @@
 				demandHistory: [],
 				resultHistory: [],
 				demandList: [],
-				resultList: []
+				resultList: [],
+				demandTotal: 0,
+				resultTotal: 0,
+				demandPage: 1,
+				resultPage: 1,
+				loading: false,
+				pageSize: 50
 			}
 		},
 		computed: {
@@ -126,10 +144,16 @@
 			currentList() {
 				return this.searchType === 0 ? this.demandList : this.resultList
 			},
+			currentTotal() {
+				return this.searchType === 0 ? this.demandTotal : this.resultTotal
+			},
+			currentHasMore() {
+				return this.currentList.length < this.currentTotal
+			},
 			listTip() {
 				const kw = (this.keyword || '').trim()
 				const name = this.searchType === 0 ? '需求' : '成果'
-				const count = this.currentList.length
+				const count = this.currentTotal
 				if (!kw) {
 					return '全部' + name + '（' + count + ' 条）'
 				}
@@ -139,9 +163,16 @@
 		onShow() {
 			this.loadHistory()
 			if (this.searchType === 0) {
-				this.loadDemands(this.keyword)
+				this.loadDemands(this.keyword, true)
 			} else {
-				this.loadResults(this.keyword)
+				this.loadResults(this.keyword, true)
+			}
+		},
+		onReachBottom() {
+			if (this.searchType === 0) {
+				this.loadDemands(this.keyword, false)
+			} else {
+				this.loadResults(this.keyword, false)
 			}
 		},
 		methods: {
@@ -153,40 +184,74 @@
 				this.searchType = type
 				this.keyword = ''
 				if (type === 0) {
-					this.loadDemands('')
+					this.loadDemands('', true)
 				} else {
-					this.loadResults('')
+					this.loadResults('', true)
 				}
 			},
-			async loadDemands(keyword) {
+			mapDemand(item) {
+				const card = toDemandCard(item)
+				return {
+					...card,
+					metaLine: [card.company, card.location, card.budget].filter(Boolean).join(' ｜ '),
+					canDock: !card.isMine
+				}
+			},
+			async loadDemands(keyword, reset) {
+				if (this.loading) return
+				if (!reset && this.demandList.length >= this.demandTotal) return
+				this.loading = true
+				const page = reset ? 1 : this.demandPage + 1
 				try {
-					const data = await getDemands({ keyword: keyword || '', page: 1, pageSize: 50 })
-					this.demandList = (data.list || []).map((item) => {
-						const card = toDemandCard(item)
-						return {
-							...card,
-							metaLine: [card.company, card.location, card.budget].filter(Boolean).join(' ｜ '),
-							canDock: !card.isMine
-						}
+					const data = await getDemands({
+						keyword: keyword || '',
+						page,
+						pageSize: this.pageSize
 					})
+					const rows = (data.list || []).map((item) => this.mapDemand(item))
+					this.demandTotal = Number(data.total) || 0
+					this.demandPage = page
+					this.demandList = reset ? rows : this.demandList.concat(rows)
 				} catch (e) {
 					console.error('[search] loadDemands failed:', e)
-					this.demandList = []
+					if (reset) {
+						this.demandList = []
+						this.demandTotal = 0
+					}
+				} finally {
+					this.loading = false
 				}
 			},
-			async loadResults(keyword) {
+			async loadResults(keyword, reset) {
+				if (this.loading) return
+				if (!reset && this.resultList.length >= this.resultTotal) return
+				this.loading = true
+				const page = reset ? 1 : this.resultPage + 1
 				try {
-					const data = await searchAchievements({ keyword: keyword || '', page: 1, pageSize: 50 })
-					this.resultList = (data.list || []).map((item) => toAchievementPreviewCard(item))
+					const kw = (keyword || '').trim()
+					const data = kw
+						? await searchAchievements({ keyword: kw, page, pageSize: this.pageSize })
+						: await getAchievements({ page, pageSize: this.pageSize })
+					const rows = (data.list || []).map((item) => toAchievementPreviewCard(item))
+					this.resultTotal = Number(data.total) || 0
+					this.resultPage = page
+					this.resultList = reset ? rows : this.resultList.concat(rows)
 				} catch (e) {
 					console.error('[search] loadResults failed:', e)
-					this.resultList = []
+					if (reset) {
+						this.resultList = []
+						this.resultTotal = 0
+					}
+				} finally {
+					this.loading = false
 				}
 			},
 			onInput(e) {
 				this.keyword = e.detail.value
 				if (this.searchType === 0) {
-					this.loadDemands(this.keyword)
+					this.loadDemands(this.keyword, true)
+				} else {
+					this.loadResults(this.keyword, true)
 				}
 			},
 			onConfirmSearch() {
@@ -197,9 +262,9 @@
 				}
 				this.keyword = kw
 				if (this.searchType === 0) {
-					this.loadDemands(kw)
+					this.loadDemands(kw, true)
 				} else {
-					this.loadResults(kw)
+					this.loadResults(kw, true)
 				}
 				this.saveHistory(kw)
 			},
@@ -213,9 +278,9 @@
 			onHistoryTap(item) {
 				this.keyword = item
 				if (this.searchType === 0) {
-					this.loadDemands(item)
+					this.loadDemands(item, true)
 				} else {
-					this.loadResults(item)
+					this.loadResults(item, true)
 				}
 				this.saveHistory(item)
 			},
@@ -453,6 +518,18 @@
 		margin-bottom: 12rpx;
 	}
 
+	.meta-row-inline {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 12rpx;
+	}
+
+	.meta-row-inline .meta {
+		margin-bottom: 0;
+		margin-right: 8rpx;
+	}
+
 	.desc {
 		display: block;
 		font-size: 26rpx;
@@ -470,5 +547,12 @@
 		background: #2b73f8 !important;
 		color: #ffffff !important;
 		margin: 0;
+	}
+
+	.load-more {
+		text-align: center;
+		padding: 16rpx 0 8rpx;
+		font-size: 26rpx;
+		color: #999999;
 	}
 </style>

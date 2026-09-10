@@ -14,3 +14,9 @@ test('keeps application approve and reject actions on one row', () => {
   assert.match(manage, /\.action-row\s*\{[\s\S]*flex-direction:\s*row/)
   assert.match(manage, /\.action-row\s+\.mini-btn\s*\{[\s\S]*margin:/)
 })
+
+test('keeps the revoke dialog as a centered card instead of a full-width overlay', () => {
+  assert.match(manage, /\.dialog-panel\s*\{[\s\S]*?width:\s*560rpx/)
+  assert.match(manage, /left:\s*var\(--window-left,\s*0px\)/)
+  assert.match(manage, /right:\s*var\(--window-right,\s*0px\)/)
+})

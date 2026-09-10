@@ -84,7 +84,11 @@
 				</view>
 				<view class="form-item">
 					<text class="label">公司 <text class="required">*</text></text>
-					<input class="input" :value="form.company" placeholder="请输入公司名称" @input="onFieldInput('company', $event)" />
+					<view v-if="isOrgCertified" class="locked-row">
+						<input class="input input-disabled" disabled :value="certifiedOrgName" />
+						<text class="cert-badge">认证</text>
+					</view>
+					<input v-else class="input" :value="form.company" placeholder="请输入公司名称" @input="onFieldInput('company', $event)" />
 				</view>
 				<view class="form-item">
 					<text class="label">主体类型 <text class="required">*</text></text>
@@ -133,30 +137,39 @@
 		<!-- 已登录且资料齐全 -->
 		<view v-else class="logged-wrap">
 			<view class="profile-card">
-				<view class="profile-top">
-					<view class="avatar-col">
-						<image class="avatar lg" :src="profile.avatar || '/static/logo.png'" mode="aspectFill"></image>
-					</view>
-					<view class="profile-info">
-						<text class="nickname">{{ profile.nickname }}</text>
-						<view class="tag-row">
+				<view class="profile-head">
+					<image class="avatar lg" :src="profile.avatar || '/static/logo.png'" mode="aspectFill"></image>
+					<view class="profile-main">
+						<view class="name-row">
+							<text class="nickname">{{ profile.nickname }}</text>
 							<text v-if="profileSubjectLabel" class="identity-tag">{{ profileSubjectLabel }}</text>
-							<text
-								v-for="label in profileCapabilityLabels"
-								:key="label"
-								class="cap-tag"
-							>{{ label }}</text>
+						</view>
+						<view v-if="displayCompany" class="company-row">
+							<text class="company">{{ displayCompany }}</text>
+							<text v-if="isOrgCertified" class="cert-badge">认证</text>
 						</view>
 					</view>
-					<view class="profile-divider"></view>
-					<view class="contact-side">
-						<text class="side-line">电话：{{ profile.phone }}</text>
-						<text class="side-line">邮箱：{{ profile.email }}</text>
-						<text class="side-line">微信：{{ profile.wechat }}</text>
-					</view>
 				</view>
-				<view class="company-row">
-					<text class="company">{{ profile.company }}</text>
+				<view v-if="profileCapabilityLabels.length" class="tag-row">
+					<text
+						v-for="label in profileCapabilityLabels"
+						:key="label"
+						class="cap-tag"
+					>{{ label }}</text>
+				</view>
+				<view class="contact-list">
+					<view class="contact-row">
+						<text class="contact-label">电话</text>
+						<text class="contact-value">{{ profile.phone || '未填写' }}</text>
+					</view>
+					<view class="contact-row">
+						<text class="contact-label">邮箱</text>
+						<text class="contact-value">{{ profile.email || '未填写' }}</text>
+					</view>
+					<view class="contact-row">
+						<text class="contact-label">微信</text>
+						<text class="contact-value">{{ profile.wechat || '未填写' }}</text>
+					</view>
 				</view>
 			</view>
 
@@ -190,25 +203,35 @@
 			<view class="module-grid">
 				<view class="module-box" @click="goMyList('demand')">
 					<view class="module-icon demand-icon">需</view>
-					<text class="module-title">我发布的需求</text>
-					<text class="module-count">已发布 {{ myDemandCount }} 条</text>
-					<text class="module-pending">待审核 {{ myDemandPendingCount }} 条</text>
+					<view class="module-body">
+						<text class="module-title">我发布的需求</text>
+						<text class="module-count">已发布 {{ myDemandCount }} 条</text>
+						<text class="module-pending">待审核 {{ myDemandPendingCount }} 条</text>
+					</view>
 				</view>
 				<view class="module-box" @click="goMyList('result')">
 					<view class="module-icon result-icon">果</view>
-					<text class="module-title">我发布的成果</text>
-					<text class="module-count">已发布 {{ myResultCount }} 条</text>
-					<text class="module-pending">待审核 {{ myResultPendingCount }} 条</text>
+					<view class="module-body">
+						<text class="module-title">我发布的成果</text>
+						<text class="module-count">已发布 {{ myResultCount }} 条</text>
+						<text class="module-pending">待审核 {{ myResultPendingCount }} 条</text>
+					</view>
 				</view>
 				<view class="module-box" @click="goMyList('favorite')">
 					<view class="module-icon fav-icon">藏</view>
-					<text class="module-title">我的收藏</text>
-					<text class="module-count">{{ favoriteCount }} 条</text>
+					<view class="module-body">
+						<text class="module-title">我的收藏</text>
+						<text class="module-count">需求 {{ favoriteDemandCount }} 条</text>
+						<text class="module-pending">成果 {{ favoriteResultCount }} 条</text>
+					</view>
 				</view>
 				<view class="module-box" @click="goMyList('intention')">
 					<view class="module-icon intent-icon">意</view>
-					<text class="module-title">意向请求</text>
-					<text class="module-count">{{ intentionCount }} 条</text>
+					<view class="module-body">
+						<text class="module-title">意向请求</text>
+						<text class="module-count">需处理 {{ intentionPendingCount }} 个</text>
+						<text class="module-pending">成功对接 {{ intentionSuccessCount }} 个</text>
+					</view>
 				</view>
 			</view>
 
@@ -246,6 +269,7 @@
 	import { getMyAchievements } from '../../api/achievement.js'
 	import { getMyFavorites, getMyCooperations } from '../../api/interaction.js'
 	import { fetchCurrentUser, getMyOrganizationCertification } from '../../api/membership.js'
+	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 
 	export default {
@@ -280,8 +304,10 @@
 				myDemandPendingCount: 0,
 				myResultCount: 0,
 				myResultPendingCount: 0,
-				favoriteCount: 0,
-				intentionCount: 0,
+				favoriteDemandCount: 0,
+				favoriteResultCount: 0,
+				intentionPendingCount: 0,
+				intentionSuccessCount: 0,
 				memberships: [],
 				certification: { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
 			}
@@ -311,6 +337,18 @@
 					return '机构入驻审核中：' + (this.certification.pendingName || '待命名机构')
 				}
 				return '选择认证方式后可绑定机构身份'
+			},
+			isOrgCertified() {
+				return this.certification.status === 'certified_admin' || this.certification.status === 'certified_member'
+			},
+			certifiedOrgName() {
+				const primary = this.certification && this.certification.primaryMembership
+				if (primary && primary.orgName) return primary.orgName
+				const first = this.memberships && this.memberships[0]
+				return (first && first.orgName) || ''
+			},
+			displayCompany() {
+				return this.certifiedOrgName || (this.profile && this.profile.company) || ''
 			}
 		},
 		onShow() {
@@ -320,7 +358,7 @@
 			this.refresh()
 		},
 		methods: {
-			refresh() {
+			async refresh() {
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
@@ -339,9 +377,9 @@
 				this.viewMode = 'auth'
 			}
 
-				this.loadMyPublicationCounts()
-				this.loadInteractionCounts()
-				this.loadMemberships()
+				await this.loadMyPublicationCounts()
+				await this.loadInteractionCounts()
+				await this.loadMemberships()
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
@@ -394,18 +432,25 @@
 			},
 			async loadInteractionCounts() {
 				if (!isLoggedIn()) {
-					this.favoriteCount = 0
-					this.intentionCount = 0
+					this.favoriteDemandCount = 0
+					this.favoriteResultCount = 0
+					this.intentionPendingCount = 0
+					this.intentionSuccessCount = 0
 					return
 				}
 				try {
-					const [favDemand, favResult, coop] = await Promise.all([
+					const [favDemand, favResult, pending, accepted, confirmed, completed] = await Promise.all([
 						getMyFavorites('demand', { page: 1, pageSize: 1 }),
 						getMyFavorites('result', { page: 1, pageSize: 1 }),
-						getMyCooperations({ role: 'both', page: 1, pageSize: 1 })
+						getMyCooperations({ role: 'both', status: 'pending', page: 1, pageSize: 1 }),
+						getMyCooperations({ role: 'both', status: 'accepted', page: 1, pageSize: 1 }),
+						getMyCooperations({ role: 'both', status: 'confirmed', page: 1, pageSize: 1 }),
+						getMyCooperations({ role: 'both', status: 'completed', page: 1, pageSize: 1 })
 					])
-					this.favoriteCount = (favDemand.total || 0) + (favResult.total || 0)
-					this.intentionCount = coop.total || 0
+					this.favoriteDemandCount = favDemand.total || 0
+					this.favoriteResultCount = favResult.total || 0
+					this.intentionPendingCount = (pending.total || 0) + (accepted.total || 0)
+					this.intentionSuccessCount = (confirmed.total || 0) + (completed.total || 0)
 				} catch (e) {
 					console.error('[mine] loadInteractionCounts failed:', e)
 				}
@@ -450,7 +495,7 @@
 				this.form = {
 					avatar: profile.avatar || '/static/logo.png',
 					nickname: profile.nickname || '',
-					company: profile.company || '',
+					company: this.isOrgCertified ? this.certifiedOrgName : (profile.company || ''),
 					subjectType: profile.subjectType || '',
 					businessCapabilities: normalizeCapabilities(profile.businessCapabilities || []),
 					phone: profile.phone || getSessionPhone() || '',
@@ -515,7 +560,7 @@
 					uni.showToast({ title: '请填写昵称', icon: 'none' })
 					return
 				}
-				if (!company) {
+				if (!this.isOrgCertified && !company) {
 					uni.showToast({ title: '请填写公司', icon: 'none' })
 					return
 				}
@@ -523,8 +568,14 @@
 					uni.showToast({ title: '请选择主体类型', icon: 'none' })
 					return
 				}
-				if (!email) {
-					uni.showToast({ title: '请填写邮箱', icon: 'none' })
+				const emailCheck = validateEmail(email, { required: true })
+				if (!emailCheck.ok) {
+					uni.showToast({ title: emailCheck.message, icon: 'none' })
+					return
+				}
+				const phoneCheck = validatePhone(this.form.phone || getSessionPhone(), { required: false })
+				if (!phoneCheck.ok) {
+					uni.showToast({ title: phoneCheck.message, icon: 'none' })
 					return
 				}
 				if (!wechat) {
@@ -532,8 +583,9 @@
 					return
 				}
 				this.form.nickname = nickname
-				this.form.company = company
-				this.form.email = email
+				this.form.company = this.isOrgCertified ? (this.profile && this.profile.company) || '' : company
+				this.form.email = emailCheck.value
+				this.form.wechat = wechat
 				this.form.wechat = wechat
 				this.form.phone = getSessionPhone()
 				const wasEditing = this.editing
@@ -700,27 +752,29 @@
 		border-radius: 56rpx;
 	}
 
-	.avatar-col {
+	.profile-head {
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
 		align-items: center;
-		flex-shrink: 0;
 	}
 
-	.profile-info {
-		flex: 1 1 auto;
-		margin-left: 20rpx;
-		max-width: 280rpx;
+	.profile-main {
+		flex: 1;
 		min-width: 0;
+		margin-left: 24rpx;
+	}
+
+	.name-row {
 		display: flex;
-		flex-direction: column;
-		justify-content: center;
+		flex-direction: row;
+		align-items: center;
+		min-width: 0;
 	}
 
 	.nickname {
-		display: block;
-		width: 100%;
-		font-size: 30rpx;
+		flex-shrink: 1;
+		min-width: 0;
+		font-size: 34rpx;
 		font-weight: 600;
 		color: #1a1a1a;
 		white-space: nowrap;
@@ -729,34 +783,91 @@
 	}
 
 	.identity-tag {
-		align-self: flex-start;
-		margin-top: 10rpx;
-		font-size: 22rpx;
+		flex-shrink: 0;
+		margin-left: 12rpx;
+		font-size: 20rpx;
 		color: #2b73f8;
 		background: rgba(43, 115, 248, 0.1);
 		padding: 4rpx 12rpx;
 		border-radius: 8rpx;
 	}
 
-	.profile-divider {
-		width: 6rpx;
-		align-self: stretch;
-		margin: 8rpx 16rpx;
-		background: #d0d5de;
-		border-radius: 3rpx;
-		flex-shrink: 0;
+	.company {
+		display: block;
+		margin-top: 8rpx;
+		font-size: 24rpx;
+		color: #888888;
+		line-height: 1.4;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.contact-side {
+	.company-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 8rpx;
+	}
+
+	.company-row .company {
+		margin-top: 0;
+	}
+
+	.locked-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 12rpx;
+	}
+
+	.locked-row .input {
+		flex: 1;
+	}
+
+	.tag-row {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 20rpx;
+	}
+
+	.cap-tag {
+		font-size: 22rpx;
+		color: #0f9d58;
+		background: rgba(15, 157, 88, 0.08);
+		padding: 6rpx 14rpx;
+		border-radius: 8rpx;
+		margin: 0 12rpx 8rpx 0;
+	}
+
+	.contact-list {
+		margin-top: 12rpx;
+		padding-top: 8rpx;
+		border-top: 1rpx solid #eef0f4;
+	}
+
+	.contact-row {
+		display: flex;
+		flex-direction: row;
+		align-items: flex-start;
+		padding: 12rpx 0;
+	}
+
+	.contact-label {
+		width: 80rpx;
+		flex-shrink: 0;
+		font-size: 24rpx;
+		color: #999999;
+		line-height: 1.5;
+	}
+
+	.contact-value {
 		flex: 1;
 		min-width: 0;
-	}
-
-	.side-line {
-		display: block;
-		font-size: 24rpx;
-		color: #444444;
-		line-height: 1.7;
+		font-size: 26rpx;
+		color: #333333;
+		line-height: 1.5;
 		word-break: break-all;
 	}
 
@@ -893,22 +1004,6 @@
 		line-height: 1.5;
 	}
 
-	.tag-row {
-		display: flex;
-		flex-direction: row;
-		flex-wrap: wrap;
-		margin-top: 10rpx;
-	}
-
-	.cap-tag {
-		font-size: 22rpx;
-		color: #0f9d58;
-		background: rgba(15, 157, 88, 0.1);
-		padding: 4rpx 12rpx;
-		border-radius: 8rpx;
-		margin: 4rpx 10rpx 0 0;
-	}
-
 	.login-btn {
 		margin-top: 12rpx;
 		background: #2b73f8;
@@ -922,26 +1017,6 @@
 		color: #666666;
 		border: 1rpx solid #dddddd;
 		border-radius: 12rpx;
-	}
-
-	.profile-top {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-	}
-
-	.company-row {
-		margin-top: 24rpx;
-		padding-top: 20rpx;
-		border-top: 1rpx solid #eef0f4;
-	}
-
-	.company {
-		display: block;
-		font-size: 28rpx;
-		color: #666666;
-		line-height: 1.5;
-		word-break: break-all;
 	}
 
 	.org-card {
@@ -1089,29 +1164,35 @@
 
 	.module-box {
 		width: calc(50% - 10rpx);
-		height: 220rpx;
 		background: #ffffff;
 		border-radius: 16rpx;
 		border: 1rpx solid #e8ecf2;
 		margin-bottom: 20rpx;
-		padding: 24rpx 12rpx;
+		padding: 24rpx 20rpx;
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
 		align-items: center;
-		justify-content: center;
 		box-sizing: border-box;
 	}
 
 	.module-icon {
-		width: 72rpx;
-		height: 72rpx;
-		border-radius: 36rpx;
+		width: 64rpx;
+		height: 64rpx;
+		border-radius: 32rpx;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 30rpx;
+		font-size: 28rpx;
 		font-weight: 600;
-		margin-bottom: 16rpx;
+		flex-shrink: 0;
+		margin-right: 16rpx;
+	}
+
+	.module-body {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.demand-icon {
@@ -1137,18 +1218,18 @@
 	.module-title {
 		font-size: 24rpx;
 		color: #222222;
-		text-align: center;
+		text-align: left;
 		line-height: 1.3;
 	}
 
 	.module-count {
-		margin-top: 8rpx;
-		font-size: 22rpx;
+		margin-top: 6rpx;
+		font-size: 20rpx;
 		color: #999999;
 	}
 
 	.module-pending {
-		margin-top: 4rpx;
+		margin-top: 2rpx;
 		font-size: 20rpx;
 		color: #d98a00;
 	}
