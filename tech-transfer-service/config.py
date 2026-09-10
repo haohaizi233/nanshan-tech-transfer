@@ -84,10 +84,11 @@ class Settings(BaseSettings):
 
     # ── DB 连接池（T007：psycopg2 ThreadedConnectionPool，进程内）──
     # 规模约束：uvicorn worker 数 × DB_POOL_MAX ≤ PostgreSQL max_connections；
-    # 本地默认单 worker，min=2/max=10 相对 PG 默认 max_connections=100 余量充足
+    # 本地默认单 worker；「我的」页会并发打出十余个 /me/* 查询，max=20 留余量
     DB_POOL_MIN: int = 2
-    DB_POOL_MAX: int = 10
+    DB_POOL_MAX: int = 20
     DB_CONNECT_TIMEOUT: int = 5  # 秒；防止 DB 不可用时 connect 长时间挂起
+    DB_POOL_ACQUIRE_TIMEOUT: float = 3.0  # 秒；池满时等待归还，0=立即失败
 
     # ── 存量资本库（MySQL，仅 tools/etl_institutions.py 过渡期使用）──
     CAPITAL_DB_HOST: str = "127.0.0.1"
@@ -152,6 +153,13 @@ class Settings(BaseSettings):
     def _validate_pool_sizes(cls, v: int) -> int:
         if v < 1:
             raise ValueError("DB 连接池参数必须 >= 1")
+        return v
+
+    @field_validator("DB_POOL_ACQUIRE_TIMEOUT")
+    @classmethod
+    def _validate_acquire_timeout(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("DB_POOL_ACQUIRE_TIMEOUT 必须 >= 0")
         return v
 
     @model_validator(mode="after")

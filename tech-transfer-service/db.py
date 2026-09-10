@@ -14,7 +14,8 @@
 - get_cursor(commit=False)：只读；归还时 psycopg2 pool 对残留事务统一 rollback
 
 异常安全：
-- 池耗尽（PoolError）→ 转为 OperationalError，统一映射 503（core/exception_handlers）
+- 池耗尽（PoolError）→ 等待归还（DB_POOL_ACQUIRE_TIMEOUT），超时仍耗尽则
+  转为 OperationalError，统一映射 503（core/exception_handlers）
 - putconn 按连接状态处理：UNKNOWN（服务端已断）→ 关闭；空闲池已满（≥ minconn）
   → 直接关闭（psycopg2 语义，池复用上限即 minconn）；否则按状态清理后回池
 
@@ -26,6 +27,7 @@
 
 import logging
 import threading
+import time
 from contextlib import contextmanager
 
 import psycopg2
@@ -38,6 +40,7 @@ logger = logging.getLogger("nanshan.db")
 
 _pool: ThreadedConnectionPool | None = None
 _pool_lock = threading.Lock()
+_acquire_cond = threading.Condition()
 
 
 def _connect_kwargs() -> dict:
@@ -93,6 +96,8 @@ def close_pool() -> None:
         pool, _pool = _pool, None
     if pool is not None:
         pool.closeall()
+    with _acquire_cond:
+        _acquire_cond.notify_all()
 
 
 def _get_pool() -> ThreadedConnectionPool:
@@ -102,11 +107,25 @@ def _get_pool() -> ThreadedConnectionPool:
 
 
 def _acquire_conn():
-    """从池借出连接；池耗尽统一转为 OperationalError（→ 503 契约）。"""
-    try:
-        return _get_pool().getconn()
-    except PoolError:
-        raise psycopg2.OperationalError("connection pool exhausted") from None
+    """从池借出连接；池满时等待归还，超时仍耗尽则 OperationalError（→ 503）。"""
+    timeout = max(0.0, float(settings.DB_POOL_ACQUIRE_TIMEOUT))
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return _get_pool().getconn()
+        except PoolError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise psycopg2.OperationalError("connection pool exhausted") from None
+            with _acquire_cond:
+                # 归还可能发生在首次 getconn 失败与入等待之间；持锁再试一次避免丢失唤醒
+                try:
+                    return _get_pool().getconn()
+                except PoolError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise psycopg2.OperationalError("connection pool exhausted") from None
+                    _acquire_cond.wait(timeout=remaining)
 
 
 def _release_conn(conn) -> None:
@@ -127,6 +146,9 @@ def _release_conn(conn) -> None:
             conn.close()
         except Exception:
             pass
+    finally:
+        with _acquire_cond:
+            _acquire_cond.notify()
 
 
 @contextmanager

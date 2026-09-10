@@ -8,18 +8,21 @@ T007 数据库连接池与事务边界测试
   4. get_cursor(commit=True) 提交可见
   5. get_cursor(commit=False) 残留事务由归还逻辑 rollback（不残留半写状态）
   6. 池耗尽 → OperationalError（供异常处理器统一映射 503）
-  7. 多线程并发借还互不干扰
-  8. 懒初始化（未 init_pool 时首次访问自动建池）
+  7. 池满等待归还后续借出成功
+  8. 多线程并发借还互不干扰
+  9. 懒初始化（未 init_pool 时首次访问自动建池）
 
 运行：python test_db_session.py（服务根目录，需本地 PostgreSQL 可用）
 """
 import sys
 import threading
+import time
 
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
 
 import db
+from config import settings
 
 PASS = 0
 FAIL = 0
@@ -120,7 +123,9 @@ try:
     # ════════════════════════════════════════════════════════
     print("[7] 池耗尽 → OperationalError")
     orig_pool = db._pool
+    orig_timeout = settings.DB_POOL_ACQUIRE_TIMEOUT
     try:
+        settings.DB_POOL_ACQUIRE_TIMEOUT = 0.15
         db._pool = ThreadedConnectionPool(0, 1, **db._connect_kwargs())
         with db.get_conn():  # 占满 max=1
             try:
@@ -131,6 +136,56 @@ try:
                 check("池耗尽 → OperationalError（含 exhausted）",
                       "exhausted" in str(e), str(e))
     finally:
+        settings.DB_POOL_ACQUIRE_TIMEOUT = orig_timeout
+        db._pool.closeall()
+        db._pool = orig_pool
+
+    # ════════════════════════════════════════════════════════
+    # [7b] 池满时等待归还，随后借出成功
+    # ════════════════════════════════════════════════════════
+    print("[7b] 池满等待归还 → 第二借出成功")
+    orig_pool = db._pool
+    orig_timeout = settings.DB_POOL_ACQUIRE_TIMEOUT
+    waiter_errors = []
+    acquired = threading.Event()
+    release_holder = threading.Event()
+    holder_ready = threading.Event()
+
+    def _holder():
+        with db.get_conn():
+            holder_ready.set()
+            release_holder.wait(timeout=5)
+
+    def _waiter():
+        try:
+            with db.get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 AS v")
+                    if cur.fetchone()["v"] != 1:
+                        waiter_errors.append("结果错乱")
+            acquired.set()
+        except Exception as e:  # noqa: BLE001
+            waiter_errors.append(repr(e))
+            acquired.set()
+
+    try:
+        settings.DB_POOL_ACQUIRE_TIMEOUT = 2.0
+        db._pool = ThreadedConnectionPool(0, 1, **db._connect_kwargs())
+        holder = threading.Thread(target=_holder)
+        waiter = threading.Thread(target=_waiter)
+        holder.start()
+        if not holder_ready.wait(timeout=5):
+            waiter_errors.append("holder 未就绪")
+        waiter.start()
+        time.sleep(0.05)
+        release_holder.set()
+        holder.join(timeout=5)
+        waiter.join(timeout=5)
+        check("等待归还后第二借出成功", acquired.is_set() and not waiter_errors,
+              str(waiter_errors[:3]))
+    finally:
+        release_holder.set()
+        settings.DB_POOL_ACQUIRE_TIMEOUT = orig_timeout
         db._pool.closeall()
         db._pool = orig_pool
 

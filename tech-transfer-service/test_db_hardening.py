@@ -7,8 +7,8 @@ T007 Final Hardening 测试 —— PostgreSQL 故障恢复 / 泄漏压力 / 并�
   H2  INERROR 恢复：下一 checkout SELECT 1 成功，新事务正常（无 aborted 污染）
   H3  残留 INERROR 直接归还（get_conn 无 rollback）→ putconn 清理 → 下一借出正常
   H4  50 轮泄漏压力：success / Python error / SQL error 交替 + 每轮收尾 SELECT 1
-  H5  并发容量边界：DB_POOL_MAX 个同时持有 + 第 11 借出池耗尽 + 归还后恢复
-  H6  16 并发短任务（fail-fast 语义下统计成功/瞬时耗尽，禁止污染类错误）
+  H5  并发容量边界：DB_POOL_MAX 个同时持有 + 第 N+1 借出池耗尽 + 归还后恢复
+  H6  16 并发短任务（等待归还语义下统计成功/超时耗尽，禁止污染类错误）
   H7  坏连接：借出后手动 close → 归还丢弃 → 新借出不受污染
   H8  DB 不可达时 init_pool 降级空池（fail-soft 启动）→ 恢复后自愈
   H9  同线程嵌套借出行为（事实揭示，为文档提供依据）
@@ -173,7 +173,7 @@ try:
     # ════════════════════════════════════════════════════════
     # H5 并发容量边界：DB_POOL_MAX 同时持有 + 第 N+1 借出
     # ════════════════════════════════════════════════════════
-    print(f"[H5] Concurrent pool：{settings.DB_POOL_MAX} 个同时持有 + 第 11 借出池耗尽")
+    print(f"[H5] Concurrent pool：{settings.DB_POOL_MAX} 个同时持有 + 第 {settings.DB_POOL_MAX + 1} 借出池耗尽")
     N = settings.DB_POOL_MAX
     held = [threading.Event() for _ in range(N)]
     release = threading.Event()
@@ -204,6 +204,8 @@ try:
 
         if not holder_errors:
             # 全部持有的情况下第 N+1 个借出必须报池耗尽（holders 仍持有时检查）
+            orig_timeout = settings.DB_POOL_ACQUIRE_TIMEOUT
+            settings.DB_POOL_ACQUIRE_TIMEOUT = 0.2
             try:
                 with db.get_conn():
                     pass
@@ -211,6 +213,8 @@ try:
             except psycopg2.OperationalError as e:
                 check(f"持有 {N}/{N} 时第 {N + 1} 借出 → OperationalError",
                       "exhausted" in str(e), str(e))
+            finally:
+                settings.DB_POOL_ACQUIRE_TIMEOUT = orig_timeout
     finally:
         release.set()
         for t in threads:
@@ -222,7 +226,7 @@ try:
     # ════════════════════════════════════════════════════════
     # H6 16 并发短任务
     # ════════════════════════════════════════════════════════
-    print("[H6] Concurrent pool：16 个并发短任务（fail-fast 语义）")
+    print("[H6] Concurrent pool：16 个并发短任务（等待归还语义）")
     stats = {"ok": 0, "exhausted": 0, "polluted": []}
 
     def _short_task(i):
@@ -235,7 +239,7 @@ try:
             return "ok"
         except psycopg2.OperationalError as e:
             if "exhausted" in str(e):
-                return "exhausted"  # 设计语义：无等待机制，瞬时耗尽即失败
+                return "exhausted"  # 等待超时仍耗尽才失败；短任务通常能等到归还
             return f"polluted:{e!r}"
         except Exception as e:  # noqa: BLE001
             return f"polluted:{e!r}"
