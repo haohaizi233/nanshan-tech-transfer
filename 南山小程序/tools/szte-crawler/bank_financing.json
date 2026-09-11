@@ -1,0 +1,67 @@
+{
+  "source": "https://www.szte.com/capital/financeService/pledge/index.html",
+  "api": "https://www.szte.com/pubsapi/officialSiteApi/intellectualProperty/zyrz/user/get/1",
+  "total": 5,
+  "items": [
+    {
+      "kind": "service",
+      "name": "中国工商银行股份有限公司深圳市分行",
+      "intro": "中国工商银行深圳市分行是总行下辖的省一级分行，是深圳经济特区最早入驻的金融机构之一。自1984年成立之日起，伴随着深圳特区的经济发展，我行始终以建设现代一流商业银行为目标，坚持稳健、可持续的发展战略，深入推进经营转型，不断加强业务创新，持续提升服务质量和水平，目前已成为深圳市最具经营实力和竞争力的现代商业银行之一。",
+      "label": "银行",
+      "logoFileId": "1849696008309708053",
+      "sortOrder": 1,
+      "status": "active",
+      "sourceSite": "szte.com",
+      "sourceApi": "https://www.szte.com/pubsapi/officialSiteApi/intellectualProperty/zyrz/user/get/1",
+      "fetchedAt": "2026-09-11T11:03:40+08:00"
+    },
+    {
+      "kind": "service",
+      "name": "中国银行股份有限公司深圳市分行",
+      "intro": "中国银行深圳市分行成立于1978年，最初是由人民银行分设出来的仅有52人的办事处。伴随深圳经济特区的崛起和腾飞，深圳办事处于1979年升格为支行，1981年改组为深圳市分行，1997年成为直属总行管理的一级分行。\n40多年来，深圳市分行始终坚持以稳健务实、守法合规为立行之本，积极创新、优质服务为兴行之策，科学管理、集约经营为强行之道，与深圳特区共同成长，业务规模不断扩大，服务水平不断提升，目前已发展成为拥有各类经营机构156家、在岗人员6000余人，功能全面、技术先进、经营稳健的现代化国有商业银行一级分行。截至2022年9月末，深圳市分行存款余额折合人民币9000亿元，较年初增长1265亿元，增量排名四大行第1，各项贷款余额折合人民币7876亿元；本外币储蓄存款、国际贸易结算、跨境人民币结算等多项业务指标连续多年居同业首位。建行40多年来，深圳市分行累计投放贷款超过万亿元，为国家上缴利税超千亿元，连续多年被深圳市政府评为“立功创先”单位和纳税大户，为国家经济建设和经济特区的腾飞做出了贡献。\n近年来，面对复杂多变的宏观经济形势和异常激烈的市场竞争态势，深圳市分行坚持党的领导，积极转变经营理念，稳步推进发展模式和管理机制改革，不断筑牢健康可持续发展基础。目前，深圳市分行在总行党委的正确领导下，紧紧围绕“激发活力、敏捷反应、重点突破，建设全球一流现代银行集团”指导精神，锐意进取，开放创新，务实夯基。",
+      "label": "银行",
+      "logoFileId": "1613708414624600064",
+      "sortOrder": 2,
+      "status": "active",
+      "sourceSite": "szte.com",
+      "sourceApi": "https://www.szte.com/pubsapi/officialSiteApi/intellectualProperty/zyrz/user/get/1",
+      "fetchedAt": "2026-09-11T11:03:40+08:00"
+    },
+    {
+      "kind": "service",
+      "name": "中国建设银行股份有限公司深圳市分行",
+      "intro": "中国建设银行股份有限公司是一家中国领先的大型商业银行，总部设在北京，其前身中国建设银行成立于1954 年10 月。本行2005 年10 月在香港联合交易所挂牌上市（股票代码939），2007年9月在上海证券交易所挂牌上市（股票代码601939）。本行2021年末市值约为1,753.02亿美元，居全球上市银行第六位。按一级资本排序，本集团在全球银行中位列第二。",
+      "label": "银行",
+      "logoFileId": "1588078590673686528",
+      "sortOrder": 3,
+      "status": "active",
+      "sourceSite": "szte.com",
+      "sourceApi": "https://www.szte.com/pubsapi/officialSiteApi/intellectualProperty/zyrz/user/get/1",
+      "fetchedAt": "2026-09-11T11:03:40+08:00"
+    },
+    {
+      "kind": "service",
+      "name": "中国民生银行股份有限公司深圳分行",
+      "intro": "中国民生银行深圳分行于1997年10月9日正式设立，是中国民生银行设立的第4家一级分行。目前员工总数1897人。截至2021年末，深圳分行资产规模超2700亿元，各项贷款余额2327亿元；各项存款年日均2323亿元，主要经营指标在本地同类股份制银行中和民生银行系统内均名列前茅。当前深圳上市民企中，深圳分行合作率超80%；深圳500强企业中，分行合作率亦超过一半。截至2021年末，深圳分行对公贷款规模900亿元。",
+      "label": "银行",
+      "logoFileId": "1584867064978477056",
+      "sortOrder": 4,
+      "status": "active",
+      "sourceSite": "szte.com",
+      "sourceApi": "https://www.szte.com/pubsapi/officialSiteApi/intellectualProperty/zyrz/user/get/1",
+      "fetchedAt": "2026-09-11T11:03:40+08:00"
+    },
+    {
+      "kind": "service",
+      "name": "广州银行股份有限公司深圳分行",
+      "intro": "广州银行股份有限公司深圳分行于2010年03月19日成立。法定代表人王芳，公司经营范围包括：一般经营项目是：吸收公众存款；发放短期、中期和长期贷款；办理国内外结算；办理票据承兑与贴现；代理发行金融债券；代理发行、代理兑付、承销政府债券；买卖政府债券、金融债券；从事同业拆借；买卖、代理买卖外汇；从事银行卡业务；提供信用证服务及担保；代理收付款项；提供保管箱服务；经中国银行业监督管理委员会批准的其它业务等。",
+      "label": "银行",
+      "logoFileId": "1584867735949676544",
+      "sortOrder": 5,
+      "status": "active",
+      "sourceSite": "szte.com",
+      "sourceApi": "https://www.szte.com/pubsapi/officialSiteApi/intellectualProperty/zyrz/user/get/1",
+      "fetchedAt": "2026-09-11T11:03:40+08:00"
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 # 科交中心资本对接数据爬虫
 
 ## 数据来源
-- 专业服务机构（银行融资）：[知识产权质押融资信息服务](https://www.szte.com/capital/financeService/pledge/index.html)
-- 特色投资机构（投资机构）：[特色投资机构一览](https://www.szte.com/visual/customize/detail?id=81)
+- 银行（银行融资）：[知识产权质押融资信息服务](https://www.szte.com/capital/financeService/pledge/index.html) Tab「银行」
+  - `python crawl_banks.py` → `bank_financing.json`，再 `python ../platform-crawler/import_to_admin.py --files bank_financing.json`
+- 专业服务机构 / 特色投资机构：`python crawl_szte_orgs.py`
 
 ## 表结构（库 `nanshan_capital`）
 | 表名 | 用途 |
