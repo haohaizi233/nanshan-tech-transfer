@@ -39,11 +39,12 @@
             <text class="meta-value">{{ detail.grantDate }}</text>
           </view>
         </view>
-        <button v-if="detail.hasPdf" class="pdf-btn" size="mini" :loading="pdfLoading" @click="onOpenPdf">查看说明书 PDF</button>
+        <button v-if="detail.hasPdf" class="pdf-btn" size="mini" @click="onOpenPdf">查看说明书 PDF</button>
       </view>
 
       <view v-if="loading" class="section">
-        <text class="state-text">正在加载摘要与权利要求...</text>
+        <text class="state-text">正在解析摘要与权利要求</text>
+        <text class="state-sub">正在拼命加载中</text>
       </view>
       <view v-else-if="error" class="section">
         <text class="state-text">摘要暂不可用</text>
@@ -69,22 +70,36 @@
         <text v-if="showDescription" class="body-text">{{ detail.description }}</text>
       </view>
     </block>
+    <pdf-preview-overlay
+      :visible="pdfVisible"
+      :publication-no="publicationNo"
+      @close="pdfVisible = false"
+    />
   </view>
 </template>
 
 <script>
-import { getPatentDetail, getPatentTypeLabel, openPatentPdf } from '../../api/patent.js'
+import { getPatentDetail, getPatentTypeLabel } from '../../api/patent.js'
+import PdfPreviewOverlay from '../../components/pdf-preview-overlay.vue'
 
 export default {
+  components: { PdfPreviewOverlay },
   data() {
     return {
       publicationNo: '',
       detail: null,
       loading: false,
-      pdfLoading: false,
+      pdfVisible: false,
       error: '',
       showDescription: false,
     }
+  },
+  onBackPress() {
+    if (this.pdfVisible) {
+      this.pdfVisible = false
+      return true
+    }
+    return false
   },
   onLoad(options) {
     const q = options || {}
@@ -139,16 +154,12 @@ export default {
         this.loading = false
       }
     },
-    async onOpenPdf() {
-      if (this.pdfLoading) return
-      this.pdfLoading = true
-      try {
-        await openPatentPdf(this.publicationNo)
-      } catch (e) {
-        uni.showToast({ title: (e && e.message) || '无法打开说明书', icon: 'none' })
-      } finally {
-        this.pdfLoading = false
+    onOpenPdf() {
+      if (!this.publicationNo) {
+        uni.showToast({ title: '缺少专利公开号', icon: 'none' })
+        return
       }
+      this.pdfVisible = true
     },
   },
 }

@@ -24,6 +24,9 @@ _DROP_KEYS = {
 }
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+# 上游把角标拆成独立行：h\n1 → h₁。只拼「单字母变量 + 短数字」，避免 Figure\n1。
+_BROKEN_SUB_RE = re.compile(r"(?<![A-Za-z])([A-Za-z])\n(\d{1,3})(?=\n|$|[^\d])")
+_SUB_DIGITS = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
 _SOURCE_URL_RE = re.compile(
     r"https?://[^\s\"'<>]*(?:googleapis|googleusercontent|patents\.google|patentimages\.storage|google\.com/patent)[^\s\"'<>]*",
     re.IGNORECASE,
@@ -45,6 +48,16 @@ def clean_text(value) -> str:
     return " ".join(text.split()).strip()
 
 
+def repair_broken_subscripts(text: str) -> str:
+    """把 OCR/HTML 转纯文本时拆行的变量角标拼回去。"""
+    if not text or "\n" not in text:
+        return text
+    return _BROKEN_SUB_RE.sub(
+        lambda m: m.group(1) + m.group(2).translate(_SUB_DIGITS),
+        text,
+    )
+
+
 def clean_multiline(value) -> str:
     if value is None:
         return ""
@@ -52,7 +65,7 @@ def clean_multiline(value) -> str:
     text = _HTML_TAG_RE.sub("", text)
     text = _SOURCE_URL_RE.sub("", text)
     lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    return "\n".join(lines).strip()
+    return repair_broken_subscripts("\n".join(lines).strip())
 
 
 def clean_date(value) -> str | None:

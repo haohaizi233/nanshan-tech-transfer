@@ -3,10 +3,12 @@
 from core.errors import BizError
 from modules.patent.normalize import (
     assert_no_source_leak,
+    clean_multiline,
     clean_text,
     infer_patent_type,
     map_patent_info,
     map_search_hit,
+    repair_broken_subscripts,
 )
 from modules.patent.service import get_patent, search_patents
 
@@ -56,6 +58,10 @@ def main():
     assert infer_patent_type("CN217384194U") == "utility_model"
     assert infer_patent_type("CN305516311S") == "design"
     assert clean_text("<b>北京银行</b>股份有限公司") == "北京银行股份有限公司"
+    assert repair_broken_subscripts("高度范围在\n内，h\n1\n第一个是") == "高度范围在\n内，h₁\n第一个是"
+    assert "w₁" in clean_multiline("差值大于前一个符号的宽w\n1\n。")
+    assert repair_broken_subscripts("Figure\n1\nshows") == "Figure\n1\nshows"
+    assert "段落一\n段落二" == clean_multiline("段落一\n段落二")
 
     mapped = map_search_hit(GOOGLE_HIT)
     assert mapped["publicationNo"] == "CN108604342B"

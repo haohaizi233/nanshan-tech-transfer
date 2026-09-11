@@ -6,6 +6,7 @@
 
 import { apiRequest } from './client.js'
 import HostBridge from '../../../host/host-bridge.js'
+import { resolveH5ApiBase } from './api-origin.js'
 
 const TYPE_LABEL = {
   invention: '发明专利',
@@ -29,43 +30,84 @@ export async function getPatentDetail(publicationNo) {
   return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}`)
 }
 
-function apiOrigin() {
-  const env = HostBridge.getEnvironment() || {}
+export function resolvePatentApiOrigin(env = {}, pageLocation = globalThis.location) {
+  if (env.hostMode === 'local') {
+    return resolveH5ApiBase({
+      appEnv: env.appEnv,
+      localApiBase: env.apiBase,
+      pageLocation,
+    })
+  }
   if (env.apiBase) return String(env.apiBase).replace(/\/$/, '')
   try {
-    if (typeof location !== 'undefined' && location.origin) return location.origin
+    if (pageLocation && pageLocation.origin) return pageLocation.origin
   } catch (e) {
     // ignore
   }
   return ''
 }
 
-export function getPatentPdfUrl(publicationNo) {
-  const env = HostBridge.getEnvironment() || {}
-  const prefix = env.apiPrefix || '/api/tech-transfer/v1'
-  return `${apiOrigin()}${prefix}/patents/${encodeURIComponent(publicationNo)}/pdf`
+function apiOrigin() {
+  return resolvePatentApiOrigin(HostBridge.getEnvironment() || {})
 }
 
-export function openPatentPdf(publicationNo) {
+export function getPatentPdfPageImageUrl(publicationNo, page) {
+  const env = HostBridge.getEnvironment() || {}
+  const prefix = env.apiPrefix || '/api/tech-transfer/v1'
+  return `${apiOrigin()}${prefix}/patents/${encodeURIComponent(publicationNo)}/pdf/pages/${encodeURIComponent(page)}`
+}
+
+export async function getPatentPdfPagesMeta(publicationNo) {
+  return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}/pdf/pages`)
+}
+
+function canUseBlobUrl() {
+  try {
+    return typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined'
+  } catch (e) {
+    return false
+  }
+}
+
+function authHeader() {
   const token = HostBridge.getStorage('tt_access_token') || ''
-  const url = getPatentPdfUrl(publicationNo)
+  return token ? { Authorization: 'Bearer ' + token } : {}
+}
+
+/** 拉一页说明书 PNG，返回本页 <image> 可用的本地地址（H5 为 blob，小程序为临时文件） */
+export function loadPatentPdfPage(publicationNo, page) {
+  const url = getPatentPdfPageImageUrl(publicationNo, page)
+  const header = authHeader()
+  if (canUseBlobUrl()) {
+    return new Promise((resolve, reject) => {
+      uni.request({
+        url,
+        method: 'GET',
+        header,
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        success(res) {
+          if (res.statusCode !== 200) {
+            reject(new Error('说明书预览失败'))
+            return
+          }
+          resolve(URL.createObjectURL(new Blob([res.data], { type: 'image/png' })))
+        },
+        fail: reject,
+      })
+    })
+  }
   return new Promise((resolve, reject) => {
     uni.downloadFile({
       url,
-      header: token ? { Authorization: 'Bearer ' + token } : {},
+      header,
       timeout: 60000,
       success(res) {
         if (res.statusCode !== 200) {
-          reject(new Error('说明书获取失败'))
+          reject(new Error('说明书预览失败'))
           return
         }
-        uni.openDocument({
-          filePath: res.tempFilePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        })
+        resolve(res.tempFilePath)
       },
       fail: reject,
     })

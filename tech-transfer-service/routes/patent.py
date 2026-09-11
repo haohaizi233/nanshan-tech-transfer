@@ -1,17 +1,24 @@
 """
-专利检索路由 —— GET /patents、GET /patents/{publicationNo}、GET /patents/{publicationNo}/pdf
+专利检索路由 —— GET /patents、GET /patents/{publicationNo}、
+GET /patents/{publicationNo}/pdf、GET /patents/{publicationNo}/pdf/pages
 
 前端只消费本服务契约。上游 PDF / 源站地址不会出现在 JSON 响应里。
 """
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from core.errors import patent_not_found
 from core.middleware import identity
 from core.pagination import parse_page_args
 from core.response import success
-from modules.patent.service import get_patent, iter_patent_pdf, search_patents
+from modules.patent.service import (
+    get_patent,
+    get_patent_pdf_pages_meta,
+    iter_patent_pdf,
+    render_patent_pdf_page,
+    search_patents,
+)
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["patents"])
 
@@ -42,6 +49,21 @@ def patent_pdf(publication_no: str, user: dict = Depends(identity)):
             "Content-Disposition": f'inline; filename="{filename}"',
             "Cache-Control": "private, max-age=3600",
         },
+    )
+
+
+@router.get("/patents/{publication_no}/pdf/pages")
+def patent_pdf_pages(publication_no: str, user: dict = Depends(identity)):
+    return success(get_patent_pdf_pages_meta(publication_no))
+
+
+@router.get("/patents/{publication_no}/pdf/pages/{page}")
+def patent_pdf_page(publication_no: str, page: int, user: dict = Depends(identity)):
+    png = render_patent_pdf_page(publication_no, page)
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
     )
 
 
