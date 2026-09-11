@@ -7,7 +7,7 @@
                      └── H5（HBuilderX dev server）──┤
                                                     ├── FastAPI :8787 ── PostgreSQL
                                     Admin Web ──────┘
-                          Caddy ── https://inanshan.centips.com
+                          Caddy ── https://inanshan.sjhcip.com
                                     /health+/api → :8025（VPS；本机 start_dev 仍反代 :8787）
                                     /h5          → :5173
                                     其余         → FastAPI（后台 SPA）
@@ -19,7 +19,7 @@
   python start_dev.py --weixin            # FastAPI + 仅微信小程序 + 隧道 + Caddy
   python start_dev.py --h5                # FastAPI + 仅 H5 + 隧道 + Caddy
   python start_dev.py --no-tunnel         # 关闭 frp 外网隧道（纯本地联调）
-  python start_dev.py --no-caddy          # 不启动 Caddy（https://inanshan.centips.com）
+  python start_dev.py --no-caddy          # 不启动 Caddy（https://inanshan.sjhcip.com）
   python start_dev.py --backend-only      # 仅 FastAPI（+ 隧道 + Caddy）
   python start_dev.py --frontend-only --weixin|h5|all   # 仅前端，不起后端
   python start_dev.py --h5 --lan          # H5 + FastAPI 局域网模式（输出 LAN 地址）
@@ -38,7 +38,7 @@
     默认随启动器一起拉起 frpc 并做外网端到端健康验证（--no-tunnel 关闭）；
     frpc 目录检测顺序：FRPC_HOME 环境变量 > 桌面 frp* 扫描。
   - Caddy 默认随启动器拉起（--no-caddy 关闭）：deploy/Caddyfile 把
-    https://inanshan.centips.com/health+/api 与后台 SPA 转到本机 8787，/h5 转到 5173；
+    https://inanshan.sjhcip.com/health+/api 与后台 SPA 转到本机 8787，/h5 转到 5173；
     VPS 上未设 NS_API_UPSTREAM 时默认反代 127.0.0.1:8025；
     检测顺序：CADDY_HOME > PATH > 桌面 caddy*。
   - 启动器 spawn 的后端进程退出时（如崩溃）keep-alive 循环会自动重启。
@@ -94,7 +94,7 @@ TUNNEL_H5_PORT = 8077    # 远端 H5 入口（→ 本地 5173，实际以 frpc.t
 CADDY_SCAN_ROOTS = [Path.home() / "Desktop", Path("D:\\")]
 CADDYFILE = ROOT.parent / "deploy" / "Caddyfile"
 CADDY_HTTPS_PORT = 443
-CADDY_SITE_DEFAULT = "inanshan.centips.com"
+CADDY_SITE_DEFAULT = "inanshan.sjhcip.com"
 
 
 # ── 前端构建新鲜度 ───────────────────────────────────────────
@@ -494,10 +494,11 @@ def wait_backend_ready(proc, timeout=30):
 
 
 def ensure_backend_deps():
-    """检查 import 名（fastapi/uvicorn/psycopg2/jwt），安装以 requirements.txt 为准。"""
-    missing = [m for m in ("fastapi", "uvicorn", "psycopg2", "jwt") if importlib.util.find_spec(m) is None]
+    """检查 import 名，安装以 requirements.txt 为准。"""
+    required = ("fastapi", "uvicorn", "psycopg2", "jwt", "pypdfium2", "PIL")
+    missing = [m for m in required if importlib.util.find_spec(m) is None]
     if not missing:
-        ok("后端依赖已就绪（fastapi / uvicorn / psycopg2 / pyjwt）")
+        ok("后端依赖已就绪（fastapi / uvicorn / psycopg2 / pyjwt / pypdfium2）")
         return True
     print(f"  检测到缺少依赖：{', '.join(missing)}，自动安装中（依据 requirements.txt）...")
     env = os.environ.copy()
@@ -1183,7 +1184,14 @@ def run_doctor():
 
     check("Python", sys.version_info >= (3, 10), sys.version.split()[0], fatal=True)
 
-    for mod, pkg in (("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("psycopg2", "psycopg2-binary"), ("jwt", "PyJWT")):
+    for mod, pkg in (
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"),
+        ("psycopg2", "psycopg2-binary"),
+        ("jwt", "PyJWT"),
+        ("pypdfium2", "pypdfium2"),
+        ("PIL", "Pillow"),
+    ):
         has = importlib.util.find_spec(mod) is not None
         check(f"后端依赖 {pkg}", has, "" if has else f"import {mod} 失败（pip install {pkg}）")
 
@@ -1420,10 +1428,9 @@ def print_summary(runtimes, lan, tunnel_urls=None, caddy_info=None):
         print(f"  API           {caddy_info['public_url']}/api/")
         print(f"  Health        {caddy_info['health_url']}")
     print()
-    print("真机调试（微信小程序，改 config/local.env.js 的 API_BASE）：")
-    print("  模拟器/本地  http://127.0.0.1:8787（默认，无需修改）")
-    if lan_ips:
-        print(f"  同一 WiFi    http://{lan_ips[0]}:{BACKEND_PORT}")
+    print("真机调试（微信小程序）：")
+    print("  开发者工具 / 扫码  走 https://inanshan.sjhcip.com（config/local.env.js API_BASE_WEIXIN）")
+    print("  请在小程序后台把 request 合法域名配成该 HTTPS 域名；开发版可先勾选「不校验合法域名」")
     api_tunnel_url = next((u for label, u in tunnel_urls if label == "API"), None) if tunnel_urls else None
     if api_tunnel_url:
         print(f"  外网（frp）  {api_tunnel_url}")
@@ -1445,7 +1452,7 @@ def parse_args():
     parser.add_argument("--no-tunnel", dest="tunnel", action="store_false",
                         help="不启动 frp 外网隧道（纯本地联调）")
     parser.add_argument("--caddy", dest="caddy", action="store_true", default=True,
-                        help="启动 Caddy（默认开启；deploy/Caddyfile：https://inanshan.centips.com /health+/api+/admin → 本机 8787 或 VPS 8025，/h5 → 5173）")
+                        help="启动 Caddy（默认开启；deploy/Caddyfile：https://inanshan.sjhcip.com /health+/api+/admin → 本机 8787 或 VPS 8025，/h5 → 5173）")
     parser.add_argument("--no-caddy", dest="caddy", action="store_false",
                         help="不启动 Caddy 反向代理")
     parser.add_argument("--lan", action="store_true", help="局域网模式：FastAPI 绑定 0.0.0.0，输出 LAN 地址")

@@ -103,7 +103,7 @@ class CaddyLauncherTests(unittest.TestCase):
     def test_default_site_is_inanshan(self):
         previous = os.environ.pop("NS_SITE", None)
         try:
-            self.assertEqual(start_dev.caddy_site(), "inanshan.centips.com")
+            self.assertEqual(start_dev.caddy_site(), "inanshan.sjhcip.com")
         finally:
             if previous is None:
                 os.environ.pop("NS_SITE", None)

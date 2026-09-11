@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { resolveH5ApiBase } from '../host/local-adapter.js'
@@ -96,8 +97,39 @@ test('uses same-origin API paths when H5 is under /h5 on the public Caddy host',
     resolveH5ApiBase({
       appEnv: 'local',
       localApiBase: 'http://127.0.0.1:8787',
-      pageLocation: new URL('https://inanshan.centips.com/h5/#/pages/home/home'),
+      pageLocation: new URL('https://inanshan.sjhcip.com/h5/#/pages/home/home'),
     }),
     '',
+  )
+})
+
+test('LocalAdapter stays in the main package (WeChat whitescreens main→subpackage imports)', () => {
+  const src = readFileSync(new URL('../host/local-adapter.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(src, /subpackages\//)
+})
+
+test('WeChat mini program uses the public HTTPS API in devtools', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      weixinApiBase: 'https://inanshan.sjhcip.com',
+      pageLocation: null,
+      systemInfo: { uniPlatform: 'mp-weixin', platform: 'devtools' },
+    }),
+    'https://inanshan.sjhcip.com',
+  )
+})
+
+test('WeChat mini program uses the public HTTPS API on a real phone', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'local',
+      localApiBase: 'http://127.0.0.1:8787',
+      weixinApiBase: 'https://inanshan.sjhcip.com',
+      pageLocation: null,
+      systemInfo: { uniPlatform: 'mp-weixin', platform: 'ios' },
+    }),
+    'https://inanshan.sjhcip.com',
   )
 })

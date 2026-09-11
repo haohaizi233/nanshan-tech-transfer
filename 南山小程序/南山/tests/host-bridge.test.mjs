@@ -122,6 +122,7 @@ test('LocalAdapter._getEnvironment 返回环境快照五字段', () => {
   assert.equal(env.hostMode, 'local')
   assert.equal(env.authProvider, 'mock')
   assert.equal(env.apiPrefix, '/api/tech-transfer/v1')
+  assert.equal(env.apiBase, 'http://127.0.0.1:8787')
 })
 
 test('LocalAdapter._request 组装 URL（base+prefix+query 编码）并注入 Bearer 与 X-Request-Id', async () => {

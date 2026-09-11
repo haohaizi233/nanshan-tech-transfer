@@ -39,7 +39,7 @@
 </template>
 
 <script>
-import { APP_ENV, API_BASE } from '../../config/local.env.js'
+import { APP_ENV, API_BASE, API_BASE_WEIXIN } from '../../config/local.env.js'
 import { resolveH5ApiBase } from '../../host/local-adapter.js'
 import { SHOW_AI_MATCH_ENTRY } from '../../config/feature-flags.js'
 
@@ -65,7 +65,11 @@ export default {
     async checkHealth() {
       // API 地址随页面访问来源配对：本地→127.0.0.1:8787，
       // Caddy :80/:443→同源 /api，公网隧道 :8077→同主机 :8076，局域网 IP→同主机 :8787
-      this.apiBase = resolveH5ApiBase({ appEnv: APP_ENV, localApiBase: API_BASE })
+      this.apiBase = resolveH5ApiBase({
+        appEnv: APP_ENV,
+        localApiBase: API_BASE,
+        weixinApiBase: API_BASE_WEIXIN,
+      })
       try {
         const res = await new Promise((resolve, reject) => {
           uni.request({

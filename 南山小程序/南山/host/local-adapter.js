@@ -3,8 +3,11 @@
  * 实现与 AiNanshanAdapter 相同的接口，仅用于本地开发
  */
 
-import { APP_ENV, HOST_MODE, AUTH_PROVIDER, API_BASE, API_PREFIX } from '../config/local.env.js'
+import { APP_ENV, HOST_MODE, AUTH_PROVIDER, API_BASE, API_BASE_WEIXIN, API_PREFIX } from '../config/local.env.js'
 import { getMockTicket } from './mock-identity.js'
+import { resolveH5ApiBase } from '../config/api-origin.js'
+
+export { resolveH5ApiBase }
 
 const ACCESS_TOKEN_KEY = 'tt_access_token'
 const REFRESH_TOKEN_KEY = 'tt_refresh_token'
@@ -12,46 +15,12 @@ const USER_KEY = 'tt_current_user'
 const TOKEN_EXPIRES_KEY = 'tt_token_expires_at'
 const AUTH_MODE_KEY = 'tt_auth_mode'
 
-const PRODUCTION_ENVS = ['staging', 'production']
-const TUNNEL_H5_PORT = '8077'
-const TUNNEL_API_PORT = '8076'
-const LOCAL_API_PORT = '8787'
-const SAME_ORIGIN_PORTS = new Set(['', '80', '443'])
-const LOCALHOST_HOSTNAMES = ['localhost', '127.0.0.1', '::1', '[::1]']
-const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
-
-/**
- * Select the API origin for an H5 page without changing its public route.
- *
- * The page's own origin decides which API it can reach — a visitor's browser
- * must never inherit the developer machine's 127.0.0.1 API address:
- *   - :80 / :443 Caddy reverse proxy（含 /h5/）→ same-origin relative /api
- *   - :8077 frp tunnel page  → paired :8076 tunnel API on the same host
- *   - LAN hostname (phone/other PC on the same WiFi) → same host, direct :8787
- *   - localhost / mini-program (no location) → localApiBase as configured
- */
-export function resolveH5ApiBase({ appEnv, localApiBase, pageLocation = globalThis.location } = {}) {
-  if (PRODUCTION_ENVS.includes(appEnv)) return ''
-
-  if (pageLocation && pageLocation.hostname) {
-    const protocol = pageLocation.protocol === 'https:' ? 'https:' : 'http:'
-    const port = String(pageLocation.port || (protocol === 'https:' ? '443' : '80'))
-    if (SAME_ORIGIN_PORTS.has(port)) {
-      return ''
-    }
-    if (port === TUNNEL_H5_PORT) {
-      return `${protocol}//${pageLocation.hostname}:${TUNNEL_API_PORT}`
-    }
-    if (!LOCALHOST_HOSTNAMES.includes(pageLocation.hostname)) {
-      return `${protocol}//${pageLocation.hostname}:${LOCAL_API_PORT}`
-    }
-  }
-
-  return localApiBase || DEFAULT_LOCAL_API_BASE
-}
-
 function effectiveApiBase() {
-  return resolveH5ApiBase({ appEnv: APP_ENV, localApiBase: API_BASE })
+  return resolveH5ApiBase({
+    appEnv: APP_ENV,
+    localApiBase: API_BASE,
+    weixinApiBase: API_BASE_WEIXIN,
+  })
 }
 
 function getStorageSync(key) {
@@ -82,7 +51,7 @@ const LocalAdapter = {
       appEnv: APP_ENV,
       hostMode: HOST_MODE,
       authProvider: AUTH_PROVIDER,
-      apiBase: API_BASE,
+      apiBase: effectiveApiBase(),
       apiPrefix: API_PREFIX,
     }
   },

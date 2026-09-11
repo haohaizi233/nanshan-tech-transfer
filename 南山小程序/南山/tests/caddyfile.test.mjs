@@ -18,7 +18,7 @@ test('unified Caddyfile splits /api, /h5, and the admin SPA on the same host', (
   assert.match(caddyfile, /handle \/h5\/\*/)
   assert.match(caddyfile, /import nanshan_api/)
   assert.match(caddyfile, /import nanshan_h5/)
-  assert.match(caddyfile, /inanshan\.centips\.com/)
+  assert.match(caddyfile, /inanshan\.sjhcip\.com/)
   assert.match(caddyfile, /https:\/\/\{\$NS_SITE/)
   assert.match(caddyfile, /NS_TLS_SNIPPET/)
   assert.match(caddyfile, /tls-acme\.caddy/)

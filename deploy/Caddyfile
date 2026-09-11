@@ -1,11 +1,11 @@
 # 南山科转通 · Caddy 反向代理
 #
-# 同一域名 inanshan.centips.com（可用 NS_SITE 覆盖）同时托管三套入口：
+# 同一域名 inanshan.sjhcip.com（可用 NS_SITE 覆盖）同时托管三套入口：
 #
-#   https://inanshan.centips.com/health   FastAPI :8025（存活检查）
-#   https://inanshan.centips.com/api/*    FastAPI :8025（接口、/api/health）
-#   https://inanshan.centips.com/h5/      小程序 H5 :5173（manifest h5.router.base=/h5/）
-#   https://inanshan.centips.com/         其余 → FastAPI（后台 SPA /login /admin /assets、/docs）
+#   https://inanshan.sjhcip.com/health   FastAPI :8025（存活检查）
+#   https://inanshan.sjhcip.com/api/*    FastAPI :8025（接口、/api/health）
+#   https://inanshan.sjhcip.com/h5/      小程序 H5 :5173（manifest h5.router.base=/h5/）
+#   https://inanshan.sjhcip.com/         其余 → FastAPI（后台 SPA /login /admin /assets、/docs）
 #
 # 对外 HTTPS 在 43.138.138.200 上由本文件终结。VPS Caddy 反代 127.0.0.1:8025，
 # 本机 FastAPI 仍听 8787，必须由 frpc 转到 8025，否则 Caddy 会 502：
@@ -28,7 +28,7 @@
 #   caddy run --config deploy/Caddyfile.h5   # 与本文件等价，保留旧命令
 #
 # 环境变量：
-#   NS_SITE            站点域名，默认 inanshan.centips.com
+#   NS_SITE            站点域名，默认 inanshan.sjhcip.com
 #   NS_API_UPSTREAM    FastAPI，默认 127.0.0.1:8025（VPS）；本机 start_dev 设为 8787
 #   NS_H5_UPSTREAM     小程序 H5，默认 127.0.0.1:5173
 #   NS_TLS_SNIPPET     TLS 片段，默认 tls-acme.caddy；本机 start_dev 用 tls-local.caddy
@@ -36,14 +36,14 @@
 # 只监听 443，不占用 80。Let's Encrypt 走 TLS-ALPN-01（同样只要 443）。
 # DNS A 记录需指向 43.138.138.200，并放行 443。
 # 验证：
-#   curl --resolve inanshan.centips.com:443:43.138.138.200 https://inanshan.centips.com/health
+#   curl --resolve inanshan.sjhcip.com:443:43.138.138.200 https://inanshan.sjhcip.com/health
 {
 	auto_https disable_redirects
 }
 
 import nanshan.caddy
 
-https://{$NS_SITE:inanshan.centips.com} {
+https://{$NS_SITE:inanshan.sjhcip.com} {
 	encode gzip zstd
 
 	import {$NS_TLS_SNIPPET:tls-acme.caddy}
