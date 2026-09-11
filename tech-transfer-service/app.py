@@ -112,6 +112,10 @@ if (_admin_dist / "index.html").is_file():
         app.mount("/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
         app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets-legacy")
 
+    _admin_icons_dir = _admin_dist / "admin-icons"
+    if _admin_icons_dir.is_dir():
+        app.mount("/admin-icons", StaticFiles(directory=_admin_icons_dir), name="admin-icons")
+
     @app.get("/", include_in_schema=False)
     @app.get("/login", include_in_schema=False)
     @app.get("/register", include_in_schema=False)

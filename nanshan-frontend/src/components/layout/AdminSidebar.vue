@@ -3,6 +3,34 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getSavedUser } from '../../api/client'
 
+import iconOverview from '../../assets/admin-icons/overview.png'
+import iconAchievement from '../../assets/admin-icons/achievement.png'
+import iconRequirement from '../../assets/admin-icons/requirement.png'
+import iconCooperation from '../../assets/admin-icons/cooperation.png'
+import iconCapital from '../../assets/admin-icons/capital.png'
+import iconInstitution from '../../assets/admin-icons/institution.png'
+import iconReview from '../../assets/admin-icons/review.png'
+import iconUser from '../../assets/admin-icons/user.png'
+import iconAi from '../../assets/admin-icons/ai.png'
+import iconContent from '../../assets/admin-icons/content.png'
+import iconSystem from '../../assets/admin-icons/system.png'
+import iconLog from '../../assets/admin-icons/log.png'
+
+const MENU_ICONS = {
+  overview: iconOverview,
+  achievement: iconAchievement,
+  requirement: iconRequirement,
+  cooperation: iconCooperation,
+  capital: iconCapital,
+  institution: iconInstitution,
+  review: iconReview,
+  user: iconUser,
+  ai: iconAi,
+  content: iconContent,
+  system: iconSystem,
+  log: iconLog,
+}
+
 defineProps({
   collapsed: {
     type: Boolean,
@@ -59,7 +87,7 @@ const menuList = [
   {
     name: '机构认证审核',
     path: '/admin/membership-review',
-    icon: 'institution'
+    icon: 'review'
   },
   {
     name: '用户管理',
@@ -139,125 +167,11 @@ const isActive = (path) => {
         @click="goPage(item.path)"
       >
         <span class="menu-icon">
-          <svg
-            v-if="item.icon === 'overview'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
+          <img
+            class="menu-icon-img"
+            :src="MENU_ICONS[item.icon]"
+            :alt="item.name"
           >
-            <circle cx="9" cy="7" r="4" />
-            <path d="M3 21v-2a6 6 0 0 1 12 0v2" />
-            <path d="M17 11a4 4 0 0 1 4 4v6" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'achievement'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <rect x="5" y="3" width="14" height="18" rx="2" />
-            <path d="M8 8h8M8 12h8M8 16h5" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'requirement'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <rect x="5" y="3" width="14" height="18" rx="2" />
-            <path d="M8 7h8M8 11h8M8 15h5" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'cooperation'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <path d="M4 12 9 7l4 4 3-3 4 4" />
-            <path d="m8 12 4 4 8-8" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'capital'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <rect x="3" y="10" width="4" height="10" rx="1" />
-            <rect x="10" y="6" width="4" height="14" rx="1" />
-            <rect x="17" y="3" width="4" height="17" rx="1" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'institution'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <path d="M3 21h18" />
-            <path d="M5 21V9l7-5 7 5v12" />
-            <path d="M9 21v-6h6v6" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'user'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <circle cx="9" cy="7" r="4" />
-            <path d="M3 21v-2a6 6 0 0 1 12 0v2" />
-            <path d="M17 11a4 4 0 0 1 4 4v6" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'ai'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path
-              d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
-            />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'content'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <rect x="5" y="3" width="14" height="18" rx="2" />
-            <path d="M8 8h8M8 12h8M8 16h5" />
-          </svg>
-
-          <svg
-            v-else-if="item.icon === 'system'"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v3M12 19v3" />
-            <path d="M2 12h3M19 12h3" />
-            <path d="m4.9 4.9 2.1 2.1" />
-            <path d="m17 17 2.1 2.1" />
-          </svg>
-
-          <svg
-            v-else
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <rect x="5" y="3" width="14" height="18" rx="2" />
-            <path d="M8 7h8M8 11h8M8 15h8" />
-          </svg>
         </span>
 
         <span
@@ -460,11 +374,11 @@ const isActive = (path) => {
   height: 24px;
 }
 
-.menu-icon svg {
+.menu-icon-img {
   width: 22px;
   height: 22px;
-
-  stroke-width: 2;
+  object-fit: contain;
+  display: block;
 }
 
 .menu-text {
