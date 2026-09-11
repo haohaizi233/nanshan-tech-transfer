@@ -13,7 +13,7 @@ Architecture source: 04-backend-domain-design.md §5.4, 06-api-design.md §15 ad
 import json
 
 from db import get_cursor
-from core.contact_validation import validate_phone
+from core.contact_validation import validate_contact_way
 from core.errors import (
     BizError,
     bad_request,
@@ -450,6 +450,11 @@ INST_KINDS = (
     "university", "institute", "enterprise", "other",
 )
 PLATFORM_TYPE_KEYS = ("poc", "pilot", "other")
+PLATFORM_TYPE_LABELS = {
+    "poc": "概念验证中心",
+    "pilot": "中小试基地",
+    "other": "其他",
+}
 INST_STATUSES = ("active", "disabled")
 
 # Institution PATCH 可编辑字段（camel → snake）；kind/source 溯源/id/时间戳不可改
@@ -470,6 +475,8 @@ INST_EDITABLE = {
     "contact": "contact_person",
     "phone": "contact_mobile",
     "serialNo": "serial_no",
+    "sourceStatus": "source_status",
+    "orderNum": "order_num",
 }
 
 
@@ -704,7 +711,10 @@ def _inst_admin_item(r):
         "platformTypeKey": (r.get("platform_type_key") or "other").strip(),
         "serialNo": int(r.get("serial_no") or 0),
         "sourcePk": r.get("source_pk"),
+        "sourceStatus": r.get("source_status"),
+        "orderNum": r.get("order_num"),
         "sourceSite": (r.get("source_site") or "").strip(),
+        "sourceApi": (r.get("source_api") or "").strip(),
         "fetchedAt": r["fetched_at"].isoformat() if r.get("fetched_at") else None,
         "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
         "updatedAt": r["updated_at"].isoformat() if r.get("updated_at") else None,
@@ -720,6 +730,8 @@ def _inst_admin_item(r):
             "functionText": (r.get("functions") or "").strip(),
             "contact": (r.get("contact_person") or "").strip(),
             "phone": (r.get("contact_mobile") or "").strip(),
+            "sourceStatus": r.get("source_status"),
+            "orderNum": r.get("order_num"),
         })
     return item
 
@@ -783,8 +795,8 @@ def _validate_inst_payload(body: dict, require_kind: bool):
             code, message, status = TT_INST_40001
             raise BizError(code, "机构名称不能为空", status)
     if "contact_mobile" in cleaned:
-        cleaned["contact_mobile"] = validate_phone(
-            cleaned["contact_mobile"], required=False, field_name="联系电话"
+        cleaned["contact_mobile"] = validate_contact_way(
+            cleaned["contact_mobile"], required=False, field_name="联系方式"
         )
 
     kind = None
@@ -793,11 +805,14 @@ def _validate_inst_payload(body: dict, require_kind: bool):
         if kind not in INST_KINDS:
             code, message, status = TT_INST_40001
             raise BizError(code, f"kind 必须是 {'/'.join(INST_KINDS)}", status)
-    elif "platform_type_key" in cleaned:
+    if "platform_type_key" in cleaned:
         key = str(cleaned["platform_type_key"]).strip().lower()
         if key not in PLATFORM_TYPE_KEYS:
             code, message, status = TT_INST_40001
             raise BizError(code, f"platformTypeKey 必须是 {'/'.join(PLATFORM_TYPE_KEYS)}", status)
+        cleaned["platform_type_key"] = key
+        if "platform_type" not in cleaned or not str(cleaned.get("platform_type") or "").strip():
+            cleaned["platform_type"] = PLATFORM_TYPE_LABELS.get(key, "")
     return cleaned, kind
 
 
@@ -810,13 +825,14 @@ def create_institution(admin_user: dict, body: dict, request_id=None) -> dict:
 
     if kind == "platform":
         cleaned.setdefault("platform_type_key", "other")
+        cleaned.setdefault("platform_type", PLATFORM_TYPE_LABELS.get(cleaned["platform_type_key"], ""))
 
     columns = ["kind", "status"]
     values: list = [kind, "active"]
     for snake in ("name", "region", "intro", "detail_info", "label", "logo_file_id", "sort_order",
                   "user_type", "detail_activity_id", "platform_type", "platform_type_key",
                   "support_unit", "functions", "contact_person", "contact_mobile",
-                  "serial_no"):
+                  "serial_no", "source_status", "order_num"):
         if snake in cleaned:
             columns.append(snake)
             values.append(cleaned[snake])
@@ -908,6 +924,13 @@ def set_institution_status(admin_user: dict, inst_id: int, action: str, request_
 CAPITAL_IMPORT_KINDS = ("platform", "invest", "service")
 
 
+def _to_int_or_none(v):
+    try:
+        return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_import_item(raw: dict) -> dict:
     if not isinstance(raw, dict):
         code, message, status = TT_INST_40001
@@ -927,29 +950,43 @@ def _normalize_import_item(raw: dict) -> dict:
     else:
         platform_type_key = platform_type_key or "other"
     source_pk = raw.get("sourcePk") if raw.get("sourcePk") is not None else raw.get("source_pk")
-    try:
-        source_pk = int(source_pk) if source_pk not in (None, "") else None
-    except (TypeError, ValueError):
-        source_pk = None
-    try:
-        sort_order = int(raw.get("sortOrder") if raw.get("sortOrder") is not None else raw.get("sort_order") or 0)
-    except (TypeError, ValueError):
-        sort_order = 0
+    source_pk = _to_int_or_none(source_pk)
+    sort_order = _to_int_or_none(
+        raw.get("sortOrder") if raw.get("sortOrder") is not None else raw.get("sort_order")
+    )
+    serial_no = _to_int_or_none(
+        raw.get("serialNo") if raw.get("serialNo") is not None else raw.get("serial_no")
+    )
+    source_status = _to_int_or_none(
+        raw.get("sourceStatus") if raw.get("sourceStatus") is not None else raw.get("source_status")
+    )
+    order_num = _to_int_or_none(
+        raw.get("orderNum") if raw.get("orderNum") is not None else raw.get("order_num")
+    )
     return {
         "kind": kind,
         "name": name,
         "region": str(raw.get("region") or "").strip(),
         "intro": str(raw.get("intro") or "").strip(),
         "label": str(raw.get("label") or "").strip(),
-        "unit": str(raw.get("unit") or "").strip(),
-        "functionText": str(raw.get("functionText") or raw.get("functions") or "").strip(),
-        "contact": str(raw.get("contact") or "").strip(),
-        "phone": str(raw.get("phone") or "").strip(),
+        "unit": str(raw.get("unit") or raw.get("support_unit") or "").strip(),
+        "functionText": str(raw.get("functionText") or raw.get("functions") or raw.get("platform_fun") or "").strip(),
+        "contact": str(raw.get("contact") or raw.get("contact_person") or "").strip(),
+        "phone": str(raw.get("phone") or raw.get("contact_mobile") or "").strip(),
         "platformTypeKey": platform_type_key,
-        "platformType": str(raw.get("platformType") or "").strip(),
-        "sortOrder": sort_order,
+        "platformType": str(raw.get("platformType") or raw.get("platform_type") or "").strip(),
+        "sortOrder": sort_order or 0,
         "sourcePk": source_pk,
         "status": "active" if str(raw.get("status") or "active").strip().lower() != "disabled" else "disabled",
+        "serialNo": serial_no,
+        "sourceStatus": source_status,
+        "orderNum": order_num,
+        "sourceSite": str(raw.get("sourceSite") or raw.get("source_site") or "").strip(),
+        "sourceApi": str(raw.get("sourceApi") or raw.get("source_api") or "").strip(),
+        "fetchedAt": str(raw.get("fetchedAt") or raw.get("fetched_at") or "").strip() or None,
+        "logoFileId": str(raw.get("logoFileId") or raw.get("logo_file_id") or "").strip(),
+        "detailInfo": str(raw.get("detailInfo") or raw.get("detail_info") or "").strip(),
+        "userType": str(raw.get("userType") or raw.get("user_type") or "").strip(),
     }
 
 
@@ -987,6 +1024,9 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
                 item["unit"], item["functionText"], item["contact"], item["phone"],
                 item["platformTypeKey"], item["platformType"], item["sortOrder"],
                 item["status"], item["sourcePk"],
+                item["serialNo"], item["sourceStatus"], item["orderNum"],
+                item["sourceSite"], item["sourceApi"], item["fetchedAt"],
+                item["logoFileId"], item["detailInfo"], item["userType"],
             )
             if existing:
                 cur.execute(
@@ -995,7 +1035,16 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
                         name=%s, region=%s, intro=%s, label=%s,
                         support_unit=%s, functions=%s, contact_person=%s, contact_mobile=%s,
                         platform_type_key=%s, platform_type=%s, sort_order=%s,
-                        status=%s, source_pk=COALESCE(%s, source_pk)
+                        status=%s, source_pk=COALESCE(%s, source_pk),
+                        serial_no=COALESCE(%s, serial_no),
+                        source_status=COALESCE(%s, source_status),
+                        order_num=COALESCE(%s, order_num),
+                        source_site=COALESCE(NULLIF(%s, ''), source_site),
+                        source_api=COALESCE(NULLIF(%s, ''), source_api),
+                        fetched_at=COALESCE(%s::timestamptz, fetched_at),
+                        logo_file_id=COALESCE(NULLIF(%s, ''), logo_file_id),
+                        detail_info=COALESCE(NULLIF(%s, ''), detail_info),
+                        user_type=COALESCE(NULLIF(%s, ''), user_type)
                     WHERE id=%s
                     RETURNING id
                     """,
@@ -1010,8 +1059,14 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
                     INSERT INTO institution (
                         kind, name, region, intro, label, support_unit, functions,
                         contact_person, contact_mobile, platform_type_key, platform_type,
-                        sort_order, status, source_pk
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        sort_order, status, source_pk,
+                        serial_no, source_status, order_num, source_site, source_api, fetched_at,
+                        logo_file_id, detail_info, user_type
+                    ) VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                        %s,%s,%s,%s,%s,%s::timestamptz,
+                        %s,%s,%s
+                    )
                     RETURNING id
                     """,
                     (item["kind"],) + values,

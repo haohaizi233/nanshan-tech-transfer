@@ -4,49 +4,59 @@
 
 - 页面：[南方创投网 - 概念验证中心/中小试基地库](https://www.first-net.cn/page/portal/platformBase/platformBase.jsp)
 - 接口：`POST /portal/platformBase_showPlatformBaseList`
-- 分页参数：`pagination.pageSize`、`pagination.pageIndex`
+- 分页：每页 20 条，全量约 5 页 / 100 条
 
 ## 字段对应
 
-| 网站列名 | 接口字段 | MySQL 列 |
-| --- | --- | --- |
-| 序号 | storeId | serial_no |
-| 平台名称 | platformName | platform_name |
-| 平台类型 | platformType | platform_type |
-| 依托单位 | supportUnit | support_unit |
-| 平台功能 | platformFun | platform_fun |
-| 联系人 | contactPerson | contact_person |
-| 联系方式 | contactMobile | contact_mobile |
+| 网站列名 | 源站字段 | 后台导入字段 | PG `institution` 列 |
+| --- | --- | --- | --- |
+| 序号 | storeId | serialNo / sourcePk | serial_no / source_pk |
+| 平台名称 | platformName | name | name |
+| 平台类型 | platformType | platformType / platformTypeKey | platform_type / platform_type_key |
+| 依托单位 | supportUnit | unit | support_unit |
+| 平台功能 | platformFun | functionText | functions |
+| 联系人 | contactPerson | contact | contact_person |
+| 联系方式 | contactMobile | phone | contact_mobile |
 
-## 数据库
+源站另有 `status`、`orderNum`，分别写入 `sourceStatus`、`orderNum`。
 
-- 库名：`nanshan_capital`
-- 表名：`platform_base`
-- 本机连接（当前环境）：见 `db_config.json`
-  - host: `127.0.0.1`
-  - port: **3307**（3306 已被其他 MySQL 占用）
-  - user: `root`
-  - password: 空（本地初始化，请尽快改密）
+平台类型归一：含「概念验证」→ `poc`；含「中小试」或「中试」→ `pilot`。源站原文仍保留在 `platformType`。
 
-启动本机 8.4 实例（若未在跑）：
-
-```powershell
-& "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqld.exe" --defaults-file="C:\ProgramData\MySQL\MySQL Server 8.4\my.ini"
-```
-
-## 使用
+## 输出文件
 
 ```bash
 cd tools/platform-crawler
 pip install -r requirements.txt
-
-# 仅爬取导出 JSON（无需 MySQL）
-python crawl_platform_base.py --skip-mysql
-
-# 写入本地 MySQL（当前环境）
-python crawl_platform_base.py --host 127.0.0.1 --port 3307 --user root --password=
+python crawl_platform_base.py
 ```
 
-重复执行会按 `serial_no` 做 upsert 更新。
+默认导出（不写 MySQL）：
 
-当前已成功入库 **100** 条（概念验证中心 49 / 中小试基地 26 / 中试基地 25）。
+- `concept_validation_centers.json` 概念验证中心
+- `pilot_test_bases.json` 中小试基地（含源站「中试基地」）
+- `platform_base_data.json` 全量 snake_case（兼容旧格式）
+
+分类 JSON 的 `items` 可直接给后台 `POST /api/tech-transfer/v1/admin/institutions/import`。
+
+如需写入 legacy MySQL `nanshan_capital.platform_base`：
+
+```bash
+python crawl_platform_base.py --mysql --host 127.0.0.1 --port 3307 --user root --password=
+```
+
+## 批量导入后台管理
+
+后端需已启动（默认 `http://127.0.0.1:8787`）。按 `(kind, source_pk)` 幂等更新，可重复执行。
+
+```bash
+# 本地开发（mock 票据，dev-user-001 为 admin 种子）
+python import_to_admin.py --base-url http://127.0.0.1:8787
+
+# 账号密码
+python import_to_admin.py --username admin --password Admin@2026
+
+# 已有 JWT
+python import_to_admin.py --token <jwt>
+```
+
+管理端「资本对接」页也支持 CSV 批量导入，模板列包含 `serialNo` / `unit` / `functionText` / `contact` / `phone`。

@@ -40,6 +40,8 @@ class InstitutionCreateRequest(BaseModel):
     contact: Optional[str] = Field(None, max_length=64)
     phone: Optional[str] = Field(None, max_length=64)
     serialNo: Optional[int] = Field(None, ge=0)
+    sourceStatus: Optional[int] = Field(None)
+    orderNum: Optional[int] = Field(None)
     detailActivityId: Optional[int] = Field(None)
 
 
@@ -61,4 +63,6 @@ class InstitutionUpdateRequest(BaseModel):
     contact: Optional[str] = Field(None, max_length=64)
     phone: Optional[str] = Field(None, max_length=64)
     serialNo: Optional[int] = Field(None, ge=0)
+    sourceStatus: Optional[int] = Field(None)
+    orderNum: Optional[int] = Field(None)
     detailActivityId: Optional[int] = Field(None)
