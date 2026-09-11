@@ -329,7 +329,7 @@ const submitReject = async () => {
 
         <div class="filter-item">
           <label>状态</label>
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="handleSearch">
             <option value="">全部</option>
             <option v-for="item in statusOptions" :key="item.value" :value="item.value">
               {{ item.label }}
@@ -339,7 +339,7 @@ const submitReject = async () => {
 
         <div class="filter-item">
           <label>分类</label>
-          <select v-model="filters.categoryCode">
+          <select v-model="filters.categoryCode" @change="handleSearch">
             <option value="">全部分类</option>
             <option v-for="item in categoryOptions" :key="item.code" :value="item.code">
               {{ item.name }}

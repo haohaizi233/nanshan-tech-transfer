@@ -266,7 +266,7 @@ const exportData = async () => {
 
         <div class="filter-item">
           <label>状态</label>
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="search">
             <option value="">
               全部
             </option>

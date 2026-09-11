@@ -166,7 +166,7 @@ const goDetail = item => {
             当前状态
           </label>
 
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="handleSearch">
 
             <option value="">
               全部

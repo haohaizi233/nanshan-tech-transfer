@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 
 import { api } from '../../api/client'
 import { confirmDialog, alertDialog } from '../../utils/appDialog.js'
-import { validatePhone } from '../../utils/contactValidation.js'
+import { validateContactWay } from '../../utils/contactValidation.js'
 
 const MODULES = [
   { key: 'poc', label: '概念验证中心', kind: 'platform', type: 'poc' },
@@ -19,11 +19,11 @@ const STATUS_OPTIONS = [
 ]
 
 const CSV_TEMPLATE = [
-  'kind,platformTypeKey,name,region,intro,unit,contact,phone,label,sortOrder',
-  'platform,poc,示例概念验证中心,深圳市南山区,服务早期技术验证,依托单位,张三,13800138000,,1',
-  'platform,pilot,示例中小试基地,深圳市南山区,工程化中试资源,依托单位,李四,13800138001,,2',
-  'service,,示例融资服务机构,深圳市南山区,知识产权融资服务,,,13800138002,融资,3',
-  'invest,,示例投资机构,深圳市南山区,早期技术投资,,,13800138003,投资,4',
+  'kind,platformTypeKey,platformType,name,serialNo,region,unit,functionText,contact,phone,label,sortOrder',
+  'platform,poc,概念验证中心,示例概念验证中心,1,深圳市南山区,依托单位,服务早期技术验证,张三,13800138000,,1',
+  'platform,pilot,中小试基地,示例中小试基地,2,深圳市南山区,依托单位,工程化中试资源,李四,13800138001,,2',
+  'service,,,示例融资服务机构,,深圳市南山区,,,,13800138002,融资,3',
+  'invest,,,示例投资机构,,深圳市南山区,,,,13800138003,投资,4',
 ].join('\n')
 
 const activeModule = ref('poc')
@@ -39,6 +39,7 @@ const totalPages = ref(1)
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
+const actingId = ref(null)
 
 const modalVisible = ref(false)
 const modalMode = ref('create')
@@ -50,6 +51,7 @@ const form = reactive({
   region: '',
   intro: '',
   unit: '',
+  functionText: '',
   contact: '',
   phone: '',
   label: '',
@@ -57,15 +59,8 @@ const form = reactive({
 })
 
 const importing = ref(false)
-
-const kindLabel = item => {
-  if (item.kind === 'platform') {
-    return item.platformTypeKey === 'poc' ? '概念验证中心' : item.platformTypeKey === 'pilot' ? '中小试基地' : '平台'
-  }
-  return item.kind === 'invest' ? '投资机构' : '银行融资'
-}
-
-const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
+const isPlatformModule = computed(() => current.value.kind === 'platform')
+const colCount = computed(() => (isPlatformModule.value ? 8 : 5))
 
 async function loadList() {
   loading.value = true
@@ -119,7 +114,7 @@ const openCreate = () => {
   modalMode.value = 'create'
   currentItem.value = null
   modalError.value = ''
-  Object.assign(form, { name: '', region: '', intro: '', unit: '', contact: '', phone: '', label: '', sortOrder: 0 })
+  Object.assign(form, { name: '', region: '', intro: '', unit: '', functionText: '', contact: '', phone: '', label: '', sortOrder: 0 })
   modalVisible.value = true
 }
 
@@ -132,10 +127,11 @@ const openEdit = item => {
     region: item.region || '',
     intro: item.intro || '',
     unit: item.unit || '',
+    functionText: item.functionText || '',
     contact: item.contact || '',
     phone: item.phone || '',
     label: item.label || '',
-    sortOrder: item.sortOrder || 0,
+    sortOrder: Number(item.sortOrder) || 0,
   })
   modalVisible.value = true
 }
@@ -149,11 +145,14 @@ const save = async () => {
     modalError.value = '请输入名称'
     return
   }
-  const phoneCheck = validatePhone(form.phone, { required: false })
-  if (!phoneCheck.ok) {
-    modalError.value = phoneCheck.message
-    return
+  if (isPlatformModule.value) {
+    const phoneCheck = validateContactWay(form.phone, { required: false, label: '联系方式' })
+    if (!phoneCheck.ok) {
+      modalError.value = phoneCheck.message
+      return
+    }
   }
+  if (saving.value) return
   saving.value = true
   modalError.value = ''
   try {
@@ -161,15 +160,21 @@ const save = async () => {
       name: form.name.trim(),
       region: form.region.trim(),
       intro: form.intro.trim(),
-      unit: form.unit.trim(),
-      contact: form.contact.trim(),
-      phone: phoneCheck.value,
       label: form.label.trim(),
       sortOrder: Number(form.sortOrder) || 0,
     }
+    if (isPlatformModule.value) {
+      body.unit = form.unit.trim()
+      body.contact = form.contact.trim()
+      body.phone = validateContactWay(form.phone, { required: false, label: '联系方式' }).value
+      body.functionText = form.functionText.trim()
+    }
     if (modalMode.value === 'create') {
       body.kind = current.value.kind
-      if (current.value.type) body.platformTypeKey = current.value.type
+      if (current.value.type) {
+        body.platformTypeKey = current.value.type
+        body.platformType = current.value.label
+      }
       await api('/admin/institutions', { method: 'POST', body })
       currentPage.value = 1
     } else {
@@ -185,35 +190,48 @@ const save = async () => {
 }
 
 const toggleStatus = async item => {
+  if (actingId.value) return
+  actingId.value = item.id
   const goingOnline = item.status !== 'active'
-  const ok = await confirmDialog({
-    title: goingOnline ? '上架资源' : '下架资源',
-    message: `确定${goingOnline ? '上架' : '下架'}「${item.name}」吗？`,
-    confirmText: goingOnline ? '确定上架' : '确定下架',
-    tone: goingOnline ? 'primary' : 'danger',
-  })
-  if (!ok) return
   try {
+    const ok = await confirmDialog({
+      title: goingOnline ? '上架资源' : '下架资源',
+      message: `确定${goingOnline ? '上架' : '下架'}「${item.name}」吗？`,
+      confirmText: goingOnline ? '确定上架' : '确定下架',
+      tone: goingOnline ? 'primary' : 'danger',
+    })
+    if (!ok) return
+    actionError.value = ''
     await api(`/admin/institutions/${item.id}/${goingOnline ? 'online' : 'offline'}`, { method: 'POST' })
-    loadList()
+    await loadList()
   } catch (err) {
     actionError.value = err.message || '操作失败'
+  } finally {
+    actingId.value = null
   }
 }
 
 const removeItem = async item => {
-  const ok = await confirmDialog({
-    title: '删除资源',
-    message: `确定删除「${item.name}」吗？删除后不可恢复。`,
-    confirmText: '确定删除',
-    tone: 'danger',
-  })
-  if (!ok) return
+  if (actingId.value) return
+  actingId.value = item.id
   try {
+    const ok = await confirmDialog({
+      title: '删除资源',
+      message: `确定删除「${item.name}」吗？删除后不可恢复。`,
+      confirmText: '确定删除',
+      tone: 'danger',
+    })
+    if (!ok) return
+    actionError.value = ''
     await api(`/admin/institutions/${item.id}`, { method: 'DELETE' })
-    loadList()
+    if (rows.value.length <= 1 && currentPage.value > 1) {
+      currentPage.value -= 1
+    }
+    await loadList()
   } catch (err) {
     actionError.value = err.message || '删除失败'
+  } finally {
+    actingId.value = null
   }
 }
 
@@ -325,13 +343,13 @@ const goPage = page => {
           <label>关键词</label>
           <input
             v-model="filters.keyword"
-            placeholder="名称、简介或依托单位"
+            :placeholder="isPlatformModule ? '名称、简介或依托单位' : '名称或简介'"
             @keyup.enter="handleSearch"
           />
         </div>
         <div class="filter-item">
           <label>状态</label>
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="handleSearch">
             <option
               v-for="item in STATUS_OPTIONS"
               :key="item.value"
@@ -352,7 +370,7 @@ const goPage = page => {
           </label>
         </div>
       </div>
-      <p class="hint">导入 CSV 按 kind + 名称幂等更新；模板列为 kind / platformTypeKey / name / region / intro / unit / contact / phone / label / sortOrder。</p>
+      <p class="hint">导入 CSV 按 kind + sourcePk/名称幂等更新。平台列：kind / platformTypeKey / platformType / name / serialNo / region / unit / functionText / contact / phone / label / sortOrder。</p>
     </section>
 
     <section class="table-card">
@@ -363,37 +381,37 @@ const goPage = page => {
             <tr>
               <th>ID</th>
               <th>名称</th>
-              <th>类型</th>
-              <th>地区</th>
-              <th>依托单位 / 简介</th>
-              <th>联系人</th>
+              <th v-if="isPlatformModule">依托单位</th>
+              <th>{{ isPlatformModule ? '平台功能' : '简介' }}</th>
+              <th v-if="isPlatformModule">联系人</th>
+              <th v-if="isPlatformModule">联系方式</th>
               <th>状态</th>
-              <th>更新时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td colspan="9">加载中…</td>
+              <td :colspan="colCount">加载中…</td>
             </tr>
             <tr v-else-if="!rows.length">
-              <td colspan="9">暂无数据</td>
+              <td :colspan="colCount">暂无数据</td>
             </tr>
             <tr v-for="item in rows" :key="item.id">
               <td>{{ item.id }}</td>
               <td>{{ item.name || '-' }}</td>
-              <td>{{ kindLabel(item) }}</td>
-              <td>{{ item.region || '-' }}</td>
-              <td>{{ item.unit || item.intro || '-' }}</td>
-              <td>{{ item.contact || item.phone || '-' }}</td>
+              <td v-if="isPlatformModule">{{ item.unit || '-' }}</td>
+              <td class="fn-cell" :title="item.functionText || item.intro">{{ (isPlatformModule ? (item.functionText || item.intro) : item.intro) || '-' }}</td>
+              <td v-if="isPlatformModule">{{ item.contact || '-' }}</td>
+              <td v-if="isPlatformModule">{{ item.phone || '-' }}</td>
               <td>{{ item.status === 'active' ? '已上架' : '已下架' }}</td>
-              <td>{{ fmtTime(item.updatedAt) }}</td>
-              <td>
-                <button type="button" @click="openEdit(item)">编辑</button>
-                <span>|</span>
-                <button type="button" @click="toggleStatus(item)">{{ item.status === 'active' ? '下架' : '上架' }}</button>
-                <span>|</span>
-                <button type="button" @click="removeItem(item)">删除</button>
+              <td class="ops-col">
+                <div class="ops">
+                  <button type="button" :disabled="actingId != null" @click="openEdit(item)">编辑</button>
+                  <span>|</span>
+                  <button type="button" :disabled="actingId != null" @click="toggleStatus(item)">{{ item.status === 'active' ? '下架' : '上架' }}</button>
+                  <span>|</span>
+                  <button type="button" :disabled="actingId != null" @click="removeItem(item)">删除</button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -424,11 +442,12 @@ const goPage = page => {
           <label class="full">名称<input v-model="form.name" /></label>
           <label>地区<input v-model="form.region" /></label>
           <label>排序<input v-model="form.sortOrder" type="number" /></label>
-          <label>依托单位<input v-model="form.unit" /></label>
-          <label>联系人<input v-model="form.contact" /></label>
-          <label>电话<input v-model="form.phone" /></label>
+          <label v-if="isPlatformModule">依托单位<input v-model="form.unit" /></label>
+          <label v-if="isPlatformModule">联系人<input v-model="form.contact" /></label>
+          <label v-if="isPlatformModule">联系方式<input v-model="form.phone" /></label>
           <label>标签<input v-model="form.label" /></label>
-          <label class="full">简介<textarea v-model="form.intro" rows="4" /></label>
+          <label v-if="isPlatformModule" class="full">平台功能<textarea v-model="form.functionText" rows="4" /></label>
+          <label class="full">简介<textarea v-model="form.intro" rows="3" /></label>
         </div>
         <footer>
           <button type="button" class="default-btn" @click="closeModal">取消</button>
@@ -487,7 +506,11 @@ const goPage = page => {
 .table-wrapper { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { height: 52px; padding: 0 12px; border-bottom: 1px solid #edf1f5; text-align: left; font-size: 13px; color: #4f5b6d; }
+.fn-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-col { width: 1%; white-space: nowrap; }
+.ops { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 td button { border: 0; background: transparent; color: #1a7fff; }
+td button:disabled { color: #9aa6b6; cursor: not-allowed; }
 .pager { display: flex; align-items: center; gap: 8px; padding-top: 14px; color: #8a95a5; font-size: 13px; }
 .pager button { min-width: 32px; height: 32px; border: 1px solid #e5eaf1; background: #fff; border-radius: 6px; }
 .pager button.active { border-color: #1a7fff; color: #1a7fff; }

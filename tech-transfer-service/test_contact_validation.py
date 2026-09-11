@@ -1,6 +1,8 @@
 from core.contact_validation import (
+    is_valid_contact_way,
     is_valid_email,
     is_valid_phone,
+    validate_contact_way,
     validate_email,
     validate_phone,
 )
@@ -29,6 +31,17 @@ def main():
     try:
         validate_email("wqe", required=True)
         raise AssertionError("expected invalid email")
+    except BizError as exc:
+        assert "格式" in exc.message
+
+    assert is_valid_contact_way("13800138000")
+    assert is_valid_contact_way("88015909")
+    assert is_valid_contact_way("0755-88015909")
+    assert not is_valid_contact_way("abc")
+    assert validate_contact_way("", required=False) == ""
+    try:
+        validate_contact_way("nope", required=True)
+        raise AssertionError("expected invalid contact way")
     except BizError as exc:
         assert "格式" in exc.message
     print("PASS: contact validation")

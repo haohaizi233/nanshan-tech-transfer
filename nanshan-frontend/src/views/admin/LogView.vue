@@ -211,7 +211,7 @@ const cellTitle = (value) => {
             目标类型
           </label>
 
-          <select v-model="filters.targetType">
+          <select v-model="filters.targetType" @change="search">
             <option value="">
               全部
             </option>

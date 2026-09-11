@@ -8,7 +8,7 @@ import {
 
 import { api } from '../../api/client'
 import { confirmDialog } from '../../utils/appDialog.js'
-import { validatePhone } from '../../utils/contactValidation.js'
+import { validateContactWay } from '../../utils/contactValidation.js'
 
 const KIND_OPTIONS = [
   { value: 'platform', label: '平台' },
@@ -25,9 +25,21 @@ const STATUS_OPTIONS = [
   { value: 'disabled', label: '已下架' }
 ]
 
+const PLATFORM_TYPE_OPTIONS = [
+  { value: 'poc', label: '概念验证中心' },
+  { value: 'pilot', label: '中小试基地' },
+  { value: 'other', label: '其他' }
+]
+
+const platformTypeLabel = key => ({
+  poc: '概念验证中心',
+  pilot: '中小试基地',
+  other: '其他'
+}[key] || '其他')
+
 const kindLabel = item => {
   if (item.kind === 'platform') {
-    return item.platformTypeKey === 'poc' ? '平台·验证' : item.platformTypeKey === 'pilot' ? '平台·中试' : '平台'
+    return item.platformType || platformTypeLabel(item.platformTypeKey)
   }
   return {
     invest: '投资机构',
@@ -50,6 +62,11 @@ const kindClass = item => ({
 }[item.kind] || 'tag-none')
 
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
+
+const platformSummary = item => {
+  if (!item) return '-'
+  return item.intro || item.functionText || '-'
+}
 
 const filters = reactive({
   keyword: '',
@@ -98,7 +115,10 @@ const form = reactive({
   sortOrder: 0,
   contact: '',
   phone: '',
-  unit: ''
+  unit: '',
+  platformTypeKey: 'poc',
+  functionText: '',
+  serialNo: null
 })
 
 const pages = computed(() => {
@@ -268,7 +288,10 @@ const fillForm = item => {
     sortOrder: item.sortOrder || 0,
     contact: item.contact || '',
     phone: item.phone || '',
-    unit: item.unit || ''
+    unit: item.unit || '',
+    platformTypeKey: item.platformTypeKey || 'poc',
+    functionText: item.functionText || '',
+    serialNo: item.serialNo || null
   })
 }
 
@@ -293,7 +316,10 @@ const openCreate = () => {
     sortOrder: 0,
     contact: '',
     phone: '',
-    unit: ''
+    unit: '',
+    platformTypeKey: 'poc',
+    functionText: '',
+    serialNo: null
   })
   modalVisible.value = true
 }
@@ -307,7 +333,7 @@ const save = async () => {
     modalError.value = '请输入机构名称'
     return
   }
-  const phoneCheck = validatePhone(form.phone, { required: false, label: '联系电话' })
+  const phoneCheck = validateContactWay(form.phone, { required: false, label: '联系方式' })
   if (!phoneCheck.ok) {
     modalError.value = phoneCheck.message
     return
@@ -324,9 +350,16 @@ const save = async () => {
       sortOrder: Number(form.sortOrder) || 0
     }
     if (form.kind === 'platform') {
+      const typeOpt = PLATFORM_TYPE_OPTIONS.find(item => item.value === form.platformTypeKey)
       body.contact = form.contact.trim()
       body.phone = phoneCheck.value
       body.unit = form.unit.trim()
+      body.functionText = form.functionText.trim()
+      body.platformTypeKey = form.platformTypeKey
+      body.platformType = typeOpt ? typeOpt.label : form.platformTypeKey
+      if (form.serialNo != null && form.serialNo !== '') {
+        body.serialNo = Number(form.serialNo) || 0
+      }
     }
 
     if (modalMode.value === 'create') {
@@ -391,12 +424,17 @@ const exportData = async () => {
     }
 
     const csv = [
-      ['ID', '机构名称', '机构类型', '所在地区', '标签', '简介', '状态', '更新时间'],
+      ['ID', '序号', '机构名称', '机构类型', '所在地区', '依托单位', '平台功能', '联系人', '联系方式', '标签', '简介', '状态', '更新时间'],
       ...all.map(item => [
         item.id,
+        item.serialNo || '',
         item.name,
         kindLabel(item),
         item.region,
+        item.unit,
+        item.functionText,
+        item.contact,
+        item.phone,
         item.label,
         item.intro,
         item.status === 'active' ? '已上架' : '已下架',
@@ -434,7 +472,7 @@ const exportData = async () => {
 
         <div class="filter-item">
           <label>机构类型</label>
-          <select v-model="filters.kind">
+          <select v-model="filters.kind" @change="handleSearch">
             <option value="">
               请选择机构类型
             </option>
@@ -450,7 +488,7 @@ const exportData = async () => {
 
         <div class="filter-item">
           <label>状态</label>
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="handleSearch">
             <option value="">
               请选择状态
             </option>
@@ -501,16 +539,16 @@ const exportData = async () => {
         <table>
           <thead>
             <tr>
-              <th>ID</th>
-              <th>机构名称</th>
-              <th>机构类型</th>
-              <th>所在地区</th>
-              <th>标签</th>
-              <th>简介</th>
-              <th>排序</th>
-              <th>状态</th>
-              <th>更新时间</th>
-              <th>操作</th>
+              <th class="col-id">ID</th>
+              <th class="col-name">机构名称</th>
+              <th class="col-kind">机构类型</th>
+              <th class="col-region">所在地区</th>
+              <th class="col-unit">依托单位</th>
+              <th class="col-label">标签</th>
+              <th class="col-intro">简介</th>
+              <th class="col-status">状态</th>
+              <th class="col-time">更新时间</th>
+              <th class="col-ops">操作</th>
             </tr>
           </thead>
 
@@ -519,16 +557,16 @@ const exportData = async () => {
               v-for="item in rows"
               :key="item.id"
             >
-              <td>{{ item.id }}</td>
+              <td class="col-id">{{ item.id }}</td>
 
               <td
-                class="name-cell"
+                class="name-cell col-name"
                 :title="item.name"
               >
                 {{ item.name || '-' }}
               </td>
 
-              <td>
+              <td class="col-kind">
                 <span
                   class="type-tag"
                   :class="kindClass(item)"
@@ -537,25 +575,35 @@ const exportData = async () => {
                 </span>
               </td>
 
-              <td>{{ item.region || '-' }}</td>
+              <td
+                class="label-cell col-region"
+                :title="item.region"
+              >
+                {{ item.region || '-' }}
+              </td>
 
               <td
-                class="label-cell"
+                class="label-cell col-unit"
+                :title="item.unit"
+              >
+                {{ item.unit || '-' }}
+              </td>
+
+              <td
+                class="label-cell col-label"
                 :title="item.label"
               >
                 {{ item.label || '-' }}
               </td>
 
               <td
-                class="intro-cell"
-                :title="item.intro"
+                class="intro-cell col-intro"
+                :title="platformSummary(item)"
               >
-                {{ item.intro || '-' }}
+                {{ platformSummary(item) }}
               </td>
 
-              <td>{{ item.sortOrder }}</td>
-
-              <td>
+              <td class="col-status">
                 <span
                   class="status"
                   :class="{
@@ -569,11 +617,11 @@ const exportData = async () => {
                 </span>
               </td>
 
-              <td class="time-cell">
+              <td class="time-cell col-time">
                 {{ fmtTime(item.updatedAt) }}
               </td>
 
-              <td>
+              <td class="col-ops">
                 <div class="operation">
                   <button @click="openView(item)">
                     查看
@@ -824,13 +872,18 @@ const exportData = async () => {
 
             <template v-if="currentItem.kind === 'platform'">
               <div>
+                <label>序号</label>
+                <strong>{{ currentItem.serialNo || '-' }}</strong>
+              </div>
+
+              <div>
                 <label>依托单位</label>
                 <strong>{{ currentItem.unit || '-' }}</strong>
               </div>
 
               <div>
                 <label>平台类型</label>
-                <strong>{{ { poc: '验证平台', pilot: '中试平台', other: '其他' }[currentItem.platformTypeKey] || '-' }}</strong>
+                <strong>{{ currentItem.platformType || platformTypeLabel(currentItem.platformTypeKey) }}</strong>
               </div>
 
               <div>
@@ -839,8 +892,13 @@ const exportData = async () => {
               </div>
 
               <div>
-                <label>联系电话</label>
+                <label>联系方式</label>
                 <strong>{{ currentItem.phone || '-' }}</strong>
+              </div>
+
+              <div class="full">
+                <label>平台功能</label>
+                <strong>{{ currentItem.functionText || '-' }}</strong>
               </div>
             </template>
 
@@ -920,6 +978,30 @@ const exportData = async () => {
 
           <template v-if="form.kind === 'platform'">
             <label>
+              平台类型
+
+              <select v-model="form.platformTypeKey">
+                <option
+                  v-for="item in PLATFORM_TYPE_OPTIONS"
+                  :key="item.value"
+                  :value="item.value"
+                >
+                  {{ item.label }}
+                </option>
+              </select>
+            </label>
+
+            <label>
+              序号
+
+              <input
+                v-model.number="form.serialNo"
+                type="number"
+                min="0"
+              />
+            </label>
+
+            <label>
               依托单位
 
               <input v-model="form.unit" />
@@ -932,9 +1014,18 @@ const exportData = async () => {
             </label>
 
             <label>
-              联系电话
+              联系方式
 
               <input v-model="form.phone" />
+            </label>
+
+            <label class="full">
+              平台功能
+
+              <textarea
+                v-model="form.functionText"
+                rows="4"
+              ></textarea>
             </label>
           </template>
 
@@ -1204,7 +1295,7 @@ const exportData = async () => {
 
 .table-wrapper table {
   width: 100%;
-  min-width: 1240px;
+  min-width: 1120px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -1224,37 +1315,15 @@ const exportData = async () => {
   font-weight: 600;
 }
 
-.table-wrapper th:nth-child(1) {
-  width: 70px;
-}
-
-.table-wrapper th:nth-child(2) {
-  width: 220px;
-}
-
-.table-wrapper th:nth-child(3) {
-  width: 110px;
-}
-
-.table-wrapper th:nth-child(4) {
-  width: 135px;
-}
-
-.table-wrapper th:nth-child(7) {
-  width: 65px;
-}
-
-.table-wrapper th:nth-child(8) {
-  width: 90px;
-}
-
-.table-wrapper th:nth-child(9) {
-  width: 145px;
-}
-
-.table-wrapper th:nth-child(10) {
-  width: 150px;
-}
+.col-id { width: 64px; }
+.col-name { width: 22%; }
+.col-kind { width: 100px; }
+.col-region { width: 96px; }
+.col-unit { width: 14%; }
+.col-label { width: 100px; }
+.col-status { width: 88px; }
+.col-time { width: 148px; }
+.col-ops { width: 168px; }
 
 tbody tr:hover {
   background: #fafcff;

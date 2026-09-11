@@ -708,7 +708,7 @@ onMounted(() => {
         <div class="filter-item">
           <label>分类</label>
 
-          <select v-model="filters.categoryCode">
+          <select v-model="filters.categoryCode" @change="handleSearch">
             <option value="">
               请选择分类
             </option>
@@ -726,7 +726,7 @@ onMounted(() => {
         <div class="filter-item">
           <label>状态</label>
 
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="handleSearch">
             <option value="">
               请选择状态
             </option>
