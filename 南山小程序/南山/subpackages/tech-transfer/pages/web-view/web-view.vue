@@ -3,16 +3,16 @@
 </template>
 
 <script>
+import { getScannedHttpUrl } from '../../utils/scanned-url.mjs'
+
 export default {
   data() {
     return { url: '' }
   },
   onLoad(options) {
-    try {
-      const value = decodeURIComponent((options && options.url) || '')
-      const parsed = new URL(value)
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') this.url = parsed.href
-    } catch (e) {
+    const value = decodeURIComponent((options && options.url) || '')
+    this.url = getScannedHttpUrl(value)
+    if (!this.url) {
       uni.showToast({ title: '网址无效', icon: 'none' })
     }
   },

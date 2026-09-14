@@ -48,6 +48,28 @@ test('scan results accept only complete http URLs for direct navigation', () => 
   assert.equal(getScannedHttpUrl('javascript:alert(1)'), '')
 })
 
+test('scan recognizes HTTPS in a WeChat runtime without the browser URL API', () => {
+  const originalUrl = globalThis.URL
+  try {
+    globalThis.URL = undefined
+    assert.equal(
+      getScannedHttpUrl('https://achievementexpo.siat.ac.cn/view/#\n/activePage/10400002'),
+      'https://achievementexpo.siat.ac.cn/view/#/activePage/10400002',
+    )
+  } finally {
+    globalThis.URL = originalUrl
+  }
+})
+
+test('in-app web view uses the same Mini Program-safe URL validation', () => {
+  const webView = readFileSync(
+    new URL('../subpackages/tech-transfer/pages/web-view/web-view.vue', import.meta.url),
+    'utf8',
+  )
+  assert.match(webView, /getScannedHttpUrl/)
+  assert.doesNotMatch(webView, /new URL/)
+})
+
 test('patent preview follows the LocalAdapter H5 API routing rule', () => {
   assert.equal(typeof patentApi.resolvePatentApiOrigin, 'function')
   if (typeof patentApi.resolvePatentApiOrigin !== 'function') return

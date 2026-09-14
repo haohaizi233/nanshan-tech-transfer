@@ -54,12 +54,44 @@
 
       <view v-if="detail.abstract" class="section">
         <text class="section-title">摘要</text>
-        <text class="body-text">{{ detail.abstract }}</text>
+        <block v-if="detail.abstractBlocks && detail.abstractBlocks.length">
+          <block
+            v-for="(block, index) in detail.abstractBlocks"
+            :key="`abstract-${index}`"
+          >
+            <rich-text
+              v-if="block.html"
+              :nodes="block.html"
+              :class="block.type === 'formula' ? 'body-formula' : 'body-paragraph'"
+            />
+            <text
+              v-else
+              :class="block.type === 'formula' ? 'body-formula' : (block.type === 'code' ? 'body-code' : 'body-paragraph')"
+            >{{ block.text }}</text>
+          </block>
+        </block>
+        <text v-else class="body-text">{{ detail.abstract }}</text>
       </view>
 
       <view v-if="detail.claims" class="section">
         <text class="section-title">权利要求</text>
-        <text class="body-text">{{ detail.claims }}</text>
+        <block v-if="detail.claimsBlocks && detail.claimsBlocks.length">
+          <block
+            v-for="(block, index) in detail.claimsBlocks"
+            :key="`claims-${index}`"
+          >
+            <rich-text
+              v-if="block.html"
+              :nodes="block.html"
+              :class="block.type === 'formula' ? 'body-formula' : 'body-paragraph'"
+            />
+            <text
+              v-else
+              :class="block.type === 'formula' ? 'body-formula' : (block.type === 'code' ? 'body-code' : 'body-paragraph')"
+            >{{ block.text }}</text>
+          </block>
+        </block>
+        <text v-else class="body-text">{{ detail.claims }}</text>
       </view>
 
       <view v-if="detail.description" class="section">
@@ -67,7 +99,23 @@
           <text class="section-title">说明书</text>
           <text class="toggle">{{ showDescription ? '收起' : '展开' }}</text>
         </view>
-        <text v-if="showDescription" class="body-text">{{ detail.description }}</text>
+        <block v-if="showDescription && detail.descriptionBlocks && detail.descriptionBlocks.length">
+          <block
+            v-for="(block, index) in detail.descriptionBlocks"
+            :key="`description-${index}`"
+          >
+            <rich-text
+              v-if="block.html"
+              :nodes="block.html"
+              :class="block.type === 'formula' ? 'body-formula' : 'body-paragraph'"
+            />
+            <text
+              v-else
+              :class="block.type === 'formula' ? 'body-formula' : (block.type === 'code' ? 'body-code' : 'body-paragraph')"
+            >{{ block.text }}</text>
+          </block>
+        </block>
+        <text v-else-if="showDescription" class="body-text">{{ detail.description }}</text>
       </view>
     </block>
     <pdf-preview-overlay
@@ -258,5 +306,45 @@ export default {
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.body-paragraph {
+  display: block;
+  font-size: 26rpx;
+  color: #444;
+  line-height: 1.8;
+  text-indent: 2em;
+  margin-bottom: 14rpx;
+  word-break: break-word;
+}
+
+.body-formula {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 25rpx;
+  color: #1f2937;
+  line-height: 1.8;
+  text-align: center;
+  text-indent: 0;
+  padding: 16rpx 12rpx;
+  margin: 12rpx 0 20rpx;
+  background: #f7f9fc;
+  border-radius: 8rpx;
+  word-break: break-all;
+}
+
+.body-code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 24rpx;
+  color: #1f2937;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-indent: 0;
+  padding: 16rpx;
+  margin: 12rpx 0 20rpx;
+  background: #f1f5f9;
+  border-radius: 8rpx;
 }
 </style>
