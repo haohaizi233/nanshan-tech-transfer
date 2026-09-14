@@ -76,9 +76,7 @@ def main():
         "具体执行过程可以表示为：TSN(T\n1\n,T\n2\n,��,T\nK\n)=H(G(F(T\n1\n；W)))。其中，T\n1\n表示第一个视频分片。"
     )
     assert blocks == [
-        {"type": "paragraph", "text": "具体执行过程可以表示为："},
-        {"type": "formula", "text": "TSN(T₁,T₂,��,Tₖ)=H(G(F(T₁；W)))"},
-        {"type": "paragraph", "text": "其中，T₁表示第一个视频分片。"},
+        {"type": "paragraph", "text": "具体执行过程可以表示为：TSN(T₁,T₂,��,Tₖ)=H(G(F(T₁；W)))。其中，T₁表示第一个视频分片。"},
     ]
 
     # 正文可能混用 Markdown/LaTeX、HTML 角标及代码围栏；代码不得被公式修复器改写。
@@ -109,6 +107,17 @@ def main():
     assert flattened_formula[0]["text"] == "资源量约为1013×10¹²m³。"
     assert flattened_formula[1]["type"] == "formula"
     assert flattened_formula[1]["text"] == "σ′ij＝λεδᵢⱼ+2Gεij(2.2-2)"
+
+    # 上游把同一行里的下标和运算符拆开时，不能把公式尾巴误拆为独立居中公式。
+    inline_equation = format_patent_content_blocks(
+        "网格块的中心满足：x\ni\n＝(x\ni+1/2\n+x\ni-1/2\n)/2，Δx\ni\n＝x\ni+1/2\n-x\ni-1/2\n；Δx\ni\n,Δy\nj\n分别为网格步长。"
+    )
+    assert [block["type"] for block in inline_equation] == ["paragraph"]
+    assert inline_equation[0]["text"] == "网格块的中心满足：xᵢ＝(xᵢ+1/2+xᵢ-1/2)/2，Δxᵢ＝xᵢ+1/2-xᵢ-1/2；Δxᵢ,Δyⱼ分别为网格步长。"
+
+    greek_index = format_patent_content_blocks("式中，C\nφ\n—孔隙压缩系数，无量纲。")
+    assert greek_index[0]["text"] == "式中，Cφ—孔隙压缩系数，无量纲。"
+    assert "C<sub>φ</sub>" in greek_index[0]["html"]
 
     mapped = map_search_hit(GOOGLE_HIT)
     assert mapped["publicationNo"] == "CN108604342B"

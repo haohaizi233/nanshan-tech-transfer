@@ -29,14 +29,14 @@ _MARKER_RE = re.compile(r"\ue000(0|1)\|(.*?)\ue001", re.DOTALL)
 # 上游把角标拆成独立行：h\n1 → h₁，ρ\ns → ρₛ，k\n∞ → k<sub>∞</sub>。
 # 变量限定为拉丁/希腊单字母，避免把 Figure\n1 等普通文字误判成角标。
 _BROKEN_SUB_RE = re.compile(
-    r"(?<![A-Za-z])([A-Za-zΑ-ωϐϑϕϖ])\n([0-9A-Za-z∞,+\-]{1,16})(?=\n|$|[^A-Za-z0-9])"
+    r"(?<![A-Za-z])([A-Za-zΑ-ωϐϑϕϖ])\n([0-9A-Za-zΑ-ωϐϑϕϖ∞,]{1,16})(?=\n|$|[^A-Za-z0-9])"
 )
 _SUB_DIGITS = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
 _SUB_LETTERS = str.maketrans("aehijklmnoprstuvx", "ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ")
 _SUPER_DIGITS = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 _BROKEN_EXPONENT_RE = re.compile(r"([0-9]+)\n([0-9]{1,3})(?=\n(?:[A-Za-zμ]))")
 _BROKEN_UNIT_POWER_RE = re.compile(r"([cm])\n([23])(?=\n|$|[，。；;])", re.IGNORECASE)
-_FORMULA_BREAK_RE = re.compile(r"(?<=[A-Za-z0-9₀-₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ⁰¹²³⁴⁵⁶⁷⁸⁹])\n(?=[,，;；)=])")
+_FORMULA_BREAK_RE = re.compile(r"(?<=[A-Za-z0-9₀-₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ⁰¹²³⁴⁵⁶⁷⁸⁹])\n(?=[,，;；)=+\-*/])")
 _SUBSCRIPT_WRAP_RE = re.compile(r"(?<=[₀-₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ⁰¹²³⁴⁵⁶⁷⁸⁹])\n(?=\S)")
 _FORMULA_RE = re.compile(r"(?<=[：:])([A-Za-z][A-Za-z0-9]*\([^。\n]*[=＝][^。\n]*)")
 _FENCED_BLOCK_RE = re.compile(r"(?m)^(?:```|~~~)([A-Za-z0-9_+-]*)[ \t]*\n?(.*?)(?:```|~~~)", re.DOTALL)
@@ -185,19 +185,9 @@ def _paragraph_blocks(text: str) -> list[dict[str, str]]:
     for line in _coalesce_math_lines(text):
         if not line:
             continue
-        match = _FORMULA_RE.search(line)
-        if match and not _INLINE_MATH_RE.search(line):
-            before = line[:match.start()].strip()
-            formula = match.group(1).strip()
-            after = line[match.end():].lstrip("。．. ").strip()
-            if before:
-                blocks.append(_rich_block("paragraph", _strip_markers(before), _inline_html(before)))
-            blocks.append(_rich_block("formula", _strip_markers(formula), _markers_to_html(formula)))
-            if after:
-                blocks.append(_rich_block("paragraph", _strip_markers(after), _inline_html(after)))
-        else:
-            block_type = "formula" if _is_formula_expression(line) else "paragraph"
-            blocks.append(_rich_block(block_type, _strip_markers(line), _inline_html(line)))
+        # 未带 Markdown/LaTeX 边界的公式可能嵌在中文语句中；不猜测边界，避免只把尾半截单独渲染。
+        block_type = "formula" if _is_formula_expression(line) else "paragraph"
+        blocks.append(_rich_block(block_type, _strip_markers(line), _inline_html(line)))
     return blocks
 
 
