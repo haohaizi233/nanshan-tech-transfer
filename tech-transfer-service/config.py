@@ -119,6 +119,19 @@ class Settings(BaseSettings):
     PATENT_PROVIDER_TIMEOUT: int = 45
     PATENT_PDF_TIMEOUT: int = 60
 
+    # ── AI 能力开关（与前端 feature-flags.js 对齐）──────────
+    AI_FEATURE_ENABLED: bool = True
+
+    # ── 爱马仕 Hermes / OpenAI 兼容 Provider（密钥只在服务端）──
+    # 企业微信 Bot 长连接由爱马仕 gateway 持有（服务器在别处），本服务只走 HTTP。
+    AI_PROVIDER_BASE: str = ""
+    AI_PROVIDER_KEY: str = ""
+    AI_PROVIDER_MODEL: str = "hermes-agent"
+    AI_PROVIDER_TIMEOUT: int = 120
+    WECOM_BOT_ID: str = ""
+    WECOM_SECRET: str = ""
+    WECOM_WEBSOCKET_URL: str = "wss://openws.work.weixin.qq.com"
+
     @field_validator("APP_ENV")
     @classmethod
     def _validate_app_env(cls, v: str) -> str:

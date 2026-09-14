@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import * as patentApi from '../subpackages/tech-transfer/api/patent.js'
+import {
+  buildPatentDetailSeed,
+  mergePatentDetail,
+} from '../subpackages/tech-transfer/utils/patent-detail-state.mjs'
+import { getScannedHttpUrl } from '../subpackages/tech-transfer/utils/scanned-url.mjs'
 
 const LEAK = /googleapis|patents\.google|googleusercontent|patentimages\.storage|pdf_url/
 
@@ -10,6 +15,37 @@ test('patent type labels stay user-facing', () => {
   assert.equal(patentApi.getPatentTypeLabel('invention'), '发明专利')
   assert.equal(patentApi.getPatentTypeLabel('utility_model'), '实用新型')
   assert.equal(patentApi.getPatentTypeLabel('design'), '外观设计')
+})
+
+test('patent detail decodes every routed preview field before rendering', () => {
+  const seed = buildPatentDetailSeed({
+    no: 'CN110313154B',
+    title: '%E5%85%B7%E6%9C%89%E5%9F%BA%E4%BA%8E%E6%84%8F%E5%9B%BE%E7%9A%84%E4%BF%A1%E6%81%AF%E8%BE%A8%E6%9E%90',
+    applicant: '%E5%BE%AE%E8%BD%AF%E6%8A%80%E6%9C%AF%E8%AE%B8%E5%8F%AF%E6%9C%89%E9%99%90%E8%B4%A3%E4%BB%BB%E5%85%AC%E5%8F%B8',
+    inventor: 'O%E3%83%BB%E6%89%80%E7%BD%97%E9%97%A8',
+    language: 'zh',
+  })
+
+  assert.equal(seed.title, '具有基于意图的信息辨析')
+  assert.equal(seed.applicant, '微软技术许可有限责任公司')
+  assert.equal(seed.inventor, 'O・所罗门')
+  assert.equal(seed.language, 'zh')
+})
+
+test('patent detail keeps the title language shown in the search preview', () => {
+  const detail = mergePatentDetail(
+    { title: '具有基于意图的信息辨析', applicant: '', language: 'zh' },
+    { title: 'Intelligent assistant with intent-based information resolution', applicant: '微软技术许可有限责任公司' },
+  )
+
+  assert.equal(detail.title, '具有基于意图的信息辨析')
+  assert.equal(detail.applicant, '微软技术许可有限责任公司')
+})
+
+test('scan results accept only complete http URLs for direct navigation', () => {
+  assert.equal(getScannedHttpUrl(' https://example.com/path?a=1 '), 'https://example.com/path?a=1')
+  assert.equal(getScannedHttpUrl('www.example.com'), '')
+  assert.equal(getScannedHttpUrl('javascript:alert(1)'), '')
 })
 
 test('patent preview follows the LocalAdapter H5 API routing rule', () => {

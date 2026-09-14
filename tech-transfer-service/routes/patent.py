@@ -68,5 +68,6 @@ def patent_pdf_page(publication_no: str, page: int, user: dict = Depends(identit
 
 
 @router.get("/patents/{publication_no}")
-def patent_detail(publication_no: str, user: dict = Depends(identity)):
-    return success(get_patent(publication_no))
+def patent_detail(publication_no: str, request: Request, user: dict = Depends(identity)):
+    language = (request.query_params.get("language") or "").strip()[:8]
+    return success(get_patent(publication_no, language=language))

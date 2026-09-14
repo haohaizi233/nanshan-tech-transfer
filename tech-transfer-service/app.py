@@ -12,12 +12,14 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config import assert_environment, settings
@@ -143,6 +145,110 @@ if (_admin_dist / "index.html").is_file():
                 f"/{_static_name}", _serve_static, methods=["GET"], include_in_schema=False
             )
 
+    # 浏览器会默认请求 /favicon.ico；后台只有 SVG 图标时复用它，避免每次访问都
+    # 产生一条无意义的 404（现代浏览器支持以 SVG 作为站点图标）。
+    if (_admin_dist / "favicon.svg").is_file():
+        @app.get("/favicon.ico", include_in_schema=False)
+        def admin_favicon_ico():
+            return FileResponse(_admin_dist / "favicon.svg", media_type="image/svg+xml")
+
+
+# ── 小程序 H5（/h5/）────────────────────────────────────────
+# 公网 Caddy 把 /h5 转到本服务（与 /api 同一上游），再反代本机 :5173。
+# VPS 上没有 HBuilder 进程；不能把 /h5 直接打到 127.0.0.1:5173。
+_H5_DEV_ORIGIN = "http://127.0.0.1:5173"
+_H5_ROOT = Path(__file__).resolve().parent.parent / "南山小程序" / "南山"
+_H5_DIST_CANDIDATES = (
+    _H5_ROOT / "unpackage" / "dist" / "build" / "h5",
+    _H5_ROOT / "unpackage" / "dist" / "dev" / "h5",
+)
+_H5_PROXY_OPENER = None
+
+
+def _h5_opener():
+    # HTTP-only：避免 build_opener 默认装 HTTPSHandler 时扫 Windows 证书库卡住 reload
+    global _H5_PROXY_OPENER
+    if _H5_PROXY_OPENER is None:
+        opener = urllib.request.OpenerDirector()
+        opener.add_handler(urllib.request.ProxyHandler({}))
+        opener.add_handler(urllib.request.HTTPHandler())
+        _H5_PROXY_OPENER = opener
+    return _H5_PROXY_OPENER
+
+
+def _h5_dist_dir() -> Path | None:
+    for candidate in _H5_DIST_CANDIDATES:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+def _h5_from_dist(full_path: str):
+    dist = _h5_dist_dir()
+    if dist is None:
+        return None
+    relative = (full_path or "").lstrip("/")
+    if relative:
+        candidate = (dist / relative).resolve()
+        if candidate.is_file() and dist in candidate.parents:
+            return FileResponse(candidate)
+    return FileResponse(dist / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+def _h5_dev_url(full_path: str, query: str) -> str:
+    suffix = (full_path or "").lstrip("/")
+    target = f"{_H5_DEV_ORIGIN}/h5/{suffix}" if suffix else f"{_H5_DEV_ORIGIN}/h5/"
+    if query:
+        # 必须用 request.url.query 原样拼接。str(QueryParams) 会把 Vite
+        # `?vue&type=style` 改成 `vue=`，Vue SFC 样式就会以裸 CSS 当 JS 下发，H5 白屏。
+        target = f"{target}?{query}"
+    return target
+
+
+def _h5_from_dev(full_path: str, query: str):
+    target = _h5_dev_url(full_path, query)
+    try:
+        with _h5_opener().open(target, timeout=60) as resp:
+            headers = {}
+            content_type = resp.headers.get("Content-Type")
+            cache = resp.headers.get("Cache-Control")
+            if cache:
+                headers["Cache-Control"] = cache
+            return Response(
+                content=resp.read(),
+                status_code=getattr(resp, "status", 200),
+                media_type=content_type,
+                headers=headers,
+            )
+    except urllib.error.HTTPError as exc:
+        return Response(
+            content=exc.read(),
+            status_code=exc.code,
+            media_type=exc.headers.get("Content-Type"),
+        )
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+
+
+@app.api_route("/h5", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/h5/", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/h5/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+def mini_program_h5(request: Request, full_path: str = ""):
+    proxied = _h5_from_dev(full_path, request.url.query)
+    if proxied is not None:
+        return proxied
+    disted = _h5_from_dist(full_path)
+    if disted is not None:
+        return disted
+    return JSONResponse(
+        {
+            "code": "TT_COMMON_50301",
+            "message": "小程序 H5 未启动。请在本机运行 start_dev.py --h5 后刷新。",
+            "requestId": get_request_id(),
+        },
+        status_code=503,
+    )
+
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────
 # 客户端 X-Request-Id 合法（受限字符集/长度）→ 复用；否则服务端生成。
@@ -211,6 +317,6 @@ if __name__ == "__main__":
         "app:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=settings.DEBUG or settings.is_local,
+        reload=settings.DEBUG or settings.is_local,  # local reload picks up AI_FEATURE_ENABLED
     )
 

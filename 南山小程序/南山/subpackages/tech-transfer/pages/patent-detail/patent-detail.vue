@@ -81,6 +81,7 @@
 <script>
 import { getPatentDetail, getPatentTypeLabel } from '../../api/patent.js'
 import PdfPreviewOverlay from '../../components/pdf-preview-overlay.vue'
+import { buildPatentDetailSeed, mergePatentDetail } from '../../utils/patent-detail-state.mjs'
 
 export default {
   components: { PdfPreviewOverlay },
@@ -103,26 +104,14 @@ export default {
   },
   onLoad(options) {
     const q = options || {}
-    this.publicationNo = decodeURIComponent(q.no || '')
+    const seed = buildPatentDetailSeed(q)
+    this.publicationNo = seed.publicationNo
     if (!this.publicationNo) {
       this.detail = null
       this.error = '缺少专利公开号'
       return
     }
-    this.detail = {
-      publicationNo: this.publicationNo,
-      title: q.title || '',
-      applicant: q.applicant || '',
-      inventor: q.inventor || '',
-      applyDate: q.applyDate || '',
-      publicationDate: q.publicationDate || '',
-      grantDate: q.grantDate || '',
-      patentType: q.patentType || '',
-      hasPdf: q.hasPdf !== '0',
-      abstract: '',
-      claims: '',
-      description: '',
-    }
+    this.detail = seed
     this.loadDetail()
   },
   methods: {
@@ -137,16 +126,8 @@ export default {
       this.loading = true
       this.error = ''
       try {
-        const remote = await getPatentDetail(this.publicationNo)
-        this.detail = {
-          ...this.detail,
-          ...remote,
-          applicant: remote.applicant || (this.detail && this.detail.applicant) || '',
-          inventor: remote.inventor || (this.detail && this.detail.inventor) || '',
-          applyDate: remote.applyDate || (this.detail && this.detail.applyDate) || '',
-          publicationDate: remote.publicationDate || (this.detail && this.detail.publicationDate) || '',
-          grantDate: remote.grantDate || (this.detail && this.detail.grantDate) || '',
-        }
+        const remote = await getPatentDetail(this.publicationNo, (this.detail && this.detail.language) || '')
+        this.detail = mergePatentDetail(this.detail || {}, remote)
         uni.setNavigationBarTitle({ title: this.detail.publicationNo || '专利详情' })
       } catch (e) {
         this.error = (e && e.message) || '加载失败'

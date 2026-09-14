@@ -70,18 +70,22 @@ def search_patents(keyword: str, assignee: str, page: int, page_size: int, fetch
     return meta
 
 
-def get_patent(publication_no: str, fetcher=None) -> dict:
+def get_patent(publication_no: str, language: str = "", fetcher=None) -> dict:
     pub = (publication_no or "").strip()
     if not is_publication_no(pub):
         raise bad_request("专利公开号无效")
 
-    info = provider.info_raw(pub, fetcher=fetcher)
+    language = (language or "").strip()[:8]
+    info = provider.info_raw(pub, language=language, fetcher=fetcher)
     has_parsed = isinstance(info, dict) and any(
         info.get(key) for key in ("title", "abstract", "description", "claims", "number")
     )
     if not has_parsed:
         raise patent_not_found()
-    return map_patent_info(info, pub, None)
+    detail = map_patent_info(info, pub, None)
+    if language:
+        detail["language"] = language
+    return detail
 
 
 def iter_patent_pdf(publication_no: str) -> Iterator[bytes]:

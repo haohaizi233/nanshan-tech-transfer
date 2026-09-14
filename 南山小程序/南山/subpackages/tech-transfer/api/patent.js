@@ -26,8 +26,9 @@ export async function searchPatents(params = {}) {
   return apiRequest('GET', '/patents', query)
 }
 
-export async function getPatentDetail(publicationNo) {
-  return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}`)
+export async function getPatentDetail(publicationNo, language = '') {
+  const query = language ? { language } : undefined
+  return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}`, query)
 }
 
 export function resolvePatentApiOrigin(env = {}, pageLocation = globalThis.location) {

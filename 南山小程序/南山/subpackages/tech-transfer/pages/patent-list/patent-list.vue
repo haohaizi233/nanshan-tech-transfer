@@ -176,6 +176,7 @@ export default {
         publicationDate: item.publicationDate || '',
         grantDate: item.grantDate || '',
         patentType: item.patentType || '',
+        language: item.language || '',
         hasPdf: item.hasPdf ? '1' : '0',
       })
     },

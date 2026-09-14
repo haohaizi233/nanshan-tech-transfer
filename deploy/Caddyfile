@@ -4,7 +4,7 @@
 #
 #   https://inanshan.sjhcip.com/health   FastAPI :8025（存活检查）
 #   https://inanshan.sjhcip.com/api/*    FastAPI :8025（接口、/api/health）
-#   https://inanshan.sjhcip.com/h5/      小程序 H5 :5173（manifest h5.router.base=/h5/）
+#   https://inanshan.sjhcip.com/h5/      小程序 H5（经 FastAPI 反代本机 :5173）
 #   https://inanshan.sjhcip.com/         其余 → FastAPI（后台 SPA /login /admin /assets、/docs）
 #
 # 对外 HTTPS 在 43.138.138.200 上由本文件终结。VPS Caddy 反代 127.0.0.1:8025，
@@ -30,7 +30,7 @@
 # 环境变量：
 #   NS_SITE            站点域名，默认 inanshan.sjhcip.com
 #   NS_API_UPSTREAM    FastAPI，默认 127.0.0.1:8025（VPS）；本机 start_dev 设为 8787
-#   NS_H5_UPSTREAM     小程序 H5，默认 127.0.0.1:5173
+#   NS_H5_UPSTREAM     已废弃：/h5 与 /api 一样走 FastAPI，由后端再转本机 5173
 #   NS_TLS_SNIPPET     TLS 片段，默认 tls-acme.caddy；本机 start_dev 用 tls-local.caddy
 #
 # 只监听 443，不占用 80。Let's Encrypt 走 TLS-ALPN-01（同样只要 443）。
@@ -58,8 +58,11 @@ https://{$NS_SITE:inanshan.sjhcip.com} {
 
 	redir /h5 /h5/ 308
 
-	handle /h5/* {
-		import nanshan_h5
+	# /h5/ 必须打到 FastAPI（8025/8787）。直接反代 VPS 的 :5173 会 502，
+	# 且 Caddy 的 /h5/* 匹配不到恰好是 /h5/ 的请求，会落到 API 返回「接口不存在」。
+	@h5 path /h5 /h5/ /h5/*
+	handle @h5 {
+		import nanshan_api
 	}
 
 	handle {

@@ -2,12 +2,13 @@
 AI 路由 —— POST /ai/match-tasks, GET /ai/match-tasks/{taskId}
 
 Architecture source: 06-api-design.md §AI, openapi.yaml /ai/match-tasks
-P0-2 稳定边界：异步任务制（202 + 轮询）；执行 worker 未接入前任务保持 queued，
-不产生任何假 AI 结果。
+P0-2 稳定边界：异步任务制（202 + 轮询）；执行由独立 worker 认领，
+不把企业微信长连接嵌进本进程。
 """
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from config import settings
 from core.response import success, get_request_id
 from core.middleware import identity, json_body
 from core.errors import ai_unavailable
@@ -16,12 +17,12 @@ from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
 )
 
-# 与小程序 config/feature-flags.js 同步。false 时 /ai/* 直接 503，路由与 service 代码保留。
-AI_FEATURE_ENABLED = False
+# 与小程序 config/feature-flags.js 同步；实际开关读 settings.AI_FEATURE_ENABLED。
+AI_FEATURE_ENABLED = settings.AI_FEATURE_ENABLED
 
 
 def require_ai_enabled():
-    if not AI_FEATURE_ENABLED:
+    if not settings.AI_FEATURE_ENABLED:
         raise ai_unavailable("该功能即将开放")
 
 

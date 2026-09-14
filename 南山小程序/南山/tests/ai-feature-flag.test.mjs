@@ -6,8 +6,8 @@ import { AI_FEATURE_ENABLED, SHOW_AI_MATCH_ENTRY } from '../config/feature-flags
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 
-test('AI feature is off and entry follows the same switch', () => {
-  assert.equal(AI_FEATURE_ENABLED, false)
+test('AI feature is on and entry follows the same switch', () => {
+  assert.equal(AI_FEATURE_ENABLED, true)
   assert.equal(SHOW_AI_MATCH_ENTRY, AI_FEATURE_ENABLED)
 })
 

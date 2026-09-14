@@ -195,6 +195,7 @@
 	import { getDemands, toDemandCard } from '../../api/demand.js'
 	import { addFavorite, removeFavorite, getFavoriteIdSet } from '../../api/interaction.js'
 	import { retryRequest } from '../../api/request-retry.js'
+	import { getScannedHttpUrl } from '../../utils/scanned-url.mjs'
 
 	export default {
 		components: {
@@ -335,6 +336,17 @@
 					scanType: ['qrCode', 'barCode'],
 					success(res) {
 						const result = String((res && res.result) || '').trim()
+						const url = getScannedHttpUrl(result)
+						if (url) {
+							// #ifdef H5
+							window.location.assign(url)
+							return
+							// #endif
+							// #ifndef H5
+							uni.navigateTo({ url: `/subpackages/tech-transfer/pages/web-view/web-view?url=${encodeURIComponent(url)}` })
+							return
+							// #endif
+						}
 						uni.showModal({
 							title: '识别结果',
 							content: result || '未识别到内容',

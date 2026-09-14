@@ -82,13 +82,16 @@ def search_raw(
     )
 
 
-def info_raw(publication_no: str, fetcher: JsonFetcher | None = None) -> dict:
+def info_raw(publication_no: str, language: str = "", fetcher: JsonFetcher | None = None) -> dict:
     if not _configured() and fetcher is None:
         raise patent_unavailable()
     fetch = fetcher or _http_json
+    params = {"query": publication_no}
+    if language:
+        params["language"] = language
     return fetch(
         "/patent_info",
-        {"query": publication_no},
+        params,
         settings.PATENT_PROVIDER_TIMEOUT,
     )
 

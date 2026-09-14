@@ -107,6 +107,14 @@
 					}
 				},
 				{
+					"path": "pages/web-view/web-view",
+					"style": {
+						"navigationBarTitleText": "网页",
+						"navigationBarBackgroundColor": "#FFFFFF",
+						"navigationBarTextStyle": "black"
+					}
+				},
+				{
 					"path": "pages/dock-detail/dock-detail",
 					"style": {
 						"navigationBarTitleText": "对接详情",

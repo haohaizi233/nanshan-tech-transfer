@@ -41,22 +41,44 @@ logger = logging.getLogger("nanshan.error")
 _MAX_VALIDATION_DETAILS = 20
 
 
+class _DropNotFoundAccessLog(logging.Filter):
+    """不输出 Uvicorn 的 404 access log，防止公网扫描淹没开发终端。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Uvicorn access logger 的参数顺序固定为：
+        # client_addr, method, full_path, http_version, status_code。
+        args = record.args
+        status = args[4] if isinstance(args, tuple) and len(args) >= 5 else None
+        return status != 404
+
+
 def configure_logging() -> None:
     """进程级日志格式（幂等：root 已有 handler 时不重复配置）。
 
     uvicorn 自身 logger 独立配置不受影响；这里保证业务异常日志
     带时间戳/级别/logger 名，便于与 requestId 关联排查。
     """
-    if logging.getLogger().handlers:
-        return
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
+
+    # Uvicorn 会独立输出 access log。公网暴露后，404 几乎全部来自目录扫描，
+    # 保留其他状态（尤其 4xx 鉴权失败和所有 5xx），仅静默不存在的路径。
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, _DropNotFoundAccessLog) for item in access_logger.filters):
+        access_logger.addFilter(_DropNotFoundAccessLog())
 
 
 def _log_error(request: Request, status: int, code: str, *, exc: bool = False) -> None:
-    log = logger.error if (exc or status >= 500) else logger.info
+    # 公网服务不可避免会收到大量扫描器对 /.env、/.git、WordPress 等路径的探测。
+    # 404 是预期的客户端结果，不应与真正的服务端故障混在业务错误日志中；
+    # 需要排查时仍可将 nanshan.error 日志级别调为 DEBUG 查看。
+    if status == 404:
+        log = logger.debug
+    else:
+        log = logger.error if (exc or status >= 500) else logger.info
     if exc:
         log(
             "unhandled exception request_id=%s method=%s path=%s status=%s code=%s",

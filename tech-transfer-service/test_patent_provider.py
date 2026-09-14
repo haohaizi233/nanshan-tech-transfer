@@ -53,6 +53,14 @@ def fake_fetch(path, params, timeout):
     raise AssertionError(path)
 
 
+def language_aware_fetch(path, params, timeout):
+    if path == "/patent_info":
+        assert params["query"] == "CN217384194U"
+        assert params["language"] == "zh"
+        return INFO_RAW
+    raise AssertionError(path)
+
+
 def main():
     assert infer_patent_type("CN108604342B") == "invention"
     assert infer_patent_type("CN217384194U") == "utility_model"
@@ -88,6 +96,10 @@ def main():
     assert detail["claims"] == "1. A device."
     assert "patent/CN" not in str(detail)
     assert_no_source_leak(detail)
+
+    # 详情请求必须把列表项的语言上下文继续传给上游，避免上游默认语言覆盖标题。
+    language_detail = get_patent("CN217384194U", language="zh", fetcher=language_aware_fetch)
+    assert language_detail["title"] == "Three-coordinate measuring instrument with accurate positioning"
 
     try:
         search_patents("", "", 1, 10, fetcher=fake_fetch)

@@ -14,10 +14,9 @@ const tlsLocal = fs.readFileSync(path.join(repoRoot, 'deploy', 'tls-local.caddy'
 test('unified Caddyfile splits /api, /h5, and the admin SPA on the same host', () => {
   assert.match(caddyfile, /import nanshan\.caddy/)
   assert.match(caddyfile, /handle \/health/)
+  assert.match(caddyfile, /@h5 path \/h5 \/h5\/ \/h5\/\*/)
   assert.match(caddyfile, /handle \/api\/\*/)
-  assert.match(caddyfile, /handle \/h5\/\*/)
   assert.match(caddyfile, /import nanshan_api/)
-  assert.match(caddyfile, /import nanshan_h5/)
   assert.match(caddyfile, /inanshan\.sjhcip\.com/)
   assert.match(caddyfile, /https:\/\/\{\$NS_SITE/)
   assert.match(caddyfile, /NS_TLS_SNIPPET/)
