@@ -76,7 +76,10 @@
 					</view>
 					<view v-if="item.company" class="card-sub-row">
 						<text class="card-sub">{{ item.company }}</text>
-						<text v-if="item.orgCertified" class="cert-badge">认证</text>
+						<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+							<text>认证</text>
+						</view>
 					</view>
 					<view v-if="item.location || item.budget" class="meta-row">
 						<view v-if="item.location" class="meta-item">
@@ -90,7 +93,7 @@
 					</view>
 					<view v-if="item.demandDesc" class="info-block">
 						<text class="info-label">需求说明</text>
-						<text class="info-text">{{ item.demandDesc }}</text>
+						<text class="info-text info-text-user-text">{{ item.demandDesc }}</text>
 					</view>
 					<view v-if="item.industryLine" class="info-block">
 						<text class="info-label">行业 / 合作方式</text>
@@ -122,13 +125,16 @@
 								<text class="meta-label">来源</text>
 								<view class="meta-value-row">
 									<text class="meta-value">{{ item.source }}</text>
-									<text v-if="item.orgCertified" class="cert-badge">认证</text>
+									<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+										<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+										<text>认证</text>
+									</view>
 								</view>
 							</view>
 						</view>
 						<view v-if="item.techIntro" class="info-block">
 							<text class="info-label">技术简介</text>
-							<text class="info-text">{{ item.techIntro }}</text>
+							<text class="info-text info-text-user-text">{{ item.techIntro }}</text>
 						</view>
 						<view class="price-row">
 							<text class="price-label">期望报价</text>
@@ -704,6 +710,10 @@
 		font-size: 26rpx;
 		color: #555555;
 		line-height: 1.6;
+	}
+
+	.info-text-user-text {
+		text-indent: 2em;
 	}
 
 	.info-text-muted {

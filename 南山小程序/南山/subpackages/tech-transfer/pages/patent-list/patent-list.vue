@@ -428,6 +428,7 @@ export default {
   display: block;
   font-size: 26rpx;
   color: #555;
+	text-indent: 2em;
   line-height: 1.5;
 }
 

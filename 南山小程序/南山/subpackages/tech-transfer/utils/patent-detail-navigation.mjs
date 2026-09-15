@@ -26,9 +26,5 @@ export function resolvePatentDetailSection(section) {
 }
 
 export function getPatentDetailNavigationTarget(section) {
-  const target = resolvePatentDetailSection(section)
-  return {
-    section: target,
-    expandDescription: target === 'description',
-  }
+  return { section: resolvePatentDetailSection(section) }
 }

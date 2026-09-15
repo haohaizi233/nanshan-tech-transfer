@@ -21,6 +21,7 @@ import {
 import { apiRequest } from './client.js'
 import HostBridge from '../../../host/host-bridge.js'
 import { validateEmail, validatePhone } from './contact-validation.mjs'
+import { clearCachedOrganizationCertification } from './membership.js'
 
 const HISTORY_PHONES_KEY = 'ns_user_history_phones'
 
@@ -278,10 +279,13 @@ export async function saveUserProfile(profile) {
 
 /** 退出登录（吊销后端会话 + 清除本地缓存） */
 export async function logout() {
+	const user = getCurrentUser()
 	try {
 		await authLogout()
 	} catch (e) {
 		console.error('[user] logout 失败:', e)
+	} finally {
+		clearCachedOrganizationCertification(user && user.userId)
 	}
 }
 

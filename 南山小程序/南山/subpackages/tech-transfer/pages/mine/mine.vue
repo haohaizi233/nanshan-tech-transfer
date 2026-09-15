@@ -88,7 +88,14 @@
 						<input class="input input-disabled" disabled :value="certifiedOrgName" />
 						<text class="cert-badge">认证</text>
 					</view>
-					<input v-else class="input" :value="form.company" placeholder="请输入公司名称" @input="onFieldInput('company', $event)" />
+					<view v-else class="company-select">
+						<input class="input" :value="form.company" placeholder="可填写或选择已有机构" @focus="showCompanySuggestions" @input="onCompanyInput" />
+						<view v-if="showingCompanySuggestions && companySuggestions.length" class="company-suggestion-list">
+							<view v-for="org in companySuggestions" :key="org.id" class="company-suggestion-item" @click="selectCompanySuggestion(org)">
+								<text>{{ org.name }}</text>
+							</view>
+						</view>
+					</view>
 				</view>
 				<view class="form-item">
 					<text class="label">主体类型 <text class="required">*</text></text>
@@ -180,10 +187,10 @@
 			</view>
 
 			<view :class="'org-card org-card-' + certification.status">
-				<image class="org-card-bg" src="/static/images/mine/org-certification-bg.png" mode="aspectFill"></image>
+      <image class="org-card-bg" src="/static/images/mine/org-certification-bg.png" mode="aspectFit"></image>
 				<view class="org-card-content">
 					<image class="org-card-icon" src="/static/icons/mine/org-certification.png" mode="aspectFit"></image>
-					<view class="org-card-main">
+					<view :class="certification.canApply ? 'org-card-main org-card-main-actionable' : 'org-card-main'">
 						<view class="org-card-heading">
 							<text class="org-card-title">机构认证</text>
 							<text class="org-role admin" v-if="certification.status === 'certified_admin'">机构管理员</text>
@@ -202,11 +209,11 @@
 							</view>
 						</view>
 						<view v-else class="org-none">
-							<text class="org-none-text">{{ certificationHint }}</text>
 							<view v-if="certification.canApply" class="org-none-actions">
-								<button class="org-action-btn" size="mini" @click="goOrgJoin">申请加入已有机构</button>
-								<button class="org-action-btn ghost" size="mini" @click="goOrgApply">申请机构入驻</button>
+								<button class="org-action-btn" size="mini" @click="goOrgJoin">加入机构</button>
+								<button class="org-action-btn ghost" size="mini" @click="goOrgApply">机构入驻</button>
 							</view>
+							<text v-else class="org-none-text">{{ certificationHint }}</text>
 						</view>
 					</view>
 				</view>
@@ -280,7 +287,15 @@
 	import { getMyDemands } from '../../api/demand.js'
 	import { getMyAchievements } from '../../api/achievement.js'
 	import { getMyFavorites, getMyCooperations } from '../../api/interaction.js'
-	import { fetchCurrentUser, getMyOrganizationCertification } from '../../api/membership.js'
+	import {
+		fetchCurrentUser,
+		getMyOrganizationCertification,
+		getCachedOrganizationCertification,
+		isOrganizationCertificationCacheFresh,
+		cacheOrganizationCertification,
+		clearCachedOrganizationCertification,
+		searchInstitutions,
+	} from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 
@@ -289,6 +304,8 @@
 			AppTabbar,
 		},
 		data() {
+			const cachedCertification = getCachedOrganizationCertification()
+			const initialCertification = cachedCertification && cachedCertification.certification
 			return {
 				viewMode: 'auth',
 				authMode: 'login',
@@ -320,8 +337,11 @@
 				favoriteResultCount: 0,
 				intentionPendingCount: 0,
 				intentionSuccessCount: 0,
-				memberships: [],
-				certification: { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
+				companySuggestions: [],
+				showingCompanySuggestions: false,
+				companySuggestionRequestId: 0,
+				memberships: (initialCertification && initialCertification.memberships) || [],
+				certification: initialCertification || { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
 			}
 		},
 		computed: {
@@ -403,6 +423,12 @@
 					this.certification = { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
 					return
 				}
+				const cachedCertification = getCachedOrganizationCertification()
+				if (cachedCertification) {
+					this.certification = cachedCertification.certification
+					this.memberships = cachedCertification.certification.memberships || []
+					if (isOrganizationCertificationCacheFresh(cachedCertification)) return
+				}
 				try {
 					const [user, certification] = await Promise.all([
 						fetchCurrentUser(),
@@ -410,6 +436,7 @@
 					])
 					this.certification = certification
 					this.memberships = certification.memberships
+					cacheOrganizationCertification(certification)
 					this.profile = getUserProfile()
 				} catch (e) {
 					console.error('[mine] loadMemberships failed:', e)
@@ -533,6 +560,29 @@
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
 			},
+			showCompanySuggestions() {
+				this.showingCompanySuggestions = true
+				this.loadCompanySuggestions(this.form.company)
+			},
+			onCompanyInput(e) {
+				this.form.company = e.detail.value
+				this.showingCompanySuggestions = true
+				this.loadCompanySuggestions(e.detail.value)
+			},
+			async loadCompanySuggestions(keyword) {
+				const requestId = ++this.companySuggestionRequestId
+				try {
+					const data = await searchInstitutions(keyword, 1, 8)
+					if (requestId !== this.companySuggestionRequestId) return
+					this.companySuggestions = data.list || []
+				} catch (e) {
+					if (requestId === this.companySuggestionRequestId) this.companySuggestions = []
+				}
+			},
+			selectCompanySuggestion(org) {
+				this.form.company = org.name || ''
+				this.showingCompanySuggestions = false
+			},
 			onWxAvatar(e) {
 				const url = e.detail && e.detail.avatarUrl
 				if (url) {
@@ -650,9 +700,11 @@
 				HostBridge.navigate('pages/my-list/my-list', { type })
 			},
 			goOrgJoin() {
+				clearCachedOrganizationCertification()
 				HostBridge.navigate('pages/org-join/org-join')
 			},
 			goOrgApply() {
+				clearCachedOrganizationCertification()
 				HostBridge.navigate('pages/org-apply/org-apply')
 			},
 			goOrgManage() {
@@ -990,6 +1042,36 @@
 		color: #999999;
 	}
 
+	.company-select {
+		position: relative;
+		z-index: 3;
+	}
+
+	.company-suggestion-list {
+		position: absolute;
+		z-index: 4;
+		top: 84rpx;
+		left: 0;
+		right: 0;
+		max-height: 300rpx;
+		overflow-y: auto;
+		background: #ffffff;
+		border: 1rpx solid #d8e5f6;
+		border-radius: 12rpx;
+		box-shadow: 0 12rpx 28rpx rgba(37, 104, 193, 0.14);
+	}
+
+	.company-suggestion-item {
+		padding: 20rpx 24rpx;
+		font-size: 26rpx;
+		color: #2b3a50;
+		border-bottom: 1rpx solid #edf2f8;
+	}
+
+	.company-suggestion-item:last-child {
+		border-bottom: 0;
+	}
+
 	.form-picker {
 		height: 80rpx;
 		line-height: 80rpx;
@@ -1068,16 +1150,16 @@
 		box-sizing: border-box;
 	}
 
-	.org-card-bg {
-		position: absolute;
-		left: auto;
-		right: -28rpx;
-		top: 0;
-		bottom: 0;
-		width: 72%;
-		height: 100%;
-		opacity: 0.42;
-	}
+.org-card-bg {
+  position: absolute;
+  left: auto;
+  right: -8rpx;
+  top: 0;
+  bottom: 0;
+  width: 76%;
+  height: 100%;
+  opacity: 0.92;
+}
 
 	.org-card-content {
 		position: relative;
@@ -1113,6 +1195,36 @@
 		border-color: #a9caff;
 	}
 
+	.org-card-unverified {
+		min-height: 132rpx;
+		background: linear-gradient(135deg, #f8fbff 0%, #e3f1ff 100%);
+		border-color: #a9caff;
+	}
+
+	.org-card-unverified .org-card-content {
+		align-items: center;
+	}
+
+	.org-card-unverified .org-card-icon {
+		width: 88rpx;
+		height: 88rpx;
+		margin-right: 16rpx;
+	}
+
+	.org-card-main-actionable {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		gap: 14rpx;
+	}
+
+	.org-card-main-actionable .org-card-heading {
+		width: auto;
+		margin-bottom: 0;
+		flex-shrink: 0;
+	}
+
 	.org-card-heading {
 		display: flex;
 		flex-direction: row;
@@ -1132,28 +1244,35 @@
 	.org-none-text {
 		display: block;
 		font-size: 26rpx;
-		color: #999999;
-		margin-bottom: 16rpx;
+		color: #5e718b;
+		line-height: 1.5;
+		margin-bottom: 18rpx;
 	}
 
 	.org-none-actions {
 		display: flex;
 		flex-direction: row;
+		gap: 16rpx;
+		flex: 1;
 	}
 
 	.org-action-btn {
 		flex: 1;
-		margin: 0 8rpx;
-		background: #2b73f8;
-		color: #ffffff;
+		margin: 0;
+		min-height: 56rpx;
+		line-height: 54rpx;
+		background: transparent;
+		color: #2b73f8;
+		border: 1rpx solid #2b73f8;
 		border-radius: 12rpx;
-		font-size: 26rpx;
+		font-size: 22rpx;
+		font-weight: 600;
 	}
 
 	.org-action-btn.ghost {
-		background: #ffffff;
-		color: #2b73f8;
-		border: 1rpx solid #2b73f8;
+		background: transparent;
+		color: #5e718b;
+		border-color: #aabfd9;
 	}
 
 	.org-row {
@@ -1217,7 +1336,7 @@
 
 	.org-manage-btn {
 		margin-left: 0;
-		background: #ffffff;
+		background: transparent;
 		color: #2b73f8;
 		border: 1rpx solid #2b73f8;
 		border-radius: 12rpx;

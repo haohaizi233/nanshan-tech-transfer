@@ -5,8 +5,67 @@
  * 自填单位（companyText）仅为展示文本，不代表认证。
  */
 
-import { apiRequest, setCurrentUser } from './client.js'
+import { apiRequest, getCurrentUser, setCurrentUser } from './client.js'
 import { normalizeOrganizationCertification } from './organization-certification-state.mjs'
+import HostBridge from '../../../host/host-bridge.js'
+
+const CERTIFICATION_CACHE_PREFIX = 'tt_org_certification:'
+const CERTIFICATION_CACHE_TTL = 5 * 60 * 1000
+
+function certificationCacheKey(userId) {
+  return CERTIFICATION_CACHE_PREFIX + String(userId)
+}
+
+function currentUserId() {
+  const user = getCurrentUser()
+  return user && user.userId ? user.userId : ''
+}
+
+/** 读取当前账号的认证状态快照，用于页面首次渲染，避免状态闪烁。 */
+export function getCachedOrganizationCertification() {
+  const userId = currentUserId()
+  if (!userId) return null
+  try {
+    const cached = HostBridge.getStorage(certificationCacheKey(userId))
+    return cached && cached.certification ? cached : null
+  } catch (e) {
+    return null
+  }
+}
+
+export function isOrganizationCertificationCacheFresh(cached, now = Date.now()) {
+  return !!(
+    cached &&
+    cached.certification &&
+    Number.isFinite(cached.cachedAt) &&
+    now - cached.cachedAt >= 0 &&
+    now - cached.cachedAt < CERTIFICATION_CACHE_TTL
+  )
+}
+
+/** 保存当前账号的认证快照；账号切换时因 key 不同不会串用。 */
+export function cacheOrganizationCertification(certification) {
+  const userId = currentUserId()
+  if (!userId || !certification) return
+  try {
+    HostBridge.setStorage(certificationCacheKey(userId), {
+      certification,
+      cachedAt: Date.now(),
+    })
+  } catch (e) {
+    // 缓存失败不影响认证接口的正常展示。
+  }
+}
+
+/** 登出或认证申请提交后丢弃当前账号的旧快照。 */
+export function clearCachedOrganizationCertification(userId = currentUserId()) {
+  if (!userId) return
+  try {
+    HostBridge.setStorage(certificationCacheKey(userId), '')
+  } catch (e) {
+    // ignore
+  }
+}
 
 /** 拉取最新 /me 并刷新本地缓存（登录后机构状态变化时调用） */
 export async function fetchCurrentUser() {

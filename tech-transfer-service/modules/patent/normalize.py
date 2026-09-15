@@ -207,7 +207,7 @@ def _is_formula_expression(text: str) -> bool:
 
 def _coalesce_math_lines(text: str) -> list[str]:
     """只合并连续的数学短行，保留普通中文段落的换行边界。"""
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    lines = _coalesce_wrapped_parenthetical_lines(text)
     merged: list[str] = []
     index = 0
     while index < len(lines):
@@ -226,6 +226,31 @@ def _coalesce_math_lines(text: str) -> list[str]:
         else:
             merged.extend(run)
         index = next_index
+    return merged
+
+
+def _coalesce_wrapped_parenthetical_lines(text: str) -> list[str]:
+    """合并上游在未闭合括号内插入的软换行，避免学名被渲染成独立段落。"""
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    merged: list[str] = []
+    pending = ""
+    depth = 0
+    opening = "(（[［【{"
+    closing = ")）]］】}"
+
+    for line in lines:
+        pending += line
+        for char in line:
+            if char in opening:
+                depth += 1
+            elif char in closing and depth > 0:
+                depth -= 1
+        if depth == 0:
+            merged.append(pending)
+            pending = ""
+
+    if pending:
+        merged.append(pending)
     return merged
 
 

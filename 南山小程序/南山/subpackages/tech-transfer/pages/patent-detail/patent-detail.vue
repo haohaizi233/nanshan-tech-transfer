@@ -52,7 +52,7 @@
         <button class="retry-btn" size="mini" @click="loadDetail">重试</button>
       </view>
 
-      <view id="abstract" v-if="detail.abstract" class="section reader-section">
+      <view v-if="activeSection === 'abstract' && detail.abstract" class="section reader-section">
         <text class="section-title">摘要</text>
         <block v-if="detail.abstractBlocks && detail.abstractBlocks.length">
           <block
@@ -73,7 +73,7 @@
         <text v-else class="body-text">{{ detail.abstract }}</text>
       </view>
 
-      <view id="claims" v-if="detail.claims" class="section reader-section">
+      <view v-if="activeSection === 'claims' && detail.claims" class="section reader-section">
         <text class="section-title">权利要求</text>
         <block v-if="detail.claimsBlocks && detail.claimsBlocks.length">
           <block
@@ -94,12 +94,9 @@
         <text v-else class="body-text">{{ detail.claims }}</text>
       </view>
 
-      <view id="description" v-if="detail.description" class="section reader-section">
-        <view class="section-head" @click="showDescription = !showDescription">
-          <text class="section-title">说明书</text>
-          <text class="toggle">{{ showDescription ? '收起' : '展开' }}</text>
-        </view>
-        <block v-if="showDescription && detail.descriptionBlocks && detail.descriptionBlocks.length">
+      <view v-if="activeSection === 'description' && detail.description" class="section reader-section">
+        <text class="section-title">说明书</text>
+        <block v-if="detail.descriptionBlocks && detail.descriptionBlocks.length">
           <block
             v-for="(block, index) in detail.descriptionBlocks"
             :key="`description-${index}`"
@@ -115,7 +112,7 @@
             >{{ block.text }}</text>
           </block>
         </block>
-        <text v-else-if="showDescription" class="body-text">{{ detail.description }}</text>
+        <text v-else class="body-text">{{ detail.description }}</text>
       </view>
     </block>
     <view v-if="detail" class="reader-nav">
@@ -161,7 +158,6 @@ export default {
       loading: false,
       pdfVisible: false,
       error: '',
-      showDescription: false,
       activeSection: 'abstract',
       navigationItems: PATENT_DETAIL_NAV_ITEMS,
     }
@@ -219,11 +215,7 @@ export default {
         uni.showToast({ title: '暂无相关内容', icon: 'none' })
         return
       }
-      if (target.expandDescription) this.showDescription = true
       this.activeSection = target.section
-      this.$nextTick(() => {
-        uni.pageScrollTo({ selector: `#${target.section}`, duration: 300 })
-      })
     },
   },
 }

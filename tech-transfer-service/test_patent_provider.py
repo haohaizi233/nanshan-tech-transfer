@@ -119,6 +119,16 @@ def main():
     assert greek_index[0]["text"] == "式中，Cφ—孔隙压缩系数，无量纲。"
     assert "C<sub>φ</sub>" in greek_index[0]["html"]
 
+    wrapped_claim = format_patent_content_blocks(
+        "1. 一株鼠李糖乳杆菌（\nLactobacillus rhamnosus\n），其特征在于，所述鼠李糖乳杆菌保藏于广东省微生物菌种保藏中心。"
+    )
+    assert wrapped_claim == [
+        {
+            "type": "paragraph",
+            "text": "1. 一株鼠李糖乳杆菌（Lactobacillus rhamnosus），其特征在于，所述鼠李糖乳杆菌保藏于广东省微生物菌种保藏中心。",
+        }
+    ]
+
     mapped = map_search_hit(GOOGLE_HIT)
     assert mapped["publicationNo"] == "CN108604342B"
     assert mapped["applicant"] == "华为技术有限公司"

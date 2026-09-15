@@ -24,13 +24,11 @@ test('patent detail navigation resolves the selected reader section', () => {
   assert.equal(resolvePatentDetailSection(''), 'abstract')
 })
 
-test('description navigation requests expansion before scrolling to its section', () => {
+test('navigation resolves one selected reader card without a scroll instruction', () => {
   assert.deepEqual(getPatentDetailNavigationTarget('description'), {
     section: 'description',
-    expandDescription: true,
   })
   assert.deepEqual(getPatentDetailNavigationTarget('claims'), {
     section: 'claims',
-    expandDescription: false,
   })
 })

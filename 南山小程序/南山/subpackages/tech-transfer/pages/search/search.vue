@@ -69,7 +69,10 @@
 					</view>
 					<view v-if="item.metaLine || item.orgCertified" class="meta-row-inline">
 						<text v-if="item.metaLine" class="meta">{{ item.metaLine }}</text>
-						<text v-if="item.orgCertified" class="cert-badge">认证</text>
+						<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+							<text>认证</text>
+						</view>
 					</view>
 					<text class="desc">{{ item.demandDesc }}</text>
 					<view v-if="item.canDock" class="card-foot">
@@ -87,7 +90,10 @@
 					</view>
 					<view v-if="item.source" class="meta-row-inline">
 						<text class="meta">{{ item.source }}</text>
-						<text v-if="item.orgCertified" class="cert-badge">认证</text>
+						<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+							<text>认证</text>
+						</view>
 					</view>
 					<text v-if="item.techIntro" class="desc">{{ item.techIntro }}</text>
 					<view v-if="item.canDock" class="card-foot">
@@ -182,11 +188,10 @@
 			},
 			switchType(type) {
 				this.searchType = type
-				this.keyword = ''
 				if (type === 0) {
-					this.loadDemands('', true)
+					this.loadDemands(this.keyword, true)
 				} else {
-					this.loadResults('', true)
+					this.loadResults(this.keyword, true)
 				}
 			},
 			mapDemand(item) {

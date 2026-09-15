@@ -71,4 +71,15 @@
 		line-height: 32rpx;
 		vertical-align: middle;
 	}
+
+	.cert-badge-with-icon {
+		gap: 4rpx;
+		padding-left: 6rpx;
+	}
+
+	.cert-badge-icon-inline {
+		width: 24rpx;
+		height: 24rpx;
+		flex-shrink: 0;
+	}
 </style>

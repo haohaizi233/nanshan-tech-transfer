@@ -61,7 +61,10 @@
           </view>
           <view v-if="item.sourceOrgName" class="meta-row">
             <text class="meta-source">{{ item.sourceOrgName }}</text>
-            <text v-if="item.orgCertified" class="cert-badge">认证</text>
+            <view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+              <image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+              <text>认证</text>
+            </view>
             <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
           </view>
           <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
@@ -367,9 +370,10 @@ export default {
 }
 
 .tech-intro {
-  display: block;
-  font-size: 26rpx;
-  color: #555;
+	display: block;
+	font-size: 26rpx;
+	color: #555;
+	text-indent: 2em;
   line-height: 1.5;
   margin-bottom: 16rpx;
 }

@@ -21,7 +21,10 @@
 						<text class="meta-label">公司名称</text>
 						<view class="meta-value-row">
 							<text class="meta-value">{{ detail.company }}</text>
-							<text v-if="detail.orgCertified" class="cert-badge">认证</text>
+							<view v-if="detail.orgCertified" class="cert-badge cert-badge-with-icon">
+								<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+								<text>认证</text>
+							</view>
 						</view>
 					</view>
 					<view v-if="detail.location" class="meta-item">
@@ -49,11 +52,11 @@
 				</view>
 				<view v-if="detail.demandDesc" class="field">
 					<text class="field-label">需求说明</text>
-					<text class="field-value">{{ detail.demandDesc }}</text>
+					<text class="field-value field-value-user-text">{{ detail.demandDesc }}</text>
 				</view>
 				<view v-if="detail.companyIntro" class="field">
 					<text class="field-label">公司简介</text>
-					<text class="field-value field-muted">{{ detail.companyIntro }}</text>
+					<text class="field-value field-muted field-value-user-text">{{ detail.companyIntro }}</text>
 				</view>
 			</block>
 
@@ -68,7 +71,10 @@
 						<text class="meta-label">来源</text>
 						<view class="meta-value-row">
 							<text class="meta-value">{{ detail.source }}</text>
-							<text v-if="detail.orgCertified" class="cert-badge">认证</text>
+							<view v-if="detail.orgCertified" class="cert-badge cert-badge-with-icon">
+								<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+								<text>认证</text>
+							</view>
 						</view>
 					</view>
 				</view>
@@ -78,15 +84,15 @@
 				</view>
 				<view v-if="detail.techIntro" class="field">
 					<text class="field-label">技术简介</text>
-					<text class="field-value">{{ detail.techIntro }}</text>
+					<text class="field-value field-value-user-text">{{ detail.techIntro }}</text>
 				</view>
 				<view v-if="detail.purpose" class="field">
 					<text class="field-label">成果用途</text>
-					<text class="field-value">{{ detail.purpose }}</text>
+					<text class="field-value field-value-user-text">{{ detail.purpose }}</text>
 				</view>
 				<view v-if="detail.techPath" class="field">
 					<text class="field-label">技术路径</text>
-					<text class="field-value">{{ detail.techPath }}</text>
+					<text class="field-value field-value-user-text">{{ detail.techPath }}</text>
 				</view>
 				<view v-if="detail.patentHolder" class="field">
 					<text class="field-label">专利持有人</text>
@@ -786,6 +792,11 @@
 		font-size: 26rpx;
 		color: #555555;
 		line-height: 1.6;
+		text-indent: 2em;
+	}
+
+	.field-value-user-text {
+		text-indent: 2em;
 	}
 
 	.field-muted {

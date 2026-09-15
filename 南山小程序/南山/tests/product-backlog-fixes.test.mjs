@@ -33,6 +33,15 @@ test('search achievements fall back to the public list when keyword is empty', (
   assert.match(source, /currentTotal/)
 })
 
+test('switching search categories preserves the keyword and reuses it for the next query', () => {
+  const source = readFileSync(new URL('../subpackages/tech-transfer/pages/search/search.vue', import.meta.url), 'utf8')
+  const switchType = source.match(/switchType\(type\)\s*\{([\s\S]*?)\r?\n\s*\},\r?\n\s*mapDemand/)
+  assert.ok(switchType)
+  assert.doesNotMatch(switchType[1], /this\.keyword\s*=/)
+  assert.match(switchType[1], /this\.loadDemands\(this\.keyword,\s*true\)/)
+  assert.match(switchType[1], /this\.loadResults\(this\.keyword,\s*true\)/)
+})
+
 test('org apply checks duplicate names on the client before submit', () => {
   const source = readFileSync(new URL('../subpackages/tech-transfer/pages/org-apply/org-apply.vue', import.meta.url), 'utf8')
   assert.match(source, /checkExistingName/)
