@@ -2,6 +2,7 @@
 	import HostBridge from './host/host-bridge.js'
 	import LocalAdapter from './host/local-adapter.js'
 	import { assertEnvironment } from './config/env-check.js'
+	import { startNotificationPolling, stopNotificationPolling } from './utils/notification-poller.js'
 
 	export default {
 		onLaunch: function() {
@@ -31,9 +32,11 @@
 		},
 		onShow: function() {
 			console.log('App Show')
+			startNotificationPolling()
 		},
 		onHide: function() {
 			console.log('App Hide')
+			stopNotificationPolling()
 		}
 	}
 </script>

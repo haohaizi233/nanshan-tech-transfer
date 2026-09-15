@@ -1,10 +1,22 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { api } from '../api/client'
 
 import AdminSidebar from '../components/layout/AdminSidebar.vue'
 import AdminHeader from '../components/layout/AdminHeader.vue'
 
 const collapsed = ref(false)
+const notification = ref({ total: 0, categories: {} })
+let notificationTimer = null
+let notificationInFlight = false
+const refreshNotification = async () => {
+  if (notificationInFlight) return
+  notificationInFlight = true
+  try { notification.value = await api('/admin/notifications/summary') } catch (e) { console.warn('[admin notification]', e) }
+  finally { notificationInFlight = false }
+}
+onMounted(() => { refreshNotification(); notificationTimer = setInterval(refreshNotification, 200) })
+onUnmounted(() => { clearInterval(notificationTimer); notificationTimer = null })
 
 const toggleSidebar = () => {
   collapsed.value = !collapsed.value
@@ -15,6 +27,7 @@ const toggleSidebar = () => {
   <div class="admin-layout">
     <AdminSidebar
       :collapsed="collapsed"
+      :notification="notification"
       @toggle="toggleSidebar"
     />
 
@@ -24,6 +37,7 @@ const toggleSidebar = () => {
     >
       <AdminHeader
         :collapsed="collapsed"
+        :notification="notification"
         @toggle="toggleSidebar"
       />
 

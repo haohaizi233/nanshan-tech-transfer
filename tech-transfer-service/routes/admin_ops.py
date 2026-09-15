@@ -15,6 +15,7 @@ from core.response import success, get_request_id
 from modules.admin.schemas import InstitutionCreateRequest, InstitutionUpdateRequest
 from modules.admin.service import (
     dashboard_summary,
+    notification_summary,
     dashboard_todos,
     dashboard_trend,
     list_institutions_admin,
@@ -48,6 +49,11 @@ router = APIRouter(prefix="/api/tech-transfer/v1")
 @router.get("/admin/dashboard/summary", tags=["admin-dashboard"])
 def admin_dashboard_summary(admin: dict = Depends(admin_identity)):
     return success(dashboard_summary())
+
+
+@router.get("/admin/notifications/summary", tags=["admin-dashboard"])
+def admin_notification_summary(admin: dict = Depends(admin_identity)):
+    return success(notification_summary())
 
 
 @router.get("/admin/dashboard/todos", tags=["admin-dashboard"])

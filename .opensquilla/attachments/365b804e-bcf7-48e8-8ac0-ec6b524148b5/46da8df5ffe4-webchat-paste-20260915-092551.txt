@@ -1,0 +1,1492 @@
+C:\Users\admin\AppData\Local\Programs\Python\Python313\python.exe C:\Users\admin\Desktop\南山小程序\南山小程序\start_dev.py 
+============================================================
+ 南山科转通 · Multi-Runtime 前后端一键联调
+============================================================
+[1/6] 检查 HBuilderX CLI
+  [OK] D:\HBuilderX\HBuilderX.5.15.2026070915\HBuilderX\cli.exe（默认配置路径）
+[2/5] 检查后端环境（依赖 / PostgreSQL）
+  [OK] 后端依赖已就绪（fastapi / uvicorn / psycopg2 / pyjwt / pypdfium2）
+  [OK] PostgreSQL 连接正常（tech_transfer@127.0.0.1:5432）
+[3/5] 检查后台管理 H5
+  检查后台管理 H5 构建产物（nanshan-frontend/dist）...
+  [WARN] 检测到后台管理 H5 源码更新，正在执行 npm run build ...
+
+> nanshan-frontend@0.0.0 build
+> vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 85 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                         0.50 kB │ gzip:  0.36 kB
+dist/assets/achievement-CbhRiQ-h.png    4.49 kB
+dist/assets/log-BQQQVPgW.png            4.55 kB
+dist/assets/cooperation-C3x5ls2g.png    5.04 kB
+dist/assets/requirement-DcuFQpAe.png    5.12 kB
+dist/assets/content-qQmsOruo.png        5.23 kB
+dist/assets/institution-DWhkAXzM.png    5.43 kB
+dist/assets/user-Dv7LSsEt.png           5.43 kB
+dist/assets/capital-Ivtyq9L7.png        5.78 kB
+dist/assets/system-DU8wO9UZ.png         6.17 kB
+dist/assets/overview-Bmp-Z4fn.png       6.37 kB
+dist/assets/review-Dbzb4IkX.png         7.09 kB
+dist/assets/ai-BXs-77AT.png             7.14 kB
+dist/assets/index-BuGTBpyR.css         84.99 kB │ gzip: 14.03 kB
+dist/assets/index-CyuqRdHz.js         268.10 kB │ gzip: 81.76 kB
+
+✓ built in 4.19s
+[PLUGIN_TIMINGS] Plugin hooks ran for 3.7s of this 4.2s build (88%).
+The slowest hooks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - vite:vue buildStart (54%, 2.3s, 1 call)
+Additional hook time came from the hooks below and from hooks under 1s.
+1 hook is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - vite:asset load (12 calls)
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+
+  [OK] 后台管理 H5 已重新构建；公网 /admin/* 将读取最新 dist
+[4/5] 启动 FastAPI 后端
+  [WARN] 现有后端（PID=45184,6172）启动早于代码更新（6 个源文件已变更，最新 service.py），重启以加载新代码
+  启动中：FastAPI（uvicorn）→ http://127.0.0.1:8787
+INFO:     Will watch for changes in these directories: ['C:\\Users\\admin\\Desktop\\南山小程序\\tech-transfer-service']
+INFO:     Uvicorn running on http://0.0.0.0:8787 (Press CTRL+C to quit)
+INFO:     Started reloader process [30168] using WatchFiles
+tech-transfer-service listening on http://0.0.0.0:8787
+  API prefix: /api/tech-transfer/v1
+  Health:     http://127.0.0.1:8787/health
+  API health: http://127.0.0.1:8787/api/health
+  Bootstrap:  POST http://127.0.0.1:8787/api/tech-transfer/v1/auth/bootstrap
+  Get Me:     GET  http://127.0.0.1:8787/api/tech-transfer/v1/me
+INFO:     Started server process [30540]
+INFO:     Waiting for application startup.
+2026-09-15 17:23:23,885 INFO nanshan.db DB 连接池就绪（min=2 max=20 db=tech_transfer@127.0.0.1:5432）
+INFO:     Application startup complete.
+INFO:     127.0.0.1:62835 - "GET /api/health HTTP/1.1" 200 OK
+  [OK] FastAPI Ready：http://127.0.0.1:8787
+  [OK] PostgreSQL Ready（appUsers=111）
+[5/5] 启动前端 Runtime
+  调用 HBuilderX 编译并运行到微信开发者工具 ...
+17:23:25.301 HBuilderX Version: 5.15
+17:23:26.784 项目 南山 开始编译
+17:23:41.285 请注意运行模式下，因日志输出、sourcemap 以及未压缩源码等原因，性能和包体积，均不及发行模式。若要正式发布，请点击发行菜单或使用 cli 发布命令进行发布
+17:23:41.288 编译器版本：5.15（vue3）
+17:23:41.289 正在编译中...
+17:23:41.291 编译会生成大量临时文件，杀毒软件监控时会影响编译速度，并造成CPU升高。推荐把项目目录添加到杀毒软件的监控排除名单中。[添加] [帮助]
+17:23:58.089 ​已开启 uni统计 2.0​
+17:24:10.232 项目 南山 编译成功。 前端运行日志，请另行在小程序开发工具的控制台查看。如需在 HBuilderX 查看日志输出，可开启运行日志回显，详情：https://uniapp.dcloud.net.cn/tutorial/run/mp-log.html
+17:24:10.251 正在启动微信开发者工具...
+17:24:11.341 [微信小程序开发者工具] - initialize
+17:24:11.406 [微信小程序开发者工具] (node:23340) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+17:24:11.409 [微信小程序开发者工具] (Use `微信开发者工具 --trace-deprecation ...` to show where the warning was created)
+17:24:11.469 [微信小程序开发者工具] √ IDE server has started, listening on http://127.0.0.1:21039
+17:24:11.474 [微信小程序开发者工具] - preparing
+17:24:12.385 [微信小程序开发者工具] √ open
+17:24:12.400 微信开发者工具已启动，在HBuilderX中修改文件并保存，会自动刷新微信模拟器。
+  [OK] 微信小程序 Runtime 已启动（微信开发者工具，watch 模式热编译）
+  调用 HBuilderX 编译并运行 H5 dev server ...
+  H5 dev 端口：5173（manifest.json h5.devServer.port）
+17:24:12.401 注：
+17:24:12.423 1. 可以通过微信开发者工具切换pages.json中condition配置的页面，或者关闭微信开发者工具，然后再从HBuilderX中启动指定页面
+17:24:12.437 2. 如果出现微信开发者工具启动后白屏的问题，检查是否启动多个微信开发者工具，如果是则关闭所有打开的微信开发者工具，然后再重新运行
+17:24:12.440 3. 运行模式下不压缩代码且含有sourcemap，体积较大；若要正式发布，请点击发行菜单进行发布
+17:24:12.443 ready in 39979ms.
+17:24:13.900 HBuilderX Version: 5.15
+17:24:15.674 项目 南山 开始编译
+17:24:17.932 请注意运行模式下，因日志输出、sourcemap 以及未压缩源码等原因，性能和包体积，均不及发行模式。
+17:24:17.933 vite是按需编译，运行时点击某个未编译页面会先编译后加载，导致显示较慢，发行后无此问题。
+17:24:17.934 编译器版本：5.15（vue3）
+17:24:17.936 正在编译中...
+17:24:24.919 ​已开启 uni统计 2.0​
+17:24:25.550   vite v5.2.8 dev server running at:
+17:24:25.555   - Local:   http://localhost:5173/h5/
+  [OK] H5 已就绪：http://127.0.0.1:5173/h5/
+  局域网访问：http://192.168.2.79:5173/h5/（完整列表用 --lan 查看）
+frp 外网隧道
+  [OK] frpc：C:\Users\admin\Desktop\frp_0.71.0_windows_amd64\frp_0.71.0_windows_amd64\frpc.exe（扫描 C:\Users\admin\Desktop\frp_0.71.0_windows_amd64\frp_0.71.0_windows_amd64）
+  启动 frpc（43.138.138.200）：8787→8025，5173→8077
+INFO:     127.0.0.1:63139 - "GET /api/health HTTP/1.1" 200 OK
+  [OK] 隧道已就绪：http://43.138.138.200:8025/api/health
+  H5 外网入口：http://43.138.138.200:8077（需 H5 dev server 运行中）
+Caddy 反向代理
+  [OK] caddy：C:\Users\admin\Desktop\caddy_2.11.4_windows_amd64\caddy.exe（扫描 C:\Users\admin\Desktop\caddy_2.11.4_windows_amd64）
+  站点：https://inanshan.sjhcip.com → 127.0.0.1:8787
+C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\jwt\api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 28 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  decoded = self.decode_complete(
+17:24:33.507   * Network: http://192.168.2.79:5173/h5/
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/health HTTP/1.1" 200 OK
+2026-09-15 17:24:33,545 ERROR nanshan.error unhandled exception request_id=req_1789464273373_n11t63yij method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+  [OK] 检测到 Caddy 已就绪，复用现有进程：https://inanshan.sjhcip.com
+
+============================================================
+ 南山科转通 · Multi-Runtime Dev Launcher
+============================================================
+Environment
+  APP_ENV       local
+  HOST_MODE     local
+  AUTH_PROVIDER mock
+
+Backend
+  FastAPI       http://127.0.0.1:8787
+  Health        http://127.0.0.1:8787/api/health
+  API Root      http://127.0.0.1:8787/api/tech-transfer/v1
+
+Frontend
+  Source        C:\Users\admin\Desktop\南山小程序\南山小程序\南山
+
+Runtime
+  WeChat        ENABLED
+  H5            ENABLED
+
+H5
+  Local         http://127.0.0.1:5173/h5/
+  LAN           http://192.168.2.79:5173/h5/
+
+Tunnel（外网入口，经 frp 转发本机）
+  API           http://43.138.138.200:8025
+  H5            http://43.138.138.200:8077
+
+Caddy（HTTPS 反代）
+  Site          https://inanshan.sjhcip.com
+  Admin         https://inanshan.sjhcip.com/login
+  H5            https://inanshan.sjhcip.com/h5/
+  API           https://inanshan.sjhcip.com/api/
+  Health        https://inanshan.sjhcip.com/api/health
+
+真机调试（微信小程序）：
+  开发者工具 / 扫码  走 https://inanshan.sjhcip.com（config/local.env.js API_BASE_WEIXIN）
+  请在小程序后台把 request 合法域名配成该 HTTPS 域名；开发版可先勾选「不校验合法域名」
+  外网（frp）  http://43.138.138.200:8025
+  外网（Caddy） https://inanshan.sjhcip.com
+============================================================
+READY
+
+  按 Ctrl+C 停止（仅终止本启动器启动的进程；复用的后端 / HBuilderX GUI 不受影响）
+  外网访问需保持本启动器运行（frpc 由其托管）
+  HTTPS 入口需保持本启动器运行（caddy 由其托管）
+17:24:36.099   - Network: http://172.20.64.1:5173/h5/
+17:24:36.110 项目 南山 编译成功。
+17:24:36.113 点击控制台右上角debug图标（虫子），可开启断点调试（添加断点：双击编辑器行号添加断点）
+17:24:36.116 Web版常见问题参考: https://ask.dcloud.net.cn/article/35232
+17:24:36.117   ready in 9369ms.
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:39,861 ERROR nanshan.error unhandled exception request_id=req_1789464279839_gsndiep3u method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:40,196 ERROR nanshan.error unhandled exception request_id=req_1789464280179_a836gt8e2 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:40,284 ERROR nanshan.error unhandled exception request_id=req_1789464280273_cams39kgs method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:40,458 ERROR nanshan.error unhandled exception request_id=req_1789464280446_a7mcmoiru method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:40,667 ERROR nanshan.error unhandled exception request_id=req_1789464280647_h7g8y5zmb method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/favorites?targetType=achievement&page=1&pageSize=50 HTTP/1.1" 200 OK
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/favorites?targetType=demand&page=1&pageSize=50 HTTP/1.1" 200 OK
+2026-09-15 17:24:40,971 ERROR nanshan.error unhandled exception request_id=req_1789464280837_o1z8es6b1 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:41,061 ERROR nanshan.error unhandled exception request_id=req_1789464281048_7w62fx8r9 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/demands?page=1&pageSize=10 HTTP/1.1" 200 OK
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/achievements?page=1&pageSize=10 HTTP/1.1" 200 OK
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:41,267 ERROR nanshan.error unhandled exception request_id=req_1789464281253_4lvwgrtb7 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:41,450 ERROR nanshan.error unhandled exception request_id=req_1789464281437_1puldl6r7 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:41,650 ERROR nanshan.error unhandled exception request_id=req_1789464281639_0j6toq540 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:41,851 ERROR nanshan.error unhandled exception request_id=req_1789464281839_3rf5yrks0 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:42,064 ERROR nanshan.error unhandled exception request_id=req_1789464282046_ubyfpe9iq method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:42,263 ERROR nanshan.error unhandled exception request_id=req_1789464282251_h78bho8lr method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:42,452 ERROR nanshan.error unhandled exception request_id=req_1789464282440_ytlvi5p5z method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:42,658 ERROR nanshan.error unhandled exception request_id=req_1789464282646_dncjsx68u method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:42,861 ERROR nanshan.error unhandled exception request_id=req_1789464282849_jvwg2p4wf method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:43,064 ERROR nanshan.error unhandled exception request_id=req_1789464283051_nf2zm7ktg method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:43,250 ERROR nanshan.error unhandled exception request_id=req_1789464283237_agwe01kg7 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:43,452 ERROR nanshan.error unhandled exception request_id=req_1789464283441_r78deobzc method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:43,657 ERROR nanshan.error unhandled exception request_id=req_1789464283643_u280zn9mg method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:43,865 ERROR nanshan.error unhandled exception request_id=req_1789464283847_qn5j5kpag method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:44,062 ERROR nanshan.error unhandled exception request_id=req_1789464284050_mwi4k3mi5 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:44,257 ERROR nanshan.error unhandled exception request_id=req_1789464284239_qmk42ve85 method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:44,456 ERROR nanshan.error unhandled exception request_id=req_1789464284445_y7i740j8k method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:44,661 ERROR nanshan.error unhandled exception request_id=req_1789464284648_7ac86166i method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:44,863 ERROR nanshan.error unhandled exception request_id=req_1789464284850_64rqaflmt method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+INFO:     14.153.54.216:0 - "GET /api/tech-transfer/v1/me/notifications/summary HTTP/1.1" 500 Internal Server Error
+2026-09-15 17:24:45,064 ERROR nanshan.error unhandled exception request_id=req_1789464285052_3ouulp31m method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\routing.py", line 354, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\concurrency.py", line 34, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\routes\notification.py", line 10, in notification_summary
+    return success(summary(user['userId']))
+                   ~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\Desktop\南山小程序\tech-transfer-service\modules\notification\service.py", line 14, in summary
+    cur.execute('''SELECT category, COUNT(*) AS count FROM notification_inbox
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        WHERE recipient_user_id=%s AND read_at IS NULL GROUP BY category''', (user_id,))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\psycopg2\extras.py", line 236, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+psycopg2.errors.UndefinedTable: 错误:  关系 "notification_inbox" 不存在
+LINE 1: SELECT category, COUNT(*) AS count FROM notification_inbox
+                                                ^
+
+2026-09-15 17:24:45,251 ERROR nanshan.error unhandled exception request_id=req_1789464285240_hkh4rnt3d method=GET path=/api/tech-transfer/v1/me/notifications/summary status=500 code=TT_COMMON_50001
+Traceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\_exception_handler.py", lin

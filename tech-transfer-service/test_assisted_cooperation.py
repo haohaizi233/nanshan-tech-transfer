@@ -80,6 +80,20 @@ h_a = {"Authorization": f"Bearer {token_a}"}
 h_b = {"Authorization": f"Bearer {token_b}"}
 print(f"[0] admin={user_admin['userId']} A={user_a['userId']} B={user_b['userId']}\n")
 
+# 对接发起方的联系方式来自用户资料快照；为可重复验证，给测试账号补齐资料。
+profile_b_before = db_one(
+    "SELECT display_name, phone, email, wechat, org_title FROM user_profile WHERE user_id=%s",
+    (user_b["userId"],),
+) or {}
+db_exec(
+    """
+    UPDATE user_profile
+    SET display_name=%s, phone=%s, email=%s, wechat=%s, org_title=%s
+    WHERE user_id=%s
+    """,
+    ("测试发起方B", "13612345678", "coop-b@example.com", "coop_b_wechat", "技术负责人", user_b["userId"]),
+)
+
 # ── 清理上轮残留（顺序：事件→意向→需求/成果→机构） ────────────
 db_exec(
     "DELETE FROM cooperation_event WHERE intent_id IN "
@@ -362,6 +376,16 @@ direct = resp.json()["data"]
 check("direct意向handlingMode=direct", direct.get("handlingMode") == "direct", str(direct.get("handlingMode")))
 check("direct意向assistStatus=null", direct.get("assistStatus") is None, str(direct.get("assistStatus")))
 
+# pending：接收方可直接联系发起方；发起方仍不可见发布方明文
+pending_target = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_a, timeout=10).json()["data"]
+pending_initiator = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_b, timeout=10).json()["data"]
+check("pending接收方可见发起方联系人", pending_target.get("counterpartContact", {}).get("masked") is False
+      and "*" not in (pending_target.get("counterpartContact", {}).get("phone") or ""),
+      str(pending_target.get("counterpartContact")))
+check("pending发起方联系人仍脱敏", pending_initiator.get("counterpartContact", {}).get("masked") is True
+      and "*" in (pending_initiator.get("counterpartContact", {}).get("phone") or ""),
+      str(pending_initiator.get("counterpartContact")))
+
 # pending 阶段目标方不可撤回他人申请（应使用 reject）
 resp = requests.post(f"{BASE}/cooperations/{direct['id']}/cancel", headers=h_a,
                      json={"version": direct["version"]}, timeout=10)
@@ -373,6 +397,22 @@ resp = requests.post(f"{BASE}/cooperations/{direct['id']}/accept", headers=h_a,
 check("A 自行accept=200", resp.status_code == 200, f"got {resp.status_code} {resp.text[:120]}")
 check("acceptMode=self", resp.json()["data"].get("acceptMode") == "self",
       str(resp.json()["data"].get("acceptMode")))
+
+accepted_target = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_a, timeout=10).json()["data"]
+accepted_initiator = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_b, timeout=10).json()["data"]
+check("accepted双方联系人解锁", accepted_target.get("counterpartContact", {}).get("masked") is False
+      and accepted_initiator.get("counterpartContact", {}).get("masked") is False,
+      f"target={accepted_target.get('counterpartContact')} initiator={accepted_initiator.get('counterpartContact')}")
+
+resp = requests.post(f"{BASE}/cooperations/{direct['id']}/cancel", headers=h_b,
+                     json={"version": accepted_initiator["version"], "reason": "验证终态重新脱敏"}, timeout=10)
+check("accepted发起方取消=200", resp.status_code == 200 and resp.json()["data"]["status"] == "cancelled",
+      f"got {resp.status_code} {resp.text[:120]}")
+cancelled_target = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_a, timeout=10).json()["data"]
+cancelled_initiator = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_b, timeout=10).json()["data"]
+check("cancelled双方联系人重新脱敏", cancelled_target.get("counterpartContact", {}).get("masked") is True
+      and cancelled_initiator.get("counterpartContact", {}).get("masked") is True,
+      f"target={cancelled_target.get('counterpartContact')} initiator={cancelled_initiator.get('counterpartContact')}")
 
 # admin 对 direct 意向代操作=400
 resp = requests.post(f"{BASE}/admin/cooperations/{direct['id']}/assist-status", headers=h_admin,
@@ -450,10 +490,20 @@ db_exec(
 db_exec("DELETE FROM demand WHERE title LIKE '协助对接%%'")
 db_exec("DELETE FROM achievement WHERE title LIKE '协助对接%%'")
 db_exec("DELETE FROM institution WHERE name LIKE '协助对接%%'")
+db_exec(
+    """
+    UPDATE user_profile
+    SET display_name=%s, phone=%s, email=%s, wechat=%s, org_title=%s
+    WHERE user_id=%s
+    """,
+    (profile_b_before.get("display_name"), profile_b_before.get("phone"),
+     profile_b_before.get("email"), profile_b_before.get("wechat"),
+     profile_b_before.get("org_title"), user_b["userId"]),
+)
 
 row = db_one(
-    "SELECT (SELECT COUNT(*) FROM demand WHERE status='pending_review') AS d, "
-    "(SELECT COUNT(*) FROM achievement WHERE status='pending_review') AS a"
+    "SELECT (SELECT COUNT(*) FROM demand WHERE status='pending_review' AND title LIKE '协助对接%%') AS d, "
+    "(SELECT COUNT(*) FROM achievement WHERE status='pending_review' AND title LIKE '协助对接%%') AS a"
 )
 check("清理后审核队列无残留", (row["d"], row["a"]) == (0, 0), f"dmd={row['d']} ach={row['a']}")
 

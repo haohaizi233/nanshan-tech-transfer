@@ -35,7 +35,8 @@ defineProps({
   collapsed: {
     type: Boolean,
     default: false
-  }
+  },
+  notification: { type: Object, default: () => ({ categories: {} }) }
 })
 
 const emit = defineEmits(['toggle'])
@@ -179,6 +180,9 @@ const isActive = (path) => {
           class="menu-text"
         >
           {{ item.name }}
+        </span>
+        <span v-if="!collapsed && notification.categories && ((item.path === '/admin/cooperation' && notification.categories.cooperation) || (item.path === '/admin/membership-review' && (notification.categories.membership || notification.categories.organization)) || ((item.path === '/admin/achievements' || item.path === '/admin/requirements') && notification.categories.review))" class="menu-badge">
+          {{ item.path === '/admin/cooperation' ? notification.categories.cooperation : (item.path === '/admin/membership-review' ? notification.categories.membership + notification.categories.organization : notification.categories.review) }}
         </span>
       </button>
     </nav>
@@ -384,6 +388,28 @@ const isActive = (path) => {
 .menu-text {
   margin-left: 14px;
   white-space: nowrap;
+}
+
+.menu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+
+  background: #ff4d5e;
+  color: #ffffff;
+
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .sidebar.collapsed .menu-item {

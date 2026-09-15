@@ -112,27 +112,27 @@
 		<!-- 下方：联系方式 -->
 		<view class="section">
 			<view class="section-head">
-				<text class="section-title">联系方式</text>
+				<text class="section-title">{{ contactSectionTitle }}</text>
 			</view>
 			<view class="contact-card">
 				<view class="contact-row">
 					<text class="contact-label">联系人</text>
-					<text class="contact-value">{{ detail.contactName }}{{ detail.contactTitle ? '（' + detail.contactTitle + '）' : '' }}</text>
+					<text class="contact-value">{{ displayContact.displayName }}{{ displayContact.orgTitle ? '（' + displayContact.orgTitle + '）' : '' }}</text>
 				</view>
-				<view v-if="detail.phone" class="contact-row" @click="onCall">
+				<view v-if="displayContact.phone" class="contact-row" @click="onCall">
 					<text class="contact-label">电话</text>
-					<text class="contact-value contact-link">{{ detail.phone }}</text>
+					<text class="contact-value contact-link">{{ displayContact.phone }}</text>
 				</view>
-				<view v-if="detail.email" class="contact-row" @click="onCopy(detail.email, '邮箱')">
+				<view v-if="displayContact.email" class="contact-row" @click="onCopy(displayContact.email, '邮箱')">
 					<text class="contact-label">邮箱</text>
-					<text class="contact-value contact-link">{{ detail.email }}</text>
+					<text class="contact-value contact-link">{{ displayContact.email }}</text>
 				</view>
-				<view v-if="detail.wechat" class="contact-row" @click="onCopy(detail.wechat, '微信号')">
+				<view v-if="displayContact.wechat" class="contact-row" @click="onCopy(displayContact.wechat, '微信号')">
 					<text class="contact-label">微信</text>
-					<text class="contact-value contact-link">{{ detail.wechat }}</text>
+					<text class="contact-value contact-link">{{ displayContact.wechat }}</text>
 				</view>
 			</view>
-			<text class="tip">为保护发布方隐私，对接被接受前联系方式已脱敏</text>
+			<text class="tip">{{ contactTip }}</text>
 		</view>
 
 		<!-- 底部操作区 -->
@@ -230,6 +230,7 @@
 						@input="onIntentMsgInput"
 					></textarea>
 				</view>
+				<text class="sheet-consent">提交即同意将您的联系方式提供给接收方，用于本次对接。</text>
 				<button
 					:class="selectedIntentType ? 'sheet-btn ready' : 'sheet-btn'"
 					:disabled="!selectedIntentType"
@@ -289,7 +290,9 @@
 				intentDialogVisible: false,
 				selectedIntentType: '',
 				intentMessage: '',
-				submitting: false
+				submitting: false,
+				intentRefreshTimer: null,
+				intentRefreshing: false
 			}
 		},
 		computed: {
@@ -319,6 +322,30 @@
 			},
 			isAssisted() {
 				return this.intention && this.intention.handlingMode === 'assisted'
+			},
+			displayContact() {
+				if (this.intention && this.intention.counterpartContact) {
+					return this.intention.counterpartContact
+				}
+				return {
+					displayName: this.detail && this.detail.contactName,
+					orgTitle: this.detail && this.detail.contactTitle,
+					phone: this.detail && this.detail.phone,
+					email: this.detail && this.detail.email,
+					wechat: this.detail && this.detail.wechat,
+					masked: false
+				}
+			},
+			contactSectionTitle() {
+				return this.intention ? '对方联系方式' : '联系方式'
+			},
+			contactTip() {
+				if (this.intention && this.displayContact.masked) {
+					return this.displayContact.reason || '联系方式已脱敏，正式对接后可见'
+				}
+				return this.intention
+					? '对方联系方式已按当前对接状态更新'
+					: '为保护发布方隐私，对接被接受前联系方式已脱敏'
 			},
 			statusHint() {
 				const row = this.intention
@@ -388,19 +415,18 @@
 				title: type === 'result' ? '成果对接' : '需求对接'
 			})
 
-			if (type === 'demand') {
-				this.loadDemandDetail(id)
-			} else {
-				this.loadResultDetail(id)
-			}
 			this.loadFavoriteState(id)
-			this.loadIntent(id)
+			this.refreshDockState(id)
 		},
 		onUnload() {
 			this.clearConfirmTimer()
+			this.stopIntentRefresh()
 		},
 		onShow() {
-			if (this.detail) this.loadIntent(this.detail.id)
+			if (this.detail) this.refreshDockState(this.detail.id)
+		},
+		onHide() {
+			this.stopIntentRefresh()
 		},
 		methods: {
 			async loadDemandDetail(id) {
@@ -454,9 +480,43 @@
 					this.intention = await getMyActiveIntentForTarget(this.type, id)
 					this.intentId = this.intention ? String(this.intention.id) : ''
 				} catch (e) {
-					// 无权限或网络异常时按无意向处理（发起按钮可重试）
+					// 网络失败不能把已展示的意向清空，否则会错误露出“申请对接”。
 					console.error('[dock-detail] loadIntent failed:', e)
-					this.intention = null
+					if (!this.intention) this.intentId = ''
+				}
+			},
+			async refreshDockState(id) {
+				const targetId = id || (this.detail && this.detail.id)
+				if (!targetId || this.intentRefreshing) return
+				this.intentRefreshing = true
+				try {
+					if (this.type === 'demand') {
+						await this.loadDemandDetail(targetId)
+					} else {
+						await this.loadResultDetail(targetId)
+					}
+					await this.loadIntent(targetId)
+				} finally {
+					this.intentRefreshing = false
+					this.startIntentRefresh()
+				}
+			},
+			startIntentRefresh() {
+				const status = this.intention && this.intention.status
+				const active = ['pending', 'accepted', 'confirmed'].indexOf(status) >= 0
+				if (!active) {
+					this.stopIntentRefresh()
+					return
+				}
+				if (this.intentRefreshTimer) return
+				this.intentRefreshTimer = setInterval(() => {
+					this.refreshDockState()
+				}, 10000)
+			},
+			stopIntentRefresh() {
+				if (this.intentRefreshTimer) {
+					clearInterval(this.intentRefreshTimer)
+					this.intentRefreshTimer = null
 				}
 			},
 			clearConfirmTimer() {
@@ -520,6 +580,8 @@
 					}
 					if (next) {
 						this.intention = next
+						this.intentId = String(next.id)
+						await this.refreshDockState(this.detail.id)
 						uni.showToast({ title: ACTION_TIPS[next.status] || '操作成功', icon: 'none' })
 					}
 				} catch (e) {
@@ -530,13 +592,14 @@
 			},
 			onCall() {
 				if (!ensureLoginForDock()) return
-				if (!this.detail || !this.detail.phone) return
-				if (this.detail.phone.indexOf('*') >= 0) {
+				const phone = this.displayContact.phone
+				if (!phone) return
+				if (phone.indexOf('*') >= 0) {
 					uni.showToast({ title: '联系方式已脱敏，正式对接后可见', icon: 'none' })
 					return
 				}
 				uni.makePhoneCall({
-					phoneNumber: this.detail.phone
+					phoneNumber: phone
 				})
 			},
 			onCopy(text, label) {
@@ -580,9 +643,10 @@
 				if (!ensureLoginForDock()) return
 				if (!this.intention) return
 				try {
-					await cancelCooperation(this.intention.id, this.intention.version, '发起方取消对接')
-					this.intention = null
-					this.intentId = ''
+					const next = await cancelCooperation(this.intention.id, this.intention.version, '发起方取消对接')
+					this.intention = next
+					this.intentId = String(next.id)
+					await this.refreshDockState(this.detail.id)
 					uni.showToast({ title: '已取消对接', icon: 'none' })
 				} catch (e) {
 					console.error('[dock-detail] onCancelPending failed:', e)
@@ -625,6 +689,7 @@
 					this.intention = intention
 					this.intentId = String(intention.id)
 					this.intentDialogVisible = false
+					await this.refreshDockState(this.detail.id)
 					uni.showToast({ title: '对接意向已提交', icon: 'success' })
 				} catch (e) {
 					console.error('[dock-detail] onSubmitIntent failed:', e)
@@ -1088,6 +1153,14 @@
 		font-size: 24rpx;
 		color: #999999;
 		margin-bottom: 10rpx;
+	}
+
+	.sheet-consent {
+		display: block;
+		margin: -8rpx 0 16rpx;
+		font-size: 22rpx;
+		line-height: 1.5;
+		color: #8a8f99;
 	}
 
 	.sheet-textarea {

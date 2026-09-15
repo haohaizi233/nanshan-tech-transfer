@@ -94,6 +94,7 @@ export async function createCooperation({ type, id, intentType, message }) {
     targetId: toTargetId(id),
     intentType: intentType || undefined,
     message: message || undefined,
+    contactShareConsent: true,
   })
 }
 

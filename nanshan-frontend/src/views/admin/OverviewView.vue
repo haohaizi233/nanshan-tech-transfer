@@ -304,7 +304,7 @@ const loadTodo = async () => {
   todoError.value = ''
 
   try {
-    const data = await api('/admin/dashboard/todos', { params: { limit: 5 } })
+    const data = await api('/admin/dashboard/todos', { params: { limit: 100 } })
     todoItems.value = data?.list ?? []
   } catch (error) {
     todoItems.value = []
@@ -1496,6 +1496,11 @@ onMounted(() => {
 .todo-list,
 .activity-list {
   margin-top: 11px;
+}
+
+.todo-list {
+  max-height: 304px;
+  overflow-y: auto;
 }
 
 .todo-item {

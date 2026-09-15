@@ -73,3 +73,19 @@ test('mine page loads publication, interaction, and membership counts sequential
   assert.match(source, /await this\.loadInteractionCounts\(\)/)
   assert.match(source, /await this\.loadMemberships\(\)/)
 })
+
+test('dock detail consumes server-approved counterpart contacts and safely refreshes active cooperation', () => {
+  const api = readFileSync(new URL('../subpackages/tech-transfer/api/interaction.js', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../subpackages/tech-transfer/pages/dock-detail/dock-detail.vue', import.meta.url), 'utf8')
+
+  assert.match(api, /contactShareConsent:\s*true/)
+  assert.match(source, /displayContact\(\)/)
+  assert.match(source, /counterpartContact/)
+  assert.match(source, /startIntentRefresh\(\)/)
+  assert.match(source, /stopIntentRefresh\(\)/)
+  assert.match(source, /setInterval\([\s\S]*?,\s*10000\)/)
+
+  const loadIntent = source.match(/async loadIntent\(id\)\s*\{([\s\S]*?)\r?\n\s*\},\r?\n\s*clearConfirmTimer/)
+  assert.ok(loadIntent)
+  assert.doesNotMatch(loadIntent[1], /this\.intention\s*=\s*null/)
+})

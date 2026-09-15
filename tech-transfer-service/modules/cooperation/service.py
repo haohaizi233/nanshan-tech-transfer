@@ -23,6 +23,7 @@ Architecture source: 04-backend-domain-design.md §4.8, 05-data-model-design.md 
 import json
 
 from db import get_cursor
+from core.masking import mask_contact
 from core.errors import (
     bad_request,
     conflict,
@@ -33,6 +34,7 @@ from core.errors import (
     coop_not_found,
 )
 from modules.audit.service import record as audit_record
+from modules.notification.service import emit_notification
 
 TARGET_TYPES = ("achievement", "demand")
 ACTIVE_STATUSES = ("pending", "accepted", "confirmed")
@@ -226,6 +228,97 @@ def _counterpart_display(cur, row, user_id: int):
     return (p or {}).get("display_name")
 
 
+def _decode_contact_snapshot(value):
+    """兼容 JSON/JSONB 返回值，且只接受联系人允许的字段。"""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            value = None
+    if not isinstance(value, dict):
+        return None
+    return {
+        "contactName": value.get("displayName"),
+        "contactTitle": value.get("orgTitle"),
+        "contactPhone": value.get("phone"),
+        "contactEmail": value.get("email"),
+        "contactWechat": value.get("wechat"),
+        "orgName": value.get("orgName"),
+    }
+
+
+def _target_contact(cur, target_type: str, target_id: int):
+    """目标内容自身的联系人，平台协助内容也可安全复用该资料。"""
+    table = "demand" if target_type == "demand" else "achievement"
+    cur.execute(
+        f"""
+        SELECT contact_name, contact_title, contact_phone, contact_email, contact_wechat
+        FROM {table}
+        WHERE id=%s AND deleted_at IS NULL
+        """,
+        (target_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "contactName": row.get("contact_name"),
+        "contactTitle": row.get("contact_title"),
+        "contactPhone": row.get("contact_phone"),
+        "contactEmail": row.get("contact_email"),
+        "contactWechat": row.get("contact_wechat"),
+        "orgName": None,
+    }
+
+
+def _contact_response(contact, *, masked: bool, reason=None):
+    """将原始联系人缩小为客户端可展示的、安全的响应对象。"""
+    if not contact or not any(contact.get(key) for key in (
+        "contactName", "contactPhone", "contactEmail", "contactWechat",
+    )):
+        return {
+            "available": False,
+            "masked": True,
+            "displayName": None,
+            "phone": None,
+            "email": None,
+            "wechat": None,
+            "orgName": None,
+            "orgTitle": None,
+            "reason": reason or "暂未提供联系人信息",
+        }
+    visible = mask_contact(contact) if masked else contact
+    return {
+        "available": True,
+        "masked": masked,
+        "displayName": visible.get("contactName"),
+        "phone": visible.get("contactPhone"),
+        "email": visible.get("contactEmail"),
+        "wechat": visible.get("contactWechat"),
+        "orgName": visible.get("orgName"),
+        "orgTitle": visible.get("contactTitle"),
+        "reason": reason,
+    }
+
+
+def _counterpart_contact(cur, row, role: str):
+    """依据状态和参与角色生成对方联系人；原始明文不离开该服务层。"""
+    is_unlocked = row["status"] in ACCEPTED_STATUSES
+    if role == "target_owner":
+        # 发起人已在创建时同意向接收方披露；使用当时快照保障历史稳定。
+        contact = _decode_contact_snapshot(row.get("initiator_contact_snapshot"))
+        can_view = row["status"] == "pending" or is_unlocked
+        hidden_reason = "该对接已结束，发起方联系方式已重新脱敏"
+    else:
+        contact = _target_contact(cur, row["target_type"], row["target_id"])
+        can_view = is_unlocked
+        hidden_reason = "待接收方同意后，可查看对方联系方式"
+
+    if can_view:
+        return _contact_response(contact, masked=False)
+    return _contact_response(contact, masked=True, reason=hidden_reason)
+
+
 def _row_to_intent(row, user_id: int):
     my_role = None
     if row["initiator_user_id"] == user_id:
@@ -331,7 +424,7 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
         # 申请方联系方式快照：创建时点生成，防止事后改资料导致历史申请联系人漂移
         cur.execute(
             """
-            SELECT p.display_name, p.phone, p.email, p.org_title, o.name AS org_name
+            SELECT p.display_name, p.phone, p.email, p.wechat, p.org_title, o.name AS org_name
             FROM user_profile p
             LEFT JOIN institution o ON p.org_id = o.id
             WHERE p.user_id = %s
@@ -344,6 +437,7 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
                 "displayName": prof.get("display_name"),
                 "phone": prof.get("phone"),
                 "email": prof.get("email"),
+                "wechat": prof.get("wechat"),
                 "orgTitle": prof.get("org_title"),
                 "orgName": prof.get("org_name"),
             },
@@ -367,6 +461,10 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
         intent_id = cur.fetchone()["id"]
         _insert_event(cur, intent_id, "created", None, "pending",
                       user_id, "initiator", message)
+        if target.get("owner_user_id"):
+            emit_notification(cur, recipient_user_id=target["owner_user_id"], category="cooperation",
+                event_type="cooperation.created", source_type="cooperation", source_id=intent_id,
+                title="收到新的对接申请", body=message, target_path="/subpackages/tech-transfer/pages/my-list/my-list")
 
     audit_record(
         "cooperation.create", "cooperation_intent", resource_id=intent_id,
@@ -393,6 +491,7 @@ def get_intent_detail(intent_id: int, user_id: int):
         if name is None:
             name = "目标机构"
         detail["counterpartDisplayName"] = name
+        detail["counterpartContact"] = _counterpart_contact(cur, row, role)
         detail["platformAssisted"] = (row.get("handling_mode") or "direct") == "assisted"
         detail["targetSummary"] = _target_summary(cur, row["target_type"], row["target_id"])
     return detail
@@ -589,6 +688,12 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
 
         _insert_event(cur, intent_id, rule["event"], row["status"], rule["to"],
                       user_id, role, remark)
+        recipient = row["initiator_user_id"] if role == "target_owner" else row["target_owner_user_id"]
+        if recipient:
+            emit_notification(cur, recipient_user_id=recipient, category="cooperation",
+                event_type=f"cooperation.{rule['event']}", source_type="cooperation", source_id=intent_id,
+                title=f"对接状态更新：{rule['to']}", body=remark, target_path="/subpackages/tech-transfer/pages/my-list/my-list",
+                dedupe_key=f"cooperation:{intent_id}:{rule['event']}:{rule['to']}")
 
         if op == "accept":
             _auto_reject_other_pending(cur, row, intent_id, user_id)

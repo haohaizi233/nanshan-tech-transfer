@@ -28,6 +28,7 @@ from core.errors import (
     TT_ADMIN_40001,
 )
 from modules.audit.service import record as audit_record
+from modules.notification.service import emit_notification
 
 from core.errors import achievement_not_found
 from modules.achievement.service import (
@@ -261,7 +262,7 @@ def review_achievement(admin_user: dict, ach_id: int, body: dict, request_id=Non
     to_status = "published" if action == "approve" else "rejected"
     with get_cursor(commit=True) as cur:
         cur.execute(
-            "SELECT status, version FROM achievement WHERE id = %s AND deleted_at IS NULL",
+            "SELECT status, version, owner_user_id FROM achievement WHERE id = %s AND deleted_at IS NULL",
             (ach_id,),
         )
         row = cur.fetchone()
@@ -289,6 +290,11 @@ def review_achievement(admin_user: dict, ach_id: int, body: dict, request_id=Non
             )
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        if row.get("owner_user_id"):
+            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
+                event_type=f"achievement.{action}", source_type="achievement", source_id=ach_id,
+                title="成果审核已通过" if action == "approve" else "成果审核未通过", body=reason or None,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
 
     audit_record(
         f"achievement.{action}", "achievement", resource_id=ach_id,
@@ -313,7 +319,7 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
     to_status = "published" if action == "approve" else "rejected"
     with get_cursor(commit=True) as cur:
         cur.execute(
-            "SELECT status, version FROM demand WHERE id = %s AND deleted_at IS NULL",
+            "SELECT status, version, owner_user_id FROM demand WHERE id = %s AND deleted_at IS NULL",
             (demand_id,),
         )
         row = cur.fetchone()
@@ -342,6 +348,11 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
             )
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        if row.get("owner_user_id"):
+            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
+                event_type=f"demand.{action}", source_type="demand", source_id=demand_id,
+                title="需求审核已通过" if action == "approve" else "需求审核未通过", body=reason or None,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
 
     audit_record(
         f"demand.{action}", "demand", resource_id=demand_id,
@@ -542,6 +553,18 @@ def dashboard_summary() -> dict:
     }
 
 
+def notification_summary() -> dict:
+    """轻量后台角标：仅聚合待处理数量，不读取待办正文或列表。"""
+    data = dashboard_summary()
+    categories = {
+        "review": data["pendingAchievements"] + data["pendingDemands"],
+        "cooperation": data["pendingCooperations"],
+        "organization": data["pendingOrganizationApplications"],
+        "membership": data["pendingOrganizationAdminApplications"] + data["pendingMembershipApplications"],
+    }
+    return {"total": sum(categories.values()), "categories": categories}
+
+
 def dashboard_todos(limit: int = 20) -> dict:
     """Unified system-admin work queue; organization applications appear only once."""
     limit = max(1, min(int(limit or 20), 100))
@@ -587,7 +610,7 @@ def dashboard_todos(limit: int = 20) -> dict:
                 LEFT JOIN demand d ON c.target_type = 'demand' AND c.target_id = d.id
                 WHERE c.status = 'pending'
             ) AS todo
-            ORDER BY created_at ASC, id ASC
+            ORDER BY created_at DESC, id DESC
             """
         )
         rows = cur.fetchall() or []

@@ -11,7 +11,8 @@ defineProps({
   collapsed: {
     type: Boolean,
     default: false
-  }
+  },
+  notification: { type: Object, default: () => ({ total: 0 }) }
 })
 
 const emit = defineEmits(['toggle'])
@@ -256,7 +257,7 @@ const savePassword = async () => {
       <button
         type="button"
         class="notification-button"
-        title="通知（开发中）"
+        title="待办通知"
       >
         <svg
           viewBox="0 0 24 24"
@@ -269,6 +270,7 @@ const savePassword = async () => {
 
           <path d="M10 21h4" />
         </svg>
+        <span v-if="notification.total" class="notification-count">{{ notification.total > 99 ? '99+' : notification.total }}</span>
       </button>
 
       <div class="vertical-line"></div>
