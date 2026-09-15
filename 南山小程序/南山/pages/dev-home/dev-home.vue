@@ -1,5 +1,5 @@
 <template>
-  <view class="dev-home">
+  <view v-if="showHost" class="dev-home">
     <!-- 后端健康状态：固定悬浮于顶部，小屏无需下滑即可见 -->
     <view class="dev-health">
       <text class="health-text" :class="{ ok: healthOk, fail: !healthOk }">
@@ -41,17 +41,24 @@
 <script>
 import { APP_ENV, API_BASE, API_BASE_WEIXIN } from '../../config/local.env.js'
 import { resolveH5ApiBase } from '../../host/local-adapter.js'
-import { SHOW_AI_MATCH_ENTRY } from '../../config/feature-flags.js'
+import { SHOW_AI_MATCH_ENTRY, SHOW_DEV_HOST } from '../../config/feature-flags.js'
+
+const BUSINESS_HOME = '/subpackages/tech-transfer/pages/home/home'
 
 export default {
   data() {
     return {
+      showHost: SHOW_DEV_HOST,
       healthOk: false,
       apiBase: '',
       showAiMatchEntry: SHOW_AI_MATCH_ENTRY,
     }
   },
   onShow() {
+    if (!SHOW_DEV_HOST) {
+      uni.reLaunch({ url: BUSINESS_HOME })
+      return
+    }
     this.checkHealth()
   },
   methods: {

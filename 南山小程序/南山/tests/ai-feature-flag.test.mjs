@@ -2,13 +2,22 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { AI_FEATURE_ENABLED, SHOW_AI_MATCH_ENTRY } from '../config/feature-flags.js'
+import { AI_FEATURE_ENABLED, SHOW_AI_MATCH_ENTRY, SHOW_DEV_HOST } from '../config/feature-flags.js'
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 
-test('AI feature is on and entry follows the same switch', () => {
-  assert.equal(AI_FEATURE_ENABLED, true)
+test('AI feature is off and entry follows the same switch', () => {
+  assert.equal(AI_FEATURE_ENABLED, false)
   assert.equal(SHOW_AI_MATCH_ENTRY, AI_FEATURE_ENABLED)
+})
+
+test('dev host is hidden and dev-home redirects into the business home', () => {
+  const source = read('../pages/dev-home/dev-home.vue')
+  assert.equal(SHOW_DEV_HOST, false)
+  assert.match(source, /v-if="showHost"/)
+  assert.match(source, /uni\.reLaunch\(\{\s*url:\s*BUSINESS_HOME\s*\}\)/)
+  assert.match(source, /BUSINESS_HOME = '\/subpackages\/tech-transfer\/pages\/home\/home'/)
+  assert.match(source, /if \(!SHOW_DEV_HOST\)/)
 })
 
 test('AI API wrappers refuse requests when the feature is off', () => {

@@ -27,6 +27,18 @@
       </view>
     </view>
 
+    <view v-if="history.length" class="history-box">
+      <text class="history-title">搜索记录</text>
+      <view class="history-tags">
+        <text
+          v-for="item in history"
+          :key="`${item.mode}-${item.keyword}`"
+          class="history-tag"
+          @click="onHistoryTap(item)"
+        >{{ item.keyword }}</text>
+      </view>
+    </view>
+
     <view class="list-wrap">
       <view v-if="!searched" class="state-box">
         <text class="state-text">输入关键词检索专利</text>
@@ -80,7 +92,12 @@
 </template>
 
 <script>
-import { getPatentTypeLabel, searchPatents } from '../../api/patent.js'
+import {
+  getPatentSearchHistory,
+  getPatentTypeLabel,
+  savePatentSearchHistory,
+  searchPatents,
+} from '../../api/patent.js'
 import HostBridge from '../../../../host/host-bridge.js'
 
 export default {
@@ -96,7 +113,11 @@ export default {
       loading: false,
       searched: false,
       error: '',
+      history: [],
     }
+  },
+  onLoad() {
+    this.loadHistory()
   },
   onReachBottom() {
     if (this.searched && this.hasMore && !this.loading) {
@@ -123,6 +144,7 @@ export default {
     switchMode(mode) {
       if (this.mode === mode) return
       this.mode = mode
+      this.loadHistory()
       if (this.searched && this.keyword.trim()) {
         this.loadList(true)
       }
@@ -133,7 +155,27 @@ export default {
         uni.showToast({ title: '请输入检索词', icon: 'none' })
         return
       }
+      this.saveHistory(kw)
       this.loadList(true)
+    },
+    async loadHistory() {
+      try {
+        const data = await getPatentSearchHistory(this.mode)
+        this.history = (data && data.list) || []
+      } catch (e) {
+        this.history = []
+      }
+    },
+    saveHistory(keyword) {
+      savePatentSearchHistory(keyword, this.mode)
+        .then(() => this.loadHistory())
+        .catch(() => {})
+    },
+    onHistoryTap(item) {
+      if (!item || !item.keyword) return
+      this.mode = item.mode === 'assignee' ? 'assignee' : 'keyword'
+      this.keyword = item.keyword
+      this.onSearch()
     },
     async loadList(reset) {
       const kw = this.keyword.trim()
@@ -257,6 +299,42 @@ export default {
 
 .list-wrap {
   padding: 24rpx;
+}
+
+.history-box {
+  padding: 18rpx 24rpx 0;
+  background: #fff;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.history-title {
+  display: block;
+  margin-bottom: 12rpx;
+  color: #697386;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.history-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  max-height: 92rpx;
+  overflow: hidden;
+  padding-bottom: 18rpx;
+}
+
+.history-tag {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 8rpx 20rpx;
+  border-radius: 24rpx;
+  background: #f1f5fb;
+  color: #4b5b73;
+  font-size: 24rpx;
+  line-height: 32rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .result-count {

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response, StreamingResponse
 
 from core.errors import patent_not_found
-from core.middleware import identity
+from core.middleware import identity, json_body
 from core.pagination import parse_page_args
 from core.response import success
 from modules.patent.service import (
@@ -19,6 +19,7 @@ from modules.patent.service import (
     render_patent_pdf_page,
     search_patents,
 )
+from modules.patent.history import list_history, record_history
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["patents"])
 
@@ -28,6 +29,17 @@ def list_patents(request: Request, user: dict = Depends(identity)):
     page, page_size, keyword = parse_page_args(request)
     assignee = (request.query_params.get("assignee") or "").strip()
     return success(search_patents(keyword, assignee, page, page_size))
+
+
+@router.get("/patents/search-history")
+def patent_search_history(mode: str = "keyword", user: dict = Depends(identity)):
+    return success(list_history(user["userId"], mode))
+
+
+@router.post("/patents/search-history")
+async def record_patent_search_history(request: Request, user: dict = Depends(identity)):
+    body = await json_body(request)
+    return success(record_history(user["userId"], body.get("mode"), body.get("keyword")))
 
 
 @router.get("/patents/{publication_no}/pdf")

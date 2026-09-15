@@ -17,6 +17,11 @@ test('patent type labels stay user-facing', () => {
   assert.equal(patentApi.getPatentTypeLabel('design'), '外观设计')
 })
 
+test('patent search client provides server-backed recent-query methods', () => {
+  assert.equal(typeof patentApi.getPatentSearchHistory, 'function')
+  assert.equal(typeof patentApi.savePatentSearchHistory, 'function')
+})
+
 test('patent detail decodes every routed preview field before rendering', () => {
   const seed = buildPatentDetailSeed({
     no: 'CN110313154B',

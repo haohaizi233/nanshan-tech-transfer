@@ -52,7 +52,7 @@
         <button class="retry-btn" size="mini" @click="loadDetail">重试</button>
       </view>
 
-      <view v-if="detail.abstract" class="section">
+      <view id="abstract" v-if="detail.abstract" class="section reader-section">
         <text class="section-title">摘要</text>
         <block v-if="detail.abstractBlocks && detail.abstractBlocks.length">
           <block
@@ -73,7 +73,7 @@
         <text v-else class="body-text">{{ detail.abstract }}</text>
       </view>
 
-      <view v-if="detail.claims" class="section">
+      <view id="claims" v-if="detail.claims" class="section reader-section">
         <text class="section-title">权利要求</text>
         <block v-if="detail.claimsBlocks && detail.claimsBlocks.length">
           <block
@@ -94,7 +94,7 @@
         <text v-else class="body-text">{{ detail.claims }}</text>
       </view>
 
-      <view v-if="detail.description" class="section">
+      <view id="description" v-if="detail.description" class="section reader-section">
         <view class="section-head" @click="showDescription = !showDescription">
           <text class="section-title">说明书</text>
           <text class="toggle">{{ showDescription ? '收起' : '展开' }}</text>
@@ -118,6 +118,23 @@
         <text v-else-if="showDescription" class="body-text">{{ detail.description }}</text>
       </view>
     </block>
+    <view v-if="detail" class="reader-nav">
+      <view
+        v-for="item in navigationItems"
+        :key="item.key"
+        class="reader-nav-item"
+        @click="onNavigateSection(item.key)"
+      >
+        <image
+          :class="['reader-nav-icon', { 'reader-nav-icon-active': activeSection === item.key }]"
+          :src="activeSection === item.key ? item.activeIcon : item.icon"
+          mode="aspectFit"
+        />
+        <text :class="['reader-nav-label', { 'reader-nav-label-active': activeSection === item.key }]">
+          {{ item.label }}
+        </text>
+      </view>
+    </view>
     <pdf-preview-overlay
       :visible="pdfVisible"
       :publication-no="publicationNo"
@@ -130,6 +147,10 @@
 import { getPatentDetail, getPatentTypeLabel } from '../../api/patent.js'
 import PdfPreviewOverlay from '../../components/pdf-preview-overlay.vue'
 import { buildPatentDetailSeed, mergePatentDetail } from '../../utils/patent-detail-state.mjs'
+import {
+  PATENT_DETAIL_NAV_ITEMS,
+  getPatentDetailNavigationTarget,
+} from '../../utils/patent-detail-navigation.mjs'
 
 export default {
   components: { PdfPreviewOverlay },
@@ -141,6 +162,8 @@ export default {
       pdfVisible: false,
       error: '',
       showDescription: false,
+      activeSection: 'abstract',
+      navigationItems: PATENT_DETAIL_NAV_ITEMS,
     }
   },
   onBackPress() {
@@ -190,6 +213,18 @@ export default {
       }
       this.pdfVisible = true
     },
+    onNavigateSection(section) {
+      const target = getPatentDetailNavigationTarget(section)
+      if (!this.detail || !this.detail[target.section]) {
+        uni.showToast({ title: '暂无相关内容', icon: 'none' })
+        return
+      }
+      if (target.expandDescription) this.showDescription = true
+      this.activeSection = target.section
+      this.$nextTick(() => {
+        uni.pageScrollTo({ selector: `#${target.section}`, duration: 300 })
+      })
+    },
   },
 }
 </script>
@@ -199,7 +234,7 @@ export default {
   min-height: 100vh;
   background: #f5f6f8;
   padding: 24rpx;
-  padding-bottom: calc(60rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(196rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
@@ -346,5 +381,58 @@ export default {
   margin: 12rpx 0 20rpx;
   background: #f1f5f9;
   border-radius: 8rpx;
+}
+
+.reader-nav {
+  position: fixed;
+  left: var(--window-left, 0px);
+  right: var(--window-right, 0px);
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  min-height: 132rpx;
+  padding: 10rpx 24rpx calc(10rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1rpx solid #edf0f5;
+  border-radius: 24rpx 24rpx 0 0;
+  box-shadow: 0 -4rpx 24rpx rgba(34, 51, 84, 0.1);
+}
+
+.reader-nav-item {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 104rpx;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.reader-nav-icon {
+  width: 52rpx;
+  height: 52rpx;
+}
+
+.reader-nav-icon-active {
+  width: 120rpx;
+  height: 58rpx;
+}
+
+.reader-nav-label {
+  display: block;
+  min-height: 30rpx;
+  margin-top: 4rpx;
+  color: #697386;
+  font-size: 24rpx;
+  line-height: 30rpx;
+  text-align: center;
+}
+
+.reader-nav-label-active {
+  color: #1769f5;
+  font-weight: 600;
 }
 </style>

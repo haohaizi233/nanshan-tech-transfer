@@ -146,7 +146,10 @@
 						</view>
 						<view v-if="displayCompany" class="company-row">
 							<text class="company">{{ displayCompany }}</text>
-							<text v-if="isOrgCertified" class="cert-badge">认证</text>
+							<view v-if="isOrgCertified" class="cert-badge">
+								<image class="cert-badge-icon" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+								<text>认证</text>
+							</view>
 						</view>
 					</view>
 				</view>
@@ -159,14 +162,17 @@
 				</view>
 				<view class="contact-list">
 					<view class="contact-row">
+						<image class="contact-icon" src="/static/icons/mine/phone.png" mode="aspectFit"></image>
 						<text class="contact-label">电话</text>
 						<text class="contact-value">{{ profile.phone || '未填写' }}</text>
 					</view>
 					<view class="contact-row">
+						<image class="contact-icon" src="/static/icons/mine/email.png" mode="aspectFit"></image>
 						<text class="contact-label">邮箱</text>
 						<text class="contact-value">{{ profile.email || '未填写' }}</text>
 					</view>
 					<view class="contact-row">
+						<image class="contact-icon" src="/static/icons/mine/wechat.png" mode="aspectFit"></image>
 						<text class="contact-label">微信</text>
 						<text class="contact-value">{{ profile.wechat || '未填写' }}</text>
 					</view>
@@ -174,35 +180,41 @@
 			</view>
 
 			<view :class="'org-card org-card-' + certification.status">
-				<view class="org-card-heading">
-					<text class="org-card-title">机构认证</text>
-					<text class="org-role admin" v-if="certification.status === 'certified_admin'">机构管理员</text>
-					<text class="org-role" v-else-if="certification.status === 'certified_member'">认证成员</text>
-				</view>
-				<view v-if="memberships.length">
-					<view v-for="m in memberships" :key="m.id" class="org-row">
-						<view class="org-info">
-							<view class="org-name-row">
-								<text class="org-name">{{ m.orgName }}</text>
+				<image class="org-card-bg" src="/static/images/mine/org-certification-bg.png" mode="aspectFill"></image>
+				<view class="org-card-content">
+					<image class="org-card-icon" src="/static/icons/mine/org-certification.png" mode="aspectFit"></image>
+					<view class="org-card-main">
+						<view class="org-card-heading">
+							<text class="org-card-title">机构认证</text>
+							<text class="org-role admin" v-if="certification.status === 'certified_admin'">机构管理员</text>
+							<text class="org-role" v-else-if="certification.status === 'certified_member'">认证成员</text>
+						</view>
+						<view v-if="memberships.length">
+							<view v-for="m in memberships" :key="m.id" class="org-row">
+								<view class="org-info">
+									<view class="org-name-row">
+										<text class="org-name">{{ m.orgName }}</text>
+									</view>
+								</view>
+								<view v-if="m.role === 'admin'" class="org-actions">
+									<button class="org-manage-btn" size="mini" @click="goOrgManage()">进入机构管理</button>
+								</view>
 							</view>
 						</view>
-						<view v-if="m.role === 'admin'" class="org-actions">
-							<button class="org-manage-btn" size="mini" @click="goOrgManage()">进入机构管理</button>
+						<view v-else class="org-none">
+							<text class="org-none-text">{{ certificationHint }}</text>
+							<view v-if="certification.canApply" class="org-none-actions">
+								<button class="org-action-btn" size="mini" @click="goOrgJoin">申请加入已有机构</button>
+								<button class="org-action-btn ghost" size="mini" @click="goOrgApply">申请机构入驻</button>
+							</view>
 						</view>
-					</view>
-				</view>
-				<view v-else class="org-none">
-					<text class="org-none-text">{{ certificationHint }}</text>
-					<view v-if="certification.canApply" class="org-none-actions">
-						<button class="org-action-btn" size="mini" @click="goOrgJoin">申请加入已有机构</button>
-						<button class="org-action-btn ghost" size="mini" @click="goOrgApply">申请机构入驻</button>
 					</view>
 				</view>
 			</view>
 
 			<view class="module-grid">
 				<view class="module-box" @click="goMyList('demand')">
-					<view class="module-icon demand-icon">需</view>
+					<image class="module-icon" src="/static/icons/mine/demand.png" mode="aspectFit"></image>
 					<view class="module-body">
 						<text class="module-title">我发布的需求</text>
 						<text class="module-count">已发布 {{ myDemandCount }} 条</text>
@@ -210,7 +222,7 @@
 					</view>
 				</view>
 				<view class="module-box" @click="goMyList('result')">
-					<view class="module-icon result-icon">果</view>
+					<image class="module-icon" src="/static/icons/mine/result.png" mode="aspectFit"></image>
 					<view class="module-body">
 						<text class="module-title">我发布的成果</text>
 						<text class="module-count">已发布 {{ myResultCount }} 条</text>
@@ -218,7 +230,7 @@
 					</view>
 				</view>
 				<view class="module-box" @click="goMyList('favorite')">
-					<view class="module-icon fav-icon">藏</view>
+					<image class="module-icon" src="/static/icons/mine/favorite.png" mode="aspectFit"></image>
 					<view class="module-body">
 						<text class="module-title">我的收藏</text>
 						<text class="module-count">需求 {{ favoriteDemandCount }} 条</text>
@@ -226,7 +238,7 @@
 					</view>
 				</view>
 				<view class="module-box" @click="goMyList('intention')">
-					<view class="module-icon intent-icon">意</view>
+					<image class="module-icon" src="/static/icons/mine/intention.png" mode="aspectFit"></image>
 					<view class="module-body">
 						<text class="module-title">意向请求</text>
 						<text class="module-count">需处理 {{ intentionPendingCount }} 个</text>
@@ -850,8 +862,15 @@
 	.contact-row {
 		display: flex;
 		flex-direction: row;
-		align-items: flex-start;
+		align-items: center;
 		padding: 12rpx 0;
+	}
+
+	.contact-icon {
+		width: 64rpx;
+		height: 64rpx;
+		flex-shrink: 0;
+		margin-right: 16rpx;
 	}
 
 	.contact-label {
@@ -869,6 +888,24 @@
 		color: #333333;
 		line-height: 1.5;
 		word-break: break-all;
+	}
+
+	.cert-badge {
+		display: flex;
+		align-items: center;
+		margin-left: 12rpx;
+		padding: 4rpx 12rpx 4rpx 8rpx;
+		border-radius: 10rpx;
+		font-size: 22rpx;
+		line-height: 1.2;
+		color: #0f9d58;
+		background: rgba(15, 157, 88, 0.1);
+	}
+
+	.cert-badge-icon {
+		width: 34rpx;
+		height: 34rpx;
+		margin-right: 4rpx;
 	}
 
 	.sheet-mask {
@@ -1020,27 +1057,60 @@
 	}
 
 	.org-card {
+		position: relative;
+		overflow: hidden;
+		min-height: 176rpx;
 		margin-top: 24rpx;
-		background: #ffffff;
+		background: linear-gradient(135deg, #f8fbff 0%, #e3f1ff 100%);
 		border-radius: 16rpx;
 		padding: 28rpx 32rpx;
-		border: 1rpx solid #e8ecf2;
+		border: 1rpx solid #a9caff;
+		box-sizing: border-box;
+	}
+
+	.org-card-bg {
+		position: absolute;
+		left: auto;
+		right: -28rpx;
+		top: 0;
+		bottom: 0;
+		width: 72%;
+		height: 100%;
+		opacity: 0.42;
+	}
+
+	.org-card-content {
+		position: relative;
+		display: flex;
+		align-items: flex-start;
+	}
+
+	.org-card-icon {
+		width: 112rpx;
+		height: 112rpx;
+		flex-shrink: 0;
+		margin: 0 20rpx 0 0;
+	}
+
+	.org-card-main {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.org-card-certified_admin {
-		background: #eef5ff;
+		background: linear-gradient(135deg, #f8fbff 0%, #e3f1ff 100%);
 		border-color: #a9caff;
 	}
 
 	.org-card-certified_member {
-		background: #effaf4;
-		border-color: #a8dfc0;
+		background: linear-gradient(135deg, #f8fbff 0%, #e3f1ff 100%);
+		border-color: #a9caff;
 	}
 
 	.org-card-membership_pending,
 	.org-card-organization_pending {
-		background: #fff8ea;
-		border-color: #f0d090;
+		background: linear-gradient(135deg, #f8fbff 0%, #e3f1ff 100%);
+		border-color: #a9caff;
 	}
 
 	.org-card-heading {
@@ -1176,16 +1246,10 @@
 	}
 
 	.module-icon {
-		width: 64rpx;
-		height: 64rpx;
-		border-radius: 32rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 28rpx;
-		font-weight: 600;
+		width: 92rpx;
+		height: 92rpx;
 		flex-shrink: 0;
-		margin-right: 16rpx;
+		margin-right: 18rpx;
 	}
 
 	.module-body {
@@ -1193,26 +1257,6 @@
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
-	}
-
-	.demand-icon {
-		color: #2b73f8;
-		background: rgba(43, 115, 248, 0.12);
-	}
-
-	.result-icon {
-		color: #0f9d58;
-		background: rgba(15, 157, 88, 0.12);
-	}
-
-	.fav-icon {
-		color: #e67e22;
-		background: rgba(230, 126, 34, 0.12);
-	}
-
-	.intent-icon {
-		color: #8e44ad;
-		background: rgba(142, 68, 173, 0.12);
 	}
 
 	.module-title {

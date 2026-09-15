@@ -26,6 +26,14 @@ export async function searchPatents(params = {}) {
   return apiRequest('GET', '/patents', query)
 }
 
+export function getPatentSearchHistory(mode = 'keyword') {
+  return apiRequest('GET', '/patents/search-history', { mode })
+}
+
+export function savePatentSearchHistory(keyword, mode = 'keyword') {
+  return apiRequest('POST', '/patents/search-history', undefined, { keyword, mode })
+}
+
 export async function getPatentDetail(publicationNo, language = '') {
   const query = language ? { language } : undefined
   return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}`, query)

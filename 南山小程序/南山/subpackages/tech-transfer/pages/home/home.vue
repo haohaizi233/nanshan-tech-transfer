@@ -29,15 +29,11 @@
 		<!-- 3. 快捷入口 -->
 		<view class="action-row">
 			<view class="action-card" @click="onPostDemand">
-				<view class="action-icon">
-					<text class="action-icon-text">需</text>
-				</view>
+				<image class="action-icon" src="/static/icons/mine/demand.png" mode="aspectFit"></image>
 				<text class="action-label">我要发需求</text>
 			</view>
 			<view class="action-card" @click="onPostResult">
-				<view class="action-icon">
-					<text class="action-icon-text">果</text>
-				</view>
+				<image class="action-icon" src="/static/icons/mine/result.png" mode="aspectFit"></image>
 				<text class="action-label">我要发成果</text>
 			</view>
 		</view>
@@ -515,21 +511,10 @@
 	}
 
 	.action-icon {
-		width: 56rpx;
-		height: 56rpx;
-		border-radius: 28rpx;
-		background-color: rgba(43, 115, 248, 0.12);
-		display: flex;
-		align-items: center;
-		justify-content: center;
+		width: 80rpx;
+		height: 80rpx;
 		margin-right: 12rpx;
 		flex-shrink: 0;
-	}
-
-	.action-icon-text {
-		font-size: 24rpx;
-		color: #2b73f8;
-		font-weight: 600;
 	}
 
 	.action-label {
