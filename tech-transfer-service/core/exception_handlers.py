@@ -42,14 +42,22 @@ _MAX_VALIDATION_DETAILS = 20
 
 
 class _DropNotFoundAccessLog(logging.Filter):
-    """不输出 Uvicorn 的 404 access log，防止公网扫描淹没开发终端。"""
+    """过滤公网扫描 404 与高频通知摘要的成功 access log。"""
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Uvicorn access logger 的参数顺序固定为：
         # client_addr, method, full_path, http_version, status_code。
         args = record.args
-        status = args[4] if isinstance(args, tuple) and len(args) >= 5 else None
-        return status != 404
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        method, full_path, status = args[1], str(args[2]), args[4]
+        if status == 404:
+            return False
+        # 角标按产品要求高频轮询。成功响应不携带诊断价值，保留 4xx/5xx 便于排障。
+        is_notification_summary = full_path.split("?", 1)[0].endswith(
+            "/me/notifications/summary"
+        )
+        return not (method == "GET" and is_notification_summary and 200 <= status < 300)
 
 
 def configure_logging() -> None:

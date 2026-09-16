@@ -15,7 +15,7 @@ const refreshNotification = async () => {
   try { notification.value = await api('/admin/notifications/summary') } catch (e) { console.warn('[admin notification]', e) }
   finally { notificationInFlight = false }
 }
-onMounted(() => { refreshNotification(); notificationTimer = setInterval(refreshNotification, 200) })
+onMounted(() => { refreshNotification(); notificationTimer = setInterval(refreshNotification, 5000) })
 onUnmounted(() => { clearInterval(notificationTimer); notificationTimer = null })
 
 const toggleSidebar = () => {

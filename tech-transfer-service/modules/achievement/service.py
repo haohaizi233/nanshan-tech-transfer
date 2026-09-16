@@ -30,6 +30,30 @@ from modules.achievement.maturity import (
 )
 
 PRICING_MODES = ("negotiable", "license", "transfer", "cooperation", "other")
+
+
+def _parse_cooperation_capacity(body, fields):
+    if "cooperationPolicy" in body:
+        policy = body["cooperationPolicy"]
+        if policy not in ("parallel", "exclusive"):
+            raise bad_request("cooperationPolicy 必须是 parallel 或 exclusive")
+        fields["cooperation_policy"] = policy
+    if "cooperationCapacity" in body:
+        capacity = body["cooperationCapacity"]
+        if capacity is None or capacity == "":
+            fields["cooperation_capacity"] = None
+            fields["cooperation_remaining"] = None
+        else:
+            try:
+                capacity = int(capacity)
+            except (TypeError, ValueError):
+                raise bad_request("cooperationCapacity 必须是正整数或空（不限量）")
+            if capacity < 1:
+                raise bad_request("cooperationCapacity 必须大于 0")
+            if fields.get("cooperation_policy") == "exclusive" and capacity != 1:
+                raise bad_request("exclusive 仅允许 1 个对接名额")
+            fields["cooperation_capacity"] = capacity
+            fields["cooperation_remaining"] = capacity
 INVENTOR_PERSON_TYPES = ("first_inventor", "co_inventor", "team_member")
 
 TRANSITIONS = {
@@ -430,6 +454,7 @@ def _parse_upsert_body(body: dict, partial: bool):
             seen.add(key)
             deduped.append(ref)
 
+    _parse_cooperation_capacity(body, fields)
     return fields, inventor_refs if inventor_refs is None else deduped
 
 
@@ -667,7 +692,7 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
     return _owner_detail_public(ach_id, user_id)
 
 
-def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reason=None, request_id=None):
+def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reason=None, reason_code=None, request_id=None):
     rule = TRANSITIONS[op]
     if version is None:
         raise bad_request(f"{op} 必须携带 version（乐观锁）")
@@ -683,9 +708,14 @@ def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reaso
                 f"当前状态 {row['status']} 不允许 {op}"
                 f"（要求 {'/'.join(rule['from'])}）"
             )
+        if op == 'offline' and reason_code:
+            if reason_code not in ('cooperated', 'expired', 'superseded', 'duplicate', 'no_longer_available', 'other'):
+                raise bad_request('reasonCode 不合法')
+        else:
+            reason_code = None
         cur.execute(
-            "UPDATE achievement SET status=%s, version=version+1 WHERE id=%s AND version=%s",
-            (rule["to"], ach_id, version),
+            "UPDATE achievement SET status=%s, version=version+1, offline_reason_code=COALESCE(%s, offline_reason_code), offline_reason_note=COALESCE(%s, offline_reason_note) WHERE id=%s AND version=%s",
+            (rule["to"], reason_code, str(reason or '').strip()[:500] or None, ach_id, version),
         )
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
@@ -693,7 +723,7 @@ def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reaso
     audit_record(
         rule["action"], "achievement", resource_id=ach_id,
         actor_user_id=user_id, actor_user_no=user_no,
-        details={"from": row["status"], "to": rule["to"], "reason": reason or None},
+        details={"from": row["status"], "to": rule["to"], "reason": reason or None, "reasonCode": reason_code},
         request_id=request_id,
     )
     return {"status": rule["to"]}
@@ -703,8 +733,8 @@ def submit_achievement(user_id: int, user_no: str, ach_id: int, version, request
     return _transition(user_id, user_no, ach_id, version, "submit", request_id=request_id)
 
 
-def offline_achievement(user_id: int, user_no: str, ach_id: int, version, reason=None, request_id=None):
-    return _transition(user_id, user_no, ach_id, version, "offline", reason=reason, request_id=request_id)
+def offline_achievement(user_id: int, user_no: str, ach_id: int, version, reason=None, reason_code=None, request_id=None):
+    return _transition(user_id, user_no, ach_id, version, "offline", reason=reason, reason_code=reason_code, request_id=request_id)
 
 
 def list_my_achievements(user_id: int, args):

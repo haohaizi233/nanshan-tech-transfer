@@ -127,7 +127,6 @@
 <script>
 import { getAchievementDetail } from '../../api/achievement.js'
 import { formatMaturityLabel } from '../../api/achievement-dock-card.mjs'
-import { ensureLoginForDock } from '../../api/user.js'
 import HostBridge from '../../../../host/host-bridge.js'
 
 const PRICING_MODE_LABELS = {
@@ -206,7 +205,6 @@ export default {
       return PRICING_MODE_LABELS[mode] || '面议'
     },
     onProposeDock() {
-      if (!ensureLoginForDock()) return
       if (!this.achId) return
       HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: this.achId })
     },

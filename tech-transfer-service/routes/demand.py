@@ -72,7 +72,7 @@ def demand_submit(demand_id: int, user: dict = Depends(identity), body: dict = D
 @router.post("/demands/{demand_id}/cancel")
 def demand_cancel(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     result = cancel_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(body),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(body), body.get("reasonCode"), body.get("reasonNote"),
         request_id=get_request_id(),
     )
     return success(result)
@@ -81,7 +81,7 @@ def demand_cancel(demand_id: int, user: dict = Depends(identity), body: dict = D
 @router.post("/demands/{demand_id}/close")
 def demand_close(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
     result = close_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(body),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(body), body.get("reasonCode"), body.get("reasonNote"),
         request_id=get_request_id(),
     )
     return success(result)

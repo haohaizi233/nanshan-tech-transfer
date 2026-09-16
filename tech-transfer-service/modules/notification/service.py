@@ -1,4 +1,5 @@
 from db import get_cursor
+from core.errors import bad_request
 
 VALID_CATEGORIES = ('review', 'cooperation', 'organization', 'membership')
 
@@ -19,8 +20,57 @@ def summary(user_id):
 
 def mark_read(user_id, category):
     if category not in VALID_CATEGORIES:
-        raise ValueError('无效通知分类')
+        raise bad_request('无效通知分类')
     with get_cursor(commit=True) as cur:
         cur.execute('''UPDATE notification_inbox SET read_at=NOW()
             WHERE recipient_user_id=%s AND category=%s AND read_at IS NULL''', (user_id, category))
+        return {'updated': cur.rowcount}
+
+
+def list_notifications(user_id, args):
+    try:
+        page = max(1, int(args.get('page') or 1))
+        page_size = max(1, min(50, int(args.get('pageSize') or 20)))
+    except (TypeError, ValueError):
+        page, page_size = 1, 20
+    unread_only = str(args.get('unreadOnly') or '').lower() in ('1', 'true')
+    category = str(args.get('category') or '').strip()
+    if category and category not in VALID_CATEGORIES:
+        raise bad_request('无效通知分类')
+    where = 'recipient_user_id=%s'
+    params = [user_id]
+    if category:
+        where += ' AND category=%s'
+        params.append(category)
+    if unread_only:
+        where += ' AND read_at IS NULL'
+    with get_cursor() as cur:
+        cur.execute(f'SELECT COUNT(*) AS count FROM notification_inbox WHERE {where}', params)
+        total = int((cur.fetchone() or {}).get('count') or 0)
+        cur.execute(f'''SELECT id, category, event_type, source_type, source_id, title, body,
+            target_path, occurred_at, read_at FROM notification_inbox WHERE {where}
+            ORDER BY occurred_at DESC, id DESC LIMIT %s OFFSET %s''',
+            params + [page_size, (page - 1) * page_size])
+        rows = cur.fetchall() or []
+    return {
+        'total': total, 'page': page, 'pageSize': page_size,
+        'list': [{'id': row['id'], 'category': row['category'], 'eventType': row['event_type'],
+                  'sourceType': row['source_type'], 'sourceId': row['source_id'], 'title': row['title'],
+                  'body': row.get('body'), 'targetPath': row.get('target_path'),
+                  'occurredAt': row['occurred_at'].strftime('%Y-%m-%d %H:%M:%S'),
+                  'readAt': row['read_at'].strftime('%Y-%m-%d %H:%M:%S') if row.get('read_at') else None}
+                 for row in rows],
+    }
+
+
+def mark_notification_read(user_id, notification_id):
+    with get_cursor(commit=True) as cur:
+        cur.execute('''UPDATE notification_inbox SET read_at=COALESCE(read_at, NOW())
+            WHERE id=%s AND recipient_user_id=%s''', (notification_id, user_id))
+        return {'updated': cur.rowcount}
+
+
+def mark_all_read(user_id):
+    with get_cursor(commit=True) as cur:
+        cur.execute('UPDATE notification_inbox SET read_at=NOW() WHERE recipient_user_id=%s AND read_at IS NULL', (user_id,))
         return {'updated': cur.rowcount}

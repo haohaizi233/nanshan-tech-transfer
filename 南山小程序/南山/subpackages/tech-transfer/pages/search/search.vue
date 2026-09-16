@@ -120,7 +120,6 @@
 		clearDemandSearchHistory,
 		clearResultSearchHistory
 	} from '../../api/search.js'
-	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { getAchievements, searchAchievements } from '../../api/achievement.js'
 	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
@@ -305,7 +304,6 @@
 				})
 			},
 			openDetail(type, id) {
-				if (!ensureLoginForDock()) return
 				if (type === 'result') {
 					HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id })
 					return

@@ -8,7 +8,7 @@ test('notification poller stays in the main package and only refreshes the summa
   assert.match(source, /getNotificationSummary/)
   assert.doesNotMatch(source, /subpackages\/tech-transfer/)
   assert.match(source, /HostBridge\.request/)
-  assert.match(source, /setInterval\(refreshNotificationBadge, 200\)/)
+  assert.match(source, /setInterval\(refreshNotificationBadge, 5000\)/)
   assert.match(source, /inFlight/)
   assert.match(source, /99\+/)
   assert.match(app, /startNotificationPolling\(\)/)

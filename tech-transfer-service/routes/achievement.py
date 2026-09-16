@@ -84,6 +84,7 @@ def achievement_offline(ach_id: int, user: dict = Depends(identity), body: dict 
     result = offline_achievement(
         user["userId"], user.get("userNo", ""), ach_id, _version_body(body),
         reason=(body or {}).get("reason"),
+        reason_code=(body or {}).get("reasonCode"),
         request_id=get_request_id(),
     )
     return success(result)

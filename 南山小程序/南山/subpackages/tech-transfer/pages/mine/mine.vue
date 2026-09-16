@@ -287,6 +287,7 @@
 	import { getMyDemands } from '../../api/demand.js'
 	import { getMyAchievements } from '../../api/achievement.js'
 	import { getMyFavorites, getMyCooperations } from '../../api/interaction.js'
+	import { getPendingPublishRoute } from '../../api/publish-draft.mjs'
 	import {
 		fetchCurrentUser,
 		getMyOrganizationCertification,
@@ -528,7 +529,8 @@
 				title: this.authMode === 'register' ? '注册成功' : '登录成功',
 				icon: 'success'
 			})
-			this.refresh()
+			await this.refresh()
+			if (!res.needProfile) this.resumePublishDraftAfterLogin()
 		},
 			fillForm(profile) {
 				this.form = {
@@ -662,7 +664,12 @@
 				this.profile = saved
 				this.editing = false
 				uni.showToast({ title: wasEditing ? '保存成功' : '资料已完善', icon: 'success' })
-				this.refresh()
+				await this.refresh()
+				this.resumePublishDraftAfterLogin()
+			},
+			resumePublishDraftAfterLogin() {
+				const route = getPendingPublishRoute()
+				if (route) setTimeout(() => HostBridge.navigate(route), 250)
 			},
 			onEdit() {
 				if (this.profile) this.fillForm(this.profile)

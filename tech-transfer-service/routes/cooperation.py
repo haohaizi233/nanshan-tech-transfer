@@ -91,7 +91,7 @@ def cooperation_complete(intent_id: int, user: dict = Depends(identity), body: d
     version, body = _version_body(body)
     return success(complete_intent(
         user["userId"], user.get("userNo", ""), intent_id, version,
-        remark=body.get("remark"),
+        remark=body.get("remark"), outcome=body.get("outcome"),
         request_id=get_request_id(),
     ))
 

@@ -173,12 +173,12 @@ def _load_target(cur, target_type: str, target_id: int):
     """加载对接目标（须 published）；owner_user_id 为 NULL 表示平台代录（assisted）"""
     if target_type == "demand":
         cur.execute(
-            "SELECT id, owner_user_id, status, org_id FROM demand WHERE id=%s AND deleted_at IS NULL",
+            "SELECT id, owner_user_id, status, org_id, cooperation_policy, cooperation_remaining FROM demand WHERE id=%s AND deleted_at IS NULL",
             (target_id,),
         )
     else:
         cur.execute(
-            "SELECT id, owner_user_id, status, org_id FROM achievement WHERE id=%s AND deleted_at IS NULL",
+            "SELECT id, owner_user_id, status, org_id, cooperation_policy, cooperation_remaining FROM achievement WHERE id=%s AND deleted_at IS NULL",
             (target_id,),
         )
     return cur.fetchone()
@@ -337,6 +337,18 @@ def _row_to_intent(row, user_id: int):
         "handlingMode": row.get("handling_mode") or "direct",
         "assistStatus": row.get("assist_status"),
         "acceptMode": row.get("accept_mode"),
+        "lastContactAt": _fmt(row.get("last_contact_at")),
+        "nextFollowupAt": _fmt(row.get("next_followup_at")),
+        "attemptCount": int(row.get("attempt_count") or 0),
+        "slotReserved": bool(row.get("slot_reserved")),
+        "outcome": {
+            "status": row.get("outcome_status"),
+            "cooperationMode": row.get("outcome_cooperation_mode"),
+            "signed": row.get("outcome_signed"),
+            "amountWan": float(row["outcome_amount_wan"]) if row.get("outcome_amount_wan") is not None else None,
+            "failureReason": row.get("outcome_failure_reason"),
+            "note": row.get("outcome_note"),
+        },
         "version": row["version"],
         "createdAt": _fmt(row.get("created_at")),
         "acceptedAt": _fmt(row.get("accepted_at")),
@@ -364,6 +376,42 @@ def _insert_event(cur, intent_id: int, event_type: str, from_status, to_status,
         (intent_id, event_type, from_status, to_status,
          operator_user_id, operator_role, remark),
     )
+
+
+def _reserve_target_slot(cur, row, intent_id: int):
+    """有限库存仅在接受时原子预占；NULL=不限量，exclusive 仅预占一席。"""
+    table = "demand" if row["target_type"] == "demand" else "achievement"
+    cur.execute(
+        f"SELECT cooperation_policy, cooperation_remaining, status FROM {table} WHERE id=%s FOR UPDATE",
+        (row["target_id"],),
+    )
+    target = cur.fetchone()
+    if not target or target["status"] != "published":
+        raise coop_conflict("对接目标已下架或不可再接受对接")
+    remaining = target.get("cooperation_remaining")
+    if remaining is None:
+        return {"reserved": False, "closePending": target.get("cooperation_policy") == "exclusive"}
+    if remaining < 1:
+        raise coop_conflict("该内容的可对接名额已用完")
+    cur.execute(
+        f"UPDATE {table} SET cooperation_remaining=cooperation_remaining-1, version=version+1 WHERE id=%s",
+        (row["target_id"],),
+    )
+    cur.execute("UPDATE cooperation_intent SET slot_reserved=TRUE WHERE id=%s", (intent_id,))
+    return {"reserved": True, "closePending": remaining == 1 or target.get("cooperation_policy") == "exclusive"}
+
+
+def _release_target_slot(cur, row, intent_id: int):
+    """拒绝/取消会释放预占；completed 代表消耗，不得返还。"""
+    if not row.get("slot_reserved"):
+        return
+    table = "demand" if row["target_type"] == "demand" else "achievement"
+    cur.execute(
+        f"UPDATE {table} SET cooperation_remaining=cooperation_remaining+1, version=version+1 "
+        "WHERE id=%s AND cooperation_remaining IS NOT NULL",
+        (row["target_id"],),
+    )
+    cur.execute("UPDATE cooperation_intent SET slot_reserved=FALSE WHERE id=%s", (intent_id,))
 
 
 def _require_role(row, user_id: int):
@@ -394,9 +442,9 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
     if message is not None:
         message = str(message).strip()[:1000] or None
 
-    # 联系方式共享同意：提交申请即视为同意平台将申请方联系方式提供给目标机构/平台运营；
-    # 前端显式传 false 时拒绝创建（不静默落库）
-    if body.get("contactShareConsent") is False:
+    # 联系方式共享必须是用户明确提交的 Boolean true；字段缺失、false 或其他类型
+    # 都不得创建意向，避免 Agent/调用方静默交出申请人联系方式。
+    if body.get("contactShareConsent") is not True:
         raise bad_request("发起对接需同意平台向目标机构提供您的联系方式")
 
     with get_cursor(commit=True) as cur:
@@ -405,6 +453,16 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
             raise coop_not_found("对接目标不存在或未发布")
         if target["owner_user_id"] == user_id:
             raise coop_bad_request()
+        if target.get("cooperation_remaining") is not None and target["cooperation_remaining"] < 1:
+            raise coop_conflict("该内容的可对接名额已用完")
+        if target.get("cooperation_policy") == "exclusive":
+            cur.execute(
+                """SELECT 1 FROM cooperation_intent WHERE target_type=%s AND target_id=%s
+                   AND status IN ('accepted', 'confirmed', 'completed') LIMIT 1""",
+                (target_type, target_id),
+            )
+            if cur.fetchone():
+                raise coop_conflict("该内容正在独占对接中，暂不接受新的申请")
 
         placeholders = ",".join(["%s"] * len(ACTIVE_STATUSES))
         cur.execute(
@@ -464,7 +522,8 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
         if target.get("owner_user_id"):
             emit_notification(cur, recipient_user_id=target["owner_user_id"], category="cooperation",
                 event_type="cooperation.created", source_type="cooperation", source_id=intent_id,
-                title="收到新的对接申请", body=message, target_path="/subpackages/tech-transfer/pages/my-list/my-list")
+                title="收到新的对接申请", body=message,
+                target_path=f"/subpackages/tech-transfer/pages/dock-detail/dock-detail?type={target_type}&id={target_id}&intentId={intent_id}")
 
     audit_record(
         "cooperation.create", "cooperation_intent", resource_id=intent_id,
@@ -641,7 +700,7 @@ def _auto_reject_other_pending(cur, row, intent_id: int, operator_user_id: int):
 
 
 def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
-                remark=None, request_id=None):
+                remark=None, request_id=None, outcome=None):
     rule = TRANSITIONS[op]
     if version is None:
         raise bad_request(f"{op} 必须携带 version（乐观锁）")
@@ -668,13 +727,18 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
         if op == "cancel" and row["status"] == "pending" and role != "initiator":
             raise coop_forbidden("仅发起方可撤回待响应的对接申请")
 
+        outcome_set = ""
+        outcome_params = []
+        if outcome:
+            outcome_set = ", outcome_status=%s, outcome_cooperation_mode=%s, outcome_signed=%s, outcome_amount_wan=%s, outcome_failure_reason=%s, outcome_note=%s"
+            outcome_params = [outcome["status"], outcome["cooperationMode"], outcome["signed"], outcome["amountWan"], outcome["failureReason"], outcome["note"]]
         cur.execute(
             f"""
             UPDATE cooperation_intent
-            SET status=%s, version=version+1, {rule['ts']}=NOW()
+            SET status=%s, version=version+1, {rule['ts']}=NOW(){outcome_set}
             WHERE id=%s AND version=%s
             """,
-            (rule["to"], intent_id, version),
+            [rule["to"]] + outcome_params + [intent_id, version],
         )
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
@@ -692,11 +756,16 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
         if recipient:
             emit_notification(cur, recipient_user_id=recipient, category="cooperation",
                 event_type=f"cooperation.{rule['event']}", source_type="cooperation", source_id=intent_id,
-                title=f"对接状态更新：{rule['to']}", body=remark, target_path="/subpackages/tech-transfer/pages/my-list/my-list",
+                title=f"对接状态更新：{rule['to']}", body=remark,
+                target_path=f"/subpackages/tech-transfer/pages/dock-detail/dock-detail?type={row['target_type']}&id={row['target_id']}&intentId={intent_id}",
                 dedupe_key=f"cooperation:{intent_id}:{rule['event']}:{rule['to']}")
 
         if op == "accept":
-            _auto_reject_other_pending(cur, row, intent_id, user_id)
+            slot = _reserve_target_slot(cur, row, intent_id)
+            if slot["closePending"]:
+                _auto_reject_other_pending(cur, row, intent_id, user_id)
+        elif op in ("reject", "cancel"):
+            _release_target_slot(cur, row, intent_id)
 
         # confirm 副作用：目标为需求时自动流转 matched
         if op == "confirm" and row["target_type"] == "demand":
@@ -734,9 +803,33 @@ def cancel_intent(user_id: int, user_no: str, intent_id: int, version, reason, r
                        remark=reason, request_id=request_id)
 
 
-def complete_intent(user_id: int, user_no: str, intent_id: int, version, remark, request_id=None):
+def complete_intent(user_id: int, user_no: str, intent_id: int, version, remark, outcome=None, request_id=None):
+    if outcome is not None:
+        if not isinstance(outcome, dict):
+            raise bad_request("outcome 必须是对象")
+        status = outcome.get("status")
+        if status not in ("cooperated", "not_cooperated", "unknown"):
+            raise bad_request("outcome.status 必须是 cooperated/not_cooperated/unknown")
+        try:
+            amount = outcome.get("amountWan")
+            amount = None if amount in (None, "") else float(amount)
+        except (TypeError, ValueError):
+            raise bad_request("outcome.amountWan 必须是数字")
+        if amount is not None and amount < 0:
+            raise bad_request("outcome.amountWan 不能为负数")
+        failure_reason = outcome.get("failureReason")
+        if status == "not_cooperated" and not failure_reason:
+            raise bad_request("未合作时必须填写 outcome.failureReason")
+        outcome = {
+            "status": status,
+            "cooperationMode": str(outcome.get("cooperationMode") or "").strip()[:64] or None,
+            "signed": outcome.get("signed") if isinstance(outcome.get("signed"), bool) else None,
+            "amountWan": amount,
+            "failureReason": str(failure_reason or "").strip()[:64] or None,
+            "note": str(outcome.get("note") or "").strip()[:1000] or None,
+        }
     return _transition(user_id, user_no, intent_id, version, "complete",
-                       remark=remark, request_id=request_id)
+                       remark=remark, outcome=outcome, request_id=request_id)
 
 
 # ── 平台协助对接：Admin 运营操作 ──────────────────────────────
@@ -754,6 +847,9 @@ def update_assist_status(admin_user: dict, intent_id: int, body: dict, request_i
     note = body.get("note")
     if note is not None:
         note = str(note).strip()[:500] or None
+    next_followup_at = body.get("nextFollowupAt")
+    if next_followup_at is not None:
+        next_followup_at = str(next_followup_at).strip() or None
 
     with get_cursor(commit=True) as cur:
         row = _get_intent_row(cur, intent_id)
@@ -771,10 +867,13 @@ def update_assist_status(admin_user: dict, intent_id: int, body: dict, request_i
             """
             UPDATE cooperation_intent
             SET assist_status=%s, handled_by_user_id=%s,
-                assist_note=COALESCE(%s, assist_note)
+                assist_note=COALESCE(%s, assist_note),
+                last_contact_at=CASE WHEN %s='contacting' THEN NOW() ELSE last_contact_at END,
+                attempt_count=attempt_count + CASE WHEN %s='contacting' THEN 1 ELSE 0 END,
+                next_followup_at=COALESCE(%s::timestamptz, next_followup_at)
             WHERE id=%s AND assist_status IS NOT DISTINCT FROM %s AND status='pending'
             """,
-            (to_status, admin_user["userId"], note, intent_id, current),
+            (to_status, admin_user["userId"], note, to_status, to_status, next_followup_at, intent_id, current),
         )
         if cur.rowcount == 0:
             raise conflict("处理阶段已被其他运营更新，请刷新后重试")
@@ -786,7 +885,7 @@ def update_assist_status(admin_user: dict, intent_id: int, body: dict, request_i
         audit_record(
             "cooperation.assist_status", "cooperation_intent", resource_id=intent_id,
             actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
-            details={"from": current, "to": to_status, "note": note},
+            details={"from": current, "to": to_status, "note": note, "nextFollowupAt": next_followup_at},
             request_id=request_id, cur=cur,
         )
     return {"id": intent_id, "status": row["status"], "assistStatus": to_status}
@@ -855,7 +954,11 @@ def admin_assist_transition(admin_user: dict, intent_id: int, body: dict, reques
                       admin_user["userId"], "platform_admin", event_remark)
 
         if action == "accept":
-            _auto_reject_other_pending(cur, row, intent_id, admin_user["userId"])
+            slot = _reserve_target_slot(cur, row, intent_id)
+            if slot["closePending"]:
+                _auto_reject_other_pending(cur, row, intent_id, admin_user["userId"])
+        elif action in ("reject", "cancel"):
+            _release_target_slot(cur, row, intent_id)
         if action == "confirm" and row["target_type"] == "demand":
             cur.execute(
                 "UPDATE demand SET status='matched', version=version+1 WHERE id=%s AND status='published'",

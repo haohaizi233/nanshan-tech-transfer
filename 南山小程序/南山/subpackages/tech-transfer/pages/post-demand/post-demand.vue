@@ -32,6 +32,10 @@
 				<input class="input" v-model="form.cooperationType" placeholder="例如：技术合作 / 联合开发" />
 			</view>
 			<view class="form-item">
+				<text class="label">可对接名额 <text class="optional">留空表示不限量</text></text>
+				<input class="input" v-model="form.cooperationCapacity" type="number" placeholder="例如：3" />
+			</view>
+			<view class="form-item">
 				<text class="label">期望周期</text>
 				<input class="input" v-model="form.deadline" placeholder="例如：期望 3 个月内完成样机" />
 			</view>
@@ -85,9 +89,11 @@
 
 <script>
 	import { createDemand, submitDemand } from '../../api/demand.js'
-	import { getSessionPhone, getUserProfile, ensureLoginForDock } from '../../api/user.js'
+	import { getSessionPhone, getUserProfile, isLoggedIn } from '../../api/user.js'
 	import { getMyOrganizationCertification } from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
+	import { clearPublishDraft, restorePublishDraft, savePublishDraft } from '../../api/publish-draft.mjs'
+	import HostBridge from '../../../../host/host-bridge.js'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -128,6 +134,7 @@
 				.map((s) => s.trim())
 				.filter(Boolean)
 		}
+		if (data.cooperationCapacity) payload.cooperationCapacity = Number(data.cooperationCapacity)
 		if (data.industry) {
 			const parts = data.industry.split(/[·•]/).map((s) => s.trim()).filter(Boolean)
 			if (parts[0]) payload.categoryName = parts[0]
@@ -148,6 +155,7 @@
 					budget: '',
 					industry: '',
 					cooperationType: '',
+					cooperationCapacity: '',
 					deadline: '',
 					demandDesc: '',
 					companyIntro: '',
@@ -166,22 +174,19 @@
 			certifiedCompanyLocked() { return this.organizations.length > 0 }
 		},
 		onLoad() {
-			if (!ensureLoginForDock()) return
+			const saved = restorePublishDraft('demand')
+			if (saved) this.form = { ...this.form, ...saved }
 			this.prefillFromProfile()
-			this.loadOrganizations()
+			if (isLoggedIn()) this.loadOrganizations()
 		},
 		onShow() {
-			if (!getSessionPhone()) {
-				ensureLoginForDock()
-				return
-			}
-			if (!this.form.phone) this.prefillFromProfile()
+			if (isLoggedIn() && !this.form.phone) this.prefillFromProfile()
 		},
 		methods: {
 			prefillFromProfile() {
 				const phone = getSessionPhone()
 				const profile = getUserProfile()
-				this.form.phone = phone || ''
+				if (!this.form.phone) this.form.phone = phone || ''
 				if (profile) {
 					if (!this.form.contactName) this.form.contactName = profile.nickname || ''
 					if (!this.form.company) this.form.company = profile.company || ''
@@ -248,7 +253,12 @@
 			},
 			async onSubmit() {
 				if (this.submitting) return
-				if (!ensureLoginForDock()) return
+				if (!isLoggedIn()) {
+					savePublishDraft('demand', this.form)
+					uni.showToast({ title: '登录后将为您恢复已填写内容', icon: 'none' })
+					setTimeout(() => HostBridge.navigate('pages/mine/mine'), 350)
+					return
+				}
 				const ownerPhone = getSessionPhone()
 				if (!ownerPhone) {
 					uni.showToast({ title: '请先登录后再发布', icon: 'none' })
@@ -262,6 +272,7 @@
 				try {
 					// 创建（draft）→ 提交审核（pending_review）
 					const detail = await createDemand(buildPayload(data))
+					clearPublishDraft('demand')
 					let submitted = false
 					try {
 						await submitDemand(detail.id, detail.version)

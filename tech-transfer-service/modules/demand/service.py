@@ -47,6 +47,31 @@ _UPSERT_FIELDS = (
 )
 
 
+def _parse_cooperation_capacity(body, fields):
+    """公开内容默认可并行且不限量；有限名额由 accept 事务原子扣减。"""
+    if "cooperationPolicy" in body:
+        policy = body["cooperationPolicy"]
+        if policy not in ("parallel", "exclusive"):
+            raise bad_request("cooperationPolicy 必须是 parallel 或 exclusive")
+        fields["cooperation_policy"] = policy
+    if "cooperationCapacity" in body:
+        capacity = body["cooperationCapacity"]
+        if capacity is None or capacity == "":
+            fields["cooperation_capacity"] = None
+            fields["cooperation_remaining"] = None
+        else:
+            try:
+                capacity = int(capacity)
+            except (TypeError, ValueError):
+                raise bad_request("cooperationCapacity 必须是正整数或空（不限量）")
+            if capacity < 1:
+                raise bad_request("cooperationCapacity 必须大于 0")
+            if fields.get("cooperation_policy") == "exclusive" and capacity != 1:
+                raise bad_request("exclusive 仅允许 1 个对接名额")
+            fields["cooperation_capacity"] = capacity
+            fields["cooperation_remaining"] = capacity
+
+
 # ── 参数解析与校验 ───────────────────────────────────────────
 
 def _parse_page_args(args):
@@ -146,6 +171,8 @@ def _parse_upsert_body(body: dict, partial: bool):
             fields["org_id"] = int(body["orgId"])
         except (ValueError, TypeError):
             raise bad_request("orgId 必须是整数")
+
+    _parse_cooperation_capacity(body, fields)
 
     # Legacy organization names are display snapshots, never canonical identities.
     if "orgName" in body and body["orgName"] is not None:
@@ -597,7 +624,7 @@ def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, reques
     return get_demand_detail(demand_id, user_id)
 
 
-def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, request_id=None):
+def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, reason_code=None, reason_note=None, request_id=None):
     rule = TRANSITIONS[op]
     if version is None:
         raise bad_request(f"{op} 必须携带 version（乐观锁）")
@@ -613,9 +640,15 @@ def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, re
                 f"当前状态 {row['status']} 不允许 {op}"
                 f"（要求 {('/'.join(rule['from']))}）"
             )
+        if op in ("cancel", "close") and reason_code:
+            if reason_code not in ('fulfilled', 'budget_changed', 'timeline_changed', 'duplicate', 'no_longer_needed', 'other'):
+                raise bad_request("reasonCode 不合法")
+            reason_note = str(reason_note or '').strip()[:500] or None
+        else:
+            reason_code, reason_note = None, None
         cur.execute(
-            "UPDATE demand SET status=%s, version=version+1 WHERE id=%s AND version=%s",
-            (rule["to"], demand_id, version),
+            "UPDATE demand SET status=%s, version=version+1, closure_reason_code=COALESCE(%s, closure_reason_code), closure_reason_note=COALESCE(%s, closure_reason_note) WHERE id=%s AND version=%s",
+            (rule["to"], reason_code, reason_note, demand_id, version),
         )
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
@@ -623,18 +656,18 @@ def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, re
     audit_record(
         rule["action"], "demand", resource_id=demand_id,
         actor_user_id=user_id, actor_user_no=user_no,
-        details={"from": row["status"], "to": rule["to"]}, request_id=request_id,
+        details={"from": row["status"], "to": rule["to"], "reasonCode": reason_code, "reasonNote": reason_note}, request_id=request_id,
     )
     return {"status": rule["to"]}
 
 
 def submit_demand(user_id: int, user_no: str, demand_id: int, version, request_id=None):
-    return _transition(user_id, user_no, demand_id, version, "submit", request_id)
+    return _transition(user_id, user_no, demand_id, version, "submit", request_id=request_id)
 
 
-def cancel_demand(user_id: int, user_no: str, demand_id: int, version, request_id=None):
-    return _transition(user_id, user_no, demand_id, version, "cancel", request_id)
+def cancel_demand(user_id: int, user_no: str, demand_id: int, version, reason_code=None, reason_note=None, request_id=None):
+    return _transition(user_id, user_no, demand_id, version, "cancel", reason_code, reason_note, request_id)
 
 
-def close_demand(user_id: int, user_no: str, demand_id: int, version, request_id=None):
-    return _transition(user_id, user_no, demand_id, version, "close", request_id)
+def close_demand(user_id: int, user_no: str, demand_id: int, version, reason_code=None, reason_note=None, request_id=None):
+    return _transition(user_id, user_no, demand_id, version, "close", reason_code, reason_note, request_id)

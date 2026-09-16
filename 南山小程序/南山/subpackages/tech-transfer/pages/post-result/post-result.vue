@@ -48,6 +48,10 @@
 					</view>
 				</view>
 				<view class="form-item">
+					<text class="label">可对接名额 <text class="optional">留空表示不限量</text></text>
+					<input class="input" v-model="form.cooperationCapacity" type="number" placeholder="例如：3" />
+				</view>
+				<view class="form-item">
 					<text class="label">技术简介 <text class="required">*</text></text>
 					<textarea
 						class="textarea"
@@ -108,13 +112,14 @@
 </template>
 
 <script>
-	import { getSessionPhone, getUserProfile, ensureLoginForDock } from '../../api/user.js'
+	import { getSessionPhone, getUserProfile, isLoggedIn } from '../../api/user.js'
 	import { createAchievement, submitAchievement } from '../../api/achievement.js'
 	import { createEvaluationTask } from '../../api/ai.js'
 	import { getMyOrganizationCertification } from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
+	import { clearPublishDraft, restorePublishDraft, savePublishDraft } from '../../api/publish-draft.mjs'
 
 	const MATURITY_OPTIONS = [
 		{ value: '01_idea', label: '概念阶段' },
@@ -156,6 +161,7 @@
 					pricingMode: 'negotiable',
 					priceMinWan: '',
 					priceMaxWan: '',
+					cooperationCapacity: '',
 					techIntro: '',
 					applicationFields: '',
 					techRoute: '',
@@ -191,22 +197,19 @@
 			, certifiedCompanyLocked() { return this.organizations.length > 0 }
 		},
 		onLoad() {
-			if (!ensureLoginForDock()) return
+			const saved = restorePublishDraft('achievement')
+			if (saved) this.form = { ...this.form, ...saved }
 			this.prefillFromProfile()
-			this.loadOrganizations()
+			if (isLoggedIn()) this.loadOrganizations()
 		},
 		onShow() {
-			if (!getSessionPhone()) {
-				ensureLoginForDock()
-				return
-			}
-			if (!this.form.contactPhone) this.prefillFromProfile()
+			if (isLoggedIn() && !this.form.contactPhone) this.prefillFromProfile()
 		},
 		methods: {
 			prefillFromProfile() {
 				const phone = getSessionPhone()
 				const profile = getUserProfile()
-				this.form.contactPhone = phone || ''
+				if (!this.form.contactPhone) this.form.contactPhone = phone || ''
 				if (profile) {
 					if (!this.form.contactName) this.form.contactName = profile.nickname || ''
 					if (!this.form.contactEmail) this.form.contactEmail = profile.email || ''
@@ -303,6 +306,7 @@
 					contactEmail: f.contactEmail.trim() || undefined,
 					contactWechat: f.contactWechat.trim() || undefined
 				}
+				if (f.cooperationCapacity) body.cooperationCapacity = Number(f.cooperationCapacity)
 				if (f.pricingMode !== 'negotiable') {
 					const min = parseFloat(f.priceMinWan)
 					const max = parseFloat(f.priceMaxWan)
@@ -312,13 +316,19 @@
 				return body
 			},
 			async onSubmit() {
-				if (!ensureLoginForDock()) return
 				if (this.submitting) return
+				if (!isLoggedIn()) {
+					savePublishDraft('achievement', this.form)
+					uni.showToast({ title: '登录后将为您恢复已填写内容', icon: 'none' })
+					setTimeout(() => HostBridge.navigate('pages/mine/mine'), 350)
+					return
+				}
 				if (!this.validate()) return
 
 				this.submitting = true
 				try {
 					const created = await createAchievement(this.buildBody())
+					clearPublishDraft('achievement')
 					// 提交审核：draft → pending_review（提交后即可发起 AI 评估）
 					await submitAchievement(created.id, created.version)
 					this.submittedId = created.id

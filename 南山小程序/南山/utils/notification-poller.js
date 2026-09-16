@@ -33,7 +33,7 @@ export async function refreshNotificationBadge() {
 export function startNotificationPolling() {
   if (timer) return
   refreshNotificationBadge()
-  timer = setInterval(refreshNotificationBadge, 200)
+  timer = setInterval(refreshNotificationBadge, 5000)
 }
 
 export function stopNotificationPolling() {

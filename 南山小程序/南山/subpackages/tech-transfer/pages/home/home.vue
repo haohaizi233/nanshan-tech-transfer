@@ -390,7 +390,6 @@
 				}
 			},
 			openDetail(type, id) {
-				if (!ensureLoginForDock()) return
 				if (type === 'result') {
 					HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id })
 					return
