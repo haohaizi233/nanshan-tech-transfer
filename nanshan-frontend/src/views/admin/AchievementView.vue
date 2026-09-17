@@ -5,6 +5,7 @@ import {
   reactive,
   ref,
 } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { api, getSavedUser } from '../../api/client'
 import { resolveContentFormActions } from '../../utils/contentFormActions.js'
@@ -18,6 +19,7 @@ const ownerUsers = ref([])
 const organizations = ref([])
 const currentUser = ref(getSavedUser() || {})
 const isPlatformAdmin = computed(() => (currentUser.value.roles || []).includes('admin'))
+const router = useRouter()
 
 const statusOptions = [
   { value: 'draft', label: '草稿' },
@@ -71,7 +73,7 @@ const editingId = ref(null)
 const formStatus = ref('')
 const achievementForm = reactive({
   title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
-  maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
+  maturityLevel: '', maturityDesc: '', pricingMode: '',
   priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
   applicationFieldsText: '', inventorNamesText: '', version: null,
 })
@@ -322,7 +324,7 @@ const adminOrgLabel = computed(() => {
 const resetAchievementForm = () => {
   Object.assign(achievementForm, {
     title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
-    maturityLevel: '02_lab', maturityDesc: '', pricingMode: 'negotiable',
+    maturityLevel: '', maturityDesc: '', pricingMode: '',
     priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
     applicationFieldsText: '', inventorNamesText: '', version: null,
   })
@@ -356,8 +358,8 @@ const openEdit = async item => {
     formStatus.value = data.status || formStatus.value
     Object.assign(achievementForm, {
       title: data.title || '', sourceOrgName: data.orgName || '', techIntro: data.techIntro || '',
-      techRoute: data.techRoute || '', maturityLevel: data.maturityLevel || '02_lab',
-      maturityDesc: data.maturityDesc || '', pricingMode: data.pricingMode || 'negotiable',
+      techRoute: data.techRoute || '', maturityLevel: data.maturityLevel || '',
+      maturityDesc: data.maturityDesc || '', pricingMode: data.pricingMode || '',
       priceMinWan: data.priceMinWan ?? '', priceMaxWan: data.priceMaxWan ?? '',
       categoryId: data.categoryId || '', orgId: data.orgId || '', ownerUserId: data.ownerUserId || '',
       contactName: data.contactName || '', contactPhone: data.contactPhone || '',
@@ -420,7 +422,9 @@ const saveAchievement = async (saveAction = null) => {
   formSaving.value = true
   formError.value = ''
   try {
-    const body = { title: achievementForm.title.trim(), maturityLevel: achievementForm.maturityLevel, pricingMode: achievementForm.pricingMode }
+    const body = { title: achievementForm.title.trim() }
+    if (achievementForm.maturityLevel) body.maturityLevel = achievementForm.maturityLevel
+    if (achievementForm.pricingMode) body.pricingMode = achievementForm.pricingMode
     if (saveAction) body.saveAction = saveAction
     const optionalTextFields = {
       sourceOrgName: achievementForm.sourceOrgName, techIntro: achievementForm.techIntro,
@@ -760,6 +764,7 @@ onMounted(() => {
         </div>
 
         <div class="right-actions">
+          <button v-if="isPlatformAdmin" type="button" class="default-button" @click="router.push('/admin/achievement-imports')">导入暂存</button>
           <button type="button" class="primary-button" @click="openCreate">新增成果</button>
           <button
             type="button"
@@ -1041,7 +1046,7 @@ onMounted(() => {
             <label>所属机构 *</label><select v-model="achievementForm.orgId" @change="achievementForm.ownerUserId = ''"><option value="">请选择机构</option><option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option></select>
             <label>归属用户 *</label><select v-model="achievementForm.ownerUserId" :disabled="!achievementForm.orgId"><option value="">请先选择机构</option><option v-for="item in usersForSelectedOrg" :key="item.userId" :value="item.userId">{{ item.displayName || item.userNo }}</option></select>
             <label>技术简介</label><textarea v-model="achievementForm.techIntro" rows="4"></textarea>
-            <div class="form-grid"><div><label>成熟度 *</label><select v-model="achievementForm.maturityLevel"><option value="01_idea">概念阶段</option><option value="02_lab">实验室验证</option><option value="03_pilot_ready">可中试</option><option value="04_pilot_done">中试完成</option><option value="05_mass_ready">量产准备</option></select></div><div><label>定价方式 *</label><select v-model="achievementForm.pricingMode"><option value="negotiable">面议</option><option value="license">许可</option><option value="transfer">转让</option><option value="cooperation">合作</option><option value="other">其他</option></select></div></div>
+            <div class="form-grid"><div><label>成熟度</label><select v-model="achievementForm.maturityLevel"><option value="">未填写</option><option value="01_idea">概念阶段</option><option value="02_lab">实验室验证</option><option value="03_pilot_ready">可中试</option><option value="04_pilot_done">中试完成</option><option value="05_mass_ready">量产准备</option></select></div><div><label>定价方式</label><select v-model="achievementForm.pricingMode"><option value="">未填写</option><option value="negotiable">面议</option><option value="license">许可</option><option value="transfer">转让</option><option value="cooperation">合作</option><option value="other">其他</option></select></div></div>
             <div class="form-grid"><div><label>最低报价（万元）</label><input v-model="achievementForm.priceMinWan" type="number" min="0" /></div><div><label>最高报价（万元）</label><input v-model="achievementForm.priceMaxWan" type="number" min="0" /></div></div>
             <label>应用领域（逗号分隔）</label><input v-model="achievementForm.applicationFieldsText" />
             <label>发明人（逗号分隔）</label><input v-model="achievementForm.inventorNamesText" />

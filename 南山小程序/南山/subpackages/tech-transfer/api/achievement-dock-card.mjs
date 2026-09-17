@@ -20,16 +20,12 @@ export function formatMaturityLabel(level, desc) {
 }
 
 export function toAchievementDockCard(data = {}) {
-  const modeLabels = {
-    negotiable: '面议',
-    license: '许可',
-    transfer: '转让',
-    cooperation: '合作',
-  }
   const min = data.priceMinWan
   const max = data.priceMaxWan
-  const price = data.pricingMode === 'negotiable' || !min
-    ? (modeLabels[data.pricingMode] || '面议')
+  const price = data.pricingMode === 'negotiable'
+    ? '面议'
+    : !min
+      ? ''
     : (min && max ? `${min}–${max} 万` : `${min} 万`)
 
   return {
@@ -58,16 +54,12 @@ export function toAchievementDockCard(data = {}) {
 
 /** 成果列表预览模型：本人成果不暴露“我要对接”入口。 */
 export function toAchievementPreviewCard(item = {}, favorited = false) {
-  const modeLabels = {
-    negotiable: '面议',
-    license: '许可',
-    transfer: '转让',
-    cooperation: '合作',
-  }
   const min = item.priceMinWan
   const max = item.priceMaxWan
-  const price = item.pricingMode === 'negotiable' || !min
-    ? (modeLabels[item.pricingMode] || '面议')
+  const price = item.pricingMode === 'negotiable'
+    ? '面议'
+    : !min
+      ? ''
     : (min && max ? `${min}–${max} 万` : `${min} 万`)
 
   return {

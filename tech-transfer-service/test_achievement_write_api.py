@@ -76,8 +76,8 @@ check("me/achievements 无Token=401", r.status_code == 401, f"got {r.status_code
 print("[2] 创建校验")
 r = requests.post(f"{BASE}/achievements", headers=h_c, json={}, timeout=10)
 check("缺必填=400", r.status_code == 400, f"got {r.status_code}")
-r = requests.post(f"{BASE}/achievements", headers=h_c, json={"title": "成果写接口-缺成熟度"}, timeout=10)
-check("缺maturityLevel=400", r.status_code == 400, f"got {r.status_code}")
+r = requests.post(f"{BASE}/achievements", headers=h_c, json={"title": "成果写接口-可选成熟度"}, timeout=10)
+check("成熟度可为空=201", r.status_code == 201, f"got {r.status_code}")
 r = requests.post(f"{BASE}/achievements", headers=h_c, json={
     "title": "成果写接口-非法枚举", "maturityLevel": "bad", "pricingMode": "negotiable"}, timeout=10)
 check("非法maturityLevel=400", r.status_code == 400, f"got {r.status_code}")
@@ -108,7 +108,7 @@ r = requests.post(f"{BASE}/achievements", headers=h_c, json={
         {"name": "成果写接口-李四", "personType": "co_inventor"},
     ],
     "ownerUserId": 999,  # 必须被忽略
-    "tags": ["tag"], "mediaFileIds": [1],  # 无表，接受但忽略
+    "tags": ["tag"],  # 真实写入 achievement_tag_relation
 }, timeout=10)
 check("创建=201", r.status_code == 201, f"got {r.status_code}: {r.text[:200]}")
 a1 = r.json()["data"]
@@ -120,6 +120,7 @@ check("DB owner=C", rows[0]["owner_user_id"] == user_c["userId"])
 check("来源名称仅保存展示快照", rows[0]["org_id"] is None and rows[0]["source_org_name"] == "成果写接口-测试大学")
 check("applicationFields落库", a1["applicationFields"] == ["新能源", "储能"], a1.get("applicationFields"))
 check("innovationPoints落库", a1["innovationPoints"] == ["点1", "点2"], a1.get("innovationPoints"))
+check("tags落关系表", a1.get("tags") == ["tag"], a1.get("tags"))
 check("inventors=2", len(a1["inventors"]) == 2, a1.get("inventors"))
 check("inventor personType", a1["inventors"][0]["personType"] == "first_inventor", a1["inventors"])
 

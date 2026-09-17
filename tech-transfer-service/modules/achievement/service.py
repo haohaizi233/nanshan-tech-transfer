@@ -28,6 +28,7 @@ from modules.achievement.maturity import (
     MATURITY_LEVELS,
     resolve_maturity_desc,
 )
+from modules.achievement.content import parse_content_payload, sync_content, load_content
 
 PRICING_MODES = ("negotiable", "license", "transfer", "cooperation", "other")
 
@@ -87,7 +88,8 @@ def _parse_page_args(args):
     keyword = (args.get("keyword") or "").strip()
     category = (args.get("category") or "").strip()
     maturity = (args.get("maturityLevel") or "").strip()
-    return page, page_size, keyword, category, maturity
+    industry_id = (args.get("industryId") or "").strip()
+    return page, page_size, keyword, category, maturity, industry_id
 
 
 def _row_to_list_item(row, user_id=None):
@@ -100,6 +102,13 @@ def _row_to_list_item(row, user_id=None):
     elif fields is None:
         fields = []
 
+    cover_id = row.get("cover_file_id")
+    industries = row.get("industries") or []
+    if isinstance(industries, str):
+        try:
+            industries = json.loads(industries)
+        except (ValueError, TypeError):
+            industries = []
     return {
         "id": row["id"],
         "title": row["title"],
@@ -108,6 +117,7 @@ def _row_to_list_item(row, user_id=None):
         "orgCertified": row.get("org_id") is not None,
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
+        "industries": industries,
         "techIntro": (row.get("tech_intro") or "")[:120],
         "maturityLevel": row.get("maturity_level"),
         "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
@@ -119,11 +129,16 @@ def _row_to_list_item(row, user_id=None):
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
         "isMine": user_id is not None and row.get("owner_user_id") == user_id,
         "platformAssisted": row.get("owner_user_id") is None,
+        "cover": ({
+            "fileId": cover_id,
+            "url": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}",
+            "thumbnailUrl": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}?variant=thumbnail",
+        } if cover_id else None),
     }
 
 
 def list_achievements(args, user_id=None):
-    page, page_size, keyword, category, maturity = _parse_page_args(args)
+    page, page_size, keyword, category, maturity, industry_id = _parse_page_args(args)
 
     where = " WHERE a.status='published' AND a.deleted_at IS NULL"
     params = []
@@ -141,6 +156,14 @@ def list_achievements(args, user_id=None):
         where += " AND a.maturity_level=%s"
         params.append(maturity)
 
+    if industry_id:
+        try:
+            industry_id = int(industry_id)
+        except (TypeError, ValueError):
+            raise bad_request("industryId 必须是整数")
+        where += " AND EXISTS (SELECT 1 FROM achievement_industry ai WHERE ai.achievement_id=a.id AND ai.industry_id=%s)"
+        params.append(industry_id)
+
     count_sql = f"""
         SELECT COUNT(*) AS c
         FROM achievement a
@@ -153,7 +176,11 @@ def list_achievements(args, user_id=None):
                a.pricing_mode, a.price_min_wan, a.price_max_wan,
                a.view_count, a.published_at, a.owner_user_id, a.org_id,
                o.name AS certified_org_name,
-               c.name AS category_name, c.code AS category_code
+               c.name AS category_name, c.code AS category_code,
+               COALESCE((SELECT jsonb_agg(jsonb_build_object('id',i.id,'code',i.code,'name',i.name,'parentId',i.parent_id) ORDER BY ai.sort_order,ai.id)
+                         FROM achievement_industry ai JOIN industry i ON i.id=ai.industry_id AND i.enabled
+                         WHERE ai.achievement_id=a.id), '[]'::jsonb) AS industries,
+               (SELECT am.file_id FROM achievement_media am JOIN file_object fo ON fo.id=am.file_id AND fo.status='active' WHERE am.achievement_id=a.id AND am.media_role='cover' ORDER BY am.sort_order,am.id LIMIT 1) AS cover_file_id
         FROM achievement a
         LEFT JOIN achievement_category c ON a.category_id=c.id
         LEFT JOIN institution o ON a.org_id=o.id
@@ -232,7 +259,7 @@ def get_achievement_detail(ach_id: int, user_id=None):
 
         cur.execute(
             """
-            SELECT i.name, i.org_name, ai.sort_order, ai.contribution
+            SELECT i.name, i.org_name, i.department, i.title, i.bio, i.homepage_url, i.avatar_file_id, ai.sort_order, ai.contribution
             FROM achievement_inventor ai
             JOIN inventor i ON ai.inventor_id=i.id
             WHERE ai.achievement_id=%s
@@ -241,6 +268,7 @@ def get_achievement_detail(ach_id: int, user_id=None):
             (ach_id,),
         )
         inventors = cur.fetchall() or []
+        dynamic_content = load_content(cur, ach_id)
 
     fields = row.get("application_fields")
     if fields and isinstance(fields, str):
@@ -272,6 +300,8 @@ def get_achievement_detail(ach_id: int, user_id=None):
     return {
         "id": row["id"],
         "title": row["title"],
+        "titleEn": row.get("title_en"),
+        "achievementKind": row.get("achievement_kind") or "technology",
         "sourceOrgName": _display_source_org(row),
         "orgId": row.get("org_id"),
         "orgCertified": row.get("org_id") is not None,
@@ -297,10 +327,17 @@ def get_achievement_detail(ach_id: int, user_id=None):
             {
                 "name": inv["name"],
                 "orgName": inv.get("org_name"),
+                "department": inv.get("department"),
+                "title": inv.get("title"),
+                "bio": inv.get("bio"),
+                "homepageUrl": inv.get("homepage_url"),
+                "avatarFileId": inv.get("avatar_file_id"),
+                "avatarUrl": (f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{inv['avatar_file_id']}" if inv.get("avatar_file_id") else None),
                 "contribution": inv.get("contribution"),
             }
             for inv in inventors
         ],
+        **dynamic_content,
     }
 
 
@@ -316,14 +353,27 @@ def list_categories():
     ]
 
 
+def list_industries():
+    """读取平台配置的产业目录；不返回停用项，也不替旧成果虚构产业标签。"""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT id, code, name, parent_id, sort_order FROM industry WHERE enabled ORDER BY parent_id NULLS FIRST, sort_order, id"
+        )
+        rows = cur.fetchall() or []
+    return [
+        {"id": row["id"], "code": row["code"], "name": row["name"], "parentId": row["parent_id"], "sortOrder": row["sort_order"]}
+        for row in rows
+    ]
+
+
 # ── 写操作（P0-5）──────────────────────────────────────────
 
 def _parse_upsert_body(body: dict, partial: bool):
     """校验 AchievementUpsertRequest（openapi.yaml），返回 (db_fields, inventor_refs)
 
-    partial=True（PATCH）：只取传入字段；False（POST）：title/maturityLevel/pricingMode 必填。
-    tags / mediaFileIds：成果域无对应表（一期冻结 schema 无 achievement_tag / file_object），
-    接受但忽略（打印告警），不静默落库 —— 06 §幂等同 ownerUserId 处理方式。
+    partial=True（PATCH）：只取传入字段；False（POST）：只要求 title。
+    sections / patents / links / media / inventors / industryIds 由内容子模型处理，
+    基础字段与动态内容在同一事务内同步，避免出现“DTO 接收但未落库”的假成功。
     """
     if not isinstance(body, dict):
         raise bad_request("请求体必须是 JSON 对象")
@@ -344,18 +394,15 @@ def _parse_upsert_body(body: dict, partial: bool):
         if val not in MATURITY_LEVELS:
             raise bad_request(f"maturityLevel 必须是 {MATURITY_LEVELS} 之一")
         fields["maturity_level"] = val
-    elif not partial:
-        raise bad_request("maturityLevel 必填")
 
     if "pricingMode" in body and body["pricingMode"] is not None:
         val = str(body["pricingMode"]).strip()
         if val not in PRICING_MODES:
             raise bad_request(f"pricingMode 必须是 {PRICING_MODES} 之一")
         fields["pricing_mode"] = val
-    elif not partial:
-        raise bad_request("pricingMode 必填")
 
     for key, column, max_len in (
+        ("titleEn", "title_en", 500),
         ("techIntro", "tech_intro", 5000),
         ("techRoute", "tech_route", 5000),
         ("maturityDesc", "maturity_desc", 255),
@@ -371,6 +418,12 @@ def _parse_upsert_body(body: dict, partial: bool):
             if len(val) > max_len:
                 raise bad_request(f"{key} 长度不能超过 {max_len}")
             fields[column] = val or None
+
+    if "achievementKind" in body:
+        kind = str(body.get("achievementKind") or "").strip()
+        if kind not in ("technology", "patent", "project", "product", "other"):
+            raise bad_request("achievementKind 无效")
+        fields["achievement_kind"] = kind
 
     if fields.get("contact_phone"):
         fields["contact_phone"] = validate_phone(fields["contact_phone"], field_name="联系电话")
@@ -410,11 +463,6 @@ def _parse_upsert_body(body: dict, partial: bool):
 
     if "ownerUserId" in body:
         print(f"[achievement] WARNING: request body contains ownerUserId (ignored)")
-    if body.get("tags"):
-        print(f"[achievement] WARNING: tags accepted but ignored (no achievement_tag table in phase 1)")
-    if body.get("mediaFileIds"):
-        print(f"[achievement] WARNING: mediaFileIds accepted but ignored (file_object not in phase 1)")
-
     inventor_refs = body.get("inventorRefs")
     if inventor_refs is not None:
         if not isinstance(inventor_refs, list):
@@ -441,9 +489,30 @@ def _parse_upsert_body(body: dict, partial: bool):
                 sort_order = int(sort_order)
             except (ValueError, TypeError):
                 raise bad_request(f"inventorRefs[{i}].sortOrder 必须是整数")
+            extra = {}
+            for api_key, column, maximum in (
+                ("department", "department", 128), ("title", "title", 128),
+                ("bio", "bio", 10000), ("phone", "phone", 32), ("email", "email", 128),
+                ("homepageUrl", "homepage_url", 2048),
+            ):
+                value = ref.get(api_key)
+                if value is not None:
+                    value = str(value).strip() or None
+                    if value and len(value) > maximum:
+                        raise bad_request(f"inventorRefs[{i}].{api_key} 长度不能超过 {maximum}")
+                    extra[column] = value
+            if extra.get("phone"):
+                extra["phone"] = validate_phone(extra["phone"], field_name="完成人电话")
+            if extra.get("email"):
+                extra["email"] = validate_email(extra["email"], field_name="完成人邮箱")
+            if ref.get("avatarFileId") is not None:
+                try:
+                    extra["avatar_file_id"] = int(ref["avatarFileId"])
+                except (TypeError, ValueError):
+                    raise bad_request(f"inventorRefs[{i}].avatarFileId 必须是整数")
             cleaned.append({
                 "name": name, "org_name": org_name,
-                "person_type": person_type, "sort_order": sort_order,
+                "person_type": person_type, "sort_order": sort_order, **extra,
             })
         deduped = []
         seen = set()
@@ -455,7 +524,7 @@ def _parse_upsert_body(body: dict, partial: bool):
             deduped.append(ref)
 
     _parse_cooperation_capacity(body, fields)
-    return fields, inventor_refs if inventor_refs is None else deduped
+    return fields, inventor_refs if inventor_refs is None else deduped, parse_content_payload(body)
 
 
 def _validate_refs(cur, fields):
@@ -474,8 +543,13 @@ def _validate_refs(cur, fields):
             fields["source_org_name"] = institution["name"]
 
 
-def _sync_inventors(cur, ach_id: int, refs):
+def _sync_inventors(cur, ach_id: int, refs, user_id: int | None = None):
     """整体替换成果-完成人关联（inventor 按 name+org_name get-or-create）"""
+    avatar_ids = [ref.get("avatar_file_id") for ref in refs if ref.get("avatar_file_id")]
+    if avatar_ids and user_id is not None:
+        cur.execute("SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, avatar_ids))
+        if {int(row["id"]) for row in cur.fetchall()} != set(avatar_ids):
+            raise bad_request("完成人头像不存在、已删除或不属于当前用户")
     cur.execute("DELETE FROM achievement_inventor WHERE achievement_id=%s", (ach_id,))
     for ref in refs:
         cur.execute(
@@ -485,13 +559,20 @@ def _sync_inventors(cur, ach_id: int, refs):
         row = cur.fetchone()
         if row:
             inventor_id = row["id"]
+            enrich = {key: value for key, value in ref.items() if key in {"person_type", "department", "title", "bio", "phone", "email", "homepage_url", "avatar_file_id"} and value is not None}
+            if enrich:
+                assignments = ", ".join(
+                    f"{column}=COALESCE(%s, {column})" if column == "avatar_file_id" else f"{column}=COALESCE(NULLIF(%s, ''), {column})"
+                    for column in enrich
+                )
+                cur.execute(f"UPDATE inventor SET {assignments}, updated_at=CURRENT_TIMESTAMP WHERE id=%s", list(enrich.values()) + [inventor_id])
         else:
             cur.execute(
                 """
-                INSERT INTO inventor (name, org_name, person_type)
-                VALUES (%s, %s, %s) RETURNING id
+                INSERT INTO inventor (name, org_name, person_type, department, title, bio, phone, email, homepage_url, avatar_file_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                 """,
-                (ref["name"], ref["org_name"], ref["person_type"]),
+                (ref["name"], ref["org_name"], ref["person_type"], ref.get("department"), ref.get("title"), ref.get("bio"), ref.get("phone"), ref.get("email"), ref.get("homepage_url"), ref.get("avatar_file_id")),
             )
             inventor_id = cur.fetchone()["id"]
         cur.execute(
@@ -528,7 +609,7 @@ def _owner_detail(cur, ach_id: int, user_id=None):
 
     cur.execute(
         """
-        SELECT i.name, i.org_name, i.person_type, ai.sort_order, ai.contribution
+        SELECT i.name, i.org_name, i.person_type, i.department, i.title, i.bio, i.homepage_url, i.avatar_file_id, ai.sort_order, ai.contribution
         FROM achievement_inventor ai
         JOIN inventor i ON ai.inventor_id=i.id
         WHERE ai.achievement_id=%s
@@ -537,6 +618,7 @@ def _owner_detail(cur, ach_id: int, user_id=None):
         (ach_id,),
     )
     inventors = cur.fetchall() or []
+    dynamic_content = load_content(cur, ach_id)
 
     def as_list(raw):
         if isinstance(raw, str):
@@ -549,6 +631,8 @@ def _owner_detail(cur, ach_id: int, user_id=None):
     return {
         "id": row["id"],
         "title": row["title"],
+        "titleEn": row.get("title_en"),
+        "achievementKind": row.get("achievement_kind") or "technology",
         "sourceOrgName": _display_source_org(row),
         "orgId": row.get("org_id"),
         "orgCertified": row.get("org_id") is not None,
@@ -580,11 +664,18 @@ def _owner_detail(cur, ach_id: int, user_id=None):
                 "name": inv["name"],
                 "orgName": inv.get("org_name"),
                 "personType": inv.get("person_type"),
+                "department": inv.get("department"),
+                "title": inv.get("title"),
+                "bio": inv.get("bio"),
+                "homepageUrl": inv.get("homepage_url"),
+                "avatarFileId": inv.get("avatar_file_id"),
+                "avatarUrl": (f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{inv['avatar_file_id']}" if inv.get("avatar_file_id") else None),
                 "sortOrder": inv.get("sort_order"),
                 "contribution": inv.get("contribution"),
             }
             for inv in inventors
         ],
+        **dynamic_content,
     }
 
 
@@ -593,8 +684,14 @@ def _owner_detail_public(ach_id: int, user_id=None):
         return _owner_detail(cur, ach_id, user_id)
 
 
-def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
-    fields, inventor_refs = _parse_upsert_body(body, partial=False)
+def create_achievement(
+    user_id: int,
+    user_no: str,
+    body: dict,
+    request_id=None,
+    source_import_item_id: int | None = None,
+):
+    fields, inventor_refs, content = _parse_upsert_body(body, partial=False)
     if fields.get("price_min_wan") is not None and fields.get("price_max_wan") is not None:
         if fields["price_min_wan"] > fields["price_max_wan"]:
             raise bad_request("priceMinWan 不能大于 priceMaxWan")
@@ -608,11 +705,11 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
             """
             INSERT INTO achievement
                 (owner_user_id, created_by_user_id, title, category_id, org_id, source_org_name,
-                 tech_intro, tech_route, maturity_level, maturity_desc,
+                 tech_intro, tech_route, maturity_level, maturity_desc, achievement_kind, title_en,
                  application_fields, innovation_points, pricing_mode,
                  price_min_wan, price_max_wan, contact_name, contact_title,
-                 contact_phone, contact_email, contact_wechat, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+                 contact_phone, contact_email, contact_wechat, source_import_item_id, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
             RETURNING id
             """,
             (
@@ -626,6 +723,8 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
                 fields.get("tech_route"),
                 fields.get("maturity_level"),
                 fields.get("maturity_desc"),
+                fields.get("achievement_kind", "technology"),
+                fields.get("title_en"),
                 fields.get("application_fields"),
                 fields.get("innovation_points"),
                 fields.get("pricing_mode"),
@@ -636,11 +735,13 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
                 fields.get("contact_phone"),
                 fields.get("contact_email"),
                 fields.get("contact_wechat"),
+                source_import_item_id,
             ),
         )
         ach_id = cur.fetchone()["id"]
         if inventor_refs:
-            _sync_inventors(cur, ach_id, inventor_refs)
+            _sync_inventors(cur, ach_id, inventor_refs, user_id)
+        sync_content(cur, ach_id, user_id, content)
 
     audit_record(
         "achievement.create", "achievement", resource_id=ach_id,
@@ -651,7 +752,7 @@ def create_achievement(user_id: int, user_no: str, body: dict, request_id=None):
 
 
 def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, request_id=None):
-    fields, inventor_refs = _parse_upsert_body(body, partial=True)
+    fields, inventor_refs, content = _parse_upsert_body(body, partial=True)
     if fields.get("price_min_wan") is not None and fields.get("price_max_wan") is not None:
         if fields["price_min_wan"] > fields["price_max_wan"]:
             raise bad_request("priceMinWan 不能大于 priceMaxWan")
@@ -683,7 +784,8 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
             if cur.rowcount == 0:
                 raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         if inventor_refs is not None:
-            _sync_inventors(cur, ach_id, inventor_refs)
+            _sync_inventors(cur, ach_id, inventor_refs, user_id)
+        sync_content(cur, ach_id, user_id, content)
 
     audit_record(
         "achievement.update", "achievement", resource_id=ach_id,
@@ -775,7 +877,8 @@ def list_my_achievements(user_id: int, args):
                    a.pricing_mode, a.price_min_wan, a.price_max_wan,
                    a.view_count, a.published_at, a.version, a.reject_reason,
                    a.org_id, o.name AS certified_org_name,
-                   c.name AS category_name, c.code AS category_code
+                   c.name AS category_name, c.code AS category_code,
+                   (SELECT am.file_id FROM achievement_media am JOIN file_object fo ON fo.id=am.file_id AND fo.status='active' WHERE am.achievement_id=a.id AND am.media_role='cover' ORDER BY am.sort_order,am.id LIMIT 1) AS cover_file_id
             FROM achievement a
             LEFT JOIN achievement_category c ON a.category_id=c.id
             LEFT JOIN institution o ON a.org_id=o.id

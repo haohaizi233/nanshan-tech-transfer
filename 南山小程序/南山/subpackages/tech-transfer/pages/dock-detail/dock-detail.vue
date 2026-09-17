@@ -54,15 +54,22 @@
 					<text class="field-label">需求说明</text>
 					<text class="field-value field-value-user-text">{{ detail.demandDesc }}</text>
 				</view>
-				<view v-if="detail.companyIntro" class="field">
-					<text class="field-label">公司简介</text>
-					<text class="field-value field-muted field-value-user-text">{{ detail.companyIntro }}</text>
-				</view>
+                                <view v-if="detail.companyIntro" class="field">
+                                        <text class="field-label">公司简介</text>
+                                        <text class="field-value field-muted field-value-user-text">{{ detail.companyIntro }}</text>
+                                </view>
+                                <view v-if="detail.attachments && detail.attachments.length" class="field">
+                                        <text class="field-label">需求附件</text>
+                                        <view v-for="attachment in detail.attachments" :key="attachment.fileId" class="attachment-row" @click="openAttachment(attachment)">
+                                                <text class="attachment-name">{{ attachment.name }}</text><text class="attachment-arrow">›</text>
+                                        </view>
+                                </view>
 			</block>
 
 			<!-- 成果详情 -->
 			<block v-else>
 				<text class="main-title">{{ detail.title }}</text>
+				<text v-if="detail.titleEn" class="title-en">{{ detail.titleEn }}</text>
 				<view v-if="detail.isMine && detail.statusLabel" class="mine-status-row">
 					<text class="mine-status-text">状态：{{ detail.statusLabel }}</text>
 				</view>
@@ -78,7 +85,7 @@
 						</view>
 					</view>
 				</view>
-				<view class="price-box">
+				<view v-if="detail.price" class="price-box">
 					<text class="price-label">期望报价</text>
 					<text class="price-value">{{ detail.price }}</text>
 				</view>
@@ -105,6 +112,26 @@
 				<view v-if="detail.maturity" class="field">
 					<text class="field-label">成熟度</text>
 					<text class="field-value">{{ detail.maturity }}</text>
+				</view>
+				<view v-if="detail.media && detail.media.length" class="field">
+					<text class="field-label">成果图片</text>
+					<view class="media-grid"><image v-for="media in detail.media" :key="media.fileId" class="media-thumb" :src="media.url" mode="aspectFill" @click="previewMedia(media)" /></view>
+				</view>
+				<view v-for="section in detail.sections" :key="section.code + section.sortOrder" class="field">
+					<text class="field-label">{{ section.title }}</text>
+					<text class="field-value field-value-user-text">{{ section.content }}</text>
+				</view>
+				<view v-if="detail.patents && detail.patents.length" class="field">
+					<text class="field-label">关联专利</text>
+					<text v-for="patent in detail.patents" :key="patent.patentNo" class="field-value link-value" @click="openPatent(patent)">{{ patent.patentNo }}{{ patent.patentTitle ? ' · ' + patent.patentTitle : '' }}</text>
+				</view>
+				<view v-if="detail.links && detail.links.length" class="field">
+					<text class="field-label">相关链接</text>
+					<text v-for="link in detail.links" :key="link.url" class="field-value link-value" @click="openLink(link)">{{ link.label }}</text>
+				</view>
+				<view v-if="detail.inventors && detail.inventors.length" class="field">
+					<text class="field-label">成果完成人</text>
+					<view v-for="inventor in detail.inventors" :key="inventor.id" class="inventor-row"><image v-if="inventor.avatarUrl" class="inventor-avatar" :src="inventor.avatarUrl" mode="aspectFill" /><text class="field-value">{{ inventor.name }}{{ inventor.title ? ' · ' + inventor.title : '' }}{{ inventor.orgName ? ' · ' + inventor.orgName : '' }}</text></view>
 				</view>
 			</block>
 		</view>
@@ -244,7 +271,8 @@
 
 <script>
 	import { getDemandDetail, toDemandCard, closeDemand } from '../../api/demand.js'
-	import { getAchievementDetail, offlineAchievement } from '../../api/achievement.js'
+        import { getAchievementDetail, offlineAchievement } from '../../api/achievement.js'
+        import HostBridge from '../../../../host/host-bridge.js'
 	import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
 	import {
@@ -453,7 +481,7 @@
 				try {
 					const data = await getAchievementDetail(id)
 					if (!data) throw new Error('未找到对应信息')
-					this.detail = toAchievementDockCard(data)
+					this.detail = { ...toAchievementDockCard(data), titleEn: data.titleEn, sections: data.sections || [], patents: data.patents || [], links: data.links || [], media: data.media || [], inventors: data.inventors || [] }
 				} catch (e) {
 					console.error('[dock-detail] loadResult failed:', e)
 					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
@@ -602,7 +630,7 @@
 					phoneNumber: phone
 				})
 			},
-			onCopy(text, label) {
+                        onCopy(text, label) {
 				if (!ensureLoginForDock()) return
 				if (!text) {
 					uni.showToast({ title: '暂无' + label, icon: 'none' })
@@ -620,7 +648,26 @@
 							icon: 'none'
 						})
 					}
-				})
+                                })
+                        },
+                        openAttachment(attachment) {
+                                if (!attachment || !attachment.url) return
+                                if ((attachment.mimeType || '').indexOf('image/') === 0) {
+                                        uni.previewImage({ urls: [attachment.url] })
+                                        return
+                                }
+                                HostBridge.navigate('pages/web-view/web-view', { url: attachment.url })
+                        },
+			previewMedia(media) {
+				if (media && media.url) uni.previewImage({ urls: (this.detail.media || []).map((item) => item.url), current: media.url })
+			},
+			openPatent(patent) {
+				if (!patent) return
+				if (patent.patentNo) HostBridge.navigate('pages/patent-detail/patent-detail', { publicationNo: patent.patentNo })
+				else if (patent.externalUrl) HostBridge.navigate('pages/web-view/web-view', { url: patent.externalUrl })
+			},
+			openLink(link) {
+				if (link && link.url) HostBridge.navigate('pages/web-view/web-view', { url: link.url })
 			},
 			async onToggleFavorite() {
 				if (!ensureLoginForDock()) return
@@ -864,9 +911,21 @@
 		text-indent: 2em;
 	}
 
-	.field-muted {
-		color: #666666;
-	}
+	.title-en { display: block; margin: -4rpx 0 16rpx; color: #7c8798; font-size: 24rpx; line-height: 1.4; }
+	.media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; }
+	.media-thumb { width: 196rpx; height: 148rpx; border-radius: 10rpx; background: #eef3fa; }
+	.link-value { color: #2b73f8; text-indent: 0; margin-bottom: 8rpx; }
+	.inventor-row { display: flex; align-items: center; min-height: 58rpx; }
+	.inventor-avatar { width: 52rpx; height: 52rpx; flex-shrink: 0; border-radius: 50%; margin-right: 14rpx; }
+	.inventor-row .field-value { text-indent: 0; }
+
+        .field-muted {
+                color: #666666;
+        }
+
+        .attachment-row { display: flex; align-items: center; min-height: 68rpx; border-bottom: 1rpx solid #edf1f5; }
+        .attachment-name { flex: 1; color: #2b73f8; font-size: 26rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .attachment-arrow { color: #8fa0b5; font-size: 38rpx; }
 
 	.contact-card {
 		background-color: #f7f9fc;

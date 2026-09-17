@@ -11,6 +11,7 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 
 import OverviewView from '../views/admin/OverviewView.vue'
 import AchievementView from '../views/admin/AchievementView.vue'
+import AchievementImportView from '../views/admin/AchievementImportView.vue'
 import InstitutionView from '../views/admin/InstitutionView.vue'
 import MembershipReviewView from '../views/admin/MembershipReviewView.vue'
 import UserView from '../views/admin/UserView.vue'
@@ -85,6 +86,16 @@ const routes = [
         meta: {
           parent: '成果管理',
           title: '成果列表'
+        }
+      },
+
+      {
+        path: 'achievement-imports',
+        name: 'achievement-imports',
+        component: AchievementImportView,
+        meta: {
+          parent: '成果管理',
+          title: '成果导入暂存'
         }
       },
 

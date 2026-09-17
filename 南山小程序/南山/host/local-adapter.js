@@ -102,11 +102,14 @@ const LocalAdapter = {
 
   async _upload(file, options = {}) {
     return new Promise((resolve, reject) => {
+      const token = getStorageSync(ACCESS_TOKEN_KEY)
       uni.uploadFile({
-        url: effectiveApiBase() + API_PREFIX + '/uploads/presign',
+        // 文件由科转服务统一校验、落盘和授权读取；不再依赖不存在的 presign 占位接口。
+        url: effectiveApiBase() + API_PREFIX + '/files',
         filePath: file,
         name: 'file',
         formData: options.formData || {},
+        header: token ? { Authorization: 'Bearer ' + token } : {},
         success: (res) => {
           const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
           resolve(data)

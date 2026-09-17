@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     )
     FILE_CACHE_DIR: str = "cache/logos"  # 相对 BASE_DIR，也可配绝对路径
 
+    # ── 用户上传媒体（与第三方 Logo 代理缓存完全隔离）────────
+    # 默认落到用户数据目录，避免把运行时文件写进后端源码或小程序包。
+    # 生产环境必须通过 MEDIA_ROOT 挂载持久化卷，并配置 MEDIA_BASE_URL。
+    MEDIA_ROOT: str = ""
+    MEDIA_BASE_URL: str = "/api/tech-transfer/v1/files"
+    MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
+
     # ── 专利检索 Provider（密钥只在服务端，禁止下发前端）──
     PATENT_PROVIDER_BASE: str = ""
     PATENT_PROVIDER_KEY: str = ""
@@ -212,6 +219,15 @@ class Settings(BaseSettings):
     def file_cache_path(self) -> Path:
         p = Path(self.FILE_CACHE_DIR)
         return p if p.is_absolute() else BASE_DIR / p
+
+    @property
+    def media_root_path(self) -> Path:
+        if self.MEDIA_ROOT.strip():
+            return Path(self.MEDIA_ROOT).expanduser()
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "NanshanTechTransfer" / "media"
+        return BASE_DIR.parent / ".runtime-media"
 
 
 settings = Settings()

@@ -3,7 +3,7 @@
  * 后端契约：openapi.yaml paths /demands、/me/demands
  */
 
-import { apiRequest } from './client.js'
+import { apiRequest, publicRequest, getCurrentUser } from './client.js'
 import { getPublicationStatus } from '../constants/review-status.js'
 
 export async function getDemands(params = {}) {
@@ -18,7 +18,9 @@ export async function getDemands(params = {}) {
 }
 
 export async function getDemandDetail(id) {
-  return apiRequest('GET', `/demands/${id}`)
+  return getCurrentUser()
+    ? apiRequest('GET', `/demands/${id}`)
+    : publicRequest('GET', `/demands/${id}`)
 }
 
 export async function createDemand(payload) {

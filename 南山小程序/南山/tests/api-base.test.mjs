@@ -105,7 +105,9 @@ test('uses same-origin API paths when H5 is under /h5 on the public Caddy host',
 
 test('LocalAdapter stays in the main package (WeChat whitescreens main→subpackage imports)', () => {
   const src = readFileSync(new URL('../host/local-adapter.js', import.meta.url), 'utf8')
-  assert.doesNotMatch(src, /subpackages\//)
+  // 主包模块可生成分包页面路径；关键是不从分包源码 import，避免微信主包加载时报缺模块。
+  assert.doesNotMatch(src, /from\s+['"][^'"]*subpackages\//)
+  assert.doesNotMatch(src, /import\([^)]*subpackages\//)
 })
 
 test('WeChat mini program uses the public HTTPS API in devtools', () => {

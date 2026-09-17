@@ -28,8 +28,34 @@ from modules.admin.service import (
     list_content_organizations_admin,
     claim_unassigned_content,
 )
+from modules.achievement.importer import list_import_batches, get_import_batch, confirm_import_item
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
+
+
+@router.get("/admin/achievement-imports")
+def admin_achievement_imports(request: Request, admin: dict = Depends(admin_identity)):
+    return success(list_import_batches(request.query_params.get("page", 1), request.query_params.get("pageSize", 20)))
+
+
+@router.get("/admin/achievement-imports/{batch_id}")
+def admin_achievement_import_detail(batch_id: int, admin: dict = Depends(admin_identity)):
+    data = get_import_batch(batch_id)
+    if data is None:
+        from core.errors import not_found
+        raise not_found("导入批次不存在")
+    return success(data)
+
+
+@router.post("/admin/achievement-imports/{batch_id}/items/{item_id}/confirm")
+def admin_achievement_import_confirm(
+    batch_id: int,
+    item_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    """管理员确认一条暂存导入记录；仅落为 draft，仍需正常审核发布。"""
+    return success(confirm_import_item(batch_id, item_id, admin, body, get_request_id()), "成果已入库为草稿")
 
 
 @router.get("/admin/demand-categories")

@@ -15,7 +15,7 @@ test('dev host is hidden and dev-home redirects into the business home', () => {
   const source = read('../pages/dev-home/dev-home.vue')
   assert.equal(SHOW_DEV_HOST, false)
   assert.match(source, /v-if="showHost"/)
-  assert.match(source, /uni\.reLaunch\(\{\s*url:\s*BUSINESS_HOME\s*\}\)/)
+  assert.match(source, /uni\.reLaunch\(\{[\s\S]*url:\s*BUSINESS_HOME[\s\S]*fail:/)
   assert.match(source, /BUSINESS_HOME = '\/subpackages\/tech-transfer\/pages\/home\/home'/)
   assert.match(source, /if \(!SHOW_DEV_HOST\)/)
 })

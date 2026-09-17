@@ -36,6 +36,9 @@
       </view>
     </view>
   </view>
+  <view v-else class="dev-redirecting">
+    <text>正在进入南山科转通…</text>
+  </view>
 </template>
 
 <script>
@@ -52,16 +55,31 @@ export default {
       healthOk: false,
       apiBase: '',
       showAiMatchEntry: SHOW_AI_MATCH_ENTRY,
+      redirecting: false,
     }
+  },
+  onLoad() {
+    if (!SHOW_DEV_HOST) this.goBusinessHome()
   },
   onShow() {
     if (!SHOW_DEV_HOST) {
-      uni.reLaunch({ url: BUSINESS_HOME })
+      this.goBusinessHome()
       return
     }
     this.checkHealth()
   },
   methods: {
+    goBusinessHome() {
+      if (this.redirecting) return
+      this.redirecting = true
+      uni.reLaunch({
+        url: BUSINESS_HOME,
+        fail: () => {
+          this.redirecting = false
+          uni.showToast({ title: '业务首页加载失败，请重试', icon: 'none' })
+        },
+      })
+    },
     goTo(url) {
       uni.navigateTo({ url, fail: () => {
         uni.switchTab({ url, fail: () => {

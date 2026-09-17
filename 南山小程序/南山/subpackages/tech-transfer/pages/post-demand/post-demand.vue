@@ -20,7 +20,7 @@
 				<input class="input" v-model="form.location" placeholder="例如：广东 · 深圳南山" />
 			</view>
 			<view class="form-item">
-				<text class="label">预算 <text class="required">*</text></text>
+				<text class="label">预算 <text class="optional">选填</text></text>
 				<input class="input" v-model="form.budget" placeholder="例如：80–120 万 / 面议" />
 			</view>
 			<view class="form-item">
@@ -49,13 +49,21 @@
 				/>
 			</view>
 			<view class="form-item">
-				<text class="label">公司简介 <text class="required">*</text></text>
+				<text class="label">公司简介 <text class="optional">选填</text></text>
 				<textarea
 					class="textarea"
 					v-model="form.companyIntro"
 					placeholder="请简要介绍公司业务"
 					maxlength="300"
 				/>
+			</view>
+		</view>
+
+		<view class="section">
+			<view class="section-head"><text class="section-title">附件资料</text><view><text class="add-link" @click="chooseDemandImage">+ 添加配图</text><text class="add-link add-link-gap" @click="chooseAttachment">{{ uploading ? '上传中…' : '+ 添加附件' }}</text></view></view>
+			<view v-if="!form.attachments.length" class="upload-hint">可上传需求说明、图片或技术资料，单文件最大 20MB</view>
+			<view v-for="(attachment, index) in form.attachments" :key="attachment.fileId || attachment.id" class="attachment-row">
+				<text class="attachment-name">{{ attachment.name }}</text><text class="remove-link" @click="removeAttachment(index)">删除</text>
 			</view>
 		</view>
 
@@ -83,7 +91,9 @@
 			</view>
 		</view>
 
-		<button class="submit-btn" type="primary" @click="onSubmit">提交需求</button>
+                <view v-if="previewError" class="preview-error">{{ previewError }}</view>
+                <button class="submit-btn" type="primary" :disabled="submitting" @click="onPreview">预览并提交</button>
+                <publish-preview :visible="previewing" :items="previewItems" :submitting="submitting" @back="previewing = false" @confirm="onSubmit" />
 	</view>
 </template>
 
@@ -93,7 +103,9 @@
 	import { getMyOrganizationCertification } from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import { clearPublishDraft, restorePublishDraft, savePublishDraft } from '../../api/publish-draft.mjs'
-	import HostBridge from '../../../../host/host-bridge.js'
+	import { uploadContentFile } from '../../api/file.js'
+        import HostBridge from '../../../../host/host-bridge.js'
+        import PublishPreview from '../../components/publish-preview.vue'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -123,6 +135,10 @@
 			contactWechat: data.wechat || null,
 			...parseBudgetText(data.budget)
 		}
+		const attachments = (data.attachments || [])
+			.map((item, index) => ({ fileId: item.fileId || item.id, role: item.role || 'attachment', caption: item.caption || undefined, sortOrder: index }))
+			.filter((item) => Number(item.fileId) > 0)
+		if (attachments.length) payload.attachments = attachments
 		if (data.company) {
 			payload.orgName = data.company
 			if (data.companyIntro) payload.orgIntro = data.companyIntro
@@ -143,7 +159,8 @@
 		return payload
 	}
 
-	export default {
+        export default {
+			components: { PublishPreview },
 		data() {
 			return {
 				organizations: [],
@@ -163,15 +180,23 @@
 					contactTitle: '',
 					phone: '',
 					email: '',
-					wechat: ''
+					wechat: '',
+					attachments: []
 				},
-				submitting: false
+                                submitting: false,
+						previewing: false,
+						uploading: false,
+						previewError: ''
 			}
 		},
 		computed: {
 			organizationNames() { return this.organizations.map((item) => item.orgName) },
 			organizationIndex() { const index = this.organizations.findIndex((item) => String(item.orgId) === String(this.form.orgId)); return index < 0 ? 0 : index },
-			certifiedCompanyLocked() { return this.organizations.length > 0 }
+                        certifiedCompanyLocked() { return this.organizations.length > 0 }
+						, previewItems() {
+							const f = this.form
+							return [{ label: '需求名称', value: f.title }, { label: '机构', value: f.company }, { label: '地点', value: f.location }, { label: '预算', value: f.budget }, { label: '合作方式', value: f.cooperationType }, { label: '需求说明', value: f.demandDesc }, { label: '附件', value: (f.attachments || []).map((item) => item.name).join('、') }, { label: '联系人', value: f.contactName }]
+						}
 		},
 		onLoad() {
 			const saved = restorePublishDraft('demand')
@@ -218,45 +243,82 @@
 			trimForm() {
 				const result = {}
 				Object.keys(this.form).forEach((key) => {
-					result[key] = key === 'orgId' ? this.form[key] : (this.form[key] || '').trim()
+					result[key] = (key === 'orgId' || key === 'attachments') ? this.form[key] : (this.form[key] || '').trim()
 				})
 				return result
 			},
-			validate(data) {
+						showPreviewError(message) {
+							this.previewError = message
+							uni.showToast({ title: message, icon: 'none' })
+							return false
+						},
+						validate(data) {
+							this.previewError = ''
 				const required = [
 					{ key: 'title', tip: '请填写需求标题' },
 					{ key: 'company', tip: '请填写公司名称' },
 					{ key: 'location', tip: '请填写地点' },
-					{ key: 'budget', tip: '请填写预算' },
 					{ key: 'demandDesc', tip: '请填写需求说明' },
-					{ key: 'companyIntro', tip: '请填写公司简介' },
 					{ key: 'contactName', tip: '请填写联系人' },
 					{ key: 'phone', tip: '请填写电话' }
 				]
 				for (let i = 0; i < required.length; i++) {
 					const item = required[i]
 					if (!data[item.key]) {
-						uni.showToast({ title: item.tip, icon: 'none' })
-						return false
+								return this.showPreviewError(item.tip)
 					}
 				}
 				if (!validatePhone(data.phone, { required: true }).ok) {
-					uni.showToast({ title: '请输入11位手机号码', icon: 'none' })
-					return false
+							return this.showPreviewError('请输入11位手机号码')
 				}
 				const emailCheck = validateEmail(data.email, { required: false })
 				if (!emailCheck.ok) {
-					uni.showToast({ title: emailCheck.message, icon: 'none' })
-					return false
+							return this.showPreviewError(emailCheck.message)
 				}
-				return true
-			},
-			async onSubmit() {
-				if (this.submitting) return
-				if (!isLoggedIn()) {
-					savePublishDraft('demand', this.form)
-					uni.showToast({ title: '登录后将为您恢复已填写内容', icon: 'none' })
+                                return true
+                        },
+				onPreview() {
+							if (this.submitting || this.uploading) {
+								if (this.uploading) uni.showToast({ title: '附件上传中，请稍候', icon: 'none' })
+								return
+							}
+							if (this.validate(this.trimForm())) this.previewing = true
+				},
+				saveDraftAndRequestLogin() {
+					savePublishDraft('demand', this.trimForm())
+					uni.showToast({ title: '请登录后提交，内容会自动保留', icon: 'none', duration: 1800 })
 					setTimeout(() => HostBridge.navigate('pages/mine/mine'), 350)
+				},
+				chooseAttachment() {
+					if (this.uploading) return
+					uni.chooseMessageFile({ count: 9, type: 'all', success: async (result) => {
+						const files = result.tempFiles || []
+						this.uploading = true
+						try {
+							for (const file of files) {
+								const uploaded = await uploadContentFile(file.path)
+								this.form.attachments.push({ ...uploaded, role: (uploaded.mimeType || '').indexOf('image/') === 0 ? 'image' : 'attachment' })
+							}
+						} catch (error) { uni.showToast({ title: (error && error.message) || '附件上传失败', icon: 'none' }) } finally { this.uploading = false }
+					} })
+				},
+				chooseDemandImage() {
+					if (this.uploading) return
+					uni.chooseImage({ count: 9, success: async (result) => {
+						this.uploading = true
+						try {
+							for (const path of (result.tempFilePaths || [])) {
+								const uploaded = await uploadContentFile(path)
+								this.form.attachments.push({ ...uploaded, role: 'image' })
+							}
+						} catch (error) { uni.showToast({ title: (error && error.message) || '配图上传失败', icon: 'none' }) } finally { this.uploading = false }
+					} })
+				},
+				removeAttachment(index) { this.form.attachments.splice(index, 1) },
+                        async onSubmit() {
+				if (this.submitting || this.uploading) { if (this.uploading) uni.showToast({ title: '附件上传中，请稍候', icon: 'none' }); return }
+				if (!isLoggedIn()) {
+					this.saveDraftAndRequestLogin()
 					return
 				}
 				const ownerPhone = getSessionPhone()
@@ -264,9 +326,10 @@
 					uni.showToast({ title: '请先登录后再发布', icon: 'none' })
 					return
 				}
-				const data = this.trimForm()
-				if (!this.validate(data)) return
+                                const data = this.trimForm()
+                                if (!this.validate(data)) return
 
+                                this.previewing = false
 				this.submitting = true
 				uni.showLoading({ title: '提交中', mask: true })
 				try {
@@ -320,13 +383,20 @@
 		margin-bottom: 24rpx;
 	}
 
-	.section-title {
+		.section-title {
 		display: block;
 		font-size: 32rpx;
 		color: #1a1a1a;
 		font-weight: 600;
 		margin-bottom: 20rpx;
-	}
+		}
+		.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20rpx; }
+		.add-link { color: #2b73f8; font-size: 26rpx; }
+		.add-link-gap { margin-left: 20rpx; }
+		.remove-link { color: #e56a63; font-size: 25rpx; }
+		.upload-hint { color: #8b98aa; font-size: 25rpx; line-height: 1.55; }
+		.attachment-row { min-height: 68rpx; display: flex; align-items: center; border-bottom: 1rpx solid #edf1f5; }
+		.attachment-name { flex: 1; min-width: 0; color: #2b73f8; font-size: 26rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 	.form-item {
 		margin-bottom: 24rpx;
@@ -392,4 +462,5 @@
 		height: 88rpx;
 		line-height: 88rpx;
 	}
+	.preview-error { margin: 8rpx 0 14rpx; color: #d64545; font-size: 26rpx; line-height: 1.5; }
 </style>

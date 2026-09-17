@@ -5,22 +5,26 @@
  * /search?type=achievement（Phase B 统一搜索）
  */
 
-import { apiRequest } from './client.js'
+import { apiRequest, publicRequest, getCurrentUser } from './client.js'
 import { getPublicationStatus } from '../constants/review-status.js'
 
 export async function getAchievements(params = {}) {
-  const { page = 1, pageSize = 10, keyword = '', category = '', maturityLevel = '' } = params
+  const { page = 1, pageSize = 10, keyword = '', category = '', maturityLevel = '', industryId = '' } = params
   const query = {}
   if (page) query.page = page
   if (pageSize) query.pageSize = pageSize
   if (keyword) query.keyword = keyword
   if (category) query.category = category
   if (maturityLevel) query.maturityLevel = maturityLevel
+  if (industryId) query.industryId = industryId
   return apiRequest('GET', '/achievements', query)
 }
 
 export async function getAchievementDetail(id) {
-  return apiRequest('GET', `/achievements/${id}`)
+  // 游客只读取公开详情；实际对接仍由 cooperation API 在提交时强制登录。
+  return getCurrentUser()
+    ? apiRequest('GET', `/achievements/${id}`)
+    : publicRequest('GET', `/achievements/${id}`)
 }
 
 /** 本人发布的成果：包含全量审核状态。 */
@@ -41,6 +45,7 @@ export function toAchievementCard(item) {
     title: item.title || '',
     sourceOrgName: item.sourceOrgName || '',
     techIntro: item.techIntro || '',
+    cover: item.cover || (item.media || []).find((media) => media.role === 'cover') || null,
     categoryName: item.categoryName || '',
     status: item.status,
     statusLabel: meta.label,
@@ -67,6 +72,10 @@ export async function searchAchievements(params = {}) {
 
 export async function getAchievementCategories() {
   return apiRequest('GET', '/achievements/categories')
+}
+
+export async function getAchievementIndustries() {
+  return apiRequest('GET', '/achievements/industries')
 }
 
 // ── 写接口（post-result 发布链路） ───────────────────────────
@@ -99,11 +108,10 @@ export function formatAchPrice(item) {
     transfer: '转让',
     cooperation: '合作'
   }
-  if (item.pricingMode === 'negotiable' || !item.priceMinWan) {
-    return modeLabels[item.pricingMode] || '面议'
-  }
+  if (item.pricingMode === 'negotiable') return '面议'
   const min = item.priceMinWan
   const max = item.priceMaxWan
   if (min && max) return `${min}–${max} 万`
-  return `${min} 万`
+  if (min) return `${min} 万`
+  return modeLabels[item.pricingMode] || ''
 }

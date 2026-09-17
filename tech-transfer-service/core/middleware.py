@@ -30,6 +30,13 @@ def identity(request: Request) -> dict:
     }
 
 
+def optional_identity(request: Request) -> dict:
+    """公开详情的可选身份：无 token 是游客；有 token 仍严格校验。"""
+    if not request.headers.get("Authorization", ""):
+        return {"userId": None, "userNo": "", "roles": []}
+    return identity(request)
+
+
 async def json_body(request: Request) -> dict:
     try:
         body = await request.json()

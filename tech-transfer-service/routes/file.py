@@ -8,11 +8,15 @@ Source: extracted from app.py inline code (Phase A)
 走全局统一异常处理器，不再输出 {"code":1,"msg":...} 并行格式。
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse
 
 from core.errors import BizError, TT_FILE_40001, TT_FILE_40401, TT_FILE_50201
-from modules.file.service import proxy_file, FileProxyError
+from core.middleware import identity, optional_identity
+from core.response import success
+from modules.file.service import (
+    proxy_file, FileProxyError, create_uploaded_file, get_uploaded_file, get_uploaded_thumbnail, delete_uploaded_file,
+)
 
 router = APIRouter(tags=["file"])
 
@@ -32,3 +36,36 @@ def get_file(file_id: str):
         code, _msg, status = _FILE_ERROR_MAP.get(e.http_status, TT_FILE_50201)
         raise BizError(code, e.msg, status)
     return FileResponse(path, media_type=mime)
+
+
+@router.post("/api/tech-transfer/v1/files", status_code=201, summary="上传成果/需求媒体")
+async def upload_file(file: UploadFile = File(...), user: dict = Depends(identity)):
+    # UploadFile 不调用 read() 无上限后直接落盘，先受限读取，拒绝大文件以防内存耗尽。
+    max_bytes = __import__("config").settings.MAX_UPLOAD_BYTES
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        from core.errors import bad_request
+        raise bad_request(f"文件不能超过 {max_bytes // 1024 // 1024}MB")
+    result = create_uploaded_file(user["userId"], file.filename or "upload", file.content_type or "", data)
+    return success(result, "上传成功")
+
+
+@router.get("/api/tech-transfer/v1/files/{file_id}", summary="读取已授权上传文件")
+def get_uploaded(file_id: int, variant: str = "", user: dict = Depends(optional_identity)):
+    path, mime, name = get_uploaded_file(
+        file_id,
+        user["userId"],
+        can_review_import_media='admin' in user.get("roles", []),
+    )
+    if variant:
+        if variant != "thumbnail":
+            from core.errors import bad_request
+            raise bad_request("不支持的文件变体")
+        path, mime = get_uploaded_thumbnail(path, mime, file_id)
+    return FileResponse(path, media_type=mime, filename=name, content_disposition_type="inline")
+
+
+@router.delete("/api/tech-transfer/v1/files/{file_id}", summary="删除未被引用的上传文件")
+def delete_uploaded(file_id: int, user: dict = Depends(identity)):
+    delete_uploaded_file(file_id, user["userId"])
+    return success(None, "已删除")

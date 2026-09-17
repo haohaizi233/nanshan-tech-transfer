@@ -669,7 +669,9 @@
 			},
 			resumePublishDraftAfterLogin() {
 				const route = getPendingPublishRoute()
-				if (route) setTimeout(() => HostBridge.navigate(route), 250)
+				if (!route) return
+				// 登录和资料补全后都从这里恢复发布页；草稿仅在真正发布成功后清除。
+				setTimeout(() => HostBridge.navigate(route), 250)
 			},
 			onEdit() {
 				if (this.profile) this.fillForm(this.profile)

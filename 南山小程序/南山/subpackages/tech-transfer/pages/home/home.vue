@@ -136,7 +136,7 @@
 							<text class="info-label">技术简介</text>
 							<text class="info-text info-text-user-text">{{ item.techIntro }}</text>
 						</view>
-						<view class="price-row">
+						<view v-if="item.price" class="price-row">
 							<text class="price-label">期望报价</text>
 							<text class="price-value">{{ item.price }}</text>
 						</view>

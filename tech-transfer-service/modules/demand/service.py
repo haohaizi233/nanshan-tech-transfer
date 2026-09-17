@@ -198,7 +198,25 @@ def _parse_upsert_body(body: dict, partial: bool):
         if not isinstance(tags, list) or any(not isinstance(t, str) for t in tags):
             raise bad_request("tags 必须是字符串数组")
 
-    return fields, tags
+    attachments = body.get("attachments")
+    if attachments is not None:
+        if not isinstance(attachments, list) or len(attachments) > 20:
+            raise bad_request("attachments 必须是最多 20 项的数组")
+        cleaned = []
+        for index, item in enumerate(attachments):
+            if not isinstance(item, dict):
+                raise bad_request(f"attachments[{index}] 必须是对象")
+            try:
+                file_id = int(item.get("fileId"))
+            except (ValueError, TypeError):
+                raise bad_request(f"attachments[{index}].fileId 无效")
+            role = item.get("role", "attachment")
+            if role not in ("attachment", "image", "specification"):
+                raise bad_request(f"attachments[{index}].role 无效")
+            cleaned.append({"fileId": file_id, "role": role, "caption": str(item.get("caption") or "").strip()[:500] or None, "sort": index})
+        attachments = cleaned
+
+    return fields, tags, attachments
 
 
 def _validate_refs(cur, fields):
@@ -366,7 +384,7 @@ def _row_to_summary(row, tags, user_id):
     }
 
 
-def _row_to_detail(row, tags, user_id, contact_visible=False):
+def _row_to_detail(row, tags, user_id, contact_visible=False, attachments=None):
     is_owner = row["owner_user_id"] == user_id
     detail = _row_to_summary(row, tags, user_id)
     # 联系方式：仅发布方本人或已被接受的对接（accepted/confirmed/completed）可见明文，
@@ -393,6 +411,7 @@ def _row_to_detail(row, tags, user_id, contact_visible=False):
         "description": row["description"],
         "expectDeadline": str(row["expect_deadline"]) if row.get("expect_deadline") else None,
         "orgIntro": row.get("org_intro"),
+        "attachments": attachments or [],
         **contact,
     })
     return detail
@@ -519,13 +538,14 @@ def get_demand_detail(demand_id: int, user_id: int):
             row["owner_user_id"] == user_id
             or has_accepted_intent(cur, "demand", demand_id, user_id)
         )
-    return _row_to_detail(row, tags, user_id, contact_visible)
+        attachments = _load_attachments(cur, demand_id)
+    return _row_to_detail(row, tags, user_id, contact_visible, attachments)
 
 
 # ── 写操作 ───────────────────────────────────────────────────
 
 def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
-    fields, tags = _parse_upsert_body(body, partial=False)
+    fields, tags, attachments = _parse_upsert_body(body, partial=False)
     if "ownerUserId" in body:
         print(f"[demand] WARNING: request body contains ownerUserId (ignored), user={user_no}")
     if fields.get("budget_min_wan") is not None and fields.get("budget_max_wan") is not None:
@@ -574,6 +594,7 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
         demand_id = cur.fetchone()["id"]
         if tags is not None:
             _sync_tags(cur, demand_id, tags)
+        _sync_attachments(cur, demand_id, user_id, attachments)
 
     audit_record(
         "demand.create", "demand", resource_id=demand_id,
@@ -584,7 +605,7 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
 
 
 def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, request_id=None):
-    fields, tags = _parse_upsert_body(body, partial=True)
+    fields, tags, attachments = _parse_upsert_body(body, partial=True)
     if fields.get("budget_min_wan") is not None and fields.get("budget_max_wan") is not None:
         if fields["budget_min_wan"] > fields["budget_max_wan"]:
             raise bad_request("budgetMinWan 不能大于 budgetMaxWan")
@@ -616,6 +637,7 @@ def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, reques
                 raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         if tags is not None:
             _sync_tags(cur, demand_id, tags)
+        _sync_attachments(cur, demand_id, user_id, attachments)
 
     audit_record(
         "demand.update", "demand", resource_id=demand_id,
@@ -659,6 +681,25 @@ def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, re
         details={"from": row["status"], "to": rule["to"], "reasonCode": reason_code, "reasonNote": reason_note}, request_id=request_id,
     )
     return {"status": rule["to"]}
+
+
+def _sync_attachments(cur, demand_id: int, user_id: int, attachments):
+    if attachments is None:
+        return
+    ids = [item["fileId"] for item in attachments]
+    if ids:
+        cur.execute("SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, ids))
+        if {int(r["id"]) for r in cur.fetchall()} != set(ids):
+            raise bad_request("附件文件不存在、已删除或不属于当前用户")
+    cur.execute("DELETE FROM demand_attachment WHERE demand_id=%s", (demand_id,))
+    for item in attachments:
+        cur.execute("INSERT INTO demand_attachment (demand_id,file_id,attachment_role,sort_order,caption) VALUES (%s,%s,%s,%s,%s)", (demand_id, item["fileId"], item["role"], item["sort"], item["caption"]))
+
+
+def _load_attachments(cur, demand_id: int):
+    cur.execute("SELECT da.file_id,da.attachment_role,da.sort_order,da.caption,fo.original_name,fo.mime_type,fo.size_bytes FROM demand_attachment da JOIN file_object fo ON fo.id=da.file_id AND fo.status='active' WHERE da.demand_id=%s ORDER BY da.sort_order,da.id", (demand_id,))
+    base = __import__("config").settings.MEDIA_BASE_URL.rstrip("/")
+    return [{"fileId": r["file_id"], "role": r["attachment_role"], "sortOrder": r["sort_order"], "caption": r["caption"], "name": r["original_name"], "mimeType": r["mime_type"], "sizeBytes": r["size_bytes"], "url": f"{base}/{r['file_id']}"} for r in cur.fetchall()]
 
 
 def submit_demand(user_id: int, user_no: str, demand_id: int, version, request_id=None):

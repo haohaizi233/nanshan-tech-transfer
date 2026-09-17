@@ -72,6 +72,10 @@ FRONTEND_DIR = ROOT / "南山"
 ADMIN_FRONTEND_DIR = ROOT.parent / "nanshan-frontend"
 ADMIN_DIST_INDEX = ADMIN_FRONTEND_DIR / "dist" / "index.html"
 API_SERVER_DIR = ROOT.parent / "tech-transfer-service"
+# 启动器常由系统 Python 调起；后端必须优先使用项目已验证的虚拟环境，
+# 否则系统级 FastAPI/Pydantic 的版本漂移会在路由注册阶段导致启动失败。
+BACKEND_VENV_PYTHON = ROOT.parent / ".venv" / "Scripts" / "python.exe"
+BACKEND_PYTHON = str(BACKEND_VENV_PYTHON if BACKEND_VENV_PYTHON.is_file() else Path(sys.executable))
 BACKEND_URL = "http://127.0.0.1:8787"
 HEALTH_URL = BACKEND_URL + "/api/health"
 API_ROOT = BACKEND_URL + "/api/tech-transfer/v1"
@@ -496,16 +500,20 @@ def wait_backend_ready(proc, timeout=30):
 def ensure_backend_deps():
     """检查 import 名，安装以 requirements.txt 为准。"""
     required = ("fastapi", "uvicorn", "psycopg2", "jwt", "pypdfium2", "PIL")
-    missing = [m for m in required if importlib.util.find_spec(m) is None]
+    probe = subprocess.run(
+        [BACKEND_PYTHON, "-c", "import importlib.util,sys; missing=[m for m in sys.argv[1:] if importlib.util.find_spec(m) is None]; print(','.join(missing))", *required],
+        capture_output=True, text=True,
+    )
+    missing = [m for m in probe.stdout.strip().split(",") if m] if probe.returncode == 0 else list(required)
     if not missing:
-        ok("后端依赖已就绪（fastapi / uvicorn / psycopg2 / pyjwt / pypdfium2）")
+        ok(f"后端依赖已就绪（{BACKEND_PYTHON}）")
         return True
     print(f"  检测到缺少依赖：{', '.join(missing)}，自动安装中（依据 requirements.txt）...")
     env = os.environ.copy()
     env.setdefault("NO_PROXY", "pypi.tuna.tsinghua.edu.cn")
     env.setdefault("no_proxy", "pypi.tuna.tsinghua.edu.cn")
     ret = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", str(API_SERVER_DIR / "requirements.txt")],
+        [BACKEND_PYTHON, "-m", "pip", "install", "-r", str(API_SERVER_DIR / "requirements.txt")],
         env=env,
     )
     if ret.returncode != 0:
@@ -616,7 +624,7 @@ def start_backend(lan):
     env.setdefault("APP_ENV", "local")
     env.setdefault("HOST_MODE", "local")
     env.setdefault("AUTH_PROVIDER", "mock")
-    proc = subprocess.Popen([sys.executable, "-u", "app.py"], cwd=API_SERVER_DIR, env=env)
+    proc = subprocess.Popen([BACKEND_PYTHON, "-u", "app.py"], cwd=API_SERVER_DIR, env=env)
     register_process("backend", proc)
     if not wait_backend_ready(proc):
         error("后端未就绪")
@@ -1183,6 +1191,7 @@ def run_doctor():
         print(f"  [{tag}] {name}" + (f" — {detail}" if detail else ""))
 
     check("Python", sys.version_info >= (3, 10), sys.version.split()[0], fatal=True)
+    check("后端 Python", Path(BACKEND_PYTHON).is_file(), BACKEND_PYTHON, fatal=True)
 
     for mod, pkg in (
         ("fastapi", "fastapi"),
@@ -1192,7 +1201,11 @@ def run_doctor():
         ("pypdfium2", "pypdfium2"),
         ("PIL", "Pillow"),
     ):
-        has = importlib.util.find_spec(mod) is not None
+        probe = subprocess.run(
+            [BACKEND_PYTHON, "-c", "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)", mod],
+            capture_output=True,
+        )
+        has = probe.returncode == 0
         check(f"后端依赖 {pkg}", has, "" if has else f"import {mod} 失败（pip install {pkg}）")
 
     for f in ("manifest.json", "pages.json", "main.js", "App.vue", "config/local.env.js", "host/host-bridge.js"):

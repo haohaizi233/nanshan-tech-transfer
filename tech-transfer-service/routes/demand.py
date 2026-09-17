@@ -7,7 +7,7 @@ Architecture source: openapi.yaml paths /demands, /demands/{id},
 from fastapi import APIRouter, Depends, Request
 
 from core.response import success, get_request_id
-from core.middleware import identity, json_body
+from core.middleware import identity, optional_identity, json_body
 from core.errors import bad_request
 from modules.demand.service import (
     list_demands,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["demand"])
 
 
 @router.get("/demands")
-def demands_list(request: Request, user: dict = Depends(identity)):
+def demands_list(request: Request, user: dict = Depends(optional_identity)):
     return success(list_demands(request.query_params, user["userId"]))
 
 
@@ -40,7 +40,7 @@ def demands_create(request: Request, user: dict = Depends(identity), body: dict 
 
 
 @router.get("/demands/{demand_id}")
-def demand_detail(demand_id: int, user: dict = Depends(identity)):
+def demand_detail(demand_id: int, user: dict = Depends(optional_identity)):
     return success(get_demand_detail(demand_id, user["userId"]))
 
 

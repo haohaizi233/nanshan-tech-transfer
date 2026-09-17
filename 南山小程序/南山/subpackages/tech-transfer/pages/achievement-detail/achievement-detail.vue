@@ -16,6 +16,7 @@
       <!-- 标题区 -->
       <view class="header-card">
         <text class="title">{{ detail.title }}</text>
+        <text v-if="detail.titleEn" class="title-en">{{ detail.titleEn }}</text>
         <view class="header-meta">
           <text v-if="detail.categoryName" class="badge">{{ detail.categoryName }}</text>
           <text v-if="maturityText" class="maturity-tag">{{ maturityText }}</text>
@@ -26,7 +27,7 @@
       <view class="info-card">
         <view class="info-row">
           <text class="info-label">来源机构</text>
-          <text class="info-value">{{ detail.sourceOrgName || '—' }}</text>
+          <text class="info-value">{{ detail.sourceOrgName }}</text>
         </view>
         <view v-if="detail.publishedAt" class="info-row">
           <text class="info-label">发布时间</text>
@@ -39,9 +40,36 @@
       </view>
 
       <!-- 技术简介 -->
-      <view class="section-card">
+      <view v-if="detail.techIntro" class="section-card">
         <text class="section-title">技术简介</text>
-        <text class="section-text">{{ detail.techIntro || '—' }}</text>
+        <text class="section-text">{{ detail.techIntro }}</text>
+      </view>
+
+      <view v-if="detail.media && detail.media.length" class="section-card">
+        <text class="section-title">成果资料</text>
+        <view class="media-grid">
+          <image v-for="media in detail.media" :key="media.fileId" class="media-image" :src="media.url" mode="aspectFill" />
+        </view>
+      </view>
+
+      <view v-for="section in dynamicSections" :key="section.code + section.sortOrder" class="section-card">
+        <text class="section-title">{{ section.title }}</text>
+        <text class="section-text">{{ section.content }}</text>
+      </view>
+
+      <view v-if="detail.patents && detail.patents.length" class="section-card">
+        <text class="section-title">关联专利</text>
+        <view v-for="patent in detail.patents" :key="patent.patentNo" :class="['link-row', { 'link-row-clickable': canOpenPatent(patent) }]" @click="openPatent(patent)">
+          <text class="link-text">{{ patent.patentNo }}{{ patent.title ? ' · ' + patent.title : '' }}</text>
+          <text v-if="patent.internalDetailAvailable || patent.externalUrl" class="link-arrow">›</text>
+        </view>
+      </view>
+
+      <view v-if="detail.links && detail.links.length" class="section-card">
+        <text class="section-title">相关链接</text>
+        <view v-for="link in detail.links" :key="link.url" class="link-row" @click="openLink(link.url)">
+          <text class="link-text">{{ link.label }}</text><text class="link-arrow">›</text>
+        </view>
       </view>
 
       <!-- 技术路线 -->
@@ -77,14 +105,14 @@
       </view>
 
       <!-- 报价 -->
-      <view class="section-card">
+      <view v-if="hasPricing" class="section-card">
         <text class="section-title">期望报价</text>
         <view class="price-box">
           <text class="price-mode">{{ formatPricingMode(detail.pricingMode) }}</text>
           <text v-if="detail.priceMinWan" class="price-amount">
             {{ detail.priceMinWan }}{{ detail.priceMaxWan ? ' – ' + detail.priceMaxWan : '' }} 万
           </text>
-          <text v-else class="price-amount price-negotiable">面议</text>
+          <text v-else-if="detail.pricingMode === 'negotiable'" class="price-amount price-negotiable">面议</text>
         </view>
       </view>
 
@@ -177,6 +205,15 @@ export default {
       }
       return groups
     },
+    dynamicSections() {
+      return Array.isArray(this.detail && this.detail.sections)
+        ? this.detail.sections.filter((section) => section && section.title && section.content)
+        : []
+    },
+    hasPricing() {
+      const d = this.detail || {}
+      return d.pricingMode === 'negotiable' || d.priceMinWan != null || d.priceMaxWan != null
+    },
   },
   onLoad(options) {
     this.achId = parseInt(options.id, 10)
@@ -202,11 +239,26 @@ export default {
       }
     },
     formatPricingMode(mode) {
-      return PRICING_MODE_LABELS[mode] || '面议'
+      return PRICING_MODE_LABELS[mode] || ''
     },
     onProposeDock() {
       if (!this.achId) return
       HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: this.achId })
+    },
+    canOpenPatent(patent) {
+      return !!(patent && (patent.internalDetailAvailable || patent.externalUrl))
+    },
+    openPatent(patent) {
+      if (!this.canOpenPatent(patent)) return
+      if (patent.internalDetailAvailable) {
+        HostBridge.navigate('pages/patent-detail/patent-detail', { publicationNo: patent.patentNo })
+      } else if (patent.externalUrl) {
+        this.openLink(patent.externalUrl)
+      }
+    },
+    openLink(url) {
+      if (!url) return
+      HostBridge.navigate('pages/web-view/web-view', { url })
     },
     goBack() {
       uni.navigateBack()
@@ -286,6 +338,7 @@ export default {
   line-height: 1.4;
   margin-bottom: 20rpx;
 }
+.title-en { display: block; font-size: 25rpx; color: #718096; line-height: 1.5; margin: -8rpx 0 18rpx; word-break: break-word; }
 
 .header-meta {
   display: flex;
@@ -353,6 +406,13 @@ export default {
   color: #555;
   line-height: 1.6;
 }
+.media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; }
+.media-image { width: calc(50% - 6rpx); height: 210rpx; border-radius: 10rpx; background: #eef4ff; }
+.link-row { display: flex; align-items: center; min-height: 72rpx; border-bottom: 1rpx solid #edf1f5; }
+.link-row-clickable { cursor: pointer; }
+.link-row:last-child { border-bottom: none; }
+.link-text { flex: 1; color: #2b73f8; font-size: 27rpx; line-height: 1.45; word-break: break-all; }
+.link-arrow { color: #8fa0b5; font-size: 40rpx; margin-left: 12rpx; }
 
 .field-tags {
   display: flex;

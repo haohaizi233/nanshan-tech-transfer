@@ -34,6 +34,22 @@
       </view>
     </scroll-view>
 
+    <!-- 产业筛选：目录来自后台配置；没有选项或未选择时不构造任何产业语义。 -->
+    <scroll-view v-if="industries.length" class="industry-bar" scroll-x>
+      <view class="industry-item" :class="activeIndustryId === '' ? 'industry-active' : ''" @click="switchIndustry('')">
+        <text>全部产业</text>
+      </view>
+      <view
+        v-for="industry in industries"
+        :key="industry.id"
+        class="industry-item"
+        :class="String(activeIndustryId) === String(industry.id) ? 'industry-active' : ''"
+        @click="switchIndustry(industry.id)"
+      >
+        <text>{{ industry.name }}</text>
+      </view>
+    </scroll-view>
+
     <!-- 列表 -->
     <view class="list-wrap">
       <!-- 加载中（首次） -->
@@ -55,23 +71,28 @@
           class="card"
           @click="openDetail(item.id)"
         >
-          <view class="card-head">
-            <text class="card-title">{{ item.title }}</text>
-            <text v-if="item.categoryName" class="badge">{{ item.categoryName }}</text>
-          </view>
-          <view v-if="item.sourceOrgName" class="meta-row">
-            <text class="meta-source">{{ item.sourceOrgName }}</text>
-            <view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
-              <image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
-              <text>认证</text>
+          <view class="card-summary">
+            <image v-if="item.cover && item.cover.url" class="cover" :src="item.cover.thumbnailUrl || item.cover.url" mode="aspectFill" />
+            <view class="card-content">
+              <view class="card-head">
+                <text class="card-title">{{ item.title }}</text>
+                <text v-if="item.categoryName" class="badge">{{ item.categoryName }}</text>
+              </view>
+              <view v-if="item.sourceOrgName" class="meta-row">
+                <text class="meta-source">{{ item.sourceOrgName }}</text>
+                <view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+                  <image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+                  <text>认证</text>
+                </view>
+                <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
+              </view>
+              <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
             </view>
-            <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
           </view>
-          <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
           <view v-if="item.applicationFields && item.applicationFields.length" class="field-tags">
             <text v-for="(field, idx) in item.applicationFields.slice(0, 3)" :key="idx" class="field-tag">{{ field }}</text>
           </view>
-          <view class="price-row">
+          <view v-if="formatPrice(item)" class="price-row">
             <text class="price-label">期望报价</text>
             <text class="price-value">{{ formatPrice(item) }}</text>
           </view>
@@ -97,7 +118,7 @@
 </template>
 
 <script>
-import { getAchievements, getAchievementCategories } from '../../api/achievement.js'
+import { getAchievements, getAchievementCategories, getAchievementIndustries } from '../../api/achievement.js'
 import HostBridge from '../../../../host/host-bridge.js'
 
 const MATURITY_LABELS = {
@@ -120,7 +141,9 @@ export default {
     return {
       keyword: '',
       activeCategory: '',
+      activeIndustryId: '',
       categories: [],
+      industries: [],
       list: [],
       page: 1,
       pageSize: 10,
@@ -132,6 +155,7 @@ export default {
   },
   onLoad() {
     this.loadCategories()
+    this.loadIndustries()
     this.loadList(true)
   },
   onReachBottom() {
@@ -151,6 +175,14 @@ export default {
         console.error('[achievement-list] loadCategories failed:', e)
       }
     },
+    async loadIndustries() {
+      try {
+        this.industries = (await getAchievementIndustries()) || []
+      } catch (e) {
+        console.error('[achievement-list] loadIndustries failed:', e)
+        this.industries = []
+      }
+    },
     async loadList(reset) {
       if (this.loading) return
       this.loading = true
@@ -165,6 +197,7 @@ export default {
           pageSize: this.pageSize,
           keyword: this.keyword,
           category: this.activeCategory,
+          industryId: this.activeIndustryId,
         })
         const items = data.list || []
         if (reset) {
@@ -200,12 +233,20 @@ export default {
       this.activeCategory = code
       this.loadList(true)
     },
+    switchIndustry(id) {
+      if (String(this.activeIndustryId) === String(id)) return
+      this.activeIndustryId = id
+      this.loadList(true)
+    },
     formatMaturity(item) {
       return MATURITY_LABELS[item.maturityLevel] || item.maturityDesc || ''
     },
     formatPrice(item) {
-      if (item.pricingMode === 'negotiable' || !item.priceMinWan) {
-        return PRICING_LABELS[item.pricingMode] || '面议'
+      if (item.pricingMode === 'negotiable') {
+        return '面议'
+      }
+      if (!item.priceMinWan) {
+        return ''
       }
       const min = item.priceMinWan
       const max = item.priceMaxWan
@@ -324,6 +365,54 @@ export default {
   margin-bottom: 24rpx;
 }
 
+.industry-bar {
+  white-space: nowrap;
+  background: #f7f9fc;
+  border-bottom: 1rpx solid #edf1f5;
+  padding: 12rpx 20rpx;
+  box-sizing: border-box;
+}
+
+.industry-item {
+  display: inline-flex;
+  align-items: center;
+  height: 52rpx;
+  margin-right: 14rpx;
+  padding: 0 20rpx;
+  border-radius: 26rpx;
+  background: #fff;
+  border: 1rpx solid #e4eaf2;
+  color: #667085;
+  font-size: 24rpx;
+  box-sizing: border-box;
+}
+
+.industry-active {
+  background: #eaf2ff;
+  border-color: #2b73f8;
+  color: #2b73f8;
+  font-weight: 600;
+}
+
+.card-summary {
+  display: flex;
+  min-width: 0;
+}
+
+.card-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.cover {
+  width: 150rpx;
+  height: 150rpx;
+  flex-shrink: 0;
+  border-radius: 12rpx;
+  background: #f0f4fb;
+  margin-right: 20rpx;
+}
+
 .card-head {
   display: flex;
   justify-content: space-between;
@@ -373,9 +462,15 @@ export default {
 	display: block;
 	font-size: 26rpx;
 	color: #555;
+	line-height: 1.5;
+	margin-bottom: 16rpx;
+	/* 人工填写的摘要与详情正文使用相同的两字符首行缩进。 */
 	text-indent: 2em;
-  line-height: 1.5;
-  margin-bottom: 16rpx;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
 }
 
 .field-tags {
