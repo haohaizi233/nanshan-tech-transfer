@@ -17,6 +17,15 @@
 				"navigationBarTextStyle": "black",
 				"backgroundColor": "#F5F6F8"
 			}
+		},
+		{
+			"path": "pages/ai-home/ai-home",
+			"style": {
+				"navigationBarTitleText": "AI匹配",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black",
+				"backgroundColor": "#F5F6F8"
+			}
 		}
 	],
 	"subPackages": [
@@ -29,7 +38,8 @@
 						"navigationBarTitleText": "南山科转通",
 						"navigationBarBackgroundColor": "#FFFFFF",
 						"navigationBarTextStyle": "black",
-						"backgroundColor": "#F5F6F8"
+						"backgroundColor": "#F5F6F8",
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -223,6 +233,12 @@
 				"text": "工作台",
 				"iconPath": "static/tab/home.png",
 				"selectedIconPath": "static/tab/home-active.png"
+			},
+			{
+				"pagePath": "pages/ai-home/ai-home",
+				"text": "AI匹配",
+				"iconPath": "static/tab/ai.png",
+				"selectedIconPath": "static/tab/ai-active.png"
 			},
 			{
 				"pagePath": "pages/mine-home/mine-home",

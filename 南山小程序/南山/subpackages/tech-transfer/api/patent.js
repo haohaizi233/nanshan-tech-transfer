@@ -6,7 +6,7 @@
 
 import { apiRequest } from './client.js'
 import HostBridge from '../../../host/host-bridge.js'
-import { resolveH5ApiBase } from './api-origin.js'
+import { resolveServiceOrigin } from './api-origin.js'
 
 const TYPE_LABEL = {
   invention: '发明专利',
@@ -40,20 +40,7 @@ export async function getPatentDetail(publicationNo, language = '') {
 }
 
 export function resolvePatentApiOrigin(env = {}, pageLocation = globalThis.location) {
-  if (env.hostMode === 'local') {
-    return resolveH5ApiBase({
-      appEnv: env.appEnv,
-      localApiBase: env.apiBase,
-      pageLocation,
-    })
-  }
-  if (env.apiBase) return String(env.apiBase).replace(/\/$/, '')
-  try {
-    if (pageLocation && pageLocation.origin) return pageLocation.origin
-  } catch (e) {
-    // ignore
-  }
-  return ''
+  return resolveServiceOrigin(env, pageLocation)
 }
 
 function apiOrigin() {

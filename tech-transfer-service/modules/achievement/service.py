@@ -690,6 +690,7 @@ def create_achievement(
     body: dict,
     request_id=None,
     source_import_item_id: int | None = None,
+    media_owner_user_id: int | None = None,
 ):
     fields, inventor_refs, content = _parse_upsert_body(body, partial=False)
     if fields.get("price_min_wan") is not None and fields.get("price_max_wan") is not None:
@@ -741,7 +742,9 @@ def create_achievement(
         ach_id = cur.fetchone()["id"]
         if inventor_refs:
             _sync_inventors(cur, ach_id, inventor_refs, user_id)
-        sync_content(cur, ach_id, user_id, content)
+        # 导入候选媒体由执行导入的账号持有；平台管理员审核确认时，
+        # 只对这类有来源追溯的内部导入记录沿用其文件归属。
+        sync_content(cur, ach_id, media_owner_user_id or user_id, content)
 
     audit_record(
         "achievement.create", "achievement", resource_id=ach_id,

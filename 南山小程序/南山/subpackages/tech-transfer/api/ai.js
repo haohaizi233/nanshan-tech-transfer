@@ -1,10 +1,9 @@
 /**
- * AI 任务 API —— 匹配（match）与成果评估（evaluation）
+ * AI API —— 需求匹配（同步）+ 成果评估（异步任务）+ 自然语言对话
  *
- * 后端契约（openapi.yaml /ai/*）：任务排队制——创建 202 queued /
- * 去重命中 200；结果仅由 worker 写入，前端轮询展示，
- * 无 worker 时任务保持 queued（无假数据回填）。
- *
+ * 需求匹配 / 对话：同步经后端转发到 nanshan-ai-agent，直接返回成果卡片。
+ * 成果评估：任务排队制——创建 202 queued / 去重命中 200；结果仅由 worker 写入，
+ * 前端轮询展示，无 worker 时任务保持 queued（无假数据回填）。
  * 任务状态机：queued → running → succeeded | failed
  *
  * 运行时开关：AI_FEATURE_ENABLED=false 时本模块拒绝发起请求，
@@ -32,22 +31,14 @@ export function assertAiRuntimeEnabled() {
 // ── 需求匹配 ──────────────────────────────────────────────────
 
 /**
- * 发起需求-成果匹配任务（去重：同需求 10 分钟内未终态任务直接复用）
- * @returns {Promise<{taskId:number, status:string}>}
+ * 需求-成果匹配（同步）：把指定需求当成一次成果检索，返回命中的成果卡片。
+ * 后端做角色校验（仅需求所有者）与状态校验（仅 published/matched），
+ * 命中成果由 ai-agent 侧 status='published' 过滤，与前端成果列表可见集合一致。
+ * @returns {Promise<{demandId, demandTitle, intent, agentMessage, cards:Array}>}
  */
-export async function createMatchTask(demandId) {
+export async function matchDemand(demandId) {
   assertAiRuntimeEnabled()
-  return apiRequest('POST', '/ai/match-tasks', null, { demandId })
-}
-
-/**
- * 查询匹配任务（仅创建者可见）
- * @returns {Promise<{taskId, status, results, failReason, createdAt, finishedAt}>}
- * succeeded 时 results: [{achievementId, achievementTitle, orgName, score, matchReasons}]
- */
-export async function getMatchTask(taskId) {
-  assertAiRuntimeEnabled()
-  return apiRequest('GET', `/ai/match-tasks/${taskId}`)
+  return apiRequest('POST', '/ai/match', null, { demandId })
 }
 
 // ── 成果评估 ──────────────────────────────────────────────────
@@ -70,4 +61,17 @@ export async function createEvaluationTask(achievementId) {
 export async function getEvaluationTask(taskId) {
   assertAiRuntimeEnabled()
   return apiRequest('GET', `/ai/evaluation-tasks/${taskId}`)
+}
+
+// ── 自然语言对话（nanshan-ai-agent demo）─────────────────────
+
+/**
+ * 与 AI 助手对话：自然语言查询科技成果 / 技术需求。
+ * 后端转发到 nanshan-ai-agent，返回 {success, intent, message, data:[卡片]}。
+ * 卡片 card_type: 'achievement' | 'demand'。
+ * @returns {Promise<{success:boolean, intent:string, message:string, data:Array}>}
+ */
+export async function chatWithAgent(message) {
+  assertAiRuntimeEnabled()
+  return apiRequest('POST', '/ai/chat', null, { message })
 }

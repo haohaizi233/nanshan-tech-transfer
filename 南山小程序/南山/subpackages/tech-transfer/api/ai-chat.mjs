@@ -4,12 +4,12 @@
  */
 
 export const WELCOME =
-  '你好，我是南山科转通 AI 助手。本页回答由人工智能生成，仅供参考。\n\n可以直接描述你想找的技术方向，或输入 / 调用技能。当前支持技能：/匹配（按我的需求推荐技术成果）。'
+  '你好，我是南山科转通 AI 助手。本页回答由人工智能生成，仅供参考。\n\n可以直接用自然语言描述你想找的技术方向或需求，例如「找机器视觉相关的成果」「有哪些人工智能方向的需求」。也可输入 / 调用技能。当前支持技能：/匹配（按我的需求推荐技术成果）。'
 
 export const SUGGESTIONS = [
   '/匹配',
-  '我想找医疗影像相关成果',
-  '有没有工业视觉检测方向？',
+  '帮我找机器学习用于生态环境遥感监测的科技成果',
+  '有哪些企业需要机器视觉的技术需求？',
 ]
 
 export const SKILLS = [
@@ -50,6 +50,43 @@ export function buildDemoReply(userText) {
     '」。\n\n' +
     '自由问答仍在演示中。若要按已发布需求匹配成果，请输入 / 选择「AI 需求匹配」。'
   )
+}
+
+/**
+ * 将 nanshan-ai-agent 的回包整理为对话消息内容。
+ * @param {object} res {success, intent, message, data:[card]}
+ * @returns {{content:string, type:string, payload:{cards:Array}}}
+ */
+export function formatAgentReply(res) {
+  if (!res || typeof res !== 'object') {
+    return { content: 'AI 助手返回异常，请稍后重试。', type: 'text', payload: { cards: [] } }
+  }
+  const message = String(res.message || '').trim()
+  const cards = Array.isArray(res.data) ? res.data.filter(Boolean) : []
+  if (!cards.length) {
+    return { content: message || '暂未找到匹配内容。', type: 'text', payload: { cards: [] } }
+  }
+  return {
+    content: message,
+    type: 'agent-cards',
+    payload: { cards },
+  }
+}
+
+/**
+ * 卡片点击跳转：
+ * achievement -> pages/achievement-detail/achievement-detail?id=
+ * demand      -> pages/dock-detail/dock-detail?type=demand&id=
+ */
+export function cardNavigateTarget(card) {
+  if (!card || !card.id) return null
+  if (card.card_type === 'achievement') {
+    return { path: 'pages/achievement-detail/achievement-detail', query: { id: card.id } }
+  }
+  if (card.card_type === 'demand') {
+    return { path: 'pages/dock-detail/dock-detail', query: { type: 'demand', id: card.id } }
+  }
+  return null
 }
 
 export function isSlashDraft(text) {

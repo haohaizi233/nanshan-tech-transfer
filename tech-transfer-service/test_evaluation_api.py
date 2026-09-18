@@ -141,15 +141,10 @@ resp = requests.get(f"{BASE}/ai/evaluation-tasks/{task_id}", timeout=10)
 check("无Token查询=401", resp.status_code == 401)
 print()
 
-# ── 4. 任务类型隔离（match ≠ evaluation） ────────────────────
-resp = requests.post(f"{BASE}/demands", headers=h_b, json={
-    "title": "评估隔离测试需求", "description": "x", "contactPhone": "13600009999",
-}, timeout=10)
-b_demand_id = resp.json()["data"]["id"]
-resp = requests.post(f"{BASE}/ai/match-tasks", headers=h_b, json={"demandId": b_demand_id}, timeout=10)
-b_match_task_id = resp.json()["data"]["taskId"]
-resp = requests.get(f"{BASE}/ai/evaluation-tasks/{b_match_task_id}", headers=h_b, timeout=10)
-check("match任务经evaluation端点查=404（类型隔离）", resp.status_code == 404, f"got {resp.status_code}")
+# ── 4. 评估任务类型边界（match 已改为同步 /ai/match，不再落 ai_task）──
+# 评估端点对不存在的 taskId 一律 404，且不与同步匹配端点混淆
+resp = requests.get(f"{BASE}/ai/evaluation-tasks/999999", headers=h_b, timeout=10)
+check("评估任务不存在=404", resp.status_code == 404, f"got {resp.status_code}")
 check("错误码TT_AI_40401", resp.json().get("code") == "TT_AI_40401", resp.text[:100])
 print()
 

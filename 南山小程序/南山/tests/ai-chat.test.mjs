@@ -46,7 +46,7 @@ test('ai-match page restores the chat composer and slash skill sheet', () => {
   assert.match(source, /class="composer"/)
   assert.match(source, /class="skill-sheet"/)
   assert.match(source, /runMatchSkill/)
-  assert.match(source, /createMatchTask/)
+  assert.match(source, /matchDemand/)
   assert.match(source, /AiGeneratedMark/)
   assert.match(source, /人工智能生成/)
   assert.match(source, /功能即将开放/)

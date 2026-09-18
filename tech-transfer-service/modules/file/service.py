@@ -186,16 +186,40 @@ def get_uploaded_file(
         row = cur.fetchone()
     if not row:
         raise not_found("文件不存在")
-    # 公开成果/需求引用的文件可读；草稿、导入中或私有附件只允许上传者读取。
-    if int(row["created_by"]) != user_id:
+    # 公开内容的引用文件可读；草稿图仅上传者、成果/需求归属方或机构管理员可读。
+    if user_id is None or int(row["created_by"]) != int(user_id):
         with get_cursor() as cur:
             cur.execute(
-                """SELECT 1 FROM achievement_media am JOIN achievement a ON a.id=am.achievement_id
-                   WHERE am.file_id=%s AND a.status='published'
-                   UNION ALL
-                   SELECT 1 FROM demand_attachment da JOIN demand d ON d.id=da.demand_id
-                   WHERE da.file_id=%s AND d.status='published' LIMIT 1""",
-                (file_id, file_id),
+                """
+                SELECT 1 FROM achievement_media am
+                JOIN achievement a ON a.id = am.achievement_id AND a.deleted_at IS NULL
+                WHERE am.file_id = %s AND (
+                    a.status = 'published'
+                    OR (%s IS NOT NULL AND a.owner_user_id = %s)
+                    OR %s
+                    OR (%s IS NOT NULL AND a.org_id IN (
+                        SELECT org_id FROM organization_membership
+                        WHERE user_id = %s AND role = 'admin' AND status = 'active'
+                    ))
+                )
+                UNION ALL
+                SELECT 1 FROM demand_attachment da
+                JOIN demand d ON d.id = da.demand_id AND d.deleted_at IS NULL
+                WHERE da.file_id = %s AND (
+                    d.status = 'published'
+                    OR (%s IS NOT NULL AND d.owner_user_id = %s)
+                    OR %s
+                    OR (%s IS NOT NULL AND d.org_id IN (
+                        SELECT org_id FROM organization_membership
+                        WHERE user_id = %s AND role = 'admin' AND status = 'active'
+                    ))
+                )
+                LIMIT 1
+                """,
+                (
+                    file_id, user_id, user_id, can_review_import_media, user_id, user_id,
+                    file_id, user_id, user_id, can_review_import_media, user_id, user_id,
+                ),
             )
             readable = bool(cur.fetchone())
             if not readable and can_review_import_media:

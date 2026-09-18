@@ -109,48 +109,6 @@ def complete_json(system: str, user: str) -> Any:
     return parse_json_content(content)
 
 
-def match_demand(snapshot: dict, achievements: list[dict]) -> list[dict]:
-    system = (
-        "你是南山科转通的技术供需匹配助手。只输出 JSON，不要 markdown。"
-        "格式：{\"results\":[{\"achievementId\":1,\"score\":0-100,\"matchReasons\":[\"理由\"]}] }。"
-        "只从给定成果中挑选，最多 8 条，按 score 降序。没有合适成果时 results 为空数组。"
-    )
-    user = json.dumps(
-        {"demand": snapshot, "achievements": achievements},
-        ensure_ascii=False,
-        default=str,
-    )
-    data = complete_json(system, user)
-    rows = data.get("results") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise AiProviderError("match JSON missing results[]")
-    allowed = {int(item["id"]) for item in achievements if item.get("id") is not None}
-    out = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        try:
-            ach_id = int(row.get("achievementId") or row.get("achievement_id"))
-        except (TypeError, ValueError):
-            continue
-        if ach_id not in allowed:
-            continue
-        try:
-            score = float(row.get("score"))
-        except (TypeError, ValueError):
-            continue
-        score = max(0.0, min(100.0, round(score, 1)))
-        reasons = row.get("matchReasons") or row.get("match_reasons") or []
-        if not isinstance(reasons, list):
-            reasons = [str(reasons)]
-        reasons = [str(x).strip() for x in reasons if str(x).strip()][:6]
-        out.append({"achievementId": ach_id, "score": score, "matchReasons": reasons})
-        if len(out) >= 8:
-            break
-    out.sort(key=lambda item: (-item["score"], item["achievementId"]))
-    return out
-
-
 def evaluate_achievement(snapshot: dict) -> dict:
     system = (
         "你是南山科转通的成果评估助手。只输出 JSON，不要 markdown。"

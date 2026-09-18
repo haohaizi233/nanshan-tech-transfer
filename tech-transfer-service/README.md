@@ -28,6 +28,26 @@ python 南山小程序/start_dev.py --backend-only
 
 staging / production 部署时通过环境变量或 `.env` 提供：`APP_ENV`、真实 `DB_*`、≥16 位随机 `JWT_SECRET`、`HOST_MODE`/`AUTH_PROVIDER`（禁止 local/mock）、真实域名 `API_BASE`、`CORS_ORIGINS` 白名单。上述弱配置会被启动断言 `assert_environment()` 直接拦截（exit 1），不会带弱密钥进入生产。
 
+### PostgreSQL 内容与媒体迁移
+
+`migrations/pg/` 是 PostgreSQL 的增量迁移目录；根目录的 `run_migration.py`
+仅兼容历史 MySQL 脚本，不能用于 PostgreSQL。新环境或已有环境升级时，按编号顺序使用
+目标环境的 PostgreSQL 凭据执行尚未应用的脚本。成果动态内容、统一媒体、导入暂存及产业/标签
+关系对应以下迁移：
+
+```powershell
+cd tech-transfer-service
+Get-ChildItem migrations\pg\018_content_media_and_dynamic_sections.sql,
+              migrations\pg\019_achievement_import_source_trace.sql,
+              migrations\pg\020_achievement_industry.sql,
+              migrations\pg\021_seed_shenzhen_20_plus_8_industries.sql,
+              migrations\pg\022_achievement_tag_relations.sql |
+  ForEach-Object { psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -f $_.FullName }
+```
+
+这些脚本均为增量、幂等式 DDL；仍应先在备份后的预发布数据库验证。媒体目录、上传限制、微信
+业务域名与 PPT/PDF 暂存导入流程见 [`docs/media-and-import.md`](docs/media-and-import.md)。
+
 ### 说明
 
 - `.env`、`.env.*` 已被 `.gitignore` 忽略，只有 `.env.example` 模板入库；

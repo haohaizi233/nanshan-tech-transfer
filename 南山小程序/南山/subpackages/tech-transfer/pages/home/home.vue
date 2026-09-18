@@ -261,6 +261,13 @@
 		onShow() {
 			this.refreshList()
 		},
+		async onPullDownRefresh() {
+			try {
+				await this.refreshList(this.currentTabKey)
+			} finally {
+				uni.stopPullDownRefresh()
+			}
+		},
 		methods: {
 			/** 画像=推荐信号（非门禁）：勾选「寻找技术成果」默认展示成果 Tab，其余默认需求 Tab */
 			applyPersonaTab() {
@@ -274,12 +281,17 @@
 					// 画像仅影响默认 Tab，读取异常时保持默认
 				}
 			},
-			async refreshList() {
+			async refreshList(target = 'all') {
+				const shouldRefreshDemand = target !== 'result'
+				const shouldRefreshResult = target !== 'demand'
 				// 收藏状态（后端 API，失败时列表仍正常展示，只是不带收藏标记）
 				let favDemandIds = new Set()
 				let favResultIds = new Set()
 				try {
-					const sets = await Promise.all([getFavoriteIdSet('demand'), getFavoriteIdSet('result')])
+					const sets = await Promise.all([
+						shouldRefreshDemand ? getFavoriteIdSet('demand') : Promise.resolve(favDemandIds),
+						shouldRefreshResult ? getFavoriteIdSet('result') : Promise.resolve(favResultIds)
+					])
 					favDemandIds = sets[0]
 					favResultIds = sets[1]
 				} catch (e) {
@@ -287,7 +299,7 @@
 				}
 
 				// 需求列表（真实 API）
-				try {
+				if (shouldRefreshDemand) try {
 					const data = await retryRequest(() => getDemands({ page: 1, pageSize: 10 }))
 					this.demandList = (data.list || []).map((item) => {
 						const card = toDemandCard(item)
@@ -304,7 +316,7 @@
 				}
 
 				// 成果列表（真实 API）
-				try {
+				if (shouldRefreshResult) try {
 					const data = await retryRequest(() => getAchievements({ page: 1, pageSize: 10 }))
 					this.resultList = (data.list || []).map((item) =>
 						toAchievementPreviewCard(item, favResultIds.has(String(item.id)))

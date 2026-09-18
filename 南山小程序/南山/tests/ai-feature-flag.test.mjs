@@ -6,8 +6,8 @@ import { AI_FEATURE_ENABLED, SHOW_AI_MATCH_ENTRY, SHOW_DEV_HOST } from '../confi
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 
-test('AI feature is off and entry follows the same switch', () => {
-  assert.equal(AI_FEATURE_ENABLED, false)
+test('AI feature is on and entry follows the same switch', () => {
+  assert.equal(AI_FEATURE_ENABLED, true)
   assert.equal(SHOW_AI_MATCH_ENTRY, AI_FEATURE_ENABLED)
 })
 
@@ -24,12 +24,12 @@ test('AI API wrappers refuse requests when the feature is off', () => {
   const source = read('../subpackages/tech-transfer/api/ai.js')
   assert.match(source, /assertAiRuntimeEnabled/)
   assert.match(source, /AI_FEATURE_ENABLED/)
-  assert.equal((source.match(/export async function createMatchTask/g) || []).length, 1)
-  assert.equal((source.match(/export async function getMatchTask/g) || []).length, 1)
+  assert.equal((source.match(/export async function matchDemand/g) || []).length, 1)
+  assert.equal((source.match(/export async function chatWithAgent/g) || []).length, 1)
   assert.equal((source.match(/export async function createEvaluationTask/g) || []).length, 1)
   assert.equal((source.match(/export async function getEvaluationTask/g) || []).length, 1)
-  assert.match(source, /export async function createMatchTask[\s\S]*?assertAiRuntimeEnabled\(\)/)
-  assert.match(source, /export async function getMatchTask[\s\S]*?assertAiRuntimeEnabled\(\)/)
+  assert.match(source, /export async function matchDemand[\s\S]*?assertAiRuntimeEnabled\(\)/)
+  assert.match(source, /export async function chatWithAgent[\s\S]*?assertAiRuntimeEnabled\(\)/)
   assert.match(source, /export async function createEvaluationTask[\s\S]*?assertAiRuntimeEnabled\(\)/)
   assert.match(source, /export async function getEvaluationTask[\s\S]*?assertAiRuntimeEnabled\(\)/)
 })
@@ -41,7 +41,7 @@ test('mis-opened AI pages show coming soon and keep chat/eval source', () => {
   assert.match(matchPage, /功能即将开放/)
   assert.match(matchPage, /if \(!this\.aiEnabled\) return/)
   assert.match(matchPage, /class="composer"/)
-  assert.match(matchPage, /createMatchTask/)
+  assert.match(matchPage, /matchDemand/)
   assert.match(evalPage, /v-if="!aiEnabled"/)
   assert.match(evalPage, /功能即将开放/)
   assert.match(evalPage, /if \(!this\.aiEnabled\) return/)

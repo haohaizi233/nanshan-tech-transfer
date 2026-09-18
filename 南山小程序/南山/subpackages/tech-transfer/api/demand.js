@@ -85,6 +85,15 @@ export function toDemandCard(d) {
     contactTitle: d.contactTitle || '',
     phone: d.contactPhone || '',
     email: d.contactEmail || '',
-    wechat: d.contactWechat || ''
+    wechat: d.contactWechat || '',
+    attachments: (d.attachments || []).map((item) => ({
+      fileId: item.fileId || item.id,
+      role: item.role || 'attachment',
+      name: item.name || '',
+      mimeType: item.mimeType || '',
+      sizeBytes: item.sizeBytes || 0,
+      caption: item.caption || '',
+      url: item.url || '',
+    })),
   }
 }

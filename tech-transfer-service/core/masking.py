@@ -23,7 +23,9 @@ def mask_phone(phone):
 def mask_email(email):
     """邮箱脱敏：li@jm-green.com → l****@jm-green.com"""
     if not email or "@" not in email:
-        return email or None
+        # 旧库可能遗留非邮箱格式的联系方式。公开详情不能因无法按邮箱规则
+        # 打码就回退为明文；返回空值让调用方按“无可展示信息”处理。
+        return None
     local, _, domain = email.partition("@")
     if len(local) <= 2:
         return (local[:1] or "") + "****@" + domain

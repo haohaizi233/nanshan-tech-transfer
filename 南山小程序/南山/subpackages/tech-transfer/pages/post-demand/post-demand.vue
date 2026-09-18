@@ -63,6 +63,7 @@
 			<view class="section-head"><text class="section-title">附件资料</text><view><text class="add-link" @click="chooseDemandImage">+ 添加配图</text><text class="add-link add-link-gap" @click="chooseAttachment">{{ uploading ? '上传中…' : '+ 添加附件' }}</text></view></view>
 			<view v-if="!form.attachments.length" class="upload-hint">可上传需求说明、图片或技术资料，单文件最大 20MB</view>
 			<view v-for="(attachment, index) in form.attachments" :key="attachment.fileId || attachment.id" class="attachment-row">
+				<image v-if="isImageAttachment(attachment)" class="attachment-thumb" :src="mediaSrc(attachment)" mode="aspectFill" />
 				<text class="attachment-name">{{ attachment.name }}</text><text class="remove-link" @click="removeAttachment(index)">删除</text>
 			</view>
 		</view>
@@ -92,8 +93,8 @@
 		</view>
 
                 <view v-if="previewError" class="preview-error">{{ previewError }}</view>
-                <button class="submit-btn" type="primary" :disabled="submitting" @click="onPreview">预览并提交</button>
-                <publish-preview :visible="previewing" :items="previewItems" :submitting="submitting" @back="previewing = false" @confirm="onSubmit" />
+                <button class="submit-btn" type="primary" hover-class="none" :disabled="submitting" @tap="onPreview">预览并提交</button>
+                <publish-preview :visible="previewing" :items="previewItems" :images="previewImages" :submitting="submitting" @back="previewing = false" @confirm="onSubmit" />
 	</view>
 </template>
 
@@ -106,6 +107,7 @@
 	import { uploadContentFile } from '../../api/file.js'
         import HostBridge from '../../../../host/host-bridge.js'
         import PublishPreview from '../../components/publish-preview.vue'
+	import { isImageMedia, mediaDisplayUrl } from '../../api/media-url.mjs'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -195,7 +197,11 @@
                         certifiedCompanyLocked() { return this.organizations.length > 0 }
 						, previewItems() {
 							const f = this.form
-							return [{ label: '需求名称', value: f.title }, { label: '机构', value: f.company }, { label: '地点', value: f.location }, { label: '预算', value: f.budget }, { label: '合作方式', value: f.cooperationType }, { label: '需求说明', value: f.demandDesc }, { label: '附件', value: (f.attachments || []).map((item) => item.name).join('、') }, { label: '联系人', value: f.contactName }]
+							const files = (f.attachments || []).filter((item) => !isImageMedia(item)).map((item) => item.name).filter(Boolean)
+							return [{ label: '需求名称', value: f.title }, { label: '机构', value: f.company }, { label: '地点', value: f.location }, { label: '预算', value: f.budget }, { label: '合作方式', value: f.cooperationType }, { label: '需求说明', value: f.demandDesc }, { label: '附件', value: files.join('、') }, { label: '联系人', value: f.contactName }]
+						}
+						, previewImages() {
+							return (this.form.attachments || []).filter(isImageMedia).map((item) => this.mediaSrc(item)).filter(Boolean)
 						}
 		},
 		onLoad() {
@@ -297,7 +303,12 @@
 						try {
 							for (const file of files) {
 								const uploaded = await uploadContentFile(file.path)
-								this.form.attachments.push({ ...uploaded, role: (uploaded.mimeType || '').indexOf('image/') === 0 ? 'image' : 'attachment' })
+								this.form.attachments.push({
+									...uploaded,
+									fileId: uploaded.id,
+									role: (uploaded.mimeType || '').indexOf('image/') === 0 ? 'image' : 'attachment',
+									localPath: file.path,
+								})
 							}
 						} catch (error) { uni.showToast({ title: (error && error.message) || '附件上传失败', icon: 'none' }) } finally { this.uploading = false }
 					} })
@@ -309,12 +320,25 @@
 						try {
 							for (const path of (result.tempFilePaths || [])) {
 								const uploaded = await uploadContentFile(path)
-								this.form.attachments.push({ ...uploaded, role: 'image' })
+								this.form.attachments.push({
+									...uploaded,
+									fileId: uploaded.id,
+									role: 'image',
+									localPath: path,
+								})
 							}
 						} catch (error) { uni.showToast({ title: (error && error.message) || '配图上传失败', icon: 'none' }) } finally { this.uploading = false }
 					} })
 				},
 				removeAttachment(index) { this.form.attachments.splice(index, 1) },
+				isImageAttachment(item) { return isImageMedia(item) },
+				mediaSrc(item) {
+					return mediaDisplayUrl(
+						item,
+						HostBridge.getEnvironment() || {},
+						HostBridge.getStorage('tt_access_token') || '',
+					)
+				},
                         async onSubmit() {
 				if (this.submitting || this.uploading) { if (this.uploading) uni.showToast({ title: '附件上传中，请稍候', icon: 'none' }); return }
 				if (!isLoggedIn()) {
@@ -396,6 +420,7 @@
 		.remove-link { color: #e56a63; font-size: 25rpx; }
 		.upload-hint { color: #8b98aa; font-size: 25rpx; line-height: 1.55; }
 		.attachment-row { min-height: 68rpx; display: flex; align-items: center; border-bottom: 1rpx solid #edf1f5; }
+		.attachment-thumb { width: 88rpx; height: 88rpx; border-radius: 10rpx; background: #eef4ff; flex-shrink: 0; margin-right: 16rpx; }
 		.attachment-name { flex: 1; min-width: 0; color: #2b73f8; font-size: 26rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 	.form-item {

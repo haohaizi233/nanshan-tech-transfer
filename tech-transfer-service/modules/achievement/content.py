@@ -189,7 +189,7 @@ def _assert_owned_files(cur, user_id: int, file_ids: list[int]):
         raise bad_request("媒体文件不存在、已删除或不属于当前用户")
 
 
-def sync_content(cur, achievement_id: int, user_id: int, content: dict):
+def sync_content(cur, achievement_id: int, user_id: int, content: dict, allow_existing_media: bool = False):
     if "tags" in content:
         cur.execute("DELETE FROM achievement_tag_relation WHERE achievement_id=%s", (achievement_id,))
         for sort_order, tag_name in enumerate(content["tags"]):
@@ -219,7 +219,12 @@ def sync_content(cur, achievement_id: int, user_id: int, content: dict):
         for item in content["links"]:
             cur.execute("INSERT INTO achievement_link (achievement_id,link_type,label,url,sort_order) VALUES (%s,%s,%s,%s,%s)", (achievement_id, item["type"], item["label"], item["url"], item["sort"]))
     if "media" in content:
-        _assert_owned_files(cur, user_id, [item["file_id"] for item in content["media"]])
+        file_ids = [item["file_id"] for item in content["media"]]
+        extra_ids: set[int] = set()
+        if allow_existing_media:
+            cur.execute("SELECT file_id FROM achievement_media WHERE achievement_id=%s", (achievement_id,))
+            extra_ids = {int(row["file_id"]) for row in cur.fetchall()}
+        _assert_owned_files(cur, user_id, [file_id for file_id in file_ids if file_id not in extra_ids])
         cur.execute("DELETE FROM achievement_media WHERE achievement_id=%s", (achievement_id,))
         for item in content["media"]:
             cur.execute("INSERT INTO achievement_media (achievement_id,file_id,media_role,sort_order,caption,alt_text) VALUES (%s,%s,%s,%s,%s,%s)", (achievement_id, item["file_id"], item["role"], item["sort"], item["caption"], item["alt"]))

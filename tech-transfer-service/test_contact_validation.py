@@ -7,6 +7,7 @@ from core.contact_validation import (
     validate_phone,
 )
 from core.errors import BizError
+from core.masking import mask_email
 
 
 def main():
@@ -33,6 +34,11 @@ def main():
         raise AssertionError("expected invalid email")
     except BizError as exc:
         assert "格式" in exc.message
+
+    # 历史数据可能含未通过当前校验的联系方式；公开视图绝不能因为格式不规范
+    # 就原样返回它。
+    assert mask_email("wqe") is None
+    assert mask_email("user@example.com") == "us****@example.com"
 
     assert is_valid_contact_way("13800138000")
     assert is_valid_contact_way("88015909")

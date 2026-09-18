@@ -1,16 +1,18 @@
 <script setup>
 import {
   computed,
+  onBeforeUnmount,
   onMounted,
   reactive,
   ref,
 } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { api, getSavedUser } from '../../api/client'
+import { api, getSavedUser, getToken } from '../../api/client'
 import { resolveContentFormActions } from '../../utils/contentFormActions.js'
 import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
 import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
+import { extractAchievementFields, mergeExtractedFields } from '../../utils/extractAchievementFields.js'
 
 const achievements = ref([])
 
@@ -74,9 +76,14 @@ const formStatus = ref('')
 const achievementForm = reactive({
   title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
   maturityLevel: '', maturityDesc: '', pricingMode: '',
-  priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
+  priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '', contactWechat: '',
   applicationFieldsText: '', inventorNamesText: '', version: null,
 })
+const formMedia = ref([])
+const formSections = ref([])
+const formLinks = ref([])
+const mediaPreviewUrls = ref({})
+const mediaUploading = ref(false)
 const formActions = computed(() => resolveContentFormActions({
   kind: 'achievement',
   isPlatformAdmin: isPlatformAdmin.value,
@@ -257,6 +264,7 @@ const fetchDetail = async id => {
     viewDetail.value = await api(
       '/admin/achievements/' + id
     )
+    ;(viewDetail.value.media || []).forEach(loadMediaPreview)
   } catch (err) {
     viewError.value = err.message || '加载失败，请稍后重试'
   } finally {
@@ -322,13 +330,128 @@ const adminOrgLabel = computed(() => {
 })
 
 const resetAchievementForm = () => {
+  revokeMediaPreviews()
   Object.assign(achievementForm, {
     title: '', categoryId: '', orgId: '', ownerUserId: '', sourceOrgName: '', techIntro: '', techRoute: '',
     maturityLevel: '', maturityDesc: '', pricingMode: '',
-    priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '',
+    priceMinWan: '', priceMaxWan: '', contactName: '', contactPhone: '', contactEmail: '', contactWechat: '',
     applicationFieldsText: '', inventorNamesText: '', version: null,
   })
+  formMedia.value = []
+  formSections.value = []
+  formLinks.value = []
 }
+
+const applyExtractedFields = (sourceText) => {
+  const extracted = extractAchievementFields(sourceText, {
+    sourceOrgName: achievementForm.sourceOrgName,
+    techRoute: achievementForm.techRoute,
+    contactName: achievementForm.contactName,
+    contactPhone: achievementForm.contactPhone,
+    contactEmail: achievementForm.contactEmail,
+    contactWechat: achievementForm.contactWechat,
+    maturityLevel: achievementForm.maturityLevel,
+    pricingMode: achievementForm.pricingMode,
+    applicationFields: achievementForm.applicationFieldsText,
+    inventorNames: achievementForm.inventorNamesText,
+    links: formLinks.value,
+  })
+  Object.assign(achievementForm, mergeExtractedFields(achievementForm, extracted))
+  if (extracted.links && extracted.links.length) formLinks.value = extracted.links
+}
+
+const splitIntroFields = () => {
+  applyExtractedFields(achievementForm.techIntro)
+}
+
+const revokeMediaPreviews = () => {
+  Object.values(mediaPreviewUrls.value).forEach((url) => {
+    if (url && String(url).startsWith('blob:')) URL.revokeObjectURL(url)
+  })
+  mediaPreviewUrls.value = {}
+}
+
+const mediaSrc = (item) => mediaPreviewUrls.value[item.fileId] || item.previewUrl || ''
+
+const loadMediaPreview = async (item) => {
+  const fileId = Number(item?.fileId)
+  if (!fileId || mediaPreviewUrls.value[fileId]) return
+  try {
+    const response = await fetch(`/api/tech-transfer/v1/files/${fileId}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    })
+    if (!response.ok) return
+    mediaPreviewUrls.value = {
+      ...mediaPreviewUrls.value,
+      [fileId]: URL.createObjectURL(await response.blob()),
+    }
+  } catch {
+    // 无权限或文件失效时仍保留文件名，避免阻断整张表单。
+  }
+}
+
+const uploadFormMedia = async (event) => {
+  const files = Array.from(event.target.files || [])
+  event.target.value = ''
+  if (!files.length || mediaUploading.value) return
+  mediaUploading.value = true
+  formError.value = ''
+  try {
+    for (const file of files) {
+      const body = new FormData()
+      body.append('file', file)
+      const response = await fetch('/api/tech-transfer/v1/files', {
+        method: 'POST',
+        headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+        body,
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || payload.code !== 0) {
+        throw new Error((payload && payload.message) || '图片上传失败')
+      }
+      const uploaded = payload.data || {}
+      const fileId = uploaded.id
+      formMedia.value.push({
+        fileId,
+        role: formMedia.value.some((item) => item.role === 'cover') ? 'gallery' : 'cover',
+        name: uploaded.name || file.name,
+      })
+      mediaPreviewUrls.value = {
+        ...mediaPreviewUrls.value,
+        [fileId]: URL.createObjectURL(file),
+      }
+    }
+  } catch (err) {
+    formError.value = err.message || '图片上传失败'
+  } finally {
+    mediaUploading.value = false
+  }
+}
+
+const removeFormMedia = (index) => {
+  const item = formMedia.value[index]
+  if (item && mediaPreviewUrls.value[item.fileId]?.startsWith('blob:')) {
+    URL.revokeObjectURL(mediaPreviewUrls.value[item.fileId])
+    const next = { ...mediaPreviewUrls.value }
+    delete next[item.fileId]
+    mediaPreviewUrls.value = next
+  }
+  formMedia.value.splice(index, 1)
+  if (formMedia.value.length && !formMedia.value.some((item) => item.role === 'cover')) {
+    formMedia.value[0].role = 'cover'
+  }
+}
+
+const setCoverMedia = (index) => {
+  formMedia.value = formMedia.value.map((item, itemIndex) => ({
+    ...item,
+    role: itemIndex === index ? 'cover' : 'gallery',
+  }))
+}
+
+onBeforeUnmount(() => {
+  revokeMediaPreviews()
+})
 
 const splitText = value => String(value || '').split(/[，,\n]/).map(x => x.trim()).filter(Boolean)
 
@@ -357,17 +480,35 @@ const openEdit = async item => {
     const data = await api(`/admin/achievements/${item.id}`)
     formStatus.value = data.status || formStatus.value
     Object.assign(achievementForm, {
-      title: data.title || '', sourceOrgName: data.orgName || '', techIntro: data.techIntro || '',
+      title: data.title || '', sourceOrgName: data.sourceOrgName || data.orgName || '', techIntro: data.techIntro || '',
       techRoute: data.techRoute || '', maturityLevel: data.maturityLevel || '',
       maturityDesc: data.maturityDesc || '', pricingMode: data.pricingMode || '',
       priceMinWan: data.priceMinWan ?? '', priceMaxWan: data.priceMaxWan ?? '',
       categoryId: data.categoryId || '', orgId: data.orgId || '', ownerUserId: data.ownerUserId || '',
       contactName: data.contactName || '', contactPhone: data.contactPhone || '',
-      contactEmail: data.contactEmail || '',
+      contactEmail: data.contactEmail || '', contactWechat: data.contactWechat || '',
       applicationFieldsText: (data.applicationFields || []).join('，'),
       inventorNamesText: (data.inventors || []).map(x => x.name).filter(Boolean).join('，'),
       version: data.version,
     })
+    formMedia.value = (data.media || []).map((item) => ({
+      fileId: item.fileId,
+      role: item.role || 'gallery',
+      name: item.name || '',
+    }))
+    formSections.value = (data.sections || []).map((item) => ({
+      code: item.code,
+      title: item.title,
+      content: item.content || '',
+      sortOrder: item.sortOrder,
+    }))
+    formLinks.value = (data.links || []).map((item) => ({
+      type: item.type || 'other',
+      label: item.label || '',
+      url: item.url || '',
+    }))
+    applyExtractedFields(achievementForm.techIntro)
+    formMedia.value.forEach(loadMediaPreview)
   } catch (err) {
     formError.value = err.message || '加载成果详情失败'
   } finally {
@@ -430,7 +571,7 @@ const saveAchievement = async (saveAction = null) => {
       sourceOrgName: achievementForm.sourceOrgName, techIntro: achievementForm.techIntro,
       techRoute: achievementForm.techRoute, maturityDesc: achievementForm.maturityDesc,
       contactName: achievementForm.contactName, contactPhone: phoneCheck.value,
-      contactEmail: emailCheck.value,
+      contactEmail: emailCheck.value, contactWechat: achievementForm.contactWechat,
     }
     Object.entries(optionalTextFields).forEach(([key, value]) => { if (value.trim()) body[key] = value.trim() })
     if (formMode.value === 'create' || achievementForm.applicationFieldsText.trim()) body.applicationFields = splitText(achievementForm.applicationFieldsText)
@@ -441,6 +582,33 @@ const saveAchievement = async (saveAction = null) => {
     if (achievementForm.priceMaxWan !== '') body.priceMaxWan = Number(achievementForm.priceMaxWan)
     const inventors = splitText(achievementForm.inventorNamesText)
     if (inventors.length) body.inventorRefs = inventors.map((name, index) => ({ name, sortOrder: index }))
+    if (formMode.value === 'edit' || formMedia.value.length) {
+      body.media = formMedia.value.map((item, index) => ({
+        fileId: item.fileId,
+        role: item.role || (index === 0 ? 'cover' : 'gallery'),
+        sortOrder: index,
+      }))
+    }
+    if (formSections.value.length) {
+      body.sections = formSections.value
+        .filter((item) => String(item.content || '').trim())
+        .map((item, index) => ({
+          code: item.code || 'other',
+          title: item.title || '其他',
+          content: item.content,
+          sortOrder: index,
+        }))
+    }
+    if (formLinks.value.length) {
+      body.links = formLinks.value
+        .filter((item) => String(item.url || '').trim())
+        .map((item, index) => ({
+          type: item.type || 'other',
+          label: item.label || '相关链接',
+          url: item.url,
+          sortOrder: index,
+        }))
+    }
     if (formMode.value === 'create') {
       await api('/admin/achievements', { method: 'POST', body })
       currentPage.value = 1
@@ -1033,25 +1201,81 @@ onMounted(() => {
         <div class="form-content" :class="{ 'org-admin-form': !isPlatformAdmin }">
           <p v-if="formLoading" class="modal-state">加载中…</p>
           <template v-else>
-            <template v-if="!isPlatformAdmin">
-              <label>所属机构</label>
-              <select v-if="organizations.length > 1" v-model="achievementForm.orgId">
-                <option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </select>
-              <input v-else :value="adminOrgLabel" disabled />
-              <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
-            </template>
-            <label>成果名称 *</label><input v-model="achievementForm.title" />
-            <label>分类 *</label><select v-model="achievementForm.categoryId"><option value="">请选择分类</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
-            <label>所属机构 *</label><select v-model="achievementForm.orgId" @change="achievementForm.ownerUserId = ''"><option value="">请选择机构</option><option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option></select>
-            <label>归属用户 *</label><select v-model="achievementForm.ownerUserId" :disabled="!achievementForm.orgId"><option value="">请先选择机构</option><option v-for="item in usersForSelectedOrg" :key="item.userId" :value="item.userId">{{ item.displayName || item.userNo }}</option></select>
-            <label>技术简介</label><textarea v-model="achievementForm.techIntro" rows="4"></textarea>
-            <div class="form-grid"><div><label>成熟度</label><select v-model="achievementForm.maturityLevel"><option value="">未填写</option><option value="01_idea">概念阶段</option><option value="02_lab">实验室验证</option><option value="03_pilot_ready">可中试</option><option value="04_pilot_done">中试完成</option><option value="05_mass_ready">量产准备</option></select></div><div><label>定价方式</label><select v-model="achievementForm.pricingMode"><option value="">未填写</option><option value="negotiable">面议</option><option value="license">许可</option><option value="transfer">转让</option><option value="cooperation">合作</option><option value="other">其他</option></select></div></div>
-            <div class="form-grid"><div><label>最低报价（万元）</label><input v-model="achievementForm.priceMinWan" type="number" min="0" /></div><div><label>最高报价（万元）</label><input v-model="achievementForm.priceMaxWan" type="number" min="0" /></div></div>
-            <label>应用领域（逗号分隔）</label><input v-model="achievementForm.applicationFieldsText" />
-            <label>发明人（逗号分隔）</label><input v-model="achievementForm.inventorNamesText" />
-            <div class="form-grid"><div><label>联系人</label><input v-model="achievementForm.contactName" /></div><div><label>联系电话</label><input v-model="achievementForm.contactPhone" /></div></div>
-            <label>联系邮箱</label><input v-model="achievementForm.contactEmail" />
+            <section class="form-section">
+              <h4>基本信息</h4>
+              <template v-if="!isPlatformAdmin">
+                <label>所属机构</label>
+                <select v-if="organizations.length > 1" v-model="achievementForm.orgId">
+                  <option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option>
+                </select>
+                <input v-else :value="adminOrgLabel" disabled />
+                <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
+              </template>
+              <label>成果名称 *</label><input v-model="achievementForm.title" />
+              <label>分类 *</label><select v-model="achievementForm.categoryId"><option value="">请选择分类</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+              <template v-if="isPlatformAdmin">
+                <label>所属机构 *</label><select v-model="achievementForm.orgId" @change="achievementForm.ownerUserId = ''"><option value="">请选择机构</option><option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+                <label>归属用户 *</label><select v-model="achievementForm.ownerUserId" :disabled="!achievementForm.orgId"><option value="">请先选择机构</option><option v-for="item in usersForSelectedOrg" :key="item.userId" :value="item.userId">{{ item.displayName || item.userNo }}</option></select>
+              </template>
+              <label>来源单位</label><input v-model="achievementForm.sourceOrgName" />
+            </section>
+
+            <section class="form-section">
+              <div class="form-section-head">
+                <h4>成果介绍</h4>
+                <button type="button" class="text-button" :disabled="formSaving" @click="splitIntroFields">从简介识别字段</button>
+              </div>
+              <label>技术简介</label><textarea v-model="achievementForm.techIntro" rows="5" placeholder="成果说明。联系邮箱、电话、个人网站会自动拆到对应字段。"></textarea>
+              <label>技术路线</label><textarea v-model="achievementForm.techRoute" rows="3"></textarea>
+              <template v-if="formSections.length">
+                <div v-for="(section, index) in formSections" :key="section.code + index">
+                  <label>{{ section.title || '扩展内容' }}</label>
+                  <textarea v-model="section.content" rows="3"></textarea>
+                </div>
+              </template>
+            </section>
+
+            <section class="form-section">
+              <div class="form-section-head">
+                <h4>配图</h4>
+                <label class="upload-btn">
+                  {{ mediaUploading ? '上传中…' : '+ 添加图片' }}
+                  <input type="file" accept="image/*" multiple :disabled="mediaUploading || formSaving" @change="uploadFormMedia" />
+                </label>
+              </div>
+              <p v-if="!formMedia.length" class="form-hint">导入或手工上传的封面、成果图会显示在这里，可设封面或删除。</p>
+              <div v-else class="media-grid">
+                <figure v-for="(item, index) in formMedia" :key="item.fileId" class="media-card">
+                  <img v-if="mediaSrc(item)" :src="mediaSrc(item)" :alt="item.name || '成果图片'" />
+                  <div v-else class="media-fallback">{{ item.name || '图片加载中' }}</div>
+                  <figcaption>
+                    <button type="button" class="text-button" @click="setCoverMedia(index)">{{ item.role === 'cover' ? '封面图' : '设为封面' }}</button>
+                    <button type="button" class="text-button danger" @click="removeFormMedia(index)">删除</button>
+                  </figcaption>
+                </figure>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h4>转化信息</h4>
+              <div class="form-grid"><div><label>成熟度</label><select v-model="achievementForm.maturityLevel"><option value="">未填写</option><option value="01_idea">概念阶段</option><option value="02_lab">实验室验证</option><option value="03_pilot_ready">可中试</option><option value="04_pilot_done">中试完成</option><option value="05_mass_ready">量产准备</option></select></div><div><label>定价方式</label><select v-model="achievementForm.pricingMode"><option value="">未填写</option><option value="negotiable">面议</option><option value="license">许可</option><option value="transfer">转让</option><option value="cooperation">合作</option><option value="other">其他</option></select></div></div>
+              <div class="form-grid"><div><label>最低报价（万元）</label><input v-model="achievementForm.priceMinWan" type="number" min="0" /></div><div><label>最高报价（万元）</label><input v-model="achievementForm.priceMaxWan" type="number" min="0" /></div></div>
+              <label>应用领域（逗号分隔）</label><input v-model="achievementForm.applicationFieldsText" />
+            </section>
+
+            <section class="form-section">
+              <h4>联系与完成人</h4>
+              <label>发明人（逗号分隔）</label><input v-model="achievementForm.inventorNamesText" />
+              <div class="form-grid"><div><label>联系人</label><input v-model="achievementForm.contactName" /></div><div><label>联系电话</label><input v-model="achievementForm.contactPhone" /></div></div>
+              <div class="form-grid"><div><label>联系邮箱</label><input v-model="achievementForm.contactEmail" /></div><div><label>微信</label><input v-model="achievementForm.contactWechat" /></div></div>
+              <div v-if="formLinks.length" class="link-list">
+                <label>相关链接</label>
+                <p v-for="(link, index) in formLinks" :key="link.url + index" class="link-row">
+                  <input v-model="link.label" class="link-label" placeholder="名称" />
+                  <input v-model="link.url" placeholder="https://" />
+                </p>
+              </div>
+            </section>
             <p v-if="formActions.hint" class="form-action-hint">{{ formActions.hint }}</p>
             <p v-if="formError" class="audit-error">{{ formError }}</p>
           </template>
@@ -1215,6 +1439,16 @@ onMounted(() => {
               <p>
                 {{ viewDetail.techIntro || '-' }}
               </p>
+            </div>
+
+            <div v-if="viewDetail.media && viewDetail.media.length" class="full">
+              <label>成果图片</label>
+              <div class="media-grid">
+                <figure v-for="item in viewDetail.media" :key="item.fileId" class="media-card">
+                  <img v-if="mediaSrc(item)" :src="mediaSrc(item)" :alt="item.name || '成果图片'" />
+                  <div v-else class="media-fallback">{{ item.name || '图片' }}</div>
+                </figure>
+              </div>
             </div>
 
           </template>
@@ -1821,14 +2055,27 @@ tbody tr:hover {
     gap: 18px 20px;
   }
 }
-.form-modal { width: 720px; }
+.form-modal { width: 880px; max-width: calc(100vw - 48px); max-height: 90vh; display: flex; flex-direction: column; }
 .form-content { overflow-y: auto; padding: 20px 24px; }
 .form-content label { display: block; margin: 12px 0 6px; color: #283447; font-size: 13px; font-weight: 600; }
 .form-content input, .form-content select, .form-content textarea { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid #dce4ee; border-radius: 5px; font: inherit; }
 .form-content textarea { resize: vertical; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.org-admin-form > label:nth-of-type(5),
-.org-admin-form > label:nth-of-type(6),
-.org-admin-form > select:nth-of-type(2),
-.org-admin-form > select:nth-of-type(3) { display: none; }
+.form-section { margin-bottom: 18px; padding-bottom: 8px; border-bottom: 1px solid #edf1f5; }
+.form-section:last-of-type { border-bottom: 0; }
+.form-section h4 { margin: 0 0 8px; color: #1d2b3e; font-size: 14px; }
+.form-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.form-hint { margin: 0 0 10px; color: #7a879a; font-size: 12px; }
+.text-button { border: 0; background: transparent; color: #1677ff; font: inherit; font-size: 13px; cursor: pointer; }
+.text-button.danger { color: #d64545; }
+.upload-btn { position: relative; overflow: hidden; margin: 0; color: #1677ff; font-size: 13px; cursor: pointer; }
+.upload-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
+.media-card { margin: 0; overflow: hidden; border: 1px solid #e5ebf3; border-radius: 8px; background: #f7f9fc; }
+.media-card img, .media-fallback { display: block; width: 100%; height: 110px; object-fit: cover; }
+.media-fallback { display: flex; align-items: center; justify-content: center; padding: 8px; color: #7a879a; font-size: 12px; text-align: center; }
+.media-card figcaption { display: flex; justify-content: space-between; padding: 6px 8px; }
+.link-list { margin-top: 8px; }
+.link-row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; margin: 0 0 8px; }
+.link-label { max-width: 120px; }
 </style>

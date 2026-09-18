@@ -100,11 +100,13 @@ print()
 # 本套件不再覆盖，见 test_search_api.py
 print()
 
-# ── 10. 权限 — 无Token访问 ──────────────────────────────────
+# ── 10. 游客浏览公开内容 ─────────────────────────────────────
 resp = requests.get(f"{BASE}/achievements", timeout=10)
-check("无Token访问成果列表=401", resp.status_code == 401)
+guest_list = resp.json().get("data") if resp.headers.get("content-type", "").startswith("application/json") else None
+check("游客可浏览成果列表", resp.status_code == 200 and isinstance(guest_list, dict))
 resp = requests.get(f"{BASE}/achievements/1", timeout=10)
-check("无Token访问成果详情=401", resp.status_code == 401)
+guest_detail = resp.json().get("data") if resp.headers.get("content-type", "").startswith("application/json") else None
+check("游客可浏览已发布成果详情", resp.status_code == 200 and isinstance(guest_detail, dict))
 print()
 
 # ── 11. 空数据 — 搜索不存在的关键词 ──────────────────────────

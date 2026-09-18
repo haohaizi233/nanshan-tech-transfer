@@ -53,25 +53,39 @@
 							</view>
 						</view>
 
-						<view v-else-if="msg.type === 'match-task'">
-							<view class="task-head">
-								<text class="task-label">匹配任务 #{{ msg.payload.taskId }}</text>
-								<text :class="'task-status task-status--' + (msg.payload.status || '')">{{ statusText(msg.payload.status) }}</text>
-							</view>
-							<text class="panel__hint">{{ formatMatchProgress(msg.payload.status, msg.payload.failReason) }}</text>
+						<view v-else-if="msg.type === 'agent-cards'">
 							<view
-								v-for="(r, i) in msg.payload.results || []"
+								v-for="(card, i) in (msg.payload && msg.payload.cards) || []"
 								:key="i"
-								class="match-item"
-								@click="openResult(r)"
+								class="agent-card"
+								@click="openCard(card)"
 							>
-								<view class="match-item__head">
-									<text class="match-item__title">{{ r.achievementTitle }}</text>
-									<text class="match-item__score">{{ r.score }} 分</text>
+								<view class="agent-card__head">
+									<text :class="'agent-card__tag agent-card__tag--' + (card.card_type || '')">{{ card.card_type === 'demand' ? '技术需求' : '科技成果' }}</text>
+									<text class="agent-card__title">{{ card.title }}</text>
 								</view>
-								<text v-if="r.orgName" class="match-item__org">{{ r.orgName }}</text>
-								<view v-if="r.matchReasons && r.matchReasons.length" class="match-item__reasons">
-									<text v-for="(reason, j) in r.matchReasons" :key="j" class="reason-chip">{{ reason }}</text>
+								<text v-if="card.organization" class="agent-card__org">{{ card.organization }}</text>
+								<text v-if="card.description" class="agent-card__desc">{{ card.description }}</text>
+
+								<view v-if="card.card_type === 'achievement'" class="agent-card__meta">
+									<text v-if="card.maturity && card.maturity.label" class="meta-chip">成熟度：{{ card.maturity.label }}</text>
+									<text v-if="card.price && card.price.text" class="meta-chip">价格：{{ card.price.text }}</text>
+								</view>
+
+								<view v-else-if="card.card_type === 'demand'" class="agent-card__meta">
+									<text v-if="card.region" class="meta-chip">地域：{{ card.region }}</text>
+									<text v-if="card.budget && card.budget.text" class="meta-chip">预算：{{ card.budget.text }}</text>
+								</view>
+
+								<view v-if="card.application_fields && card.application_fields.length" class="agent-card__fields">
+									<text v-for="(f, k) in card.application_fields" :key="k" class="field-chip">{{ f }}</text>
+								</view>
+								<view v-else-if="card.coop_mode && card.coop_mode.length" class="agent-card__fields">
+									<text v-for="(c, k) in card.coop_mode" :key="k" class="field-chip">{{ c }}</text>
+								</view>
+
+								<view v-if="card.matchReason && card.matchReason.length" class="agent-card__reasons">
+									<text v-for="(reason, k) in card.matchReason" :key="k" class="reason-chip">{{ reason }}</text>
 								</view>
 							</view>
 						</view>
@@ -144,21 +158,18 @@
 	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 	import { getMyDemands, toDemandCard } from '../../api/demand.js'
 	import {
-		createMatchTask,
-		getMatchTask,
-		isTerminalStatus,
-		POLL_INTERVAL_MS,
-		POLL_MAX_MS
+		chatWithAgent,
+		matchDemand
 	} from '../../api/ai.js'
 	import {
 		createWelcomeMessage,
 		getChatSuggestions,
-		buildDemoReply,
 		createMessage,
 		isSlashDraft,
 		filterSkills,
 		resolveSkillCommand,
-		formatMatchProgress
+		formatAgentReply,
+		cardNavigateTarget
 	} from '../../api/ai-chat.mjs'
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
@@ -166,56 +177,38 @@
 
 	const ACTIVE_STATUSES = ['published', 'matched']
 
-	const STATUS_TEXT = {
-		queued: '排队中',
-		running: '匹配中',
-		succeeded: '已完成',
-		failed: '失败'
-	}
-
 	export default {
 		components: {
 			AppTabbar,
 			AiGeneratedMark
 		},
-		data() {
-			return {
-				aiEnabled: AI_FEATURE_ENABLED,
-				messages: [createWelcomeMessage()],
-				suggestions: getChatSuggestions(),
-				inputText: '',
-				typing: false,
-				scrollIntoView: '',
-				pollers: {}
-			}
+	data() {
+		return {
+			aiEnabled: AI_FEATURE_ENABLED,
+			messages: [createWelcomeMessage()],
+			suggestions: getChatSuggestions(),
+			inputText: '',
+			typing: false,
+			scrollIntoView: ''
+		}
+	},
+	computed: {
+		showSuggestions() {
+			return !this.typing && this.messages.length <= 1
 		},
-		computed: {
-			showSuggestions() {
-				return !this.typing && this.messages.length <= 1
-			},
-			skillOptions() {
-				return isSlashDraft(this.inputText) ? filterSkills(this.inputText) : []
-			}
+		skillOptions() {
+			return isSlashDraft(this.inputText) ? filterSkills(this.inputText) : []
+		}
+	},
+	onLoad() {
+		if (!this.aiEnabled) {
+			uni.setNavigationBarTitle({ title: '南山科转通' })
+		}
+	},
+	methods: {
+		onInput(e) {
+			this.inputText = e.detail.value
 		},
-		onLoad() {
-			if (!this.aiEnabled) {
-				uni.setNavigationBarTitle({ title: '南山科转通' })
-			}
-		},
-		onHide() {
-			this.stopAllPolling()
-		},
-		onUnload() {
-			this.stopAllPolling()
-		},
-		methods: {
-			formatMatchProgress,
-			statusText(status) {
-				return STATUS_TEXT[status] || status
-			},
-			onInput(e) {
-				this.inputText = e.detail.value
-			},
 			onSuggest(text) {
 				this.inputText = text
 				this.onSend()
@@ -250,17 +243,37 @@
 					this.pushMessage('assistant', '未识别的技能。输入 / 查看可用技能，当前支持 /匹配。')
 					return
 				}
+				this.runAgentChat(text)
+			},
+			async runAgentChat(text) {
 				this.typing = true
-				setTimeout(() => {
-					this.pushMessage('assistant', buildDemoReply(text))
+				try {
+					const res = await chatWithAgent(text)
+					const reply = formatAgentReply(res)
+					this.pushMessage('assistant', reply.content, {
+						type: reply.type,
+						payload: reply.payload,
+					})
+				} catch (e) {
+					const code = e && e.code
+					let msg = (e && e.message) || 'AI 助手暂时不可用，请稍后重试。'
+					if (code === 'AI_DISABLED') msg = '该功能即将开放'
+					this.pushMessage('assistant', msg)
+				} finally {
 					this.typing = false
-				}, 500)
+					this.scrollToBottom()
+				}
+			},
+			openCard(card) {
+				const target = cardNavigateTarget(card)
+				if (!target) {
+					uni.showToast({ title: '暂不支持查看该卡片详情', icon: 'none' })
+					return
+				}
+				HostBridge.navigate(target.path, target.query)
 			},
 			goPostDemand() {
 				HostBridge.navigate('pages/post-demand/post-demand')
-			},
-			openResult(r) {
-				HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: r.achievementId })
 			},
 			async runMatchSkill() {
 				if (!this.aiEnabled) return
@@ -295,64 +308,27 @@
 				this.typing = true
 				this.pushMessage('user', '匹配需求：' + demand.title)
 				try {
-					const task = await createMatchTask(demand.id)
-					const extra = {
-						type: 'match-task',
-						payload: {
-							taskId: task.taskId,
-							status: task.status,
-							results: task.results || [],
-							failReason: task.failReason || '',
-							demandId: demand.id
-						}
+					const res = await matchDemand(demand.id)
+					const cards = (res && res.cards) || []
+					const agentMsg = (res && res.agentMessage) || ''
+					if (!cards.length) {
+						this.pushMessage('assistant', agentMsg || '暂未找到匹配的科技成果。')
+						return
 					}
-					this.pushMessage('assistant', formatMatchProgress(task.status, task.failReason), extra)
-					const card = this.messages[this.messages.length - 1]
-					if (!isTerminalStatus(task.status)) this.startPolling(card)
+					this.pushMessage(
+						'assistant',
+						agentMsg || ('找到 ' + cards.length + ' 条相关科技成果，点击卡片可查看详情。'),
+						{ type: 'agent-cards', payload: { cards } }
+					)
 				} catch (e) {
-					this.pushMessage('assistant', (e && e.message) || '发起匹配失败，请稍后重试。')
+					const code = e && e.code
+					let msg = (e && e.message) || '匹配失败，请稍后重试。'
+					if (code === 'AI_DISABLED') msg = '该功能即将开放'
+					this.pushMessage('assistant', msg)
 				} finally {
 					this.typing = false
+					this.scrollToBottom()
 				}
-			},
-			startPolling(card) {
-				this.stopPolling(card.id)
-				const startedAt = Date.now()
-				const taskId = card.payload && card.payload.taskId
-				if (!taskId) return
-				this.pollers[card.id] = setInterval(async () => {
-					try {
-						const task = await getMatchTask(taskId)
-						if (task) {
-							const idx = this.messages.findIndex((m) => m.id === card.id)
-							if (idx >= 0) {
-								const next = Object.assign({}, this.messages[idx], {
-									content: formatMatchProgress(task.status, task.failReason),
-									payload: Object.assign({}, this.messages[idx].payload, {
-										status: task.status,
-										results: task.results || [],
-										failReason: task.failReason || ''
-									})
-								})
-								this.$set(this.messages, idx, next)
-							}
-						}
-						if (!task || isTerminalStatus(task.status) || Date.now() - startedAt > POLL_MAX_MS) {
-							this.stopPolling(card.id)
-						}
-					} catch (e) {
-						this.stopPolling(card.id)
-					}
-				}, POLL_INTERVAL_MS)
-			},
-			stopPolling(id) {
-				if (this.pollers[id]) {
-					clearInterval(this.pollers[id])
-					this.pollers[id] = null
-				}
-			},
-			stopAllPolling() {
-				Object.keys(this.pollers).forEach((id) => this.stopPolling(id))
 			}
 		}
 	}
@@ -640,6 +616,106 @@
 		border-radius: 8rpx;
 		padding: 4rpx 12rpx;
 		margin: 0 8rpx 8rpx 0;
+	}
+
+	.agent-card {
+		background: #f7f9fc;
+		border-radius: 12rpx;
+		padding: 20rpx;
+		margin-top: 16rpx;
+	}
+
+	.agent-card:first-child {
+		margin-top: 0;
+	}
+
+	.agent-card__head {
+		display: flex;
+		flex-direction: row;
+		align-items: flex-start;
+	}
+
+	.agent-card__tag {
+		flex-shrink: 0;
+		font-size: 20rpx;
+		color: #2b73f8;
+		background: rgba(43, 115, 248, 0.1);
+		border-radius: 6rpx;
+		padding: 4rpx 10rpx;
+		margin-right: 12rpx;
+		line-height: 1.4;
+	}
+
+	.agent-card__tag--demand {
+		color: #c47b1a;
+		background: #fff4e5;
+	}
+
+	.agent-card__title {
+		flex: 1;
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		line-height: 1.4;
+	}
+
+	.agent-card__org {
+		display: block;
+		margin-top: 8rpx;
+		font-size: 24rpx;
+		color: #666666;
+	}
+
+	.agent-card__desc {
+		display: block;
+		margin-top: 8rpx;
+		font-size: 24rpx;
+		color: #888888;
+		line-height: 1.5;
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		overflow: hidden;
+	}
+
+	.agent-card__meta {
+		margin-top: 12rpx;
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	.meta-chip {
+		font-size: 22rpx;
+		color: #555555;
+		background: #ffffff;
+		border-radius: 8rpx;
+		padding: 4rpx 12rpx;
+		margin: 0 8rpx 8rpx 0;
+	}
+
+	.agent-card__fields {
+		margin-top: 4rpx;
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	.agent-card__reasons {
+		margin-top: 12rpx;
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	.field-chip {
+		font-size: 22rpx;
+		color: #2b73f8;
+		background: #ffffff;
+		border: 1rpx solid #dce6f8;
+		border-radius: 8rpx;
+		padding: 4rpx 12rpx;
+		margin: 8rpx 8rpx 0 0;
 	}
 
 	.primary-btn {

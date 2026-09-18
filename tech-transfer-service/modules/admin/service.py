@@ -36,6 +36,7 @@ from modules.achievement.service import (
     _validate_refs,
     _sync_inventors,
 )
+from modules.achievement.content import load_content, sync_content
 
 from core.errors import demand_not_found
 from modules.demand.service import (
@@ -1790,6 +1791,7 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
             (ach_id,),
         )
         inventors = cur.fetchall() or []
+        content = load_content(cur, ach_id)
 
     detail = _ach_admin_item(row)
     detail.update({
@@ -1802,9 +1804,12 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
         "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") is not None else None,
         "categoryId": row.get("category_id"),
         "orgId": row.get("org_id"),
+        "sourceOrgName": row.get("source_org_name"),
         "contactName": row.get("contact_name"),
+        "contactTitle": row.get("contact_title"),
         "contactPhone": row.get("contact_phone"),
         "contactEmail": row.get("contact_email"),
+        "contactWechat": row.get("contact_wechat"),
         "inventors": [
             {
                 "name": inv["name"],
@@ -1813,6 +1818,10 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
             }
             for inv in inventors
         ],
+        "sections": content.get("sections") or [],
+        "patents": content.get("patents") or [],
+        "links": content.get("links") or [],
+        "media": content.get("media") or [],
     })
     application_fields = row.get("application_fields")
     if application_fields and isinstance(application_fields, str):
@@ -2271,7 +2280,7 @@ def create_achievement_admin(
     传 ownerUserId 指定归属人；未传 = 平台代录（owner NULL，进入平台协助对接），
     录入人 created_by_user_id 恒为当前管理员。
     """
-    fields, inventor_refs = _parse_upsert_body(body, partial=False)
+    fields, inventor_refs, content = _parse_upsert_body(body, partial=False)
 
     save_action, target_status = _resolve_admin_save_action(
         scope,
@@ -2374,6 +2383,7 @@ def create_achievement_admin(
 
         if inventor_refs:
             _sync_inventors(cur, ach_id, inventor_refs)
+        sync_content(cur, ach_id, created_by_user_id or scope["userId"], content, allow_existing_media=True)
 
         # cur=cur：成果写入和审计日志处于同一个事务
         audit_record(
@@ -2407,7 +2417,7 @@ def update_achievement_admin(
     不允许通过编辑接口直接变更 owner、status、审核信息；
     status 仍应由审核/上下架接口处理。
     """
-    fields, inventor_refs = _parse_upsert_body(body, partial=True)
+    fields, inventor_refs, content = _parse_upsert_body(body, partial=True)
 
     save_action, target_status = _resolve_admin_save_action(
         scope,
@@ -2421,7 +2431,7 @@ def update_achievement_admin(
     if not isinstance(version, int) or version < 1:
         raise bad_request("编辑成果必须携带正整数 version")
 
-    if not fields and inventor_refs is None and target_status is None:
+    if not fields and inventor_refs is None and target_status is None and not content:
         raise bad_request("没有可更新的成果字段")
 
     with get_cursor(commit=True) as cur:
@@ -2501,6 +2511,8 @@ def update_achievement_admin(
         # 传 [] 表示清空发明人；没传 inventorRefs 则不处理。
         if inventor_refs is not None:
             _sync_inventors(cur, ach_id, inventor_refs)
+        if content:
+            sync_content(cur, ach_id, scope["userId"], content, allow_existing_media=True)
 
         audit_record(
             "achievement.admin_update",

@@ -8,11 +8,11 @@ Source: extracted from app.py inline code (Phase A)
 走全局统一异常处理器，不再输出 {"code":1,"msg":...} 并行格式。
 """
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from core.errors import BizError, TT_FILE_40001, TT_FILE_40401, TT_FILE_50201
-from core.middleware import identity, optional_identity
+from core.middleware import identity, identity_from_access_token, optional_identity
 from core.response import success
 from modules.file.service import (
     proxy_file, FileProxyError, create_uploaded_file, get_uploaded_file, get_uploaded_thumbnail, delete_uploaded_file,
@@ -51,11 +51,16 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(identit
 
 
 @router.get("/api/tech-transfer/v1/files/{file_id}", summary="读取已授权上传文件")
-def get_uploaded(file_id: int, variant: str = "", user: dict = Depends(optional_identity)):
+def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict = Depends(optional_identity)):
+    actor = user
+    if actor.get("userId") is None:
+        queried = identity_from_access_token(request.query_params.get("access_token") or "")
+        if queried:
+            actor = queried
     path, mime, name = get_uploaded_file(
         file_id,
-        user["userId"],
-        can_review_import_media='admin' in user.get("roles", []),
+        actor["userId"],
+        can_review_import_media='admin' in actor.get("roles", []),
     )
     if variant:
         if variant != "thumbnail":

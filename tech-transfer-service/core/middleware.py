@@ -30,6 +30,27 @@ def identity(request: Request) -> dict:
     }
 
 
+def identity_from_access_token(token: str):
+    """Decode a bearer token without requiring the Authorization header.
+
+    WeChat <image> cannot send headers; GET /files/:id therefore accepts
+    access_token as a query parameter for the owner of unpublished media.
+    Invalid tokens return None so published files still remain publicly readable.
+    """
+    value = (token or "").strip()
+    if not value:
+        return None
+    try:
+        payload = decode_token(value)
+        return {
+            "userId": int(payload["sub"]),
+            "userNo": payload.get("userNo", ""),
+            "roles": payload.get("roles", ["user"]),
+        }
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+        return None
+
+
 def optional_identity(request: Request) -> dict:
     """公开详情的可选身份：无 token 是游客；有 token 仍严格校验。"""
     if not request.headers.get("Authorization", ""):

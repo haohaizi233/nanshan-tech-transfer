@@ -77,8 +77,20 @@ test('demand attachment payload uses the file object id returned by upload', () 
 test('publish preview is constrained to the phone-width application surface on H5', () => {
   const preview = read('../subpackages/tech-transfer/components/publish-preview.vue')
   assert.match(preview, /max-width:\s*414px/)
-  assert.match(preview, /inset:0/)
-  assert.match(preview, /justify-content:center/)
+  assert.match(preview, /virtualHost:\s*true/)
+  assert.match(preview, /left:\s*0/)
+  assert.match(preview, /top:\s*0/)
+  assert.match(preview, /justify-content:\s*center/)
+  assert.doesNotMatch(preview, /inset\s*:/)
+})
+
+test('publish preview keeps list rendering compatible with WeChat compiler', () => {
+  const preview = read('../subpackages/tech-transfer/components/publish-preview.vue')
+  assert.match(preview, /v-for="item in visibleItems"/)
+  assert.doesNotMatch(preview, /v-for="item in items"[^>]*v-if="item\.value"/)
+  assert.match(preview, /@tap="\$emit\('confirm'\)"/)
+  assert.match(preview, /images:\s*\{\s*type:\s*Array/)
+  assert.match(preview, /preview-thumb/)
 })
 
 test('demand publishing keeps budget and company introduction optional', () => {

@@ -28,7 +28,7 @@ from modules.admin.service import (
     list_content_organizations_admin,
     claim_unassigned_content,
 )
-from modules.achievement.importer import list_import_batches, get_import_batch, confirm_import_item
+from modules.achievement.importer import list_import_batches, get_import_batch, confirm_import_item, clear_import_batches, publish_import_item
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
 
@@ -56,6 +56,23 @@ def admin_achievement_import_confirm(
 ):
     """管理员确认一条暂存导入记录；仅落为 draft，仍需正常审核发布。"""
     return success(confirm_import_item(batch_id, item_id, admin, body, get_request_id()), "成果已入库为草稿")
+
+
+@router.post("/admin/achievement-imports/clear")
+def admin_achievement_import_clear(admin: dict = Depends(admin_identity)):
+    """清空全部导入暂存批次；已入库为草稿的成果不受影响。"""
+    return success(clear_import_batches(admin), "导入暂存已清空")
+
+
+@router.post("/admin/achievement-imports/{batch_id}/items/{item_id}/publish")
+def admin_achievement_import_publish(
+    batch_id: int,
+    item_id: int,
+    body: dict = Depends(json_body),
+    admin: dict = Depends(admin_identity),
+):
+    """管理员一键发布暂存导入记录：确认入库 → 提交审核 → 审核通过。"""
+    return success(publish_import_item(batch_id, item_id, admin, body, get_request_id()), "成果已发布")
 
 
 @router.get("/admin/demand-categories")

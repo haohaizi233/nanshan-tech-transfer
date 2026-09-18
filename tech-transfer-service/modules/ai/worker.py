@@ -15,7 +15,6 @@ from db import close_pool, get_cursor, transaction
 from modules.ai import provider
 
 logger = logging.getLogger("nanshan.ai.worker")
-MATCH_CANDIDATE_LIMIT = 30
 FAIL_REASON_MAX = 500
 
 
@@ -81,69 +80,6 @@ def _snapshot(raw: Any) -> dict:
     return {}
 
 
-def _load_achievements() -> list[dict]:
-    with get_cursor() as cur:
-        cur.execute(
-            """
-            SELECT a.id, a.title, a.tech_intro, a.maturity_level, a.source_org_name,
-                   c.name AS category_name
-            FROM achievement a
-            LEFT JOIN achievement_category c ON a.category_id = c.id
-            WHERE a.status = 'published' AND a.deleted_at IS NULL
-            ORDER BY a.published_at DESC NULLS LAST, a.id DESC
-            LIMIT %s
-            """,
-            (MATCH_CANDIDATE_LIMIT,),
-        )
-        rows = cur.fetchall() or []
-    return [
-        {
-            "id": r["id"],
-            "title": r.get("title"),
-            "techIntro": (r.get("tech_intro") or "")[:800],
-            "maturity": r.get("maturity_level"),
-            "orgName": r.get("source_org_name"),
-            "category": r.get("category_name"),
-        }
-        for r in rows
-    ]
-
-
-def _run_match(task: dict) -> None:
-    demand_id = task["target_id"]
-    snapshot = _snapshot(task.get("input_snapshot"))
-    achievements = _load_achievements()
-    results = provider.match_demand(snapshot, achievements)
-    with transaction() as conn:
-        cur = conn.cursor()
-        for item in results:
-            cur.execute(
-                """
-                INSERT INTO ai_match_result
-                    (task_id, demand_id, achievement_id, score, match_reasons, model_version_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (task_id, achievement_id) DO NOTHING
-                """,
-                (
-                    task["id"],
-                    demand_id,
-                    item["achievementId"],
-                    item["score"],
-                    Json(item["matchReasons"]),
-                    0,
-                ),
-            )
-        cur.execute(
-            """
-            UPDATE ai_task
-            SET status = 'succeeded', fail_reason = NULL, finished_at = NOW(),
-                version = version + 1
-            WHERE id = %s AND status = 'running'
-            """,
-            (task["id"],),
-        )
-
-
 def _run_evaluation(task: dict) -> None:
     achievement_id = task["target_id"]
     snapshot = _snapshot(task.get("input_snapshot"))
@@ -196,9 +132,7 @@ def process_one() -> str:
         return "idle"
     task_id = task["id"]
     try:
-        if task["task_type"] == "match":
-            _run_match(task)
-        elif task["task_type"] == "evaluation":
+        if task["task_type"] == "evaluation":
             _run_evaluation(task)
         else:
             _fail(task_id, f"unknown task_type={task['task_type']}")

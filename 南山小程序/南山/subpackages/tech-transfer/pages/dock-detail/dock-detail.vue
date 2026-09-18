@@ -58,9 +58,15 @@
                                         <text class="field-label">公司简介</text>
                                         <text class="field-value field-muted field-value-user-text">{{ detail.companyIntro }}</text>
                                 </view>
-                                <view v-if="detail.attachments && detail.attachments.length" class="field">
+                                <view v-if="demandImages.length" class="field">
+                                        <text class="field-label">需求图片</text>
+                                        <view :class="['media-grid', demandImages.length === 1 ? 'single' : '']">
+                                                <image v-for="media in demandImages" :key="media.fileId" class="media-thumb" :src="media.displayUrl" mode="aspectFill" @click="previewDemandImage(media)" />
+                                        </view>
+                                </view>
+                                <view v-if="demandFiles.length" class="field">
                                         <text class="field-label">需求附件</text>
-                                        <view v-for="attachment in detail.attachments" :key="attachment.fileId" class="attachment-row" @click="openAttachment(attachment)">
+                                        <view v-for="attachment in demandFiles" :key="attachment.fileId" class="attachment-row" @click="openAttachment(attachment)">
                                                 <text class="attachment-name">{{ attachment.name }}</text><text class="attachment-arrow">›</text>
                                         </view>
                                 </view>
@@ -113,9 +119,9 @@
 					<text class="field-label">成熟度</text>
 					<text class="field-value">{{ detail.maturity }}</text>
 				</view>
-				<view v-if="detail.media && detail.media.length" class="field">
+				<view v-if="resultMedia.length" class="field">
 					<text class="field-label">成果图片</text>
-					<view class="media-grid"><image v-for="media in detail.media" :key="media.fileId" class="media-thumb" :src="media.url" mode="aspectFill" @click="previewMedia(media)" /></view>
+					<view :class="['media-grid', resultMedia.length === 1 ? 'single' : '']"><image v-for="media in resultMedia" :key="media.fileId" class="media-thumb" :src="media.displayUrl" mode="aspectFill" @click="previewMedia(media)" /></view>
 				</view>
 				<view v-for="section in detail.sections" :key="section.code + section.sortOrder" class="field">
 					<text class="field-label">{{ section.title }}</text>
@@ -131,7 +137,7 @@
 				</view>
 				<view v-if="detail.inventors && detail.inventors.length" class="field">
 					<text class="field-label">成果完成人</text>
-					<view v-for="inventor in detail.inventors" :key="inventor.id" class="inventor-row"><image v-if="inventor.avatarUrl" class="inventor-avatar" :src="inventor.avatarUrl" mode="aspectFill" /><text class="field-value">{{ inventor.name }}{{ inventor.title ? ' · ' + inventor.title : '' }}{{ inventor.orgName ? ' · ' + inventor.orgName : '' }}</text></view>
+					<view v-for="inventor in detail.inventors" :key="inventor.id" class="inventor-row"><image v-if="inventor.avatarUrl" class="inventor-avatar" :src="mediaSrc({ url: inventor.avatarUrl })" mode="aspectFill" /><text class="field-value">{{ inventor.name }}{{ inventor.title ? ' · ' + inventor.title : '' }}{{ inventor.orgName ? ' · ' + inventor.orgName : '' }}</text></view>
 				</view>
 			</block>
 		</view>
@@ -274,6 +280,7 @@
         import { getAchievementDetail, offlineAchievement } from '../../api/achievement.js'
         import HostBridge from '../../../../host/host-bridge.js'
 	import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
+	import { isImageMedia, mediaDisplayUrl, splitDemandAttachments } from '../../api/media-url.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
 	import {
 		addFavorite,
@@ -366,6 +373,21 @@
 			},
 			contactSectionTitle() {
 				return this.intention ? '对方联系方式' : '联系方式'
+			},
+			demandImages() {
+				return splitDemandAttachments((this.detail && this.detail.attachments) || []).images.map((item) => ({
+					...item,
+					displayUrl: this.mediaSrc(item),
+				}))
+			},
+			demandFiles() {
+				return splitDemandAttachments((this.detail && this.detail.attachments) || []).files
+			},
+			resultMedia() {
+				return ((this.detail && this.detail.media) || []).map((item) => ({
+					...item,
+					displayUrl: this.mediaSrc(item),
+				}))
 			},
 			contactTip() {
 				if (this.intention && this.displayContact.masked) {
@@ -650,16 +672,34 @@
 					}
                                 })
                         },
-                        openAttachment(attachment) {
-                                if (!attachment || !attachment.url) return
-                                if ((attachment.mimeType || '').indexOf('image/') === 0) {
-                                        uni.previewImage({ urls: [attachment.url] })
-                                        return
-                                }
-                                HostBridge.navigate('pages/web-view/web-view', { url: attachment.url })
-                        },
+			mediaSrc(item) {
+				return mediaDisplayUrl(
+					item,
+					HostBridge.getEnvironment() || {},
+					HostBridge.getStorage('tt_access_token') || '',
+				)
+			},
+			previewImageList(items, current) {
+				const urls = (items || []).map((item) => this.mediaSrc(item)).filter(Boolean)
+				const active = this.mediaSrc(current) || urls[0]
+				if (!active) return
+				uni.previewImage({ urls: urls.length ? urls : [active], current: active })
+			},
+			previewDemandImage(media) {
+				this.previewImageList(this.demandImages, media)
+			},
+			openAttachment(attachment) {
+				if (!attachment) return
+				if (isImageMedia(attachment)) {
+					this.previewDemandImage(attachment)
+					return
+				}
+				const url = this.mediaSrc(attachment)
+				if (!url) return
+				HostBridge.navigate('pages/web-view/web-view', { url })
+			},
 			previewMedia(media) {
-				if (media && media.url) uni.previewImage({ urls: (this.detail.media || []).map((item) => item.url), current: media.url })
+				this.previewImageList(this.resultMedia, media)
 			},
 			openPatent(patent) {
 				if (!patent) return
@@ -912,8 +952,9 @@
 	}
 
 	.title-en { display: block; margin: -4rpx 0 16rpx; color: #7c8798; font-size: 24rpx; line-height: 1.4; }
-	.media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; }
+	.media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; justify-content: center; }
 	.media-thumb { width: 196rpx; height: 148rpx; border-radius: 10rpx; background: #eef3fa; }
+	.media-grid.single .media-thumb { width: 560rpx; height: 420rpx; max-width: 100%; }
 	.link-value { color: #2b73f8; text-indent: 0; margin-bottom: 8rpx; }
 	.inventor-row { display: flex; align-items: center; min-height: 58rpx; }
 	.inventor-avatar { width: 52rpx; height: 52rpx; flex-shrink: 0; border-radius: 50%; margin-right: 14rpx; }

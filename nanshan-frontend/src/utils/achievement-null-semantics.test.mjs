@@ -9,4 +9,6 @@ test('achievement editor preserves omitted maturity and pricing as null semantic
   assert.doesNotMatch(source, /pricingMode:\s*'negotiable'/)
   assert.match(source, /if \(achievementForm\.maturityLevel\) body\.maturityLevel = achievementForm\.maturityLevel/)
   assert.match(source, /if \(achievementForm\.pricingMode\) body\.pricingMode = achievementForm\.pricingMode/)
+  assert.match(source, /formMedia/)
+  assert.match(source, /splitIntroFields/)
 })

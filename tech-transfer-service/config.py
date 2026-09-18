@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     # ── AI 能力开关（与前端 feature-flags.js 对齐）──────────
     AI_FEATURE_ENABLED: bool = True
 
+    # ── nanshan-ai-agent demo（自然语言查询成果/需求）──────
+    # 独立 FastAPI 服务，本服务通过 HTTP 转发 /ai/chat；为空则禁用聊天代理。
+    # ai-agent 部署在 LLM 同一台公网机（见 nanshan-ai-agent/.env 的 LLM_API_URL）。
+    AI_AGENT_URL: str = "http://43.138.138.200:8000/api/ai/chat"
+    AI_AGENT_TIMEOUT: int = 90
+
     # ── 爱马仕 Hermes / OpenAI 兼容 Provider（密钥只在服务端）──
     # 企业微信 Bot 长连接由爱马仕 gateway 持有（服务器在别处），本服务只走 HTTP。
     AI_PROVIDER_BASE: str = ""

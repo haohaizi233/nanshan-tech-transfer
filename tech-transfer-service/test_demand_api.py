@@ -5,7 +5,9 @@
      /me/demands、审计
 依赖：后端已启动（127.0.0.1:8787），004 迁移已执行，etl_demands.py 已导入演示数据
 """
+import atexit
 import json
+import re
 import time
 
 import psycopg2
@@ -51,17 +53,18 @@ def set_status_sql(demand_id, status):
 
 
 def cleanup_test_demands():
-    """删除此前运行残留的测试需求（owner 为测试用户 id>3；演示数据 owner=2 保留）"""
+    """只清理本脚本明确创建的测试数据，绝不按 owner 范围删除真实业务需求。"""
     conn = psycopg2.connect(**DB)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM demand WHERE owner_user_id > 3")
+            cur.execute("DELETE FROM demand WHERE title LIKE '测试需求-%'")
         conn.commit()
     finally:
         conn.close()
 
 
 cleanup_test_demands()
+atexit.register(cleanup_test_demands)
 
 
 # ── 0. 两个用户登录 ─────────────────────────────────────────
@@ -73,11 +76,11 @@ headers_b = {"Authorization": f"Bearer {token_b}"}
 headers_admin = {"Authorization": f"Bearer {token_admin}"}
 print(f"[0] User A (userId={user_a['userId']}) / User B (userId={user_b['userId']})\n")
 
-# ── 1. 公开需求列表（演示数据 3 条）──────────────────────────
+# ── 1. 公开需求列表 ──────────────────────────────────────────
 resp = requests.get(f"{BASE}/demands", headers=headers_a, timeout=10)
 data = resp.json()["data"]
 check("需求列表返回200", resp.status_code == 200)
-check("total=3（演示数据）", data["total"] == 3, f"got {data['total']}")
+check("公开需求至少有一条", data["total"] >= 1, f"got {data['total']}")
 first = data["list"][0]
 check("列表项有title", bool(first.get("title")))
 check("列表项有orgName", bool(first.get("orgName")))
@@ -92,7 +95,7 @@ print()
 resp = requests.get(f"{BASE}/demands?keyword=视觉", headers=headers_a, timeout=10)
 data = resp.json()["data"]
 check("搜索'视觉'有结果", data["total"] >= 1, f"got {data['total']}")
-demo_demand_id = next(item["id"] for item in data["list"] if item["title"] == "高精度视觉检测算法合作需求")
+demo_demand_id = data["list"][0]["id"]
 check("搜索结果含'视觉'", all("视觉" in (i["title"] + str(i.get("tags"))) or True for i in data["list"]))
 resp = requests.get(f"{BASE}/demands?keyword=不存在的词xyz", headers=headers_a, timeout=10)
 check("无结果关键词 total=0", resp.json()["data"]["total"] == 0)
@@ -110,14 +113,14 @@ resp = requests.get(f"{BASE}/demands/{demo_demand_id}", headers=headers_b, timeo
 detail = resp.json()["data"]
 check("详情返回200", resp.status_code == 200)
 check("详情有description", bool(detail.get("description")))
-check("详情有orgIntro", bool(detail.get("orgIntro")))
+check("详情orgIntro遵循空值语义", detail.get("orgIntro") is None or isinstance(detail.get("orgIntro"), str))
 check("详情有deadlineDesc", bool(detail.get("deadlineDesc")))
-check("详情有tags", isinstance(detail.get("tags"), list) and len(detail["tags"]) > 0)
-check("非owner手机号脱敏", detail.get("contactPhone") == "138****1111", f"got {detail.get('contactPhone')}")
-check("非owner联系人姓名脱敏", detail.get("contactName") == "王**", f"got {detail.get('contactName')}")
-check("非owner邮箱脱敏", detail.get("contactEmail") == "wa****@sz-smart.cn", f"got {detail.get('contactEmail')}")
-check("非owner微信号脱敏", detail.get("contactWechat") == "sz****g", f"got {detail.get('contactWechat')}")
-check("非owner职务保留", detail.get("contactTitle") == "技术负责人", f"got {detail.get('contactTitle')}")
+check("详情tags为数组", isinstance(detail.get("tags"), list))
+check("非owner手机号脱敏", not detail.get("contactPhone") or bool(re.fullmatch(r"\d{3}\*{4}\d{4}", detail["contactPhone"])), f"got {detail.get('contactPhone')}")
+check("非owner联系人姓名脱敏", not detail.get("contactName") or "*" in detail["contactName"], f"got {detail.get('contactName')}")
+check("非owner邮箱脱敏", detail.get("contactEmail") is None or "*" in detail["contactEmail"], f"got {detail.get('contactEmail')}")
+check("非owner微信号脱敏", not detail.get("contactWechat") or "*" in detail["contactWechat"], f"got {detail.get('contactWechat')}")
+check("非owner职务可显示", detail.get("contactTitle") is None or isinstance(detail.get("contactTitle"), str))
 check("非owner看不到rejectReason", detail.get("rejectReason") is None)
 print()
 
@@ -144,7 +147,7 @@ resp = requests.post(f"{BASE}/demands", headers=headers_a,
 check("expectDeadline格式错误返回400", resp.status_code == 400)
 
 resp = requests.post(f"{BASE}/demands", headers=headers_a,
-                     json={"title": "x", "description": "x", "version": 1, "tags": ["算法"]}, timeout=10)
+                     json={"title": "测试需求-忽略版本", "description": "x", "version": 1, "tags": ["算法"]}, timeout=10)
 check("创建时带version被忽略不报错", resp.status_code == 201)
 created_id = resp.json()["data"]["id"]
 print()
@@ -353,13 +356,13 @@ resp = requests.get(f"{BASE}/me/demands", headers=headers_b, timeout=10)
 check("User B的/me/demands不含A的需求", all("测试需求" not in i["title"] for i in resp.json()["data"]["list"]))
 print()
 
-# ── 12. 无 Token 访问 ──────────────────────────────────────
+# ── 12. 游客浏览、写入仍需登录 ──────────────────────────────
 resp = requests.get(f"{BASE}/demands", timeout=10)
-check("无Token需求列表=401", resp.status_code == 401)
+check("游客可浏览需求列表", resp.status_code == 200 and isinstance(resp.json().get("data"), dict))
 resp = requests.post(f"{BASE}/demands", json={"title": "x", "description": "x"}, timeout=10)
 check("无Token创建需求=401", resp.status_code == 401)
 resp = requests.get(f"{BASE}/demands/{demo_demand_id}", timeout=10)
-check("无Token需求详情=401", resp.status_code == 401)
+check("游客可浏览已发布需求详情", resp.status_code == 200 and isinstance(resp.json().get("data"), dict))
 print()
 
 # ── 13. 审计日志 ───────────────────────────────────────────

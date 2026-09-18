@@ -87,8 +87,8 @@
 			<view class="section">
 				<view class="section-head"><text class="section-title">媒体资料</text><text class="add-link" @click="chooseMedia">{{ uploading ? '上传中…' : '+ 添加图片' }}</text></view>
 				<view v-if="!form.media.length" class="upload-hint">可设置一张封面及多张成果图，动态图片不会进入小程序包</view>
-				<view v-for="(media, index) in form.media" :key="media.fileId" class="media-item">
-					<image class="media-thumb" :src="media.url" mode="aspectFill" /><view class="media-info"><text class="media-name">{{ media.name }}</text><text class="media-role" @click="toggleCover(index)">{{ media.role === 'cover' ? '封面图' : '设为封面' }}</text></view><text class="remove-link" @click="removeMedia(index)">删除</text>
+				<view v-for="(media, index) in form.media" :key="media.fileId || media.id || index" class="media-item">
+					<image class="media-thumb" :src="mediaSrc(media)" mode="aspectFill" /><view class="media-info"><text class="media-name">{{ media.name }}</text><text class="media-role" @click="toggleCover(index)">{{ media.role === 'cover' ? '封面图' : '设为封面' }}</text></view><text class="remove-link" @click="removeMedia(index)">删除</text>
 				</view>
 			</view>
 
@@ -158,10 +158,10 @@
 			</view>
 
 			<view v-if="previewError" class="preview-error">{{ previewError }}</view>
-			<button class="submit-btn" type="primary" :disabled="submitting" @click="onPreview">
+			<button class="submit-btn" type="primary" hover-class="none" :disabled="submitting" @tap="onPreview">
 				{{ submitting ? '提交中…' : '预览并提交' }}
 			</button>
-			<publish-preview :visible="previewing" :items="previewItems" :submitting="submitting" @back="previewing = false" @confirm="onSubmit" />
+			<publish-preview :visible="previewing" :items="previewItems" :images="previewImages" :submitting="submitting" @back="previewing = false" @confirm="onSubmit" />
 		</block>
 	</view>
 </template>
@@ -177,6 +177,7 @@
 	import { clearPublishDraft, restorePublishDraft, savePublishDraft } from '../../api/publish-draft.mjs'
 	import { uploadContentFile } from '../../api/file.js'
 	import PublishPreview from '../../components/publish-preview.vue'
+	import { mediaDisplayUrl } from '../../api/media-url.mjs'
 
 	const MATURITY_OPTIONS = [
 		{ value: '', label: '未填写' },
@@ -291,6 +292,9 @@
 					{ label: '技术简介', value: f.techIntro }, { label: '联系人', value: f.contactName }
 				]
 			}
+			, previewImages() {
+				return (this.form.media || []).map((item) => this.mediaSrc(item)).filter(Boolean)
+			}
 			, sectionLabels() { return SECTION_OPTIONS.map((item) => item.label) }
 			, linkTypeLabels() { return LINK_TYPE_OPTIONS.map((item) => item.label) }
 			, achievementKindLabels() { return ACHIEVEMENT_KIND_OPTIONS.map((item) => item.label) }
@@ -375,13 +379,30 @@
 				if (this.uploading) return
 				uni.chooseImage({ count: 9, success: async (result) => {
 					this.uploading = true
-					try { for (const path of (result.tempFilePaths || [])) { const uploaded = await uploadContentFile(path); this.form.media.push({ ...uploaded, role: this.form.media.some((item) => item.role === 'cover') ? 'gallery' : 'cover' }) } }
+					try {
+						for (const path of (result.tempFilePaths || [])) {
+							const uploaded = await uploadContentFile(path)
+							this.form.media.push({
+								...uploaded,
+								fileId: uploaded.id,
+								role: this.form.media.some((item) => item.role === 'cover') ? 'gallery' : 'cover',
+								localPath: path,
+							})
+						}
+					}
 					catch (error) { uni.showToast({ title: (error && error.message) || '图片上传失败', icon: 'none' }) }
 					finally { this.uploading = false }
 				} })
 			},
 			removeMedia(index) { this.form.media.splice(index, 1) },
 			toggleCover(index) { this.form.media.forEach((item, itemIndex) => { item.role = itemIndex === index ? 'cover' : 'gallery' }) },
+			mediaSrc(item) {
+				return mediaDisplayUrl(
+					item,
+					HostBridge.getEnvironment() || {},
+					HostBridge.getStorage('tt_access_token') || '',
+				)
+			},
 			showPreviewError(message) {
 				this.previewError = message
 				uni.showToast({ title: message, icon: 'none' })
