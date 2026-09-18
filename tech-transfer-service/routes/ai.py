@@ -18,6 +18,7 @@ from core.errors import ai_unavailable, bad_request
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
 )
+from modules.ai.chat_store import append_message, list_messages, clear_messages
 
 # 与小程序 config/feature-flags.js 同步；实际开关读 settings.AI_FEATURE_ENABLED。
 AI_FEATURE_ENABLED = settings.AI_FEATURE_ENABLED
@@ -63,10 +64,14 @@ def evaluation_task_detail(task_id: int, user: dict = Depends(identity)):
 # 小程序自由问答经本路由转发到独立的 ai-agent 服务，回包结构为
 # {success, intent, message, data:[achievement|demand 卡片]}。
 # ai-agent 不可达时返回 ai_unavailable，保持前端契约统一。
-def _forward_to_agent(message: str) -> dict:
+def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
     import json
 
-    payload = json.dumps({"message": message}).encode("utf-8")
+    payload_dict = {"message": message}
+    # 透传当前用户 id，agent 检索时排除该用户自己的成果/需求，避免自我推荐。
+    if exclude_user_id is not None:
+        payload_dict["exclude_owner_user_id"] = exclude_user_id
+    payload = json.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
         settings.AI_AGENT_URL,
         data=payload,
@@ -89,7 +94,18 @@ def ai_chat(user: dict = Depends(identity), body: dict = Depends(json_body)):
         raise bad_request("message 不能为空")
     if not settings.AI_AGENT_URL:
         raise ai_unavailable("AI 助手未配置")
-    result = _forward_to_agent(message.strip())
+    user_message = message.strip()
+    result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
+    # 入库：用户提问 + 助手回复（含卡片快照）。失败 503 不会走到这里，不入脏历史。
+    try:
+        append_message(user["userId"], "user", user_message)
+        agent_message = (result or {}).get("message") or ""
+        data = (result or {}).get("data")
+        cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
+        append_message(user["userId"], "assistant", agent_message, cards=cards)
+    except Exception as exc:
+        # 入库失败不影响主流程，仅记录日志
+        print(f"[ai/chat] 聊天记录入库失败: {exc!r}")
     return success(result, result.get("message") or "ok")
 
 
@@ -193,7 +209,7 @@ def ai_match(user: dict = Depends(identity), body: dict = Depends(json_body)):
     if not title and not description:
         raise bad_request("需求内容为空，无法匹配")
 
-    result = _forward_to_agent(message)
+    result = _forward_to_agent(message, exclude_user_id=user["userId"])
     cards = []
     if isinstance(result, dict):
         data = result.get("data")
@@ -207,6 +223,14 @@ def ai_match(user: dict = Depends(identity), body: dict = Depends(json_body)):
     for card in cards:
         card["matchReason"] = _build_match_reasons(card, keywords)
 
+    # 入库：用户发起匹配（以需求标题记录）+ 助手成果推荐（卡片快照）
+    try:
+        append_message(user["userId"], "user", f"匹配需求：{title}" if title else "匹配需求")
+        agent_message = (result or {}).get("message") or ""
+        append_message(user["userId"], "assistant", agent_message, cards=cards if cards else None)
+    except Exception as exc:
+        print(f"[ai/match] 聊天记录入库失败: {exc!r}")
+
     return success(
         {
             "demandId": demand["id"],
@@ -217,3 +241,16 @@ def ai_match(user: dict = Depends(identity), body: dict = Depends(json_body)):
         },
         ("找到 " + str(len(cards)) + " 条相关科技成果。") if cards else "暂未找到匹配的科技成果。",
     )
+
+
+# ── 聊天记录持久化（切页/重登后历史不丢）──────────────────────
+@router.get("/ai/chat/messages")
+def ai_chat_messages_list(user: dict = Depends(identity)):
+    messages = list_messages(user["userId"])
+    return success({"messages": messages}, "ok")
+
+
+@router.delete("/ai/chat/messages")
+def ai_chat_messages_clear(user: dict = Depends(identity)):
+    deleted = clear_messages(user["userId"])
+    return success({"deleted": deleted}, "聊天记录已清空")

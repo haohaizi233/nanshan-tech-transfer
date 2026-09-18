@@ -159,7 +159,8 @@
 	import { getMyDemands, toDemandCard } from '../../api/demand.js'
 	import {
 		chatWithAgent,
-		matchDemand
+		matchDemand,
+		getChatHistory
 	} from '../../api/ai.js'
 	import {
 		createWelcomeMessage,
@@ -203,9 +204,32 @@
 	onLoad() {
 		if (!this.aiEnabled) {
 			uni.setNavigationBarTitle({ title: '南山科转通' })
+			return
 		}
+		this.loadHistory()
 	},
 	methods: {
+		async loadHistory() {
+			// 从后端回放历史聊天（切页/重登后不丢）。欢迎语前置，历史卡片快照复用
+			// 现有 agent-cards 模板渲染，openCard 仍按 card.id 跳最新详情页。
+			try {
+				const data = await getChatHistory()
+				const msgs = (data && data.messages) || []
+				const restored = msgs.map((m) => {
+					const cards = Array.isArray(m.cards) ? m.cards : null
+					return createMessage(m.role === 'user' ? 'user' : 'assistant', m.content || '', {
+						id: 'm_' + m.id,
+						type: cards && cards.length ? 'agent-cards' : 'text',
+						payload: cards && cards.length ? { cards } : null,
+					})
+				})
+				this.messages = [createWelcomeMessage(), ...restored]
+				if (restored.length) this.scrollToBottom()
+			} catch (e) {
+				// 历史拉取失败时保留欢迎语，不阻塞当前会话
+				this.messages = [createWelcomeMessage()]
+			}
+		},
 		onInput(e) {
 			this.inputText = e.detail.value
 		},

@@ -75,3 +75,23 @@ export async function chatWithAgent(message) {
   assertAiRuntimeEnabled()
   return apiRequest('POST', '/ai/chat', null, { message })
 }
+
+// ── 聊天记录持久化（切页/重登后历史不丢）─────────────────────
+
+/**
+ * 拉取当前用户的 AI 聊天历史（按时间升序）。
+ * @returns {Promise<{messages:Array<{id,role,content,cards,createdAt}>}>}
+ */
+export async function getChatHistory() {
+  assertAiRuntimeEnabled()
+  return apiRequest('GET', '/ai/chat/messages')
+}
+
+/**
+ * 清空当前用户的 AI 聊天历史。
+ * @returns {Promise<{deleted:number}>}
+ */
+export async function clearChatHistory() {
+  assertAiRuntimeEnabled()
+  return apiRequest('DELETE', '/ai/chat/messages')
+}
