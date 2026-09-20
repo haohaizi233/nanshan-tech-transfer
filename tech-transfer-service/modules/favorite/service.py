@@ -108,12 +108,13 @@ def add_favorite(user_id: int, user_no: str, target_type: str, target_id: int, r
         )
         row = cur.fetchone()
 
-    audit_record(
-        "favorite.add", "favorite", resource_id=row["id"],
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"targetType": target_type, "targetId": target_id},
-        request_id=request_id,
-    )
+        audit_record(
+            "favorite.add", "favorite", resource_id=row["id"],
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"targetType": target_type, "targetId": target_id},
+            request_id=request_id, cur=cur,
+        )
+
     return {
         "id": row["id"],
         "favoritedAt": row["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
@@ -133,12 +134,13 @@ def remove_favorite(user_id: int, user_no: str, target_type: str, target_id: int
             (user_id, target_type, target_id),
         )
 
-    audit_record(
-        "favorite.remove", "favorite",
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"targetType": target_type, "targetId": target_id},
-        request_id=request_id,
-    )
+        audit_record(
+            "favorite.remove", "favorite",
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"targetType": target_type, "targetId": target_id},
+            request_id=request_id, cur=cur,
+        )
+
     return None
 
 

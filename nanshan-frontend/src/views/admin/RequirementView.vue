@@ -444,16 +444,16 @@ const submitReject = async () => {
           <option :value="20">20条/页</option>
         </select>
 
-        <button :disabled="currentPage === 1" @click="changePage(currentPage - 1)">‹</button>
+        <button type="button" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">‹</button>
 
         <template v-for="(page, index) in visiblePages" :key="`${page}-${index}`">
           <span v-if="page === '...'">...</span>
-          <button v-else :class="{ active: currentPage === page }" @click="changePage(page)">
+          <button v-else type="button" :class="{ active: currentPage === page }" @click="changePage(page)">
             {{ page }}
           </button>
         </template>
 
-        <button :disabled="currentPage === totalPages" @click="changePage(currentPage + 1)">›</button>
+        <button type="button" :disabled="currentPage === totalPages" @click="changePage(currentPage + 1)">›</button>
 
       </div>
 

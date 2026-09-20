@@ -7,7 +7,16 @@ admin 路由 —— 管理审核组（06-api-design.md §15）
 from fastapi import APIRouter, Depends, Request
 
 from core.response import success, get_request_id
-from core.middleware import admin_identity, backend_identity, json_body
+from core.middleware import admin_identity, backend_identity
+from core.request_schemas import (
+    AchievementCreateRequest,
+    AchievementUpdateRequest,
+    AchievementWriteRequest,
+    DemandCreateRequest,
+    DemandUpdateRequest,
+    ReviewRejectRequest,
+    VersionBody,
+)
 from modules.admin.service import (
     achievements_review_queue,
     demands_review_queue,
@@ -51,11 +60,11 @@ def admin_achievement_import_detail(batch_id: int, admin: dict = Depends(admin_i
 def admin_achievement_import_confirm(
     batch_id: int,
     item_id: int,
-    body: dict = Depends(json_body),
+    body: AchievementWriteRequest,
     admin: dict = Depends(admin_identity),
 ):
     """管理员确认一条暂存导入记录；仅落为 draft，仍需正常审核发布。"""
-    return success(confirm_import_item(batch_id, item_id, admin, body, get_request_id()), "成果已入库为草稿")
+    return success(confirm_import_item(batch_id, item_id, admin, body.as_dict(), get_request_id()), "成果已入库为草稿")
 
 
 @router.post("/admin/achievement-imports/clear")
@@ -68,11 +77,11 @@ def admin_achievement_import_clear(admin: dict = Depends(admin_identity)):
 def admin_achievement_import_publish(
     batch_id: int,
     item_id: int,
-    body: dict = Depends(json_body),
+    body: AchievementWriteRequest,
     admin: dict = Depends(admin_identity),
 ):
     """管理员一键发布暂存导入记录：确认入库 → 提交审核 → 审核通过。"""
-    return success(publish_import_item(batch_id, item_id, admin, body, get_request_id()), "成果已发布")
+    return success(publish_import_item(batch_id, item_id, admin, body.as_dict(), get_request_id()), "成果已发布")
 
 
 @router.get("/admin/demand-categories")
@@ -94,12 +103,12 @@ def admin_achievements_list(
 
 @router.post("/admin/achievements", status_code=201)
 def admin_achievement_create(
-    body: dict = Depends(json_body),
+    body: AchievementCreateRequest,
     admin: dict = Depends(backend_identity),
 ):
     result = create_achievement_admin(
         admin,
-        body,
+        body.as_dict(),
         request_id=get_request_id(),
     )
     return success(result, "成果创建成功")
@@ -120,13 +129,13 @@ def admin_achievement_detail(
 @router.patch("/admin/achievements/{ach_id}")
 def admin_achievement_update(
     ach_id: int,
-    body: dict = Depends(json_body),
+    body: AchievementUpdateRequest,
     admin: dict = Depends(backend_identity),
 ):
     result = update_achievement_admin(
         admin,
         ach_id,
-        body,
+        body.as_dict(),
         request_id=get_request_id(),
     )
     return success(result, "成果更新成功")
@@ -135,11 +144,11 @@ def admin_achievement_update(
 @router.post("/admin/achievements/{ach_id}/claim-organization")
 def admin_achievement_claim_organization(
     ach_id: int,
-    body: dict = Depends(json_body),
+    body: VersionBody,
     scope: dict = Depends(backend_identity),
 ):
     return success(
-        claim_unassigned_content(scope, "achievement", ach_id, body.get("version"), get_request_id()),
+        claim_unassigned_content(scope, "achievement", ach_id, body.as_dict().get("version"), get_request_id()),
         "已归属到当前机构",
     )
 
@@ -147,28 +156,28 @@ def admin_achievement_claim_organization(
 @router.post("/admin/achievements/{ach_id}/submit")
 def admin_achievement_submit(
     ach_id: int,
-    body: dict = Depends(json_body),
+    body: VersionBody,
     admin: dict = Depends(admin_identity),
 ):
     """代平台代录成果提交审核（仅 owner NULL 的内容）。"""
     return success(
-        submit_achievement_admin(admin, ach_id, body, request_id=get_request_id()),
+        submit_achievement_admin(admin, ach_id, body.as_dict(), request_id=get_request_id()),
         "已提交审核",
     )
 
 
 @router.post("/admin/achievements/{ach_id}/approve")
-def admin_ach_approve(ach_id: int, body: dict = Depends(json_body), admin: dict = Depends(admin_identity)):
-    body = dict(body)
-    body["_action"] = "approve"
-    return success(review_achievement(admin, ach_id, body, request_id=get_request_id()))
+def admin_ach_approve(ach_id: int, body: VersionBody, admin: dict = Depends(admin_identity)):
+    payload = body.as_dict()
+    payload["_action"] = "approve"
+    return success(review_achievement(admin, ach_id, payload, request_id=get_request_id()))
 
 
 @router.post("/admin/achievements/{ach_id}/reject")
-def admin_ach_reject(ach_id: int, body: dict = Depends(json_body), admin: dict = Depends(admin_identity)):
-    body = dict(body)
-    body["_action"] = "reject"
-    return success(review_achievement(admin, ach_id, body, request_id=get_request_id()))
+def admin_ach_reject(ach_id: int, body: ReviewRejectRequest, admin: dict = Depends(admin_identity)):
+    payload = body.as_dict()
+    payload["_action"] = "reject"
+    return success(review_achievement(admin, ach_id, payload, request_id=get_request_id()))
 
 
 @router.get("/admin/demands")
@@ -180,12 +189,12 @@ def admin_demands_list(
 
 @router.post("/admin/demands", status_code=201)
 def admin_demand_create(
-    body: dict = Depends(json_body),
+    body: DemandCreateRequest,
     admin: dict = Depends(backend_identity),
 ):
     result = create_demand_admin(
         admin,
-        body,
+        body.as_dict(),
         request_id=get_request_id(),
     )
     return success(result, "需求创建成功")
@@ -206,13 +215,13 @@ def admin_demand_detail(
 @router.patch("/admin/demands/{demand_id}")
 def admin_demand_update(
     demand_id: int,
-    body: dict = Depends(json_body),
+    body: DemandUpdateRequest,
     admin: dict = Depends(backend_identity),
 ):
     result = update_demand_admin(
         admin,
         demand_id,
-        body,
+        body.as_dict(),
         request_id=get_request_id(),
     )
     return success(result, "需求更新成功")
@@ -221,11 +230,11 @@ def admin_demand_update(
 @router.post("/admin/demands/{demand_id}/claim-organization")
 def admin_demand_claim_organization(
     demand_id: int,
-    body: dict = Depends(json_body),
+    body: VersionBody,
     scope: dict = Depends(backend_identity),
 ):
     return success(
-        claim_unassigned_content(scope, "demand", demand_id, body.get("version"), get_request_id()),
+        claim_unassigned_content(scope, "demand", demand_id, body.as_dict().get("version"), get_request_id()),
         "已归属到当前机构",
     )
 
@@ -233,28 +242,28 @@ def admin_demand_claim_organization(
 @router.post("/admin/demands/{demand_id}/submit")
 def admin_demand_submit(
     demand_id: int,
-    body: dict = Depends(json_body),
+    body: VersionBody,
     admin: dict = Depends(admin_identity),
 ):
     """代平台代录需求提交审核（仅 owner NULL 的内容）。"""
     return success(
-        submit_demand_admin(admin, demand_id, body, request_id=get_request_id()),
+        submit_demand_admin(admin, demand_id, body.as_dict(), request_id=get_request_id()),
         "已提交审核",
     )
 
 
 @router.post("/admin/demands/{demand_id}/approve")
-def admin_dmd_approve(demand_id: int, body: dict = Depends(json_body), admin: dict = Depends(admin_identity)):
-    body = dict(body)
-    body["_action"] = "approve"
-    return success(review_demand(admin, demand_id, body, request_id=get_request_id()))
+def admin_dmd_approve(demand_id: int, body: VersionBody, admin: dict = Depends(admin_identity)):
+    payload = body.as_dict()
+    payload["_action"] = "approve"
+    return success(review_demand(admin, demand_id, payload, request_id=get_request_id()))
 
 
 @router.post("/admin/demands/{demand_id}/reject")
-def admin_dmd_reject(demand_id: int, body: dict = Depends(json_body), admin: dict = Depends(admin_identity)):
-    body = dict(body)
-    body["_action"] = "reject"
-    return success(review_demand(admin, demand_id, body, request_id=get_request_id()))
+def admin_dmd_reject(demand_id: int, body: ReviewRejectRequest, admin: dict = Depends(admin_identity)):
+    payload = body.as_dict()
+    payload["_action"] = "reject"
+    return success(review_demand(admin, demand_id, payload, request_id=get_request_id()))
 
 
 @router.get("/admin/audit-logs")

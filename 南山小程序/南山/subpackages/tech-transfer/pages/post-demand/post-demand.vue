@@ -108,6 +108,7 @@
         import HostBridge from '../../../../host/host-bridge.js'
         import PublishPreview from '../../components/publish-preview.vue'
 	import { isImageMedia, mediaDisplayUrl } from '../../api/media-url.mjs'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -368,13 +369,11 @@
 						console.error('[post-demand] submit review failed:', e)
 					}
 					uni.hideLoading()
-					uni.showToast({
-						title: submitted ? '已提交，等待审核' : '已保存为草稿',
-						icon: 'success'
-					})
-					setTimeout(() => {
-						uni.navigateBack()
-					}, 900)
+				uni.showToast({
+					title: submitted ? '已提交，等待审核' : '已保存为草稿',
+					icon: 'success'
+				})
+				safeBackWithToast('', 900)
 				} catch (e) {
 					uni.hideLoading()
 					console.error('[post-demand] create failed:', e)

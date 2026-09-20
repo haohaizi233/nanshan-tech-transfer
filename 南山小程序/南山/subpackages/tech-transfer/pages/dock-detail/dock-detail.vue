@@ -281,6 +281,7 @@
         import HostBridge from '../../../../host/host-bridge.js'
 	import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
 	import { isImageMedia, mediaDisplayUrl, splitDemandAttachments } from '../../api/media-url.mjs'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
 	import {
 		addFavorite,
@@ -481,8 +482,7 @@
 		methods: {
 			async loadDemandDetail(id) {
 				if (!id) {
-					uni.showToast({ title: '未找到对应信息', icon: 'none' })
-					setTimeout(() => uni.navigateBack(), 1200)
+					safeBackWithToast('未找到对应信息', 1200)
 					return
 				}
 				try {
@@ -490,14 +490,12 @@
 					this.detail = toDemandCard(data)
 				} catch (e) {
 					console.error('[dock-detail] loadDemand failed:', e)
-					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
-					setTimeout(() => uni.navigateBack(), 1200)
+					safeBackWithToast((e && e.message) || '未找到对应信息', 1200)
 				}
 			},
 			async loadResultDetail(id) {
 				if (!id) {
-					uni.showToast({ title: '未找到对应信息', icon: 'none' })
-					setTimeout(() => uni.navigateBack(), 1200)
+					safeBackWithToast('未找到对应信息', 1200)
 					return
 				}
 				try {
@@ -506,8 +504,7 @@
 					this.detail = { ...toAchievementDockCard(data), titleEn: data.titleEn, sections: data.sections || [], patents: data.patents || [], links: data.links || [], media: data.media || [], inventors: data.inventors || [] }
 				} catch (e) {
 					console.error('[dock-detail] loadResult failed:', e)
-					uni.showToast({ title: (e && e.message) || '未找到对应信息', icon: 'none' })
-					setTimeout(() => uni.navigateBack(), 1200)
+					safeBackWithToast((e && e.message) || '未找到对应信息', 1200)
 				}
 			},
 			async loadFavoriteState(id) {

@@ -1,7 +1,8 @@
 ﻿from fastapi import APIRouter, Depends, Request
 
 from core.response import success
-from core.middleware import identity, json_body
+from core.middleware import identity
+from core.request_schemas import ChangePasswordRequest, ProfileUpdateRequest
 from modules.profile.service import get_my_profile, update_my_profile
 from modules.identity.service import change_password
 from modules.demand.service import list_my_demands
@@ -19,17 +20,18 @@ def get_me(user: dict = Depends(identity)):
 
 
 @router.patch("/profile")
-def patch_my_profile(user: dict = Depends(identity), body: dict = Depends(json_body)):
-    profile = update_my_profile(user["userId"], body)
+def patch_my_profile(body: ProfileUpdateRequest, user: dict = Depends(identity)):
+    profile = update_my_profile(user["userId"], body.as_dict())
     return success(profile)
 
 
 @router.post("/password")
-def post_my_password(user: dict = Depends(identity), body: dict = Depends(json_body)):
+def post_my_password(body: ChangePasswordRequest, user: dict = Depends(identity)):
+    payload = body.as_dict()
     result = change_password(
         user["userId"],
-        body.get("currentPassword") or "",
-        body.get("newPassword") or "",
+        payload.get("currentPassword") or "",
+        payload.get("newPassword") or "",
     )
     return success(result, "密码已更新")
 

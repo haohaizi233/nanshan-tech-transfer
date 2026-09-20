@@ -7,8 +7,14 @@ Architecture source: openapi.yaml paths /cooperations、/cooperations/{id}、
 from fastapi import APIRouter, Depends, Request
 
 from core.response import success, get_request_id
-from core.middleware import identity, json_body
+from core.middleware import identity
 from core.errors import bad_request
+from core.request_schemas import (
+    CooperationCompleteRequest,
+    CooperationCreateRequest,
+    ReasonVersionBody,
+    VersionBody,
+)
 from modules.cooperation.service import (
     create_intent,
     get_intent_detail,
@@ -24,12 +30,12 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["cooperation"])
 
 
 @router.post("/cooperations", status_code=201)
-def cooperations_create(request: Request, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def cooperations_create(request: Request, body: CooperationCreateRequest, user: dict = Depends(identity)):
     idem_key = request.headers.get("X-Idempotency-Key")
     if idem_key:
         print(f"[cooperation] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
     detail = create_intent(
-        user["userId"], user.get("userNo", ""), body,
+        user["userId"], user.get("userNo", ""), body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail, "意向已创建")
@@ -49,8 +55,8 @@ def _version_body(body: dict):
 
 
 @router.post("/cooperations/{intent_id}/accept")
-def cooperation_accept(intent_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
-    version, _ = _version_body(body)
+def cooperation_accept(intent_id: int, body: VersionBody, user: dict = Depends(identity)):
+    version, _ = _version_body(body.as_dict())
     return success(accept_intent(
         user["userId"], user.get("userNo", ""), intent_id, version,
         request_id=get_request_id(),
@@ -58,18 +64,18 @@ def cooperation_accept(intent_id: int, user: dict = Depends(identity), body: dic
 
 
 @router.post("/cooperations/{intent_id}/reject")
-def cooperation_reject(intent_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
-    version, body = _version_body(body)
+def cooperation_reject(intent_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
+    version, payload = _version_body(body.as_dict())
     return success(reject_intent(
         user["userId"], user.get("userNo", ""), intent_id, version,
-        reason=body.get("reason"),
+        reason=payload.get("reason"),
         request_id=get_request_id(),
     ))
 
 
 @router.post("/cooperations/{intent_id}/confirm")
-def cooperation_confirm(intent_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
-    version, _ = _version_body(body)
+def cooperation_confirm(intent_id: int, body: VersionBody, user: dict = Depends(identity)):
+    version, _ = _version_body(body.as_dict())
     return success(confirm_intent(
         user["userId"], user.get("userNo", ""), intent_id, version,
         request_id=get_request_id(),
@@ -77,21 +83,21 @@ def cooperation_confirm(intent_id: int, user: dict = Depends(identity), body: di
 
 
 @router.post("/cooperations/{intent_id}/cancel")
-def cooperation_cancel(intent_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
-    version, body = _version_body(body)
+def cooperation_cancel(intent_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
+    version, payload = _version_body(body.as_dict())
     return success(cancel_intent(
         user["userId"], user.get("userNo", ""), intent_id, version,
-        reason=body.get("reason"),
+        reason=payload.get("reason"),
         request_id=get_request_id(),
     ))
 
 
 @router.post("/cooperations/{intent_id}/complete")
-def cooperation_complete(intent_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
-    version, body = _version_body(body)
+def cooperation_complete(intent_id: int, body: CooperationCompleteRequest, user: dict = Depends(identity)):
+    version, payload = _version_body(body.as_dict())
     return success(complete_intent(
         user["userId"], user.get("userNo", ""), intent_id, version,
-        remark=body.get("remark"), outcome=body.get("outcome"),
+        remark=payload.get("remark"), outcome=payload.get("outcome"),
         request_id=get_request_id(),
     ))
 

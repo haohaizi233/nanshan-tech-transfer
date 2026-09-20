@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timezone
 from typing import Optional
 
 from db import get_cursor
@@ -246,8 +245,8 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
         phone = validate_phone(phone, required=True)
     except BizError:
         raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "请输入11位手机号")
-    if not password or len(password) < 6:
-        raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "密码至少6位")
+    if not password or len(password) < 8:
+        raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "密码至少8位")
 
     with get_cursor(commit=True) as cur:
         # 检查手机号是否已注册（phone 唯一索引 + username 唯一约束双查，
@@ -471,21 +470,21 @@ def refresh_session(refresh_token: str) -> dict:
 
     jti = payload.get("jti")
     user_id = int(payload["sub"])
-    # PG TIMESTAMPTZ 读取为带时区 datetime，比较也须用带时区当前时间
-    now = datetime.now(timezone.utc)
 
     with get_cursor(commit=True) as cur:
+        # 原子消费 refresh 令牌：仅当 status='active' 且未过期时才置 consumed。
+        # 并发刷新同令牌时，第二条 UPDATE 的 WHERE status='active' 失败 → rowcount=0，
+        # 杜绝令牌重放（两条有效刷新链）。过期判断下沉到 SQL，避免 Python/PG 时区分歧。
         cur.execute(
-            "SELECT status, expires_at FROM auth_session WHERE refresh_jti=%s",
+            """
+            UPDATE auth_session
+            SET status='consumed', consumed_at=NOW()
+            WHERE refresh_jti=%s AND status='active'
+              AND (expires_at IS NULL OR expires_at >= NOW())
+            """,
             (jti,),
         )
-        session = cur.fetchone()
-        if not session or session["status"] != "active":
-            from core.errors import BizError, TT_COMMON_40102
-            code, message, status = TT_COMMON_40102
-            raise BizError(code, message, status)
-
-        if session["expires_at"] and session["expires_at"] < now:
+        if cur.rowcount == 0:
             from core.errors import BizError, TT_COMMON_40102
             code, message, status = TT_COMMON_40102
             raise BizError(code, message, status)
@@ -514,11 +513,6 @@ def refresh_session(refresh_token: str) -> dict:
             code, message, status = TT_AUTH_40106
             raise BizError(code, message, status)
         user_no = row["user_no"] or ""
-
-        cur.execute(
-            "UPDATE auth_session SET status='consumed' WHERE refresh_jti=%s",
-            (jti,),
-        )
 
         roles = _get_roles(cur, user_id)
         access_token = sign_access_token(user_id, user_no, roles)
@@ -589,5 +583,9 @@ def change_password(user_id: int, current_password: str, new_password: str) -> d
         cur.execute(
             "UPDATE user_credential SET password_hash=%s WHERE user_id=%s",
             (hash_password(new_password), user_id),
+        )
+        audit_record(
+            "user.change_password", "user_credential", resource_id=user_id,
+            actor_user_id=user_id, cur=cur,
         )
     return {"ok": True}

@@ -61,6 +61,7 @@
 
 <script>
 	import { getPatentById, buildPatentFeeDetail } from '../../api/patent-fee.js'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 
 	export default {
 		data() {
@@ -72,8 +73,7 @@
 			const id = options.id || ''
 			const patent = getPatentById(id)
 			if (!patent) {
-				uni.showToast({ title: '未找到该专利', icon: 'none' })
-				setTimeout(() => uni.navigateBack(), 1200)
+				safeBackWithToast('未找到该专利', 1200)
 				return
 			}
 			this.detail = buildPatentFeeDetail(patent)

@@ -57,10 +57,21 @@ def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict =
         queried = identity_from_access_token(request.query_params.get("access_token") or "")
         if queried:
             actor = queried
+    # 不信任 JWT roles 快照：实时查 user_role 表判定平台管理员（与 admin_identity 同源）。
+    actor_id = actor.get("userId")
+    can_review_import_media = False
+    if actor_id is not None:
+        from db import get_cursor
+        with get_cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
+                (actor_id,),
+            )
+            can_review_import_media = cur.fetchone() is not None
     path, mime, name = get_uploaded_file(
         file_id,
         actor["userId"],
-        can_review_import_media='admin' in actor.get("roles", []),
+        can_review_import_media=can_review_import_media,
     )
     if variant:
         if variant != "thumbnail":

@@ -3,8 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '../../api/client'
+import { useAbortable } from '../../api/useAbortable'
 
 const router = useRouter()
+const { run: runApi } = useAbortable()
 
 const fmtTime = (v) => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 const fmtNum = (v) => (v === null || v === undefined || v === '' ? '-' : Number(v).toLocaleString())
@@ -75,7 +77,8 @@ const loadSummary = async () => {
   summaryError.value = ''
 
   try {
-    summary.value = await api('/admin/dashboard/summary')
+    const data = await runApi('/admin/dashboard/summary')
+    if (data !== null) summary.value = data // null = 被取消（导航/卸载）
   } catch (error) {
     summary.value = null
     summaryError.value = error.message || '数据概览加载失败'

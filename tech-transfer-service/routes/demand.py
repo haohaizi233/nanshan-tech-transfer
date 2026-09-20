@@ -7,8 +7,14 @@ Architecture source: openapi.yaml paths /demands, /demands/{id},
 from fastapi import APIRouter, Depends, Request
 
 from core.response import success, get_request_id
-from core.middleware import identity, optional_identity, json_body
+from core.middleware import identity, optional_identity
 from core.errors import bad_request
+from core.request_schemas import (
+    DemandCreateRequest,
+    DemandUpdateRequest,
+    ReasonVersionBody,
+    VersionBody,
+)
 from modules.demand.service import (
     list_demands,
     get_demand_detail,
@@ -28,12 +34,12 @@ def demands_list(request: Request, user: dict = Depends(optional_identity)):
 
 
 @router.post("/demands", status_code=201)
-def demands_create(request: Request, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def demands_create(request: Request, body: DemandCreateRequest, user: dict = Depends(identity)):
     idem_key = request.headers.get("X-Idempotency-Key")
     if idem_key:
         print(f"[demand] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
     detail = create_demand(
-        user["userId"], user.get("userNo", ""), body,
+        user["userId"], user.get("userNo", ""), body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail, "创建成功")
@@ -45,9 +51,9 @@ def demand_detail(demand_id: int, user: dict = Depends(optional_identity)):
 
 
 @router.patch("/demands/{demand_id}")
-def demand_update(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def demand_update(demand_id: int, body: DemandUpdateRequest, user: dict = Depends(identity)):
     detail = update_demand(
-        user["userId"], user.get("userNo", ""), demand_id, body,
+        user["userId"], user.get("userNo", ""), demand_id, body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail)
@@ -61,27 +67,30 @@ def _version_body(body: dict):
 
 
 @router.post("/demands/{demand_id}/submit")
-def demand_submit(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def demand_submit(demand_id: int, body: VersionBody, user: dict = Depends(identity)):
+    payload = body.as_dict()
     result = submit_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(body),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(payload),
         request_id=get_request_id(),
     )
     return success(result)
 
 
 @router.post("/demands/{demand_id}/cancel")
-def demand_cancel(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def demand_cancel(demand_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
+    payload = body.as_dict()
     result = cancel_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(body), body.get("reasonCode"), body.get("reasonNote"),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(payload), payload.get("reasonCode"), payload.get("reasonNote"),
         request_id=get_request_id(),
     )
     return success(result)
 
 
 @router.post("/demands/{demand_id}/close")
-def demand_close(demand_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def demand_close(demand_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
+    payload = body.as_dict()
     result = close_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(body), body.get("reasonCode"), body.get("reasonNote"),
+        user["userId"], user.get("userNo", ""), demand_id, _version_body(payload), payload.get("reasonCode"), payload.get("reasonNote"),
         request_id=get_request_id(),
     )
     return success(result)

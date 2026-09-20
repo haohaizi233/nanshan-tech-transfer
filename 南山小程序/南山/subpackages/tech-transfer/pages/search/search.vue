@@ -250,14 +250,17 @@
 					this.loading = false
 				}
 			},
-			onInput(e) {
-				this.keyword = e.detail.value
+		onInput(e) {
+			this.keyword = e.detail.value
+			clearTimeout(this._searchTimer)
+			this._searchTimer = setTimeout(() => {
 				if (this.searchType === 0) {
 					this.loadDemands(this.keyword, true)
 				} else {
 					this.loadResults(this.keyword, true)
 				}
-			},
+			}, 300)
+		},
 			onConfirmSearch() {
 				const kw = (this.keyword || '').trim()
 				if (!kw) {

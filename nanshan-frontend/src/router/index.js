@@ -9,23 +9,24 @@ import RegisterView from '../views/auth/RegisterView.vue'
 
 import AdminLayout from '../layouts/AdminLayout.vue'
 
-import OverviewView from '../views/admin/OverviewView.vue'
-import AchievementView from '../views/admin/AchievementView.vue'
-import AchievementImportView from '../views/admin/AchievementImportView.vue'
-import InstitutionView from '../views/admin/InstitutionView.vue'
-import MembershipReviewView from '../views/admin/MembershipReviewView.vue'
-import UserView from '../views/admin/UserView.vue'
-import ContentView from '../views/admin/ContentView.vue'
-import SystemView from '../views/admin/SystemView.vue'
-import LogView from '../views/admin/LogView.vue'
-import RequirementView from '../views/admin/RequirementView.vue'
+// 管理页懒加载：减小首屏 bundle，按需加载各功能模块
+const OverviewView = () => import('../views/admin/OverviewView.vue')
+const AchievementView = () => import('../views/admin/AchievementView.vue')
+const AchievementImportView = () => import('../views/admin/AchievementImportView.vue')
+const InstitutionView = () => import('../views/admin/InstitutionView.vue')
+const MembershipReviewView = () => import('../views/admin/MembershipReviewView.vue')
+const UserView = () => import('../views/admin/UserView.vue')
+const ContentView = () => import('../views/admin/ContentView.vue')
+const SystemView = () => import('../views/admin/SystemView.vue')
+const LogView = () => import('../views/admin/LogView.vue')
+const RequirementView = () => import('../views/admin/RequirementView.vue')
 
-import RequirementDetailView from '../views/admin/RequirementDetailView.vue'
+const RequirementDetailView = () => import('../views/admin/RequirementDetailView.vue')
 
-import CooperationView from '../views/admin/CooperationView.vue'
+const CooperationView = () => import('../views/admin/CooperationView.vue')
 
-import CooperationDetailView from '../views/admin/CooperationDetailView.vue'
-import CapitalView from '../views/admin/CapitalView.vue'
+const CooperationDetailView = () => import('../views/admin/CooperationDetailView.vue')
+const CapitalView = () => import('../views/admin/CapitalView.vue')
 
 const isOrgAdminOnly = () => {
   const roles = getSavedUser()?.roles || []
@@ -203,32 +204,37 @@ const routes = [
       {
         path: 'ai',
         name: 'ai',
-        component: ContentView
+        component: ContentView,
+        meta: { parent: 'AI 管理', title: 'AI 配置' }
       },
 
       {
         path: 'content',
         name: 'content',
-        component: ContentView
+        component: ContentView,
+        meta: { parent: '内容管理', title: '内容配置' }
       },
 
       {
         path: 'system',
         name: 'system',
-        component: SystemView
+        component: SystemView,
+        meta: { parent: '系统管理', title: '系统配置' }
       },
 
       {
         path: 'logs',
         name: 'logs',
-        component: LogView
+        component: LogView,
+        meta: { parent: '系统管理', title: '操作日志' }
       }
     ]
   },
 
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/login'
+    name: 'not-found',
+    redirect: () => (getToken() ? '/admin' : '/login')
   }
 ]
 
@@ -242,6 +248,10 @@ router.beforeEach(to => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.path === '/login' && getToken()) {
+    return { path: isOrgAdminOnly() ? '/admin/achievements' : '/admin/overview' }
+  }
+  // 已认证用户不应停留在注册页
+  if (to.path === '/register' && getToken()) {
     return { path: isOrgAdminOnly() ? '/admin/achievements' : '/admin/overview' }
   }
   if (

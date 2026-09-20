@@ -1,5 +1,6 @@
 from db import get_cursor
 from core.errors import bad_request
+from modules.audit.service import record as audit_record
 
 VALID_CATEGORIES = ('review', 'cooperation', 'organization', 'membership')
 
@@ -67,6 +68,11 @@ def mark_notification_read(user_id, notification_id):
     with get_cursor(commit=True) as cur:
         cur.execute('''UPDATE notification_inbox SET read_at=COALESCE(read_at, NOW())
             WHERE id=%s AND recipient_user_id=%s''', (notification_id, user_id))
+        if cur.rowcount > 0:
+            audit_record(
+                "notification.read", "notification", resource_id=notification_id,
+                actor_user_id=user_id, cur=cur,
+            )
         return {'updated': cur.rowcount}
 
 

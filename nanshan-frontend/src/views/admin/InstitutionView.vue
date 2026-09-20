@@ -504,6 +504,7 @@ const exportData = async () => {
 
         <div class="filter-actions">
           <button
+            type="button"
             class="primary-btn"
             @click="handleSearch"
           >
@@ -511,6 +512,7 @@ const exportData = async () => {
           </button>
 
           <button
+            type="button"
             class="default-btn"
             @click="reset"
           >
@@ -518,6 +520,7 @@ const exportData = async () => {
           </button>
 
           <button
+            type="button"
             class="outline-btn"
             @click="openRegistrationReview"
           >
@@ -525,6 +528,7 @@ const exportData = async () => {
           </button>
 
           <button
+            type="button"
             class="primary-btn"
             @click="openCreate"
           >
@@ -623,19 +627,19 @@ const exportData = async () => {
 
               <td class="col-ops">
                 <div class="operation">
-                  <button @click="openView(item)">
+                  <button type="button" @click="openView(item)">
                     查看
                   </button>
 
                   <span>|</span>
 
-                  <button @click="openEdit(item)">
+                  <button type="button" @click="openEdit(item)">
                     编辑
                   </button>
 
                   <span>|</span>
 
-                  <button @click="toggleStatus(item)">
+                  <button type="button" @click="toggleStatus(item)">
                     {{ item.status === 'active' ? '下架' : '上架' }}
                   </button>
                 </div>
@@ -659,6 +663,7 @@ const exportData = async () => {
                 {{ loadError }}
 
                 <button
+                  type="button"
                   class="retry-btn"
                   @click="loadList"
                 >
@@ -688,6 +693,7 @@ const exportData = async () => {
 
       <div class="batch-right">
         <button
+          type="button"
           class="outline-btn"
           :disabled="exporting"
           @click="exportData"
@@ -717,6 +723,7 @@ const exportData = async () => {
         </select>
 
         <button
+          type="button"
           :disabled="currentPage === 1"
           @click="changePage(currentPage - 1)"
         >
@@ -736,6 +743,7 @@ const exportData = async () => {
 
           <button
             v-else
+            type="button"
             :class="{ active: currentPage === page }"
             @click="changePage(page)"
           >
@@ -744,6 +752,7 @@ const exportData = async () => {
         </template>
 
         <button
+          type="button"
           :disabled="currentPage === totalPages"
           @click="changePage(currentPage + 1)"
         >
@@ -756,7 +765,7 @@ const exportData = async () => {
       <div class="modal registration-modal">
         <div class="modal-header">
           <h3>机构注册申请审核</h3>
-          <button :disabled="Boolean(reviewingRegistrationId)" @click="registrationVisible = false">×</button>
+          <button type="button" :disabled="Boolean(reviewingRegistrationId)" @click="registrationVisible = false">×</button>
         </div>
         <div class="registration-toolbar">
           <label>申请状态
@@ -767,7 +776,7 @@ const exportData = async () => {
               <option value="all">全部</option>
             </select>
           </label>
-          <button class="default-btn" :disabled="registrationLoading" @click="loadRegistrations">刷新</button>
+          <button type="button" class="default-btn" :disabled="registrationLoading" @click="loadRegistrations">刷新</button>
         </div>
         <p v-if="registrationError" class="modal-error">{{ registrationError }}</p>
         <div class="registration-table-wrap">
@@ -785,8 +794,8 @@ const exportData = async () => {
                 <td><span class="registration-status" :class="item.registrationStatus">{{ { pending: '待审核', approved: '已通过', rejected: '已驳回' }[item.registrationStatus] || item.registrationStatus }}</span><small v-if="item.rejectReason">{{ item.rejectReason }}</small></td>
                 <td>
                   <div v-if="item.registrationStatus === 'pending'" class="review-actions">
-                    <button class="approve-btn" :disabled="Boolean(reviewingRegistrationId)" @click="approveRegistration(item)">通过</button>
-                    <button class="reject-btn" :disabled="Boolean(reviewingRegistrationId)" @click="openRejectRegistration(item)">驳回</button>
+                    <button type="button" class="approve-btn" :disabled="Boolean(reviewingRegistrationId)" @click="approveRegistration(item)">通过</button>
+                    <button type="button" class="reject-btn" :disabled="Boolean(reviewingRegistrationId)" @click="openRejectRegistration(item)">驳回</button>
                   </div>
                   <span v-else>-</span>
                 </td>
@@ -797,7 +806,7 @@ const exportData = async () => {
         <div v-if="rejectTarget" class="reject-panel">
           <strong>驳回“{{ rejectTarget.name }}”</strong>
           <textarea v-model="rejectReason" rows="3" maxlength="500" placeholder="请填写驳回原因（必填）"></textarea>
-          <div><button class="default-btn" :disabled="Boolean(reviewingRegistrationId)" @click="rejectTarget = null">取消</button><button class="reject-btn" :disabled="Boolean(reviewingRegistrationId)" @click="rejectRegistration">确认驳回</button></div>
+          <div><button type="button" class="default-btn" :disabled="Boolean(reviewingRegistrationId)" @click="rejectTarget = null">取消</button><button type="button" class="reject-btn" :disabled="Boolean(reviewingRegistrationId)" @click="rejectRegistration">确认驳回</button></div>
         </div>
       </div>
     </div>
@@ -813,7 +822,7 @@ const exportData = async () => {
             {{ modalMode === 'view' ? '机构详情' : modalMode === 'create' ? '新增机构' : '编辑机构' }}
           </h3>
 
-          <button @click="closeModal">
+          <button type="button" @click="closeModal">
             ×
           </button>
         </div>
@@ -1048,6 +1057,7 @@ const exportData = async () => {
 
         <div class="modal-footer">
           <button
+            type="button"
             class="default-btn"
             @click="closeModal"
           >
@@ -1056,6 +1066,7 @@ const exportData = async () => {
 
           <button
             v-if="modalMode !== 'view'"
+            type="button"
             class="primary-btn"
             :disabled="saving"
             @click="save"

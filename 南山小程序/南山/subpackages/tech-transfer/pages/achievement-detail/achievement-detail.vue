@@ -48,7 +48,7 @@
       <view v-if="detail.media && detail.media.length" class="section-card">
         <text class="section-title">成果资料</text>
         <view class="media-grid">
-          <image v-for="media in detail.media" :key="media.fileId" class="media-image" :src="media.url" mode="aspectFill" />
+          <image v-for="media in detail.media" :key="media.fileId" class="media-image" :src="mediaSrc(media)" mode="aspectFill" />
         </view>
       </view>
 
@@ -155,7 +155,9 @@
 <script>
 import { getAchievementDetail } from '../../api/achievement.js'
 import { formatMaturityLabel } from '../../api/achievement-dock-card.mjs'
+import { mediaDisplayUrl } from '../../api/media-url.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
+import { safeNavigateBack } from '../../utils/nav.mjs'
 
 const PRICING_MODE_LABELS = {
   'negotiable': '面议',
@@ -241,6 +243,15 @@ export default {
     formatPricingMode(mode) {
       return PRICING_MODE_LABELS[mode] || ''
     },
+    mediaSrc(media) {
+      // 与 dock-detail.vue 的 mediaSrc 一致：把相对 /api/... 补成绝对地址并附带 access_token，
+      // 否则 WeChat MP 的 <image> 无法加载需要鉴权的成果资料图。
+      return mediaDisplayUrl(
+        media,
+        HostBridge.getEnvironment() || {},
+        HostBridge.getStorage('tt_access_token') || '',
+      )
+    },
     onProposeDock() {
       if (!this.achId) return
       HostBridge.navigate('pages/dock-detail/dock-detail', { type: 'result', id: this.achId })
@@ -261,7 +272,7 @@ export default {
       HostBridge.navigate('pages/web-view/web-view', { url })
     },
     goBack() {
-      uni.navigateBack()
+      safeNavigateBack(1)
     },
   },
 }

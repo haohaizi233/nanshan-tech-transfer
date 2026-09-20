@@ -93,6 +93,7 @@
 		revokeOrgMember
 	} from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 
 	export default {
 		data() {
@@ -114,8 +115,7 @@
 		},
 		onShow() {
 			if (!isLoggedIn()) {
-				uni.showToast({ title: '请先登录', icon: 'none' })
-				setTimeout(() => uni.navigateBack(), 800)
+				safeBackWithToast('请先登录', 800)
 				return
 			}
 			this.loadAdminOrgs()

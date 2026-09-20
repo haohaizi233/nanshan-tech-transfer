@@ -68,6 +68,7 @@
 	import { applyOrganization, getMyOrganizationCertification, searchInstitutions } from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 
 	const TYPE_OPTIONS = [
 		{ label: '企业', value: 'enterprise' },
@@ -116,11 +117,14 @@
 		},
 		onShow() {
 			if (!isLoggedIn()) {
-				uni.showToast({ title: '请先登录', icon: 'none' })
-				setTimeout(() => uni.navigateBack(), 800)
+				safeBackWithToast('请先登录', 800)
 				return
 			}
 			this.loadCertification()
+		},
+		onUnload() {
+			// 防止离开页面后 debounce 仍触发 checkExistingName
+			clearTimeout(this._nameTimer)
 		},
 		methods: {
 			async loadCertification() {
@@ -210,8 +214,8 @@
 						proofMaterial: (this.form.proofMaterial || '').trim() || undefined
 					})
 					uni.hideLoading()
-					uni.showToast({ title: '已提交，等待平台管理员审核', icon: 'none', duration: 2000 })
-					setTimeout(() => uni.navigateBack(), 1200)
+				uni.showToast({ title: '已提交，等待平台管理员审核', icon: 'none', duration: 2000 })
+				safeBackWithToast('', 1200)
 				} catch (e) {
 					uni.hideLoading()
 					uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none', duration: 2500 })

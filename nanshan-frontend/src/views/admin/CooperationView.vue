@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
+import { useAbortable } from '../../api/useAbortable'
 
 const router = useRouter()
 
@@ -59,11 +60,13 @@ const totalPages = ref(1)
 const currentPage = ref(1)
 const pageSize = ref(10)
 
+const { run: runApi } = useAbortable()
+
 const fetchList = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    const data = await api('/admin/cooperations', {
+    const data = await runApi('/admin/cooperations', {
       params: {
         page: currentPage.value,
         pageSize: pageSize.value,
@@ -71,6 +74,7 @@ const fetchList = async () => {
         keyword: appliedFilters.keyword.trim()
       }
     })
+    if (data === null) return // 被取消（快速翻页/导航/卸载）
     rows.value = data.list || []
     total.value = data.total || 0
     totalPages.value = Math.max(1, data.totalPages || Math.ceil(total.value / pageSize.value))
@@ -188,6 +192,7 @@ const goDetail = item => {
         <div class="filter-actions">
 
           <button
+            type="button"
             class="primary-btn"
             @click="handleSearch"
           >
@@ -195,6 +200,7 @@ const goDetail = item => {
           </button>
 
           <button
+            type="button"
             class="default-btn"
             @click="handleReset"
           >
@@ -255,7 +261,7 @@ const goDetail = item => {
                   {{ loadError }}
                 </span>
 
-                <button @click="fetchList">
+                <button type="button" @click="fetchList">
                   重试
                 </button>
 
@@ -353,7 +359,7 @@ const goDetail = item => {
 
               <div class="operation">
 
-                <button @click="goDetail(item)">
+                <button type="button" @click="goDetail(item)">
                   查看
                 </button>
 
@@ -391,6 +397,7 @@ const goDetail = item => {
 
 
         <button
+          type="button"
           :disabled="currentPage === 1"
           @click="goPage(currentPage - 1)"
         >
@@ -411,6 +418,7 @@ const goDetail = item => {
 
           <button
             v-else
+            type="button"
             :class="{
               active:
                 currentPage ===
@@ -425,6 +433,7 @@ const goDetail = item => {
 
 
         <button
+          type="button"
           :disabled="
             currentPage ===
             totalPages

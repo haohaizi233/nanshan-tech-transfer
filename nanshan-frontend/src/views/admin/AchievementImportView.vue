@@ -64,6 +64,12 @@ function loadCandidateImages(batch) {
   }
 }
 
+// 撤销所有已创建的 blob URL，释放 GPU/内存；切换批次或清空暂存时必须调用
+function revokeCandidateUrls() {
+  Object.values(candidateImageUrls.value).forEach(URL.revokeObjectURL)
+  candidateImageUrls.value = {}
+}
+
 async function loadBatches() {
   loading.value = true
   loadError.value = ''
@@ -79,6 +85,7 @@ async function loadBatches() {
 }
 
 async function selectBatch(batch) {
+  revokeCandidateUrls() // 切换批次前撤销旧 blob URL，避免内存泄漏
   detailLoading.value = true
   selectedBatch.value = null
   activeItemIndex.value = 0
@@ -105,6 +112,7 @@ async function clearStaging() {
   clearing.value = true
   try {
     await api('/admin/achievement-imports/clear', { method: 'POST', body: {} })
+    revokeCandidateUrls() // 清空暂存后撤销所有 blob URL
     selectedBatch.value = null
     activeItemIndex.value = 0
     await loadBatches()
@@ -135,7 +143,7 @@ async function publishItem(item) {
 }
 
 onMounted(loadBatches)
-onBeforeUnmount(() => Object.values(candidateImageUrls.value).forEach(URL.revokeObjectURL))
+onBeforeUnmount(revokeCandidateUrls)
 </script>
 
 <template>

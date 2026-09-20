@@ -25,6 +25,7 @@ from PIL import Image
 from config import settings
 from core.errors import bad_request, forbidden, not_found
 from db import get_cursor
+from modules.audit.service import record as audit_record
 
 LOGO_CACHE = settings.file_cache_path
 LOGO_CACHE.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,15 @@ _ALLOWED = {
 _IMAGE_SIGNATURES = {
     ".png": b"\x89PNG\r\n\x1a\n", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff",
     ".gif": b"GIF8", ".webp": b"RIFF",
+}
+# Office 文档魔数：旧二进制 OLE2 复合文档统一头；OOXML 系列为 ZIP 容器
+_OFFICE_SIGNATURES = {
+    ".doc": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+    ".ppt": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+    ".xls": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+    ".docx": b"PK\x03\x04",
+    ".pptx": b"PK\x03\x04",
+    ".xlsx": b"PK\x03\x04",
 }
 _IMAGE_MIMES = {suffix: next(iter(mimes)) for suffix, mimes in _ALLOWED.items() if suffix in _IMAGE_SIGNATURES}
 
@@ -86,6 +96,10 @@ def _validate_upload(name: str, content_type: str, data: bytes) -> tuple[str, st
     if declared not in _ALLOWED[suffix]:
         raise bad_request("不支持的文件类型")
     if suffix == ".pdf" and not data.startswith(b"%PDF-"):
+        raise bad_request("文件内容与声明类型不一致")
+    # Office 文档校验魔数：防止把可执行/脚本伪装成 .docx 等附件
+    office_sig = _OFFICE_SIGNATURES.get(suffix)
+    if office_sig and not data.startswith(office_sig):
         raise bad_request("文件内容与声明类型不一致")
     return suffix, declared
 
@@ -161,6 +175,10 @@ def create_uploaded_file(user_id: int, filename: str, content_type: str, data: b
                 (storage_key, _safe_name(filename), mime, len(data), digest, width, height, user_id),
             )
             row = cur.fetchone()
+            audit_record(
+                "file.upload", "file_object", resource_id=row["id"],
+                actor_user_id=user_id, cur=cur,
+            )
     except Exception:
         path.unlink(missing_ok=True)
         raise
@@ -261,6 +279,10 @@ def delete_uploaded_file(file_id: int, user_id: int) -> None:
         if cur.fetchone()["linked"]:
             raise bad_request("文件已被内容引用，不能删除")
         cur.execute("UPDATE file_object SET status='deleted', deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=%s", (file_id,))
+        audit_record(
+            "file.delete", "file_object", resource_id=file_id,
+            actor_user_id=user_id, cur=cur,
+        )
     (settings.media_root_path / row["storage_key"]).unlink(missing_ok=True)
     thumbnail_path_for_file(file_id).unlink(missing_ok=True)
 

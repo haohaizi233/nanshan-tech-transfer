@@ -7,8 +7,14 @@ Architecture source: openapi.yaml paths /achievements, /achievements/{id},
 from fastapi import APIRouter, Depends, Request
 
 from core.response import success, get_request_id
-from core.middleware import identity, optional_identity, json_body
+from core.middleware import identity, optional_identity
 from core.errors import bad_request
+from core.request_schemas import (
+    AchievementCreateRequest,
+    AchievementOfflineRequest,
+    AchievementUpdateRequest,
+    VersionBody,
+)
 from modules.achievement.service import (
     list_achievements,
     get_achievement_detail,
@@ -49,21 +55,21 @@ def achievement_detail(ach_id: int, user: dict = Depends(optional_identity)):
 
 
 @router.post("/achievements", status_code=201, summary="创建成果（draft）")
-def achievements_create(request: Request, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def achievements_create(request: Request, body: AchievementCreateRequest, user: dict = Depends(identity)):
     idem_key = request.headers.get("X-Idempotency-Key")
     if idem_key:
         print(f"[achievement] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
     detail = create_achievement(
-        user["userId"], user.get("userNo", ""), body,
+        user["userId"], user.get("userNo", ""), body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail, "创建成功")
 
 
 @router.patch("/achievements/{ach_id}", summary="编辑成果（owner + 乐观锁 + draft/rejected）")
-def achievement_update(ach_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def achievement_update(ach_id: int, body: AchievementUpdateRequest, user: dict = Depends(identity)):
     detail = update_achievement(
-        user["userId"], user.get("userNo", ""), ach_id, body,
+        user["userId"], user.get("userNo", ""), ach_id, body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail)
@@ -77,20 +83,22 @@ def _version_body(body: dict):
 
 
 @router.post("/achievements/{ach_id}/submit", summary="提交审核（draft/rejected/offline → pending_review）")
-def achievement_submit(ach_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def achievement_submit(ach_id: int, body: VersionBody, user: dict = Depends(identity)):
+    payload = body.as_dict()
     result = submit_achievement(
-        user["userId"], user.get("userNo", ""), ach_id, _version_body(body),
+        user["userId"], user.get("userNo", ""), ach_id, _version_body(payload),
         request_id=get_request_id(),
     )
     return success(result)
 
 
 @router.post("/achievements/{ach_id}/offline", summary="下线成果（published → offline）")
-def achievement_offline(ach_id: int, user: dict = Depends(identity), body: dict = Depends(json_body)):
+def achievement_offline(ach_id: int, body: AchievementOfflineRequest, user: dict = Depends(identity)):
+    payload = body.as_dict()
     result = offline_achievement(
-        user["userId"], user.get("userNo", ""), ach_id, _version_body(body),
-        reason=(body or {}).get("reason"),
-        reason_code=(body or {}).get("reasonCode"),
+        user["userId"], user.get("userNo", ""), ach_id, _version_body(payload),
+        reason=payload.get("reason"),
+        reason_code=payload.get("reasonCode"),
         request_id=get_request_id(),
     )
     return success(result)

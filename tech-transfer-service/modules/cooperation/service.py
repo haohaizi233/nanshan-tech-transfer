@@ -502,20 +502,28 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
             ensure_ascii=False,
         )
 
-        cur.execute(
-            """
-            INSERT INTO cooperation_intent
-                (initiator_user_id, target_type, target_id, target_owner_user_id,
-                 intent_type, message, handling_mode, assist_status, target_org_id,
-                 initiator_contact_snapshot, contact_share_consent_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            RETURNING id
-            """,
-            (user_id, target_type, target_id, target["owner_user_id"],
-             intent_type, message, handling_mode,
-             "queued" if handling_mode == "assisted" else None,
-             target.get("org_id"), contact_snapshot),
-        )
+        try:
+            cur.execute(
+                """
+                INSERT INTO cooperation_intent
+                    (initiator_user_id, target_type, target_id, target_owner_user_id,
+                     intent_type, message, handling_mode, assist_status, target_org_id,
+                     initiator_contact_snapshot, contact_share_consent_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING id
+                """,
+                (user_id, target_type, target_id, target["owner_user_id"],
+                 intent_type, message, handling_mode,
+                 "queued" if handling_mode == "assisted" else None,
+                 target.get("org_id"), contact_snapshot),
+            )
+        except Exception as exc:
+            # 并发创建同一 (initiator, target) 可撞 uk_coop_active 唯一约束；
+            # 转为业务 409 而非 500，与 check-then-insert 的 coop_active_exists 语义一致。
+            from psycopg2.errors import UniqueViolation
+            if isinstance(exc, UniqueViolation):
+                raise coop_active_exists()
+            raise
         intent_id = cur.fetchone()["id"]
         _insert_event(cur, intent_id, "created", None, "pending",
                       user_id, "initiator", message)
@@ -525,13 +533,15 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
                 title="收到新的对接申请", body=message,
                 target_path=f"/subpackages/tech-transfer/pages/dock-detail/dock-detail?type={target_type}&id={target_id}&intentId={intent_id}")
 
-    audit_record(
-        "cooperation.create", "cooperation_intent", resource_id=intent_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"targetType": target_type, "targetId": target_id,
-                 "handlingMode": handling_mode},
-        request_id=request_id,
-    )
+        # 审计与状态变更同事务（cur=cur），避免提交后审计静默失败
+        audit_record(
+            "cooperation.create", "cooperation_intent", resource_id=intent_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"targetType": target_type, "targetId": target_id,
+                     "handlingMode": handling_mode},
+            request_id=request_id, cur=cur,
+        )
+
     return get_intent_detail(intent_id, user_id)
 
 
@@ -773,13 +783,22 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
                 "UPDATE demand SET status='matched', version=version+1 WHERE id=%s AND status='published'",
                 (row["target_id"],),
             )
+            # demand 状态变更也需审计留痕（同事务）
+            audit_record(
+                "demand.auto_matched", "demand", resource_id=row["target_id"],
+                actor_user_id=user_id, actor_user_no=user_no,
+                details={"from": "published", "to": "matched", "trigger": f"cooperation.{op}", "intentId": intent_id},
+                request_id=request_id, cur=cur,
+            )
 
-    audit_record(
-        f"cooperation.{op}", "cooperation_intent", resource_id=intent_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"from": row["status"], "to": rule["to"]},
-        request_id=request_id,
-    )
+        # 审计与状态变更同事务（cur=cur），避免提交后审计静默失败
+        audit_record(
+            f"cooperation.{op}", "cooperation_intent", resource_id=intent_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"from": row["status"], "to": rule["to"]},
+            request_id=request_id, cur=cur,
+        )
+
     return get_intent_detail(intent_id, user_id)
 
 
@@ -963,6 +982,12 @@ def admin_assist_transition(admin_user: dict, intent_id: int, body: dict, reques
             cur.execute(
                 "UPDATE demand SET status='matched', version=version+1 WHERE id=%s AND status='published'",
                 (row["target_id"],),
+            )
+            audit_record(
+                "demand.auto_matched", "demand", resource_id=row["target_id"],
+                actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+                details={"from": "published", "to": "matched", "trigger": f"cooperation.admin_{action}", "intentId": intent_id},
+                request_id=request_id, cur=cur,
             )
 
         audit_details = {"from": row["status"], "to": rule["to"],

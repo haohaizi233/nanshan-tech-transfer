@@ -72,7 +72,7 @@
           @click="openDetail(item.id)"
         >
           <view class="card-summary">
-            <image v-if="item.cover && item.cover.url" class="cover" :src="item.cover.thumbnailUrl || item.cover.url" mode="aspectFill" />
+            <image v-if="item.cover && item.cover.url" class="cover" :src="coverDisplayUrl(item.cover)" mode="aspectFill" />
             <view class="card-content">
               <view class="card-head">
                 <text class="card-title">{{ item.title }}</text>
@@ -119,6 +119,7 @@
 
 <script>
 import { getAchievements, getAchievementCategories, getAchievementIndustries } from '../../api/achievement.js'
+import { mediaDisplayUrl } from '../../api/media-url.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
 
 const MATURITY_LABELS = {
@@ -240,6 +241,15 @@ export default {
     },
     formatMaturity(item) {
       return MATURITY_LABELS[item.maturityLevel] || item.maturityDesc || ''
+    },
+    coverDisplayUrl(cover) {
+      // 成果封面在 WeChat MP 下需要绝对 origin + access_token 才能被 <image> 加载，
+      // 与 dock-detail.vue 的 mediaSrc 走同一套 media-url 解析逻辑。
+      return mediaDisplayUrl(
+        { url: cover.thumbnailUrl || cover.url },
+        HostBridge.getEnvironment() || {},
+        HostBridge.getStorage('tt_access_token') || '',
+      )
     },
     formatPrice(item) {
       if (item.pricingMode === 'negotiable') {

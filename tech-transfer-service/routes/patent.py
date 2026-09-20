@@ -9,8 +9,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response, StreamingResponse
 
 from core.errors import patent_not_found
-from core.middleware import identity, json_body
+from core.middleware import identity
 from core.pagination import parse_page_args
+from core.request_schemas import PatentSearchHistoryRequest
 from core.response import success
 from modules.patent.service import (
     get_patent,
@@ -37,9 +38,9 @@ def patent_search_history(mode: str = "keyword", user: dict = Depends(identity))
 
 
 @router.post("/patents/search-history")
-async def record_patent_search_history(request: Request, user: dict = Depends(identity)):
-    body = await json_body(request)
-    return success(record_history(user["userId"], body.get("mode"), body.get("keyword")))
+def record_patent_search_history(body: PatentSearchHistoryRequest, user: dict = Depends(identity)):
+    payload = body.as_dict()
+    return success(record_history(user["userId"], payload.get("mode"), payload.get("keyword")))
 
 
 @router.get("/patents/{publication_no}/pdf")

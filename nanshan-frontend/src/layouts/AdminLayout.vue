@@ -15,8 +15,25 @@ const refreshNotification = async () => {
   try { notification.value = await api('/admin/notifications/summary') } catch (e) { console.warn('[admin notification]', e) }
   finally { notificationInFlight = false }
 }
-onMounted(() => { refreshNotification(); notificationTimer = setInterval(refreshNotification, 5000) })
-onUnmounted(() => { clearInterval(notificationTimer); notificationTimer = null })
+
+// tab 隐藏时暂停轮询，可见时恢复并立即刷新一次，避免后台空跑与无效请求
+const handleVisibility = () => {
+  if (document.hidden) {
+    if (notificationTimer) { clearInterval(notificationTimer); notificationTimer = null }
+  } else {
+    if (!notificationTimer) { refreshNotification(); notificationTimer = setInterval(refreshNotification, 5000) }
+  }
+}
+
+onMounted(() => {
+  refreshNotification()
+  notificationTimer = setInterval(refreshNotification, 5000)
+  document.addEventListener('visibilitychange', handleVisibility)
+})
+onUnmounted(() => {
+  clearInterval(notificationTimer); notificationTimer = null
+  document.removeEventListener('visibilitychange', handleVisibility)
+})
 
 const toggleSidebar = () => {
   collapsed.value = !collapsed.value

@@ -82,6 +82,20 @@ app.add_middleware(
     expose_headers=["X-Request-Id"],
 )
 
+
+# ── 安全响应头（防点击劫持 / MIME 嗅探 / 降级）────────────────
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # 限制内嵌 iframe；API 响应不需要 CSP，仅对 HTML 页面设 frame-ancestors
+    if "text/html" in response.headers.get("content-type", ""):
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return response
+
+
 app.include_router(auth_router)
 app.include_router(institution_registration_router)
 app.include_router(notification_router)
@@ -278,8 +292,8 @@ register_exception_handlers(app)
 def health():
     try:
         with get_cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS c FROM app_user")
-            user_count = cur.fetchone()["c"]
+            # 仅探活，不暴露用户总数（公开端点不应泄露业务量级）
+            cur.execute("SELECT 1")
         return {
             "code": 0,
             "message": "ok",
@@ -287,7 +301,6 @@ def health():
                 "status": "ok",
                 "database": "ok",
                 "db": True,
-                "appUsers": user_count,
                 "authProvider": settings.AUTH_PROVIDER,
                 "appEnv": settings.APP_ENV,
             },

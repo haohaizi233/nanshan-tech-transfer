@@ -13,8 +13,9 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from core.response import success, get_request_id
-from core.middleware import identity, json_body
+from core.middleware import identity
 from core.errors import ai_unavailable, bad_request
+from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
 )
@@ -38,8 +39,8 @@ router = APIRouter(
 
 # ── 成果评估（异步任务）──────────────────────────────────────
 @router.post("/ai/evaluation-tasks", status_code=202)
-def evaluation_tasks_create(request: Request, user: dict = Depends(identity), body: dict = Depends(json_body)):
-    achievement_id = body.get("achievementId")
+def evaluation_tasks_create(request: Request, body: EvaluationTaskRequest, user: dict = Depends(identity)):
+    achievement_id = body.as_dict().get("achievementId")
     if not isinstance(achievement_id, int) or achievement_id <= 0:
         from core.errors import bad_request
         raise bad_request("achievementId 必须为正整数")
@@ -88,8 +89,8 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
 
 
 @router.post("/ai/chat")
-def ai_chat(user: dict = Depends(identity), body: dict = Depends(json_body)):
-    message = body.get("message")
+def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
+    message = body.as_dict().get("message")
     if not isinstance(message, str) or not message.strip():
         raise bad_request("message 不能为空")
     if not settings.AI_AGENT_URL:
@@ -173,8 +174,8 @@ def _build_match_reasons(card: dict, keywords: list[str]) -> list[str]:
 
 
 @router.post("/ai/match")
-def ai_match(user: dict = Depends(identity), body: dict = Depends(json_body)):
-    demand_id = body.get("demandId")
+def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
+    demand_id = body.as_dict().get("demandId")
     if not isinstance(demand_id, int) or demand_id <= 0:
         raise bad_request("demandId 必须为正整数")
     if not settings.AI_AGENT_URL:

@@ -60,7 +60,7 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
     """
     with get_cursor(commit=True) as cur:
         cur.execute(
-            "SELECT id, title, owner_user_id FROM achievement WHERE id = %s AND deleted_at IS NULL",
+            "SELECT id, title, owner_user_id FROM achievement WHERE id = %s AND deleted_at IS NULL FOR UPDATE",
             (achievement_id,),
         )
         achievement = cur.fetchone()
@@ -118,13 +118,14 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
         )
         task_id = cur.fetchone()["id"]
 
-    audit_record(
-        "ai.task.create", "ai_task", resource_id=task_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"taskType": "evaluation", "achievementId": achievement_id,
-                 "inputDataVersion": input_data_version},
-        request_id=request_id,
-    )
+        audit_record(
+            "ai.task.create", "ai_task", resource_id=task_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"taskType": "evaluation", "achievementId": achievement_id,
+                     "inputDataVersion": input_data_version},
+            request_id=request_id, cur=cur,
+        )
+
     return _task_view(task_id), True
 
 

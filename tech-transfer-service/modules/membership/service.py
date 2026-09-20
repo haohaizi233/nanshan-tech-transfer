@@ -425,7 +425,13 @@ def apply_membership(user: dict, body: dict) -> dict:
                         body.get("proofMaterial"), body.get("applyNote"),
                     ),
                 )
-                return _map_application(cur.fetchone())
+                application = cur.fetchone()
+                audit_record(
+                    "membership.apply", "organization_membership_application", application["id"],
+                    user_id, user.get("userNo", ""),
+                    {"orgId": org_id, "userId": user_id}, cur=cur,
+                )
+                return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的成员申请")
 
@@ -664,7 +670,13 @@ def apply_organization_admin(user: dict, body: dict) -> dict:
                         body.get("proofMaterial"), body.get("reason"),
                     ),
                 )
-                return _map_application(cur.fetchone())
+                application = cur.fetchone()
+                audit_record(
+                    "membership.apply_org_admin", "organization_admin_application", application["id"],
+                    user_id, user.get("userNo", ""),
+                    {"orgId": org_id, "userId": user_id}, cur=cur,
+                )
+                return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的机构管理员申请")
 
@@ -819,7 +831,13 @@ def apply_organization(user: dict, body: dict) -> dict:
                         contact_email, body.get("proofMaterial"),
                     ),
                 )
-                return _map_application(cur.fetchone())
+                application = cur.fetchone()
+                audit_record(
+                    "membership.apply_org", "organization_application", application["id"],
+                    user_id, user.get("userNo", ""),
+                    {"orgId": None, "userId": user_id, "requestedName": requested_name}, cur=cur,
+                )
+                return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的机构入驻申请")
 

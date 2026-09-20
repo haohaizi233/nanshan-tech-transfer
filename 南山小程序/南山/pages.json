@@ -210,7 +210,7 @@
 	],
 	"preloadRule": {
 		"pages/dev-home/dev-home": {
-			"network": "all",
+			"network": "wifi",
 			"packages": ["subpackages/tech-transfer"]
 		}
 	},

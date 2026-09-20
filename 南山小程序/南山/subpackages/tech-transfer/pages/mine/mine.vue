@@ -385,9 +385,6 @@
 			}
 		},
 		onShow() {
-			// #ifdef H5
-			window.__mineOnShowCount = (window.__mineOnShowCount || 0) + 1
-			// #endif
 			this.refresh()
 		},
 		methods: {

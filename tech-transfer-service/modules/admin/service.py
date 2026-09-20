@@ -45,6 +45,10 @@ from modules.demand.service import (
     _sync_tags as _sync_demand_tags,
     _validate_refs as _validate_demand_refs,
 )
+from modules.cooperation.service import (
+    _reserve_target_slot,
+    _release_target_slot,
+)
 
 
 def _page_args(args) -> tuple[int, int]:
@@ -297,12 +301,13 @@ def review_achievement(admin_user: dict, ach_id: int, body: dict, request_id=Non
                 title="成果审核已通过" if action == "approve" else "成果审核未通过", body=reason or None,
                 target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
 
-    audit_record(
-        f"achievement.{action}", "achievement", resource_id=ach_id,
-        actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
-        details={"from": "pending_review", "to": to_status, "reason": reason or None},
-        request_id=request_id,
-    )
+        audit_record(
+            f"achievement.{action}", "achievement", resource_id=ach_id,
+            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            details={"from": "pending_review", "to": to_status, "reason": reason or None},
+            request_id=request_id, cur=cur,
+        )
+
     return {"status": to_status}
 
 
@@ -355,12 +360,13 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
                 title="需求审核已通过" if action == "approve" else "需求审核未通过", body=reason or None,
                 target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
 
-    audit_record(
-        f"demand.{action}", "demand", resource_id=demand_id,
-        actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
-        details={"from": "pending_review", "to": to_status, "reason": reason or None},
-        request_id=request_id,
-    )
+        audit_record(
+            f"demand.{action}", "demand", resource_id=demand_id,
+            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            details={"from": "pending_review", "to": to_status, "reason": reason or None},
+            request_id=request_id, cur=cur,
+        )
+
     return {"status": to_status}
 
 
@@ -569,10 +575,7 @@ def notification_summary() -> dict:
 def dashboard_todos(limit: int = 20) -> dict:
     """Unified system-admin work queue; organization applications appear only once."""
     limit = max(1, min(int(limit or 20), 100))
-    with get_cursor() as cur:
-        cur.execute(
-            """
-            SELECT kind, id, title, created_at
+    union_from = """
             FROM (
                 SELECT 'achievement' AS kind, a.id, a.title,
                        COALESCE(a.updated_at, a.created_at) AS created_at
@@ -611,8 +614,18 @@ def dashboard_todos(limit: int = 20) -> dict:
                 LEFT JOIN demand d ON c.target_type = 'demand' AND c.target_id = d.id
                 WHERE c.status = 'pending'
             ) AS todo
+    """
+    with get_cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) AS total {union_from}")
+        total = int((cur.fetchone() or {}).get("total") or 0)
+        cur.execute(
+            f"""
+            SELECT kind, id, title, created_at
+            {union_from}
             ORDER BY created_at DESC, id DESC
-            """
+            LIMIT %s
+            """,
+            (limit,),
         )
         rows = cur.fetchall() or []
 
@@ -643,7 +656,7 @@ def dashboard_todos(limit: int = 20) -> dict:
         }
         for row in rows
     ]
-    return {"total": len(items), "list": items[:limit]}
+    return {"total": total, "list": items}
 
 
 def dashboard_trend(days) -> dict:
@@ -692,9 +705,9 @@ def dashboard_trend(days) -> dict:
         )
         demands = {row["day"]: int(row["c"]) for row in (cur.fetchall() or [])}
 
-    from datetime import date, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    today = date.today()
+    today = datetime.now(timezone(timedelta(hours=8))).date()
     labels, users_seq, ach_seq, dmd_seq = [], [], [], []
     for i in range(days - 1, -1, -1):
         day = today - timedelta(days=i)
@@ -1411,6 +1424,7 @@ def admin_review_cooperation(
                 ci.version,
                 ci.handling_mode,
                 ci.assist_status,
+                ci.slot_reserved,
                 COALESCE(ci.target_org_id, d.org_id, a.org_id) AS target_org_id
             FROM cooperation_intent ci
             LEFT JOIN demand d
@@ -1474,6 +1488,9 @@ def admin_review_cooperation(
         # 接受某条对接后，同一目标的其他待处理对接自动驳回。
         # 与小程序原有 accept 行为保持一致。
         if action == "accept":
+            # 名额预占（与用户路径 _transition 保持一致）：exclusive/limited
+            # 目标必须在 accept 时原子扣减 cooperation_remaining，否则可被超量接受。
+            slot = _reserve_target_slot(cur, row, intent_id)
             cur.execute(
                 """
                 SELECT id
@@ -1517,6 +1534,28 @@ def admin_review_cooperation(
                     operator_role="system",
                     remark="目标内容已接受其他对接申请",
                 )
+            # 独占或最后一席：closePending 时 _reserve_target_slot 已返回，
+            # 上面的 auto_reject 已覆盖全部其他 pending，语义一致。
+        else:
+            # reject 释放该意向已预占的名额（若曾 accept 过又因状态回退等场景）
+            _release_target_slot(cur, row, intent_id)
+
+        # 通知发起方：对接申请已被处理（与用户路径 _transition 保持一致）
+        emit_notification(
+            cur,
+            recipient_user_id=row["initiator_user_id"],
+            category="cooperation",
+            event_type=f"cooperation.{'accepted' if action == 'accept' else 'rejected'}",
+            source_type="cooperation",
+            source_id=intent_id,
+            title=f"对接状态更新：{to_status}",
+            body=reason or None,
+            target_path=(
+                f"/subpackages/tech-transfer/pages/dock-detail/dock-detail"
+                f"?type={row['target_type']}&id={row['target_id']}&intentId={intent_id}"
+            ),
+            dedupe_key=f"cooperation:{intent_id}:{action}:{to_status}",
+        )
 
         audit_record(
             f"cooperation.admin_{action}",

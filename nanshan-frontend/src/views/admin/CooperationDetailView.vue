@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import { confirmDialog } from '../../utils/appDialog.js'
+import { useAbortable } from '../../api/useAbortable'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,6 +52,8 @@ const reviewError = ref('')
 const rejectVisible = ref(false)
 const rejectReason = ref('')
 
+const { run: runApi } = useAbortable()
+
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
 
 const statusLabel = status => STATUS_META[status]?.label || status || '-'
@@ -62,7 +65,9 @@ const fetchDetail = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    detail.value = await api('/admin/cooperations/' + route.params.id)
+    const data = await runApi('/admin/cooperations/' + route.params.id)
+    if (data === null) return // 被取消（导航到其他记录或卸载）
+    detail.value = data
   } catch (err) {
     loadError.value = err.message || '加载失败'
     detail.value = null
@@ -72,6 +77,8 @@ const fetchDetail = async () => {
 }
 
 onMounted(fetchDetail)
+// 详情路由复用组件时，:id 变化须重新加载，否则显示旧记录
+watch(() => route.params.id, fetchDetail)
 
 const goBack = () => {
   router.push('/admin/cooperation')

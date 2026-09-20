@@ -121,6 +121,7 @@
 	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 
 	const SCORE_DIMENSIONS = [
 		{ key: 'techFeature', label: '技术特点' },
@@ -193,11 +194,10 @@
 			}
 			const taskId = parseInt(options.taskId, 10)
 			this.achievementId = parseInt(options.achievementId, 10) || null
-			if (!taskId) {
-				uni.showToast({ title: '缺少评估任务参数', icon: 'none' })
-				setTimeout(() => uni.navigateBack(), 1200)
-				return
-			}
+		if (!taskId) {
+			safeBackWithToast('缺少评估任务参数', 1200)
+			return
+		}
 			this.taskId = taskId
 			this.fetchTask()
 		},

@@ -12,6 +12,35 @@ from core.errors import BizError, TT_COMMON_40101, TT_COMMON_40102
 from core.jwt_utils import decode_token
 
 
+def _payload_to_actor(payload: dict) -> dict:
+    """Build the actor dict from a decoded JWT payload.
+
+    Centralizes the mapping so identity() and identity_from_access_token()
+    stay consistent. Caller must guarantee payload is a dict.
+    """
+    return {
+        "userId": int(payload["sub"]),
+        "userNo": payload.get("userNo", ""),
+        "roles": payload.get("roles", ["user"]),
+    }
+
+
+def _user_is_active(user_id: int) -> bool:
+    """Lightweight DB check: app_user.status must be 'active'.
+
+    Closes the gap where a disabled user's existing access token remains
+    valid until JWT expiry (up to ACCESS_TOKEN_EXPIRES). One indexed query
+    per authenticated request; acceptable for this app's traffic profile.
+    """
+    from db import get_cursor
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM app_user WHERE id = %s AND status = 'active'",
+            (user_id,),
+        )
+        return cur.fetchone() is not None
+
+
 def identity(request: Request) -> dict:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -23,11 +52,18 @@ def identity(request: Request) -> dict:
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         code, message, status = TT_COMMON_40102
         raise BizError(code, message, status)
-    return {
-        "userId": int(payload["sub"]),
-        "userNo": payload.get("userNo", ""),
-        "roles": payload.get("roles", ["user"]),
-    }
+    # Reject refresh tokens used as access tokens: a stolen 14-day refresh
+    # token must not grant API access as a Bearer credential.
+    if payload.get("type") != "access":
+        code, message, status = TT_COMMON_40102
+        raise BizError(code, message, status)
+    actor = _payload_to_actor(payload)
+    # Disabled-user gap: existing access tokens would otherwise remain valid
+    # until expiry. Re-check app_user.status each request.
+    if not _user_is_active(actor["userId"]):
+        code, message, status = TT_COMMON_40102
+        raise BizError(code, message, status)
+    return actor
 
 
 def identity_from_access_token(token: str):
@@ -42,13 +78,15 @@ def identity_from_access_token(token: str):
         return None
     try:
         payload = decode_token(value)
-        return {
-            "userId": int(payload["sub"]),
-            "userNo": payload.get("userNo", ""),
-            "roles": payload.get("roles", ["user"]),
-        }
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError, TypeError, ValueError):
         return None
+    # Reject refresh tokens used as access tokens.
+    if payload.get("type") != "access":
+        return None
+    actor = _payload_to_actor(payload)
+    if not _user_is_active(actor["userId"]):
+        return None
+    return actor
 
 
 def optional_identity(request: Request) -> dict:

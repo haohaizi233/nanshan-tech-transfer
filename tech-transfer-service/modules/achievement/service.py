@@ -33,7 +33,7 @@ from modules.achievement.content import parse_content_payload, sync_content, loa
 PRICING_MODES = ("negotiable", "license", "transfer", "cooperation", "other")
 
 
-def _parse_cooperation_capacity(body, fields):
+def _parse_cooperation_capacity(body, fields, partial=False):
     if "cooperationPolicy" in body:
         policy = body["cooperationPolicy"]
         if policy not in ("parallel", "exclusive"):
@@ -54,7 +54,10 @@ def _parse_cooperation_capacity(body, fields):
             if fields.get("cooperation_policy") == "exclusive" and capacity != 1:
                 raise bad_request("exclusive 仅允许 1 个对接名额")
             fields["cooperation_capacity"] = capacity
-            fields["cooperation_remaining"] = capacity
+            # 创建时直接置满；编辑时由 update_achievement 按 delta 调整 remaining，
+            # 保留已消耗名额，防止 owner 编辑下线内容时绕过 accept/release 状态机恢复名额。
+            if not partial:
+                fields["cooperation_remaining"] = capacity
 INVENTOR_PERSON_TYPES = ("first_inventor", "co_inventor", "team_member")
 
 TRANSITIONS = {
@@ -505,6 +508,12 @@ def _parse_upsert_body(body: dict, partial: bool):
                 extra["phone"] = validate_phone(extra["phone"], field_name="完成人电话")
             if extra.get("email"):
                 extra["email"] = validate_email(extra["email"], field_name="完成人邮箱")
+            if extra.get("homepage_url"):
+                # 防止 javascript: 等危险 scheme 存入公开成果详情
+                from urllib.parse import urlparse
+                parsed = urlparse(extra["homepage_url"])
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    raise bad_request(f"inventorRefs[{i}].homepageUrl 必须是 http(s) URL")
             if ref.get("avatarFileId") is not None:
                 try:
                     extra["avatar_file_id"] = int(ref["avatarFileId"])
@@ -523,7 +532,7 @@ def _parse_upsert_body(body: dict, partial: bool):
             seen.add(key)
             deduped.append(ref)
 
-    _parse_cooperation_capacity(body, fields)
+    _parse_cooperation_capacity(body, fields, partial=partial)
     return fields, inventor_refs if inventor_refs is None else deduped, parse_content_payload(body)
 
 
@@ -746,11 +755,12 @@ def create_achievement(
         # 只对这类有来源追溯的内部导入记录沿用其文件归属。
         sync_content(cur, ach_id, media_owner_user_id or user_id, content)
 
-    audit_record(
-        "achievement.create", "achievement", resource_id=ach_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"title": fields.get("title")}, request_id=request_id,
-    )
+        audit_record(
+            "achievement.create", "achievement", resource_id=ach_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"title": fields.get("title")}, request_id=request_id, cur=cur,
+        )
+
     return _owner_detail_public(ach_id, user_id)
 
 
@@ -775,9 +785,24 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
                 f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected/offline 可编辑）"
             )
 
+        # 编辑 cooperationCapacity 时按 delta 调整 remaining，保留已消耗名额
+        if "cooperation_capacity" in fields:
+            new_cap = fields["cooperation_capacity"]
+            old_cap = row.get("cooperation_capacity")
+            old_rem = row.get("cooperation_remaining")
+            if new_cap is None:
+                fields["cooperation_remaining"] = None
+            elif old_cap is None or old_rem is None:
+                # 从不限量切到限量：直接置满
+                fields["cooperation_remaining"] = new_cap
+            else:
+                # 按差值平移，不恢复已消耗名额
+                fields["cooperation_remaining"] = max(0, min(new_cap, old_rem + (new_cap - old_cap)))
+
         if "org_id" in fields:
             assert_active_membership(cur, user_id, fields["org_id"])
         _validate_refs(cur, fields)
+        has_child_mutation = inventor_refs is not None or bool(content)
         if fields:
             set_clause = ", ".join(f"{k}=%s" for k in fields)
             cur.execute(
@@ -786,14 +811,24 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
             )
             if cur.rowcount == 0:
                 raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        elif has_child_mutation:
+            # 内容型 PATCH（仅改 sections/media/attachments/inventors）也必须
+            # 校验乐观锁并 bump version，否则并发写可双成功、子表后写覆盖先写。
+            cur.execute(
+                "UPDATE achievement SET version=version+1 WHERE id=%s AND version=%s",
+                (ach_id, version),
+            )
+            if cur.rowcount == 0:
+                raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         if inventor_refs is not None:
             _sync_inventors(cur, ach_id, inventor_refs, user_id)
         sync_content(cur, ach_id, user_id, content)
 
-    audit_record(
-        "achievement.update", "achievement", resource_id=ach_id,
-        actor_user_id=user_id, actor_user_no=user_no, request_id=request_id,
-    )
+        audit_record(
+            "achievement.update", "achievement", resource_id=ach_id,
+            actor_user_id=user_id, actor_user_no=user_no, request_id=request_id, cur=cur,
+        )
+
     return _owner_detail_public(ach_id, user_id)
 
 
@@ -825,12 +860,13 @@ def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reaso
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
-    audit_record(
-        rule["action"], "achievement", resource_id=ach_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"from": row["status"], "to": rule["to"], "reason": reason or None, "reasonCode": reason_code},
-        request_id=request_id,
-    )
+        audit_record(
+            rule["action"], "achievement", resource_id=ach_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"from": row["status"], "to": rule["to"], "reason": reason or None, "reasonCode": reason_code},
+            request_id=request_id, cur=cur,
+        )
+
     return {"status": rule["to"]}
 
 

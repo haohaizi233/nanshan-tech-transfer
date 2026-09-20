@@ -47,7 +47,7 @@ _UPSERT_FIELDS = (
 )
 
 
-def _parse_cooperation_capacity(body, fields):
+def _parse_cooperation_capacity(body, fields, partial=False):
     """公开内容默认可并行且不限量；有限名额由 accept 事务原子扣减。"""
     if "cooperationPolicy" in body:
         policy = body["cooperationPolicy"]
@@ -69,7 +69,9 @@ def _parse_cooperation_capacity(body, fields):
             if fields.get("cooperation_policy") == "exclusive" and capacity != 1:
                 raise bad_request("exclusive 仅允许 1 个对接名额")
             fields["cooperation_capacity"] = capacity
-            fields["cooperation_remaining"] = capacity
+            # 创建时直接置满；编辑时由 update_demand 按 delta 调整 remaining
+            if not partial:
+                fields["cooperation_remaining"] = capacity
 
 
 # ── 参数解析与校验 ───────────────────────────────────────────
@@ -172,7 +174,7 @@ def _parse_upsert_body(body: dict, partial: bool):
         except (ValueError, TypeError):
             raise bad_request("orgId 必须是整数")
 
-    _parse_cooperation_capacity(body, fields)
+    _parse_cooperation_capacity(body, fields, partial=partial)
 
     # Legacy organization names are display snapshots, never canonical identities.
     if "orgName" in body and body["orgName"] is not None:
@@ -596,11 +598,12 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
             _sync_tags(cur, demand_id, tags)
         _sync_attachments(cur, demand_id, user_id, attachments)
 
-    audit_record(
-        "demand.create", "demand", resource_id=demand_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"title": fields.get("title")}, request_id=request_id,
-    )
+        audit_record(
+            "demand.create", "demand", resource_id=demand_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"title": fields.get("title")}, request_id=request_id, cur=cur,
+        )
+
     return get_demand_detail(demand_id, user_id)
 
 
@@ -623,10 +626,23 @@ def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, reques
         if row["status"] not in EDITABLE_STATUSES:
             raise demand_conflict(f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected 可编辑）")
 
+        # 编辑 cooperationCapacity 时按 delta 调整 remaining，保留已消耗名额
+        if "cooperation_capacity" in fields:
+            new_cap = fields["cooperation_capacity"]
+            old_cap = row.get("cooperation_capacity")
+            old_rem = row.get("cooperation_remaining")
+            if new_cap is None:
+                fields["cooperation_remaining"] = None
+            elif old_cap is None or old_rem is None:
+                fields["cooperation_remaining"] = new_cap
+            else:
+                fields["cooperation_remaining"] = max(0, min(new_cap, old_rem + (new_cap - old_cap)))
+
         if "org_id" in fields:
             assert_active_membership(cur, user_id, fields["org_id"])
         _resolve_category_name(cur, fields)
         _validate_refs(cur, fields)
+        has_child_mutation = tags is not None or attachments is not None
         if fields:
             set_clause = ", ".join(f"{k}=%s" for k in fields)
             cur.execute(
@@ -635,14 +651,24 @@ def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, reques
             )
             if cur.rowcount == 0:
                 raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+        elif has_child_mutation:
+            # 内容型 PATCH（仅改 tags/attachments）也必须校验乐观锁并 bump version，
+            # 否则并发写可双成功、子表后写覆盖先写。
+            cur.execute(
+                "UPDATE demand SET version=version+1 WHERE id=%s AND version=%s",
+                (demand_id, version),
+            )
+            if cur.rowcount == 0:
+                raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         if tags is not None:
             _sync_tags(cur, demand_id, tags)
         _sync_attachments(cur, demand_id, user_id, attachments)
 
-    audit_record(
-        "demand.update", "demand", resource_id=demand_id,
-        actor_user_id=user_id, actor_user_no=user_no, request_id=request_id,
-    )
+        audit_record(
+            "demand.update", "demand", resource_id=demand_id,
+            actor_user_id=user_id, actor_user_no=user_no, request_id=request_id, cur=cur,
+        )
+
     return get_demand_detail(demand_id, user_id)
 
 
@@ -675,11 +701,12 @@ def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, re
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
-    audit_record(
-        rule["action"], "demand", resource_id=demand_id,
-        actor_user_id=user_id, actor_user_no=user_no,
-        details={"from": row["status"], "to": rule["to"], "reasonCode": reason_code, "reasonNote": reason_note}, request_id=request_id,
-    )
+        audit_record(
+            rule["action"], "demand", resource_id=demand_id,
+            actor_user_id=user_id, actor_user_no=user_no,
+            details={"from": row["status"], "to": rule["to"], "reasonCode": reason_code, "reasonNote": reason_note}, request_id=request_id, cur=cur,
+        )
+
     return {"status": rule["to"]}
 
 

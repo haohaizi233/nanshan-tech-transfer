@@ -8,6 +8,9 @@ import {
 
 import { api, getSavedUser } from '../../api/client'
 import { confirmDialog, promptDialog } from '../../utils/appDialog.js'
+import { useAbortable } from '../../api/useAbortable'
+
+const { run: runApi } = useAbortable()
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '正常' },
@@ -80,7 +83,7 @@ async function loadList() {
   loading.value = true
   loadError.value = ''
   try {
-    const data = await api('/admin/users', {
+    const data = await runApi('/admin/users', {
       params: {
         page: currentPage.value,
         pageSize: pageSize.value,
@@ -88,6 +91,7 @@ async function loadList() {
         status: applied.status
       }
     })
+    if (data === null) return // 被取消（快速翻页/导航/卸载）
     rows.value = data.list || []
     total.value = data.total || 0
     totalPages.value = data.totalPages || Math.max(1, Math.ceil(total.value / pageSize.value))
@@ -282,6 +286,7 @@ const exportData = async () => {
 
         <div class="actions">
           <button
+            type="button"
             class="primary-btn"
             @click="search"
           >
@@ -289,6 +294,7 @@ const exportData = async () => {
           </button>
 
           <button
+            type="button"
             class="default-btn"
             @click="reset"
           >
@@ -296,6 +302,7 @@ const exportData = async () => {
           </button>
 
           <button
+            type="button"
             class="outline-btn"
             :disabled="exporting"
             @click="exportData"
@@ -383,7 +390,7 @@ const exportData = async () => {
 
             <td>
               <div class="operation">
-                <button @click="openView(user)">
+                <button type="button" @click="openView(user)">
                   查看
                 </button>
               </div>
@@ -407,6 +414,7 @@ const exportData = async () => {
               {{ loadError }}
 
               <button
+                type="button"
                 class="retry-btn"
                 @click="loadList"
               >
@@ -445,6 +453,7 @@ const exportData = async () => {
         </select>
 
         <button
+          type="button"
           :disabled="currentPage === 1"
           @click="changePage(currentPage - 1)"
         >
@@ -464,6 +473,7 @@ const exportData = async () => {
 
           <button
             v-else
+            type="button"
             :class="{ active: currentPage === page }"
             @click="changePage(page)"
           >
@@ -472,6 +482,7 @@ const exportData = async () => {
         </template>
 
         <button
+          type="button"
           :disabled="currentPage === totalPages"
           @click="changePage(currentPage + 1)"
         >
@@ -489,7 +500,7 @@ const exportData = async () => {
         <div class="modal-header">
           <h3>用户详情</h3>
 
-          <button @click="closeModal">
+          <button type="button" @click="closeModal">
             ×
           </button>
         </div>
@@ -570,6 +581,7 @@ const exportData = async () => {
 
                   <button
                     v-if="isPlatformAdmin && m.role === 'member'"
+                    type="button"
                     class="link-btn"
                     @click="grantAdmin(m)"
                   >
@@ -578,6 +590,7 @@ const exportData = async () => {
 
                   <button
                     v-else-if="isPlatformAdmin && m.role === 'admin'"
+                    type="button"
                     class="link-btn danger"
                     @click="revokeAdmin(m)"
                   >
@@ -636,6 +649,7 @@ const exportData = async () => {
 
         <div class="modal-footer">
           <button
+            type="button"
             class="default-btn"
             @click="closeModal"
           >

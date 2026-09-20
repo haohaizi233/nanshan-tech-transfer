@@ -81,6 +81,7 @@
 	import { isLoggedIn } from '../../api/user.js'
 	import { validateEmail } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { safeBackWithToast } from '../../utils/nav.mjs'
 
 	const KIND_LABELS = {
 		platform: '平台载体',
@@ -113,8 +114,7 @@
 		},
 		onShow() {
 			if (!isLoggedIn()) {
-				uni.showToast({ title: '请先登录', icon: 'none' })
-				setTimeout(() => uni.navigateBack(), 800)
+				safeBackWithToast('请先登录', 800)
 				return
 			}
 			this.loadCertification()
@@ -199,8 +199,8 @@
 						applyNote: (this.form.applyNote || '').trim() || undefined
 					})
 					uni.hideLoading()
-					uni.showToast({ title: '已提交，等待机构管理员审核', icon: 'none', duration: 2000 })
-					setTimeout(() => uni.navigateBack(), 1200)
+				uni.showToast({ title: '已提交，等待机构管理员审核', icon: 'none', duration: 2000 })
+				safeBackWithToast('', 1200)
 				} catch (e) {
 					uni.hideLoading()
 					uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none', duration: 2500 })

@@ -71,7 +71,7 @@ async function refreshAccessToken() {
   return refreshing
 }
 
-export async function api(path, { method = 'GET', body, params, skipAuthRefresh } = {}) {
+export async function api(path, { method = 'GET', body, params, skipAuthRefresh, signal } = {}) {
   const url = new URL(BASE + path, window.location.origin)
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -94,7 +94,8 @@ export async function api(path, { method = 'GET', body, params, skipAuthRefresh 
     fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     })
 
   let resp = await request(buildHeaders())

@@ -1,8 +1,14 @@
-﻿from fastapi import APIRouter, Depends
+﻿from fastapi import APIRouter, Request
 
 from core.response import success, get_request_id
-from core.middleware import json_body
+from core.request_schemas import (
+    BootstrapRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
+)
 from core.errors import bootstrap_credential_invalid, BizError, TT_AUTH_40105, TT_COMMON_40102
+from core.rate_limit import check_login_rate, check_register_rate
 from modules.identity.provider import get_identity_provider
 from modules.identity.service import (
     bootstrap_session,
@@ -18,13 +24,17 @@ router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
 
 
 @router.post("/login", summary="登录（小程序传 phone 手机号 / 后台传 username 账号）")
-def login(body: dict = Depends(json_body)):
+def login(body: LoginRequest, request: Request):
+    body = body.as_dict()
     phone = (body.get("phone") or "").strip()
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
     if not (phone or username) or not password:
         code, message, status = TT_AUTH_40105
         raise BizError(code, "请输入账号和密码", status)
+
+    # 暴力破解防护：按 IP + 按账号双重限频
+    check_login_rate(request, account=phone or username)
 
     if phone:
         # 小程序端：手机号 + 密码（user_credential.phone 校验）
@@ -36,8 +46,13 @@ def login(body: dict = Depends(json_body)):
 
 
 @router.post("/register", summary="注册（username 用户名或 phone 手机号两种模式）")
-def register(body: dict = Depends(json_body)):
+def register(body: RegisterRequest, request: Request):
+    body = body.as_dict()
     username = (body.get("username") or "").strip()
+
+    # 防批量注册：按 IP 限频
+    check_register_rate(request)
+
     if username:
         # Vue 后台注册页：用户名 + 密码（可选 displayName/phone/email），注册后跳登录
         return success(
@@ -53,8 +68,8 @@ def register(body: dict = Depends(json_body)):
 
 
 @router.post("/bootstrap")
-def bootstrap(body: dict = Depends(json_body)):
-    host_credential = body.get("hostCredential")
+def bootstrap(body: BootstrapRequest):
+    host_credential = body.as_dict().get("hostCredential")
     if not host_credential:
         raise bootstrap_credential_invalid("缺少 hostCredential")
 
@@ -65,8 +80,8 @@ def bootstrap(body: dict = Depends(json_body)):
 
 
 @router.post("/refresh")
-def refresh(body: dict = Depends(json_body)):
-    refresh_token = body.get("refreshToken")
+def refresh(body: RefreshTokenRequest):
+    refresh_token = body.as_dict().get("refreshToken")
     if not refresh_token:
         code, message, status = TT_COMMON_40102
         raise BizError(code, "缺少 refreshToken", status)
@@ -76,8 +91,8 @@ def refresh(body: dict = Depends(json_body)):
 
 
 @router.post("/logout")
-def logout(body: dict = Depends(json_body)):
-    refresh_token = body.get("refreshToken")
+def logout(body: RefreshTokenRequest):
+    refresh_token = body.as_dict().get("refreshToken")
     if not refresh_token:
         code, message, status = TT_COMMON_40102
         raise BizError(code, "缺少 refreshToken", status)

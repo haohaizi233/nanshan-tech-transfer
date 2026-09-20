@@ -8,19 +8,23 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { api, getSavedUser, getToken } from '../../api/client'
+import { api, getToken } from '../../api/client'
 import { resolveContentFormActions } from '../../utils/contentFormActions.js'
 import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
 import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
 import { extractAchievementFields, mergeExtractedFields } from '../../utils/extractAchievementFields.js'
+import { useAbortable } from '../../api/useAbortable'
+import { useAuthStore } from '../../stores/auth.js'
+
+const { run: runApi } = useAbortable()
 
 const achievements = ref([])
 
 const categories = ref([])
 const ownerUsers = ref([])
 const organizations = ref([])
-const currentUser = ref(getSavedUser() || {})
-const isPlatformAdmin = computed(() => (currentUser.value.roles || []).includes('admin'))
+const authStore = useAuthStore()
+const isPlatformAdmin = computed(() => (authStore.user?.roles || []).includes('admin'))
 const router = useRouter()
 
 const statusOptions = [
@@ -128,7 +132,7 @@ const fetchList = async () => {
   loadError.value = ''
 
   try {
-    const data = await api('/admin/achievements', {
+    const data = await runApi('/admin/achievements', {
       params: {
         page: currentPage.value,
         pageSize: pageSize.value,
@@ -137,6 +141,8 @@ const fetchList = async () => {
         status: appliedFilters.status,
       },
     })
+
+    if (data === null) return // 被取消（快速翻页/导航/卸载）
 
     const list = (data && data.list) || []
     const pages = (data && data.totalPages) || 1
@@ -308,9 +314,9 @@ const belongsToOrg = (user, orgId) => {
 }
 
 const primaryAdminOrgId = () => {
-  const memberships = currentUser.value.organizationMemberships || []
+  const memberships = authStore.user?.organizationMemberships || []
   const admin = memberships.find(m => m.role === 'admin' && m.status === 'active')
-  return admin?.orgId || currentUser.value.orgId || ''
+  return admin?.orgId || authStore.user?.orgId || ''
 }
 
 const fetchOwnerUsers = async () => {

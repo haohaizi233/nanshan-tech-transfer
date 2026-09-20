@@ -10,8 +10,16 @@ Institution Create/Update 使用 Pydantic Schema（§21）；
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from core.middleware import admin_identity, backend_identity, json_body
+from core.middleware import admin_identity, backend_identity
 from core.response import success, get_request_id
+from core.request_schemas import (
+    AssistStatusRequest,
+    AssistTransitionRequest,
+    InstitutionImportRequest,
+    InstitutionRejectRequest,
+    ReviewRejectRequest,
+    VersionBody,
+)
 from modules.admin.schemas import InstitutionCreateRequest, InstitutionUpdateRequest
 from modules.admin.service import (
     dashboard_summary,
@@ -98,13 +106,13 @@ def admin_institution_registration_approve(
 )
 def admin_institution_registration_reject(
     institution_id: int,
-    body: dict = Depends(json_body),
+    body: InstitutionRejectRequest,
     admin: dict = Depends(admin_identity),
 ):
     result = reject_institution_registration(
         admin,
         institution_id,
-        body.get("reason"),
+        body.as_dict().get("reason"),
         request_id=get_request_id(),
     )
     return success(result, "机构注册申请已驳回")
@@ -145,10 +153,10 @@ def admin_institutions_update(
 
 @router.post("/admin/institutions/import", tags=["admin-institutions"])
 def admin_institutions_import(
-    body: dict = Depends(json_body),
+    body: InstitutionImportRequest,
     admin: dict = Depends(admin_identity),
 ):
-    data = import_institutions(admin, body, request_id=get_request_id())
+    data = import_institutions(admin, body.as_dict(), request_id=get_request_id())
     return success(data, f"导入完成：新增 {data['created']}，更新 {data['updated']}")
 
 
@@ -182,13 +190,13 @@ def admin_cooperations_detail(intent_id: int, scope: dict = Depends(backend_iden
 @router.post("/admin/cooperations/{intent_id}/accept", tags=["admin-cooperations"])
 def admin_cooperations_accept(
     intent_id: int,
-    body: dict = Depends(json_body),
+    body: VersionBody,
     scope: dict = Depends(backend_identity),
 ):
     result = admin_review_cooperation(
         scope,
         intent_id,
-        body,
+        body.as_dict(),
         action="accept",
         request_id=get_request_id(),
     )
@@ -198,13 +206,13 @@ def admin_cooperations_accept(
 @router.post("/admin/cooperations/{intent_id}/reject", tags=["admin-cooperations"])
 def admin_cooperations_reject(
     intent_id: int,
-    body: dict = Depends(json_body),
+    body: ReviewRejectRequest,
     scope: dict = Depends(backend_identity),
 ):
     result = admin_review_cooperation(
         scope,
         intent_id,
-        body,
+        body.as_dict(),
         action="reject",
         request_id=get_request_id(),
     )
@@ -213,21 +221,21 @@ def admin_cooperations_reject(
 @router.post("/admin/cooperations/{intent_id}/assist-status", tags=["admin-cooperations"])
 def admin_cooperation_assist_status(
     intent_id: int,
-    body: dict = Depends(json_body),
+    body: AssistStatusRequest,
     admin: dict = Depends(admin_identity),
 ):
     """平台协助处理阶段流转（queued/contacting/waiting_reply/target_agreed/...）。"""
-    return success(update_assist_status(admin, intent_id, body, request_id=get_request_id()))
+    return success(update_assist_status(admin, intent_id, body.as_dict(), request_id=get_request_id()))
 
 
 @router.post("/admin/cooperations/{intent_id}/assist-transition", tags=["admin-cooperations"])
 def admin_cooperation_assist_transition(
     intent_id: int,
-    body: dict = Depends(json_body),
+    body: AssistTransitionRequest,
     admin: dict = Depends(admin_identity),
 ):
     """平台代目标机构操作状态机（accept 强制前置 assist_status=target_agreed）。"""
-    return success(admin_assist_transition(admin, intent_id, body, request_id=get_request_id()))
+    return success(admin_assist_transition(admin, intent_id, body.as_dict(), request_id=get_request_id()))
 
 
 # ── admin-users（READ ONLY，禁用/启用为 P1） ─────────────────

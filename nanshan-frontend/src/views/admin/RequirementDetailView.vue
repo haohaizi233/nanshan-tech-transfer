@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, getSavedUser } from '../../api/client'
+import { useAbortable } from '../../api/useAbortable'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,6 +16,8 @@ const submitting = ref(false)
 const actionError = ref('')
 const rejectVisible = ref(false)
 const rejectReason = ref('')
+
+const { run: runApi } = useAbortable()
 
 const statusClassMap = {
   draft: 'draft',
@@ -43,7 +46,9 @@ const fetchDetail = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    detail.value = await api('/admin/demands/' + route.params.id)
+    const data = await runApi('/admin/demands/' + route.params.id)
+    if (data === null) return // 被取消（导航到其他记录或卸载）
+    detail.value = data
   } catch (err) {
     detail.value = null
     loadError.value = err.message || '加载失败'
@@ -53,6 +58,8 @@ const fetchDetail = async () => {
 }
 
 onMounted(fetchDetail)
+// 详情路由复用组件时，:id 变化须重新加载，否则显示旧记录
+watch(() => route.params.id, fetchDetail)
 
 const goBack = () => {
   router.push('/admin/requirements')
@@ -117,15 +124,15 @@ const submitReject = async () => {
     <div v-else-if="loadError" class="state-block">
       <p class="state-error">{{ loadError }}</p>
       <div class="state-actions">
-        <button class="primary-btn" @click="fetchDetail">重试</button>
-        <button class="back-btn" @click="goBack">返回列表</button>
+        <button type="button" class="primary-btn" @click="fetchDetail">重试</button>
+        <button type="button" class="back-btn" @click="goBack">返回列表</button>
       </div>
     </div>
 
     <template v-else-if="detail">
 
       <div class="back-row">
-        <button @click="goBack">‹ 返回</button>
+        <button type="button" @click="goBack">‹ 返回</button>
       </div>
 
 
@@ -278,16 +285,16 @@ const submitReject = async () => {
 
         <div class="action-buttons">
           <template v-if="isPlatformAdmin && detail.status === 'pending_review'">
-            <button class="approve-btn" :disabled="submitting" @click="approve">
+            <button type="button" class="approve-btn" :disabled="submitting" @click="approve">
               {{ submitting ? '提交中…' : '✓ 审核通过' }}
             </button>
 
-            <button class="reject-btn" :disabled="submitting" @click="openReject">
+            <button type="button" class="reject-btn" :disabled="submitting" @click="openReject">
               × 审核驳回
             </button>
           </template>
 
-          <button class="back-btn" @click="goBack">↶ 返回列表</button>
+          <button type="button" class="back-btn" @click="goBack">↶ 返回列表</button>
         </div>
 
         <p v-if="actionError && !rejectVisible" class="action-error">{{ actionError }}</p>
@@ -301,7 +308,7 @@ const submitReject = async () => {
 
           <div class="modal-header">
             <h3>审核驳回</h3>
-            <button @click="closeReject">×</button>
+            <button type="button" @click="closeReject">×</button>
           </div>
 
           <div class="modal-body">
@@ -315,8 +322,8 @@ const submitReject = async () => {
           </div>
 
           <div class="modal-footer">
-            <button class="back-btn" :disabled="submitting" @click="closeReject">取消</button>
-            <button class="reject-btn" :disabled="submitting" @click="submitReject">
+            <button type="button" class="back-btn" :disabled="submitting" @click="closeReject">取消</button>
+            <button type="button" class="reject-btn" :disabled="submitting" @click="submitReject">
               {{ submitting ? '提交中…' : '确认驳回' }}
             </button>
           </div>
