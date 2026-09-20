@@ -287,6 +287,7 @@
 					let msg = (e && e.message) || 'AI 助手暂时不可用，请稍后重试。'
 					if (code === 'AI_DISABLED') msg = '该功能即将开放'
 					this.pushMessage('assistant', msg)
+					await this.loadHistory()
 				} finally {
 					this.typing = false
 					this.scrollToBottom()

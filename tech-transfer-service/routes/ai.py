@@ -5,7 +5,9 @@ POST /ai/evaluation-tasks、GET /ai/evaluation-tasks/{taskId}（异步任务）�
 需求匹配与自然语言对话同步经本服务转发到独立的 ai-agent；成果评估沿用
 异步任务制（202 + 轮询），执行由独立 worker 认领，不把企业微信长连接嵌进本进程。
 """
+import json
 import logging
+import time
 import threading
 import urllib.error
 import urllib.request
@@ -16,7 +18,7 @@ from fastapi.responses import JSONResponse
 from config import settings
 from core.response import success, get_request_id
 from core.middleware import identity
-from core.errors import ai_unavailable, bad_request
+from core.errors import BizError, ai_unavailable, bad_request
 from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
@@ -31,6 +33,9 @@ AI_FEATURE_ENABLED = settings.AI_FEATURE_ENABLED
 # 同步阻塞 LLM 调用并发上限：避免少量请求同时打满上游连接/线程池。
 # 信号量在进程内共享，acquire 期间阻塞调用线程，release 后下一请求进入。
 _AI_CONCURRENCY = threading.Semaphore(max(1, int(getattr(settings, "AI_MAX_CONCURRENT", 4))))
+_AGENT_RETRY_STATUS = {502, 503, 504, 429}
+_AGENT_RETRY_TIMES = 2
+_AGENT_RETRY_BACKOFF = (0.5, 1.5)
 
 
 def require_ai_enabled():
@@ -73,9 +78,14 @@ def evaluation_task_detail(task_id: int, user: dict = Depends(identity)):
 # 小程序自由问答经本路由转发到独立的 ai-agent 服务，回包结构为
 # {success, intent, message, data:[achievement|demand 卡片]}。
 # ai-agent 不可达时返回 ai_unavailable，保持前端契约统一。
-def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
-    import json
+def _read_http_error_body(exc: urllib.error.HTTPError, limit: int = 300) -> str:
+    try:
+        return exc.read(limit).decode("utf-8", "replace")
+    except Exception:
+        return ""
 
+
+def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
     payload_dict = {"message": message}
     # 透传当前用户 id，agent 检索时排除该用户自己的成果/需求，避免自我推荐。
     if exclude_user_id is not None:
@@ -87,14 +97,47 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    last_exc: Exception | None = None
+    for attempt in range(_AGENT_RETRY_TIMES):
+        try:
+            with _AI_CONCURRENCY:
+                with urllib.request.urlopen(req, timeout=settings.AI_AGENT_TIMEOUT) as resp:
+                    body = resp.read()
+            data = json.loads(body.decode("utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("agent response is not a JSON object")
+            return data
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            body = _read_http_error_body(exc)
+            logger.warning(
+                "[ai/chat] agent http error status=%s attempt=%s body=%s",
+                exc.code, attempt + 1, body,
+            )
+            if exc.code in _AGENT_RETRY_STATUS and attempt < _AGENT_RETRY_TIMES - 1:
+                time.sleep(_AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)])
+                continue
+            raise ai_unavailable("AI 助手暂时不可用，请稍后重试") from None
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            last_exc = exc
+            logger.warning("[ai/chat] agent 调用失败 attempt=%s err=%r", attempt + 1, exc)
+            retryable = isinstance(exc, (TimeoutError, OSError)) or (
+                isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError)
+            )
+            if retryable and attempt < _AGENT_RETRY_TIMES - 1:
+                time.sleep(_AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)])
+                continue
+            raise ai_unavailable("AI 助手暂时不可用，请稍后重试") from None
+    logger.warning("[ai/chat] agent 调用失败 err=%r", last_exc)
+    raise ai_unavailable("AI 助手暂时不可用，请稍后重试")
+
+
+def _persist_failed_turn(user_id: int, user_message: str, assistant_message: str) -> None:
+    """失败时也保留问答痕迹，避免刷新后用户看不到自己刚发的问题。"""
     try:
-        with _AI_CONCURRENCY:
-            with urllib.request.urlopen(req, timeout=settings.AI_AGENT_TIMEOUT) as resp:
-                body = resp.read()
-        return json.loads(body.decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-        print(f"[ai/chat] agent 调用失败: {exc!r}")
-        raise ai_unavailable("AI 助手暂时不可用，请稍后重试")
+        append_turn(user_id, user_message, assistant_message)
+    except Exception:
+        logger.exception("[ai/chat] 失败对话入库失败 user_id=%s", user_id)
 
 
 @router.post("/ai/chat")
@@ -105,15 +148,19 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
     if not settings.AI_AGENT_URL:
         raise ai_unavailable("AI 助手未配置")
     user_message = message.strip()
-    result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
-    # 入库：用户提问 + 助手回复（含卡片快照）。失败 503 不会走到这里，不入脏历史。
+    try:
+        result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
+    except BizError as exc:
+        if exc.http_status == 503:
+            _persist_failed_turn(user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试")
+        raise
+    # 入库：用户提问 + 助手回复（含卡片快照）
     try:
         agent_message = (result or {}).get("message") or ""
         data = (result or {}).get("data")
         cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
         append_turn(user["userId"], user_message, agent_message, cards=cards)
-    except Exception as exc:
-        # 入库失败不影响主流程，仅记录日志
+    except Exception:
         logger.exception("[ai/chat] 聊天记录入库失败 user_id=%s", user["userId"])
     return success(result, result.get("message") or "ok")
 
