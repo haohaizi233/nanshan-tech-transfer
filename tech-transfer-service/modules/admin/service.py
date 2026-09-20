@@ -2657,7 +2657,7 @@ def create_demand_admin(
     传 ownerUserId 指定需求归属人；未传 = 平台代录（owner NULL，进入平台协助对接），
     录入人 created_by_user_id 恒为当前管理员。
     """
-    fields, tags = _parse_demand_upsert_body(body, partial=False)
+    fields, tags, attachments = _parse_demand_upsert_body(body, partial=False)
 
     save_action, target_status = _resolve_admin_save_action(
         scope,
@@ -2792,7 +2792,7 @@ def update_demand_admin(
     不允许用该接口直接修改 owner、status、审核结果。
     status 仍由审核、取消、关闭等专用接口处理。
     """
-    fields, tags = _parse_demand_upsert_body(body, partial=True)
+    fields, tags, attachments = _parse_demand_upsert_body(body, partial=True)
 
     save_action, target_status = _resolve_admin_save_action(
         scope,

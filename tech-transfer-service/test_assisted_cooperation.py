@@ -131,6 +131,7 @@ resp = requests.post(f"{BASE}/admin/achievements", headers=h_admin, json={
     "techIntro": "平台代录成果简介", "sourceOrgName": ORG_NAME,
     "contactName": "机构联系人", "contactTitle": "技术转移办主任",
     "contactPhone": "13911112222", "contactEmail": "org-assist@example.com",
+    "cooperationPolicy": "exclusive",
 }, timeout=10)
 check("代录成果=201", resp.status_code == 201, f"got {resp.status_code} {resp.text[:150]}")
 ach = resp.json()["data"]
@@ -203,7 +204,7 @@ print()
 # B 也发起（auto-reject 测试素材）
 resp = requests.post(f"{BASE}/cooperations", headers=h_b, json={
     "targetType": "achievement", "targetId": ach_id, "intentType": "license",
-    "message": "B 的协助意向",
+    "message": "B 的协助意向", "contactShareConsent": True,
 }, timeout=10)
 intent_b = resp.json()["data"]
 intent_id_b = intent_b["id"]
@@ -315,7 +316,7 @@ check("需求approve=published", resp.status_code == 200 and resp.json()["data"]
 
 resp = requests.post(f"{BASE}/cooperations", headers=h_a, json={
     "targetType": "demand", "targetId": dmd_id, "intentType": "provide_solution",
-    "message": "提供方案",
+    "message": "提供方案", "contactShareConsent": True,
 }, timeout=10)
 d_intent = resp.json()["data"]
 d_intent_id = d_intent["id"]
@@ -346,7 +347,7 @@ check("驳回后电话仍脱敏", pub.get("contactPhone") == "137****4444", str(
 # 驳回后（终态）可重新发起 + 发起方可主动撤回
 resp = requests.post(f"{BASE}/cooperations", headers=h_a, json={
     "targetType": "demand", "targetId": dmd_id, "intentType": "provide_service",
-    "message": "重新发起",
+    "message": "重新发起", "contactShareConsent": True,
 }, timeout=10)
 check("终态后可重新发起", resp.status_code == 201, f"got {resp.status_code} {resp.text[:120]}")
 d2 = resp.json()["data"]
@@ -370,7 +371,7 @@ requests.post(f"{BASE}/admin/demands/{d_direct_id}/approve", headers=h_admin, js
 
 resp = requests.post(f"{BASE}/cooperations", headers=h_b, json={
     "targetType": "demand", "targetId": d_direct_id, "intentType": "provide_achievement",
-    "message": "直连模式",
+    "message": "直连模式", "contactShareConsent": True,
 }, timeout=10)
 direct = resp.json()["data"]
 check("direct意向handlingMode=direct", direct.get("handlingMode") == "direct", str(direct.get("handlingMode")))
