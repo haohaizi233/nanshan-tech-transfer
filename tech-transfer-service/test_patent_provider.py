@@ -1,6 +1,13 @@
 """专利 Provider 出站清洗与检索映射（不打真实上游）。"""
 
+import io
+import json
+import urllib.error
+from unittest.mock import patch
+
+from config import settings
 from core.errors import BizError
+from modules.patent import provider
 from modules.patent.normalize import (
     assert_no_source_leak,
     clean_multiline,
@@ -165,7 +172,92 @@ def main():
     except BizError as exc:
         assert exc.code == "TT_COMMON_40001"
 
+    _assert_upstream_key_is_query_param()
+    _assert_http_json_retries_then_succeeds()
+    _assert_http_json_422_maps_unavailable()
+
     print("PASS: patent provider normalize")
+
+
+class _FakeHttpResponse:
+    def __init__(self, body: bytes, status=200):
+        self.status = status
+        self._body = body
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            data, self._body = self._body, b""
+            return data
+        data, self._body = self._body[:n], self._body[n:]
+        return data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def _http_error(code: int, body: bytes = b""):
+    return urllib.error.HTTPError(
+        "http://patent.test/patent_search",
+        code,
+        "error",
+        hdrs=None,
+        fp=io.BytesIO(body),
+    )
+
+
+def _assert_upstream_key_is_query_param():
+    old_base = settings.PATENT_PROVIDER_BASE
+    old_key = settings.PATENT_PROVIDER_KEY
+    settings.PATENT_PROVIDER_BASE = "http://patent.test"
+    settings.PATENT_PROVIDER_KEY = "secret-key"
+    try:
+        url = provider._build_url("/patent_search", {"q": "nihao1", "page": 0})
+        assert url.startswith("http://patent.test/patent_search?")
+        assert "q=nihao1" in url
+        assert "key=secret-key" in url
+        headers = provider._auth_headers()
+        assert headers["Authorization"] == "Bearer secret-key"
+    finally:
+        settings.PATENT_PROVIDER_BASE = old_base
+        settings.PATENT_PROVIDER_KEY = old_key
+
+
+def _assert_http_json_retries_then_succeeds():
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise _http_error(503, b"upstream busy")
+        return _FakeHttpResponse(json.dumps({"ok": True}).encode("utf-8"))
+
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), \
+            patch.object(provider.time, "sleep"):
+        data = provider._http_json("/patent_search", {"q": "x"}, 5)
+    assert data == {"ok": True}
+    assert calls["n"] == 2
+
+
+def _assert_http_json_422_maps_unavailable():
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        raise _http_error(
+            422,
+            b'{"detail":[{"loc":["query","key"],"msg":"Field required"}]}',
+        )
+
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen):
+        try:
+            provider._http_json("/patent_search", {"q": "x"}, 5)
+            raise AssertionError("expected 422 to map to patent unavailable")
+        except BizError as exc:
+            assert exc.code == "TT_PATENT_50301"
+    assert calls["n"] == 1
 
 
 if __name__ == "__main__":
