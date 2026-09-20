@@ -13,6 +13,7 @@ Phase B: 数据源迁移至 institution 表（/institutions 新路径由 institu
 """
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from core.response import success
 from core.pagination import parse_page_args
@@ -21,23 +22,38 @@ from modules.capital.service import list_platforms, list_orgs
 router = APIRouter(tags=["capital"])
 
 
+def _deprecated_response(payload: dict, request: Request) -> JSONResponse:
+    """legacy 路径响应：附加 Deprecation/Sunset 头，并在服务端日志告警。"""
+    import logging
+    logging.getLogger("nanshan.deprecation").warning(
+        "legacy capital route called path=%s ua=%s",
+        request.url.path,
+        request.headers.get("user-agent", "")[:80],
+    )
+    body = success(payload)
+    resp = JSONResponse(content=body)
+    resp.headers["Deprecation"] = "true"
+    resp.headers["Link"] = '</api/tech-transfer/v1/institutions>; rel="successor-version"'
+    return resp
+
+
 @router.get("/api/platform-base")
 def platform_base_list(request: Request):
     page, page_size, keyword = parse_page_args(request)
     type_key = (request.query_params.get("type") or "all").strip().lower()
     data = list_platforms(page, page_size, type_key, keyword)
-    return success(data)
+    return _deprecated_response(data, request)
 
 
 @router.get("/api/invest-orgs")
 def invest_orgs_list(request: Request):
     page, page_size, keyword = parse_page_args(request)
     data = list_orgs("invest", ["org_name", "intro"], page, page_size, keyword)
-    return success(data)
+    return _deprecated_response(data, request)
 
 
 @router.get("/api/service-orgs")
 def service_orgs_list(request: Request):
     page, page_size, keyword = parse_page_args(request)
     data = list_orgs("bank", ["org_name", "intro", "label"], page, page_size, keyword)
-    return success(data)
+    return _deprecated_response(data, request)

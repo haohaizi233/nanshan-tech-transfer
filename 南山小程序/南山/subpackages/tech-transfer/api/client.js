@@ -85,24 +85,35 @@ export function setCurrentUser(user) {
 
 // ── 认证流 ────────────────────────────────────────────────────
 
+// 共享刷新 promise：并发 401 共享同一次 refresh，避免短时间内重复刷新
+// （与 admin 端 client.js refreshAccessToken 同一模式）。
+let _refreshing = null
+
 async function doRefreshToken() {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) return null
-  try {
-    const res = await HostBridge.request({
-      method: 'POST',
-      path: '/auth/refresh',
-      body: { refreshToken },
-    })
-    if (res.code === 0 && res.data) {
-      saveSession(res.data)
-      return res.data.accessToken
-    }
-  } catch (e) {
-    // ignore
-  }
-  clearSession()
-  return null
+	const refreshToken = getRefreshToken()
+	if (!refreshToken) return null
+	if (!_refreshing) {
+		_refreshing = (async () => {
+			try {
+				const res = await HostBridge.request({
+					method: 'POST',
+					path: '/auth/refresh',
+					body: { refreshToken },
+				})
+				if (res.code === 0 && res.data) {
+					saveSession(res.data)
+					return res.data.accessToken
+				}
+			} catch (e) {
+				// ignore
+			}
+			clearSession()
+			return null
+		})().finally(() => {
+			_refreshing = null
+		})
+	}
+	return _refreshing
 }
 
 let _bootstrapping = false

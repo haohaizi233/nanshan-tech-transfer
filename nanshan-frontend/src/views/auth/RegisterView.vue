@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
@@ -9,6 +9,11 @@ const mode = ref('user')
 const submitting = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+
+const TABS = [
+  { value: 'user', label: '普通用户注册', panelId: 'register-panel-user', tabId: 'register-tab-user' },
+  { value: 'institution', label: '机构注册申请', panelId: 'register-panel-institution', tabId: 'register-tab-institution' },
+]
 
 const userForm = reactive({ displayName: '', username: '', phone: '', email: '', password: '', confirmPassword: '' })
 const institutionForm = reactive({
@@ -20,6 +25,23 @@ const switchMode = value => {
   mode.value = value
   errorMessage.value = ''
   successMessage.value = ''
+}
+
+// 键盘方向键在 tab 间移动焦点（ARIA tabs 模式）。
+const onTabKeydown = (event, currentValue) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const idx = TABS.findIndex(t => t.value === currentValue)
+  if (idx < 0) return
+  const nextIdx = event.key === 'ArrowRight'
+    ? (idx + 1) % TABS.length
+    : (idx - 1 + TABS.length) % TABS.length
+  const next = TABS[nextIdx]
+  switchMode(next.value)
+  nextTick(() => {
+    const el = document.getElementById(next.tabId)
+    if (el && typeof el.focus === 'function') el.focus()
+  })
 }
 
 const validatePassword = form => {
@@ -97,24 +119,53 @@ const submit = async () => {
         <p>个人用户可立即使用平台；机构注册需平台审核通过后开通机构管理员权限。</p>
       </header>
 
-      <div class="mode-tabs" role="tablist">
-        <button type="button" :class="{ active: mode === 'user' }" @click="switchMode('user')">普通用户注册</button>
-        <button type="button" :class="{ active: mode === 'institution' }" @click="switchMode('institution')">机构注册申请</button>
+      <div class="mode-tabs" role="tablist" aria-label="注册类型">
+        <button
+          type="button"
+          role="tab"
+          id="register-tab-user"
+          :aria-selected="mode === 'user'"
+          :aria-controls="'register-panel-user'"
+          :tabindex="mode === 'user' ? 0 : -1"
+          :class="{ active: mode === 'user' }"
+          @click="switchMode('user')"
+          @keydown="onTabKeydown($event, 'user')"
+        >普通用户注册</button>
+        <button
+          type="button"
+          role="tab"
+          id="register-tab-institution"
+          :aria-selected="mode === 'institution'"
+          :aria-controls="'register-panel-institution'"
+          :tabindex="mode === 'institution' ? 0 : -1"
+          :class="{ active: mode === 'institution' }"
+          @click="switchMode('institution')"
+          @keydown="onTabKeydown($event, 'institution')"
+        >机构注册申请</button>
       </div>
 
       <form @submit.prevent="submit">
-        <template v-if="mode === 'user'">
-          <div class="form-grid">
+        <div
+          v-if="mode === 'user'"
+          id="register-panel-user"
+          role="tabpanel"
+          aria-labelledby="register-tab-user"
+          class="form-grid"
+        >
             <label>姓名或昵称<input v-model="userForm.displayName" maxlength="64" placeholder="选填" /></label>
             <label>手机号码<input v-model="userForm.phone" maxlength="32" placeholder="选填" /></label>
             <label>登录账号 <em>*</em><input v-model="userForm.username" maxlength="64" placeholder="4-64 位：字母、数字、._-" /></label>
             <label>电子邮箱<input v-model="userForm.email" type="email" maxlength="128" placeholder="选填" /></label>
             <label>登录密码 <em>*</em><input v-model="userForm.password" type="password" maxlength="128" placeholder="至少 8 位" /></label>
             <label>确认密码 <em>*</em><input v-model="userForm.confirmPassword" type="password" maxlength="128" /></label>
-          </div>
-        </template>
+        </div>
 
-        <template v-else>
+        <div
+          v-else
+          id="register-panel-institution"
+          role="tabpanel"
+          aria-labelledby="register-tab-institution"
+        >
           <h2>机构资料</h2>
           <div class="form-grid">
             <label>机构类型 <em>*</em><select v-model="institutionForm.kind"><option value="university">高校</option><option value="institute">科研院所</option><option value="enterprise">企业</option><option value="invest">投资机构</option><option value="service">服务机构</option><option value="other">其他</option></select></label>
@@ -132,7 +183,7 @@ const submit = async () => {
             <label>登录密码 <em>*</em><input v-model="institutionForm.password" type="password" maxlength="128" placeholder="至少 8 位" /></label>
             <label>确认密码 <em>*</em><input v-model="institutionForm.confirmPassword" type="password" maxlength="128" /></label>
           </div>
-        </template>
+        </div>
 
         <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
         <p v-if="successMessage" class="message success">{{ successMessage }}</p>

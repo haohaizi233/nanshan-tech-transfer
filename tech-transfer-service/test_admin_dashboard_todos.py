@@ -13,6 +13,10 @@ class TodoCursor:
         assert "cooperation_intent" in normalized
         assert "submitted_at" not in normalized
 
+    def fetchone(self):
+        # dashboard_todos 先执行 COUNT(*) 取总数，再取分页行。
+        return {"total": 4}
+
     def fetchall(self):
         return [
             {"kind": "achievement", "id": 1, "title": "成果 A", "created_at": "2026-09-09T09:00:00"},

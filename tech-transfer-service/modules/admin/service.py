@@ -370,6 +370,61 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
     return {"status": to_status}
 
 
+# ── 软删除（admin 删除走 UPDATE deleted_at，保留行用于追溯；列表已过滤 deleted_at IS NULL）──
+
+def soft_delete_achievement_admin(scope: dict, ach_id: int, request_id=None) -> dict:
+    """管理员软删除成果：置 deleted_at=NOW()，不物理删除，保留审计追溯。
+
+    所有列表/详情查询均带 deleted_at IS NULL 过滤，软删除后对终端立即不可见。
+    """
+    with get_cursor(commit=True) as cur:
+        where = ["id = %s", "deleted_at IS NULL"]
+        params = [ach_id]
+        append_content_scope(where, params, scope, "achievement")
+        cur.execute(
+            f"""
+            UPDATE achievement
+            SET deleted_at = CURRENT_TIMESTAMP, version = version + 1
+            WHERE {" AND ".join(where)}
+            """,
+            params,
+        )
+        if cur.rowcount == 0:
+            raise achievement_not_found()
+        audit_record(
+            "achievement.admin_delete", "achievement", resource_id=ach_id,
+            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            details={"soft": True},
+            request_id=request_id, cur=cur,
+        )
+    return {"id": ach_id, "deleted": True}
+
+
+def soft_delete_demand_admin(scope: dict, demand_id: int, request_id=None) -> dict:
+    """管理员软删除需求：置 deleted_at=NOW()，不物理删除，保留审计追溯。"""
+    with get_cursor(commit=True) as cur:
+        where = ["id = %s", "deleted_at IS NULL"]
+        params = [demand_id]
+        append_content_scope(where, params, scope, "demand")
+        cur.execute(
+            f"""
+            UPDATE demand
+            SET deleted_at = CURRENT_TIMESTAMP, version = version + 1
+            WHERE {" AND ".join(where)}
+            """,
+            params,
+        )
+        if cur.rowcount == 0:
+            raise demand_not_found()
+        audit_record(
+            "demand.admin_delete", "demand", resource_id=demand_id,
+            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            details={"soft": True},
+            request_id=request_id, cur=cur,
+        )
+    return {"id": demand_id, "deleted": True}
+
+
 # ── 审计日志查询 ─────────────────────────────────────────────
 
 def list_audit_logs(args) -> dict:
@@ -1129,18 +1184,36 @@ def delete_institution(admin_user: dict, inst_id: int, request_id=None) -> dict:
         if not row:
             code, message, status = TT_INST_40401
             raise BizError(code, message, status)
-        cur.execute("SELECT 1 FROM organization_membership WHERE org_id=%s LIMIT 1", (inst_id,))
-        if cur.fetchone():
-            code, message, status = TT_INST_40901
-            raise BizError(code, "该机构已有认证成员，不能删除，请改为下架", status)
-        cur.execute("SELECT 1 FROM demand WHERE org_id=%s AND deleted_at IS NULL LIMIT 1", (inst_id,))
-        if cur.fetchone():
-            code, message, status = TT_INST_40901
-            raise BizError(code, "该机构仍有关联需求，不能删除，请改为下架", status)
+        # 引用检查：任何子表存在引用即拒绝硬删，列出引用来源便于人工处理。
+        references: list[str] = []
         cur.execute("SELECT 1 FROM achievement WHERE org_id=%s AND deleted_at IS NULL LIMIT 1", (inst_id,))
         if cur.fetchone():
+            references.append("achievement.org_id")
+        cur.execute("SELECT 1 FROM demand WHERE org_id=%s AND deleted_at IS NULL LIMIT 1", (inst_id,))
+        if cur.fetchone():
+            references.append("demand.org_id")
+        cur.execute("SELECT 1 FROM organization_membership WHERE org_id=%s LIMIT 1", (inst_id,))
+        if cur.fetchone():
+            references.append("organization_membership.org_id")
+        # organization_application 通过 requested_name 关联机构名而非 org_id 外键，
+        # 这里按名称匹配兜底，避免漏掉待审/已审的入驻申请。
+        cur.execute(
+            """
+            SELECT 1 FROM organization_application a
+            JOIN institution i ON i.id = %s AND i.name = a.requested_name
+            WHERE a.status IN ('pending', 'approved') LIMIT 1
+            """,
+            (inst_id,),
+        )
+        if cur.fetchone():
+            references.append("organization_application (by name)")
+        if references:
             code, message, status = TT_INST_40901
-            raise BizError(code, "该机构仍有关联成果，不能删除，请改为下架", status)
+            raise BizError(
+                code,
+                f"该机构仍被以下表引用，不能删除，请改为下架：{', '.join(references)}",
+                status,
+            )
         cur.execute("DELETE FROM institution WHERE id=%s", (inst_id,))
         audit_record(
             "institution.delete", "institution", resource_id=inst_id,

@@ -42,6 +42,12 @@ _pool: ThreadedConnectionPool | None = None
 _pool_lock = threading.Lock()
 _acquire_cond = threading.Condition()
 
+# 连接复用上限（秒）：超过则视为过期，归还前关闭重建，避免长期持有
+# 已被对端/网络中断的连接。与 keepalives_idle=30 互补，提供应用层兜底。
+_CONN_RECYCLE_SECONDS = 300
+# 借出连接时记录的创建/复用时间戳，用于过期判定。
+_conn_born: dict[int, float] = {}
+
 
 def _connect_kwargs() -> dict:
     return {
@@ -133,11 +139,21 @@ def _release_conn(conn) -> None:
 
     psycopg2 putconn 按连接状态处理：UNKNOWN（服务端已断）→ 关闭；
     事务残留 → rollback 后回池；IDLE → 直接回池复用。
+    超过 _CONN_RECYCLE_SECONDS 的连接直接关闭，不再回池，避免下个请求
+    拿到一条已被对端断开的死连接。
     """
     pool = _pool
+    born = _conn_born.pop(id(conn), None)
+    recycle = born is not None and (time.monotonic() - born) > _CONN_RECYCLE_SECONDS
     try:
         if pool is None:  # close_pool 之后的退出竞态：直接关闭
             conn.close()
+        elif recycle:
+            # 老连接：归还前关闭，不让池再借出死连接。
+            try:
+                conn.close()
+            except Exception:
+                pass
         else:
             pool.putconn(conn)
     except Exception:
@@ -153,12 +169,52 @@ def _release_conn(conn) -> None:
 
 @contextmanager
 def get_conn():
-    """借出一个池化连接，用毕归还（事务清理由 putconn 兜底）。"""
+    """借出一个池化连接，用毕归还（事务清理由 putconn 兜底）。
+
+    借出前做轻量 SELECT 1 预检：若连接已被对端断开，立即重建一条新连接，
+    避免业务游标拿到坏连接后报错（psycopg2 不会自动重连）。
+    """
     conn = _acquire_conn()
     try:
+        if not _ping(conn):
+            conn = _replace_conn(conn)
+        _conn_born.setdefault(id(conn), time.monotonic())
         yield conn
     finally:
         _release_conn(conn)
+
+
+def _ping(conn) -> bool:
+    """轻量存活探测：SELECT 1。失败即视为坏连接。"""
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        finally:
+            cur.close()
+        # 探测本身会开启事务，回滚以免影响后续业务事务边界。
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def _replace_conn(conn) -> "psycopg2.extensions.connection":
+    """关闭坏连接并向池借一条新连接；池空时返回一条新建连接。"""
+    try:
+        conn.close()
+    except Exception:
+        pass
+    _conn_born.pop(id(conn), None)
+    try:
+        return _acquire_conn()
+    except Exception:
+        # 池不可用兜底：直接建一条裸连接，归还逻辑会再处理。
+        return psycopg2.connect(**_connect_kwargs())
 
 
 @contextmanager

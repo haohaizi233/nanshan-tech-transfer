@@ -223,6 +223,7 @@
 		"rpxCalcBaseDeviceWidth": 414
 	},
 	"tabBar": {
+		"custom": true,
 		"color": "#999999",
 		"selectedColor": "#2B73F8",
 		"backgroundColor": "#FFFFFF",

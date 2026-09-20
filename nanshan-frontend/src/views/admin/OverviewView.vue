@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { api } from '../../api/client'
 import { useAbortable } from '../../api/useAbortable'
+import { actionLabel } from '../../utils/auditLabels.js'
 
 const router = useRouter()
 const { run: runApi } = useAbortable()
@@ -21,28 +22,6 @@ const TODO_KIND_COLORS = {
 }
 
 const todoKindColor = (kind) => TODO_KIND_COLORS[kind] || 'blue'
-
-const ACTION_LABELS = {
-  'achievement.approve': '通过成果审核',
-  'achievement.reject': '驳回成果',
-  'achievement.submit': '提交成果',
-  'achievement.create': '创建成果',
-  'achievement.update': '更新成果',
-  'achievement.offline': '下架成果',
-  'demand.approve': '通过需求审核',
-  'demand.reject': '驳回需求',
-  'demand.submit': '提交需求',
-  'demand.create': '创建需求',
-  'demand.update': '更新需求',
-  'demand.cancel': '取消需求',
-  'demand.close': '关闭需求',
-  'institution.create': '新增机构',
-  'institution.update': '更新机构',
-  'institution.online': '上架机构',
-  'institution.offline': '下架机构'
-}
-
-const actionLabel = (action) => ACTION_LABELS[action] || action || '-'
 
 const RESOURCE_DOT_COLORS = {
   achievement: '#3f8cff',

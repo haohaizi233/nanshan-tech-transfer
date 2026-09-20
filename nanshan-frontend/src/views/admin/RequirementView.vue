@@ -1,12 +1,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, getSavedUser } from '../../api/client'
+import { api } from '../../api/client'
 import { resolveContentFormActions } from '../../utils/contentFormActions.js'
 import { confirmDialog } from '../../utils/appDialog.js'
 import { validatePhone } from '../../utils/contactValidation.js'
+import { useAuthStore } from '../../stores/auth.js'
 
 const router = useRouter()
+const authStore = useAuthStore()
 
 const statusOptions = [
   { value: 'draft', label: '草稿' },
@@ -39,8 +41,8 @@ const categoryOptions = ref([])
 const formCategories = ref([])
 const ownerUsers = ref([])
 const organizations = ref([])
-const currentUser = ref(getSavedUser() || {})
-const isPlatformAdmin = computed(() => (currentUser.value.roles || []).includes('admin'))
+const currentUser = computed(() => authStore.user || {})
+const isPlatformAdmin = computed(() => (authStore.user?.roles || []).includes('admin'))
 
 const loading = ref(false)
 const loadError = ref('')

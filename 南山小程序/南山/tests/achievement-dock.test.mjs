@@ -124,7 +124,10 @@ test('achievement preview cards use the API thumbnail rather than fetching a cov
     new URL('../../../tech-transfer-service/modules/achievement/service.py', import.meta.url),
     'utf8',
   )
-  assert.match(list, /item\.cover\.thumbnailUrl \|\| item\.cover\.url/)
+  // 列表页通过 coverDisplayUrl 解析封面，helper 内部仍优先 thumbnailUrl 再回退到 url，
+  // 同时补上绝对 origin + access_token 让 WeChat MP <image> 能加载。
+  assert.match(list, /coverDisplayUrl\(item\.cover\)/)
+  assert.match(list, /thumbnailUrl \|\| cover\.url/)
   assert.match(service, /thumbnailUrl/)
   assert.match(service, /variant=thumbnail/)
 })

@@ -36,6 +36,8 @@ from modules.admin.service import (
     list_demand_categories_admin,
     list_content_organizations_admin,
     claim_unassigned_content,
+    soft_delete_achievement_admin,
+    soft_delete_demand_admin,
 )
 from modules.achievement.importer import list_import_batches, get_import_batch, confirm_import_item, clear_import_batches, publish_import_item
 
@@ -45,6 +47,13 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
 @router.get("/admin/achievement-imports")
 def admin_achievement_imports(request: Request, admin: dict = Depends(admin_identity)):
     return success(list_import_batches(request.query_params.get("page", 1), request.query_params.get("pageSize", 20)))
+
+
+# 静态段（clear）必须在 {batch_id} 之前注册，避免被动态 catch-all 吞掉。
+@router.post("/admin/achievement-imports/clear")
+def admin_achievement_import_clear(admin: dict = Depends(admin_identity)):
+    """清空全部导入暂存批次；已入库为草稿的成果不受影响。"""
+    return success(clear_import_batches(admin), "导入暂存已清空")
 
 
 @router.get("/admin/achievement-imports/{batch_id}")
@@ -65,12 +74,6 @@ def admin_achievement_import_confirm(
 ):
     """管理员确认一条暂存导入记录；仅落为 draft，仍需正常审核发布。"""
     return success(confirm_import_item(batch_id, item_id, admin, body.as_dict(), get_request_id()), "成果已入库为草稿")
-
-
-@router.post("/admin/achievement-imports/clear")
-def admin_achievement_import_clear(admin: dict = Depends(admin_identity)):
-    """清空全部导入暂存批次；已入库为草稿的成果不受影响。"""
-    return success(clear_import_batches(admin), "导入暂存已清空")
 
 
 @router.post("/admin/achievement-imports/{batch_id}/items/{item_id}/publish")
@@ -180,6 +183,14 @@ def admin_ach_reject(ach_id: int, body: ReviewRejectRequest, admin: dict = Depen
     return success(review_achievement(admin, ach_id, payload, request_id=get_request_id()))
 
 
+@router.delete("/admin/achievements/{ach_id}", summary="管理员软删除成果（deleted_at=NOW）")
+def admin_achievement_delete(
+    ach_id: int,
+    scope: dict = Depends(backend_identity),
+):
+    return success(soft_delete_achievement_admin(scope, ach_id, request_id=get_request_id()), "成果已删除")
+
+
 @router.get("/admin/demands")
 def admin_demands_list(
     request: Request,
@@ -264,6 +275,14 @@ def admin_dmd_reject(demand_id: int, body: ReviewRejectRequest, admin: dict = De
     payload = body.as_dict()
     payload["_action"] = "reject"
     return success(review_demand(admin, demand_id, payload, request_id=get_request_id()))
+
+
+@router.delete("/admin/demands/{demand_id}", summary="管理员软删除需求（deleted_at=NOW）")
+def admin_demand_delete(
+    demand_id: int,
+    scope: dict = Depends(backend_identity),
+):
+    return success(soft_delete_demand_admin(scope, demand_id, request_id=get_request_id()), "需求已删除")
 
 
 @router.get("/admin/audit-logs")

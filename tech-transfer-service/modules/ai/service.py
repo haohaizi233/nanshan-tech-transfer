@@ -153,7 +153,7 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
             "taskId": task["id"],
             "status": task["status"],
             "evaluation": None,
-            "failReason": task.get("fail_reason"),
+            "failReason": _desensitize_fail_reason(task.get("fail_reason")),
             "createdAt": _iso(task.get("created_at")),
             "finishedAt": _iso(task.get("finished_at")),
             "modelVersionLabel": None,
@@ -207,6 +207,27 @@ def _parse_reasons(raw):
         return parsed if isinstance(parsed, list) else []
     except (ValueError, TypeError):
         return []
+
+
+# fail_reason 脱敏：屏蔽 Provider 内部细节，避免泄露给客户端。
+_DESENSITIZE_HINTS = (
+    "qwen", "openai", "hermes", "deepseek", "provider", "http",
+    "https://", "http://", "timeout", "timed out", "url", "connection",
+    "socket", "ssl", "proxy", "ai_agent", "api_key", "authorization",
+)
+_DESENSITIZE_MSG = "AI 服务暂时不可用，请稍后重试"
+
+
+def _desensitize_fail_reason(reason: str | None) -> str | None:
+    if not reason:
+        return reason
+    text = str(reason).strip()
+    if not text:
+        return reason
+    lowered = text.lower()
+    if any(hint in lowered for hint in _DESENSITIZE_HINTS):
+        return _DESENSITIZE_MSG
+    return text
 
 
 def _iso(dt):

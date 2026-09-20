@@ -1,5 +1,13 @@
 <template>
-	<view class="page" v-if="detail">
+	<!-- 加载失败：错误态 + 重试按钮，避免根 v-if 失败时整页空白 -->
+	<view v-if="loadError && !detail" class="page error-page">
+		<view class="error-card">
+			<text class="error-title">加载失败</text>
+			<text class="error-desc">{{ loadError }}</text>
+			<button class="error-retry-btn" @click="onRetryLoad">重新加载</button>
+		</view>
+	</view>
+	<view class="page" v-else-if="detail">
 		<!-- 上方：业务信息 -->
 		<view class="section">
 			<view class="section-head">
@@ -311,26 +319,28 @@
 	}
 
 	export default {
-		data() {
-			return {
-				type: 'demand',
-				detail: null,
-				favorited: false,
-				intentId: '',
-				intention: null,
-				confirmVisible: false,
-				confirmOp: '',
-				confirmLeft: 5,
-				confirmReady: false,
-				confirmTimer: null,
-				intentDialogVisible: false,
-				selectedIntentType: '',
-				intentMessage: '',
-				submitting: false,
-				intentRefreshTimer: null,
-				intentRefreshing: false
-			}
-		},
+	data() {
+		return {
+			type: 'demand',
+			detail: null,
+			loadError: '',
+			favorited: false,
+			intentId: '',
+			intention: null,
+			confirmVisible: false,
+			confirmOp: '',
+			confirmLeft: 5,
+			confirmReady: false,
+			confirmTimer: null,
+			intentDialogVisible: false,
+			selectedIntentType: '',
+			intentMessage: '',
+			submitting: false,
+			intentRefreshTimer: null,
+			intentRefreshing: false,
+			loadedId: ''
+		}
+	},
 		computed: {
 			statusLabel() {
 				if (!this.intention) return ''
@@ -456,19 +466,20 @@
 				return titles[this.confirmOp] || '确认操作？'
 			}
 		},
-		onLoad(options) {
-			const type = options.type || 'demand'
-			const id = options.id || ''
-			this.type = type
-			this.intentId = options.intentId || ''
+	onLoad(options) {
+		const type = options.type || 'demand'
+		const id = options.id || ''
+		this.type = type
+		this.loadedId = id
+		this.intentId = options.intentId || ''
 
-			uni.setNavigationBarTitle({
-				title: type === 'result' ? '成果对接' : '需求对接'
-			})
+		uni.setNavigationBarTitle({
+			title: type === 'result' ? '成果对接' : '需求对接'
+		})
 
-			this.loadFavoriteState(id)
-			this.refreshDockState(id)
-		},
+		this.loadFavoriteState(id)
+		this.refreshDockState(id)
+	},
 		onUnload() {
 			this.clearConfirmTimer()
 			this.stopIntentRefresh()
@@ -480,33 +491,45 @@
 			this.stopIntentRefresh()
 		},
 		methods: {
-			async loadDemandDetail(id) {
-				if (!id) {
-					safeBackWithToast('未找到对应信息', 1200)
-					return
-				}
-				try {
-					const data = await getDemandDetail(id)
-					this.detail = toDemandCard(data)
-				} catch (e) {
-					console.error('[dock-detail] loadDemand failed:', e)
-					safeBackWithToast((e && e.message) || '未找到对应信息', 1200)
-				}
-			},
-			async loadResultDetail(id) {
-				if (!id) {
-					safeBackWithToast('未找到对应信息', 1200)
-					return
-				}
-				try {
-					const data = await getAchievementDetail(id)
-					if (!data) throw new Error('未找到对应信息')
-					this.detail = { ...toAchievementDockCard(data), titleEn: data.titleEn, sections: data.sections || [], patents: data.patents || [], links: data.links || [], media: data.media || [], inventors: data.inventors || [] }
-				} catch (e) {
-					console.error('[dock-detail] loadResult failed:', e)
-					safeBackWithToast((e && e.message) || '未找到对应信息', 1200)
-				}
-			},
+		async loadDemandDetail(id) {
+			if (!id) {
+				this.loadError = '未找到对应信息'
+				safeBackWithToast('未找到对应信息', 1200)
+				return
+			}
+			try {
+				const data = await getDemandDetail(id)
+				this.detail = toDemandCard(data)
+				this.loadError = ''
+			} catch (e) {
+				console.error('[dock-detail] loadDemand failed:', e)
+				this.loadError = (e && e.message) || '加载失败，请稍后重试'
+				safeBackWithToast(this.loadError, 1200)
+			}
+		},
+		async loadResultDetail(id) {
+			if (!id) {
+				this.loadError = '未找到对应信息'
+				safeBackWithToast('未找到对应信息', 1200)
+				return
+			}
+			try {
+				const data = await getAchievementDetail(id)
+				if (!data) throw new Error('未找到对应信息')
+				this.detail = { ...toAchievementDockCard(data), titleEn: data.titleEn, sections: data.sections || [], patents: data.patents || [], links: data.links || [], media: data.media || [], inventors: data.inventors || [] }
+				this.loadError = ''
+			} catch (e) {
+				console.error('[dock-detail] loadResult failed:', e)
+				this.loadError = (e && e.message) || '加载失败，请稍后重试'
+				safeBackWithToast(this.loadError, 1200)
+			}
+		},
+		onRetryLoad() {
+			const id = this.loadedId || (this.detail && this.detail.id)
+			if (!id) return
+			this.loadError = ''
+			this.refreshDockState(id)
+		},
 			async loadFavoriteState(id) {
 				if (!id) return
 				try {
@@ -1286,5 +1309,47 @@
 		background: transparent !important;
 		color: #888888 !important;
 		font-size: 28rpx;
+	}
+
+	.error-page {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.error-card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		background: #ffffff;
+		border-radius: 16rpx;
+		border: 1rpx solid #e8ecf2;
+		padding: 56rpx 40rpx;
+		width: 100%;
+		max-width: 560rpx;
+	}
+
+	.error-title {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-bottom: 16rpx;
+	}
+
+	.error-desc {
+		font-size: 26rpx;
+		color: #888888;
+		text-align: center;
+		line-height: 1.6;
+		margin-bottom: 32rpx;
+	}
+
+	.error-retry-btn {
+		background: #2b73f8 !important;
+		color: #ffffff !important;
+		border-radius: 12rpx;
+		font-size: 30rpx;
+		font-weight: 600;
+		width: 320rpx;
 	}
 </style>

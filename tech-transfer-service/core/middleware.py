@@ -137,10 +137,11 @@ def org_admin_identity(request: Request) -> dict:
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT org_id
-            FROM organization_membership
-            WHERE user_id = %s AND role = 'admin' AND status = 'active'
-            ORDER BY org_id
+            SELECT m.org_id
+            FROM organization_membership m
+            JOIN institution i ON i.id = m.org_id AND i.status = 'active'
+            WHERE m.user_id = %s AND m.role = 'admin' AND m.status = 'active'
+            ORDER BY m.org_id
             """,
             (user["userId"],),
         )

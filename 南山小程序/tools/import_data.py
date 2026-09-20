@@ -30,11 +30,13 @@ EXPECTED = {"platform_base": 100, "featured_invest_org": 21, "ip_service_org": 1
 
 def load_conn_params():
     cfg = json.loads(DB_CFG.read_text(encoding="utf-8"))
+    import os
     return {
         "host": cfg.get("host", "127.0.0.1"),
         "port": int(cfg.get("port", 3306)),
         "user": cfg.get("user", "root"),
-        "password": cfg.get("password", ""),
+        # 优先用环境变量 MYSQL_PASSWORD，避免凭据硬编码入库；json 中留空即可。
+        "password": os.getenv("MYSQL_PASSWORD", cfg.get("password", "")),
         "charset": "utf8mb4",
     }
 

@@ -308,10 +308,25 @@ def proxy_file(file_id: str) -> tuple[Path, str]:
         "Referer": referer,
         "Accept": "image/*,*/*",
     })
+    # 远端文件大小封顶：避免恶意/损坏源站把超大响应读进内存导致 OOM。
+    # 复用上传上限的 4 倍作为代理上限（Logo/缩略图远小于此阈值）。
+    max_proxy_bytes = getattr(settings, "MAX_PROXY_BYTES", None) or (settings.MAX_UPLOAD_BYTES * 4)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            content = resp.read()
             ctype = (resp.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip()
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_proxy_bytes:
+                    raise FileProxyError(413, "源站文件超过代理大小上限")
+                chunks.append(chunk)
+            content = b"".join(chunks)
+    except FileProxyError:
+        raise
     except urllib.error.HTTPError as e:
         # 源站 HTTP 状态码可安全对外；其余细节不外发
         raise FileProxyError(502, f"源站文件获取失败: HTTP {e.code}")

@@ -333,5 +333,7 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG or settings.is_local,  # local reload picks up AI_FEATURE_ENABLED
+        # 生产环境多 worker 提升吞吐并隔离阻塞；本地 reload 模式不支持多 worker
+        workers=settings.UVICORN_WORKERS if not (settings.DEBUG or settings.is_local) else 1,
     )
 

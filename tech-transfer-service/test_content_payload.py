@@ -389,7 +389,9 @@ class ContentPayloadTests(unittest.TestCase):
         self.assertIn("organization_membership", service_source)
         self.assertIn("achievement_import_item", service_source)
         self.assertIn("raw_data @>", service_source)
-        self.assertIn("'admin' in actor.get(\"roles\", [])", route_source)
+        # R2-26: 文件鉴权不再信任 JWT roles 快照，改为实时查 user_role 表
+        self.assertIn("SELECT 1 FROM user_role WHERE user_id", route_source)
+        self.assertIn("role_code = 'admin'", route_source)
 
     def test_content_payload_parses_deduplicated_industry_ids(self):
         parsed = parse_content_payload({"industryIds": ["4", 9, 4]})

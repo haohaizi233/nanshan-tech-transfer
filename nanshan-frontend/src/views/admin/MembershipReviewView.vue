@@ -6,7 +6,7 @@ import {
   ref,
   watch
 } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../../api/client'
 import { confirmDialog, promptDialog } from '../../utils/appDialog.js'
@@ -19,6 +19,7 @@ const TABS = [
 ]
 
 const route = useRoute()
+const router = useRouter()
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: '待审核' },
@@ -158,6 +159,14 @@ watch(() => route.query.tab, (tab) => {
   activeTab.value = tab
   currentPage.value = 1
   loadList()
+})
+
+// 反向同步：tab 变化时写回 query，保证刷新/分享链接与当前 tab 一致。
+watch(activeTab, (tab) => {
+  if (route.query.tab === tab) return
+  router.replace({ query: { ...route.query, tab } }).catch(() => {
+    // 导航被中止（如重复点击）时忽略，避免未捕获 rejection。
+  })
 })
 
 const switchTab = tab => {

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from core.response import success, get_request_id
 from core.middleware import identity
 from core.errors import bad_request
+from core.idempotency import idempotent_create, current_key, cache_response
 from core.request_schemas import (
     CooperationCompleteRequest,
     CooperationCreateRequest,
@@ -31,14 +32,16 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["cooperation"])
 
 @router.post("/cooperations", status_code=201)
 def cooperations_create(request: Request, body: CooperationCreateRequest, user: dict = Depends(identity)):
-    idem_key = request.headers.get("X-Idempotency-Key")
-    if idem_key:
-        print(f"[cooperation] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
+    replay = idempotent_create(request, user)
+    if replay is not None:
+        return replay
     detail = create_intent(
         user["userId"], user.get("userNo", ""), body.as_dict(),
         request_id=get_request_id(),
     )
-    return success(detail, "意向已创建")
+    result = success(detail, "意向已创建")
+    cache_response(int(user["userId"]), current_key(request), 201, result)
+    return result
 
 
 @router.get("/cooperations/{intent_id}")

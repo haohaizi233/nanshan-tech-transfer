@@ -140,6 +140,7 @@ const fetchList = async () => {
         categoryCode: appliedFilters.categoryCode,
         status: appliedFilters.status,
       },
+      guestOn401: true,
     })
 
     if (data === null) return // 被取消（快速翻页/导航/卸载）
@@ -167,7 +168,7 @@ const fetchList = async () => {
 
 const fetchCategories = async () => {
   try {
-    const data = await api('/achievements/categories')
+    const data = await api('/achievements/categories', { guestOn401: true })
 
     categories.value = (Array.isArray(data) ? data : [])
       .slice()
@@ -268,7 +269,8 @@ const fetchDetail = async id => {
 
   try {
     viewDetail.value = await api(
-      '/admin/achievements/' + id
+      '/admin/achievements/' + id,
+      { guestOn401: true }
     )
     ;(viewDetail.value.media || []).forEach(loadMediaPreview)
   } catch (err) {
@@ -321,7 +323,7 @@ const primaryAdminOrgId = () => {
 
 const fetchOwnerUsers = async () => {
   try {
-    const data = await api('/admin/users', { params: { page: 1, pageSize: 50, status: 'active' } })
+    const data = await api('/admin/users', { params: { page: 1, pageSize: 200, status: 'active' } })
     ownerUsers.value = data.list || []
   } catch { ownerUsers.value = [] }
 }
@@ -329,10 +331,10 @@ const fetchOwnerUsers = async () => {
 const usersForSelectedOrg = computed(() => ownerUsers.value.filter(user => belongsToOrg(user, achievementForm.orgId)))
 
 const adminOrgLabel = computed(() => {
-  const memberships = currentUser.value.organizationMemberships || []
+  const memberships = authStore.user?.organizationMemberships || []
   const matched = memberships.find(m => Number(m.orgId) === Number(achievementForm.orgId))
   const admin = matched || memberships.find(m => m.role === 'admin' && m.status === 'active')
-  return admin?.orgName || currentUser.value.orgName || '当前登录机构'
+  return admin?.orgName || authStore.user?.orgName || '当前登录机构'
 })
 
 const resetAchievementForm = () => {
@@ -469,7 +471,7 @@ const openCreate = () => {
   resetAchievementForm()
   if (!isPlatformAdmin.value) {
     achievementForm.orgId = primaryAdminOrgId()
-    achievementForm.ownerUserId = currentUser.value.userId || ''
+    achievementForm.ownerUserId = authStore.user?.userId || ''
   }
   formVisible.value = true
 }
@@ -796,6 +798,13 @@ const exportData = async () => {
       if (list.length < size) break
 
       if (data.total && rows.length >= data.total) break
+    }
+
+    if (page >= 20) {
+      await alertDialog({
+        title: '导出提示',
+        message: '导出数据超过1000条上限，仅导出前1000条。如需完整数据请缩小筛选范围或联系管理员。',
+      })
     }
 
     const header = [
@@ -1215,7 +1224,7 @@ onMounted(() => {
                   <option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.name }}</option>
                 </select>
                 <input v-else :value="adminOrgLabel" disabled />
-                <label>归属用户</label><input :value="currentUser.displayName || currentUser.userNo || '当前登录账号'" disabled />
+                <label>归属用户</label><input :value="authStore.user?.displayName || authStore.user?.userNo || '当前登录账号'" disabled />
               </template>
               <label>成果名称 *</label><input v-model="achievementForm.title" />
               <label>分类 *</label><select v-model="achievementForm.categoryId"><option value="">请选择分类</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select>
@@ -1252,7 +1261,7 @@ onMounted(() => {
               <p v-if="!formMedia.length" class="form-hint">导入或手工上传的封面、成果图会显示在这里，可设封面或删除。</p>
               <div v-else class="media-grid">
                 <figure v-for="(item, index) in formMedia" :key="item.fileId" class="media-card">
-                  <img v-if="mediaSrc(item)" :src="mediaSrc(item)" :alt="item.name || '成果图片'" />
+                  <img v-if="mediaSrc(item)" :src="mediaSrc(item)" :alt="item.name || '成果图片'" width="148" height="110" loading="lazy" />
                   <div v-else class="media-fallback">{{ item.name || '图片加载中' }}</div>
                   <figcaption>
                     <button type="button" class="text-button" @click="setCoverMedia(index)">{{ item.role === 'cover' ? '封面图' : '设为封面' }}</button>
@@ -1431,7 +1440,7 @@ onMounted(() => {
               >
                 <li
                   v-for="(point, index) in innovationPoints"
-                  :key="index"
+                  :key="point?.id ?? `pt-${index}`"
                 >
                   {{ fmtPoint(point) }}
                 </li>
@@ -1451,7 +1460,7 @@ onMounted(() => {
               <label>成果图片</label>
               <div class="media-grid">
                 <figure v-for="item in viewDetail.media" :key="item.fileId" class="media-card">
-                  <img v-if="mediaSrc(item)" :src="mediaSrc(item)" :alt="item.name || '成果图片'" />
+                  <img v-if="mediaSrc(item)" :src="mediaSrc(item)" :alt="item.name || '成果图片'" width="148" height="110" loading="lazy" />
                   <div v-else class="media-fallback">{{ item.name || '图片' }}</div>
                 </figure>
               </div>
@@ -2078,7 +2087,7 @@ tbody tr:hover {
 .upload-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
 .media-card { margin: 0; overflow: hidden; border: 1px solid #e5ebf3; border-radius: 8px; background: #f7f9fc; }
-.media-card img, .media-fallback { display: block; width: 100%; height: 110px; object-fit: cover; }
+.media-card img, .media-fallback { display: block; width: 100%; height: 110px; object-fit: cover; aspect-ratio: 148 / 110; }
 .media-fallback { display: flex; align-items: center; justify-content: center; padding: 8px; color: #7a879a; font-size: 12px; text-align: center; }
 .media-card figcaption { display: flex; justify-content: space-between; padding: 6px 8px; }
 .link-list { margin-top: 8px; }

@@ -29,13 +29,22 @@ _FILE_ERROR_MAP = {
 
 
 @router.get("/api/file/{file_id}")
-def get_file(file_id: str):
+def get_file(file_id: str, request: Request):
     try:
         path, mime = proxy_file(file_id)
     except FileProxyError as e:
         code, _msg, status = _FILE_ERROR_MAP.get(e.http_status, TT_FILE_50201)
         raise BizError(code, e.msg, status)
-    return FileResponse(path, media_type=mime)
+    import logging
+    logging.getLogger("nanshan.deprecation").warning(
+        "legacy file route called path=%s ua=%s",
+        request.url.path,
+        request.headers.get("user-agent", "")[:80],
+    )
+    resp = FileResponse(path, media_type=mime)
+    resp.headers["Deprecation"] = "true"
+    resp.headers["Link"] = '</api/tech-transfer/v1/files/{file_id}>; rel="successor-version"'
+    return resp
 
 
 @router.post("/api/tech-transfer/v1/files", status_code=201, summary="上传成果/需求媒体")
@@ -78,7 +87,12 @@ def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict =
             from core.errors import bad_request
             raise bad_request("不支持的文件变体")
         path, mime = get_uploaded_thumbnail(path, mime, file_id)
-    return FileResponse(path, media_type=mime, filename=name, content_disposition_type="inline")
+    # access_token 经 query 串传递是小程序 <image> 无法设置请求头的折中方案。
+    # 已知风险：token 可能出现在 Referer/服务端日志。短期缓解：禁止缓存；
+    # 中期应改为短期签名 URL（HMAC + 过期），届时移除 query access_token。
+    response = FileResponse(path, media_type=mime, filename=name, content_disposition_type="inline")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.delete("/api/tech-transfer/v1/files/{file_id}", summary="删除未被引用的上传文件")

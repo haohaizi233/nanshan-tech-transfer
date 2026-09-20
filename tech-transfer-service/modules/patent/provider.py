@@ -23,20 +23,26 @@ def _configured() -> bool:
 
 def _build_url(path: str, params: dict) -> str:
     base = settings.PATENT_PROVIDER_BASE.rstrip("/")
+    # API key 不再作为 query 参数（会进入访问日志/Referer），改由 _http_json
+    # 通过 Authorization 头发送。这里只组装业务参数。
     query = dict(params)
-    query["key"] = settings.PATENT_PROVIDER_KEY
     return f"{base}{path}?{urllib.parse.urlencode(query)}"
+
+
+def _auth_headers() -> dict:
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "nanshan-tech-transfer/1.0",
+    }
+    key = settings.PATENT_PROVIDER_KEY.strip()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
 
 
 def _http_json(path: str, params: dict, timeout: int) -> dict:
     url = _build_url(path, params)
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "nanshan-tech-transfer/1.0",
-        },
-    )
+    req = urllib.request.Request(url, headers=_auth_headers())
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
@@ -105,6 +111,7 @@ def iter_pdf_bytes(publication_no: str) -> Iterator[bytes]:
         headers={
             "Accept": "application/pdf,*/*",
             "User-Agent": "nanshan-tech-transfer/1.0",
+            **{k: v for k, v in _auth_headers().items() if k.lower() == "authorization"},
         },
     )
     try:

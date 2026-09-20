@@ -2,7 +2,7 @@
   "host": "127.0.0.1",
   "port": 3306,
   "user": "root",
-  "password": "123456",
+  "password": "",
   "database": "nanshan_capital",
-  "note": "已配置为本机 MySQL（root）。建表语句见 schema_szte_orgs.sql，数据见 szte_orgs_data.json，可用 tools/import_data.py 重新导入。"
+  "note": "已配置为本机 MySQL（root）。密码请通过环境变量 MYSQL_PASSWORD 提供，勿硬编码入库。建表语句见 schema_szte_orgs.sql，数据见 szte_orgs_data.json，可用 tools/import_data.py 重新导入。"
 }

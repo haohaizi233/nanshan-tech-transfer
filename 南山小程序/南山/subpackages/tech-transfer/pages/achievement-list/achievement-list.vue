@@ -72,7 +72,14 @@
           @click="openDetail(item.id)"
         >
           <view class="card-summary">
-            <image v-if="item.cover && item.cover.url" class="cover" :src="coverDisplayUrl(item.cover)" mode="aspectFill" />
+            <image
+              v-if="item.cover && item.cover.url"
+              class="cover"
+              :src="coverErrored[item.id] ? '/static/logo.png' : coverDisplayUrl(item.cover)"
+              mode="aspectFill"
+              lazy-load
+              @error="onCoverError(item.id)"
+            />
             <view class="card-content">
               <view class="card-head">
                 <text class="card-title">{{ item.title }}</text>
@@ -81,7 +88,7 @@
               <view v-if="item.sourceOrgName" class="meta-row">
                 <text class="meta-source">{{ item.sourceOrgName }}</text>
                 <view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
-                  <image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+                  <image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit" lazy-load></image>
                   <text>认证</text>
                 </view>
                 <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
@@ -152,6 +159,7 @@ export default {
       hasMore: true,
       loading: false,
       error: '',
+      coverErrored: {},
     }
   },
   onLoad() {
@@ -264,6 +272,10 @@ export default {
         return `${min}–${max} 万`
       }
       return `${min} 万`
+    },
+    onCoverError(id) {
+      // 封面加载失败时回退到占位图，避免列表出现碎图（R2-59）
+      this.$set(this.coverErrored, id, true)
     },
     openDetail(id) {
       // 需求与成果统一走 dock-detail：该页包含详情、联系方式、对接状态与动作，

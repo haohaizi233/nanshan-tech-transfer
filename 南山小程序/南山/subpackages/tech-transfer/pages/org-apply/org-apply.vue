@@ -78,6 +78,9 @@
 		{ label: '投资机构', value: 'invest' }
 	]
 
+	// 草稿持久化：离开页面 / 切后台后回来不丢填写内容（R2-42）
+	const DRAFT_KEY = 'tt_org_apply_draft'
+
 	export default {
 		data() {
 			return {
@@ -115,6 +118,9 @@
 				return '已完成机构认证，无需重复申请。'
 			}
 		},
+		onLoad() {
+			this.restoreDraft()
+		},
 		onShow() {
 			if (!isLoggedIn()) {
 				safeBackWithToast('请先登录', 800)
@@ -127,6 +133,30 @@
 			clearTimeout(this._nameTimer)
 		},
 		methods: {
+			saveDraft() {
+				try {
+					uni.setStorageSync(DRAFT_KEY, JSON.parse(JSON.stringify(this.form)))
+				} catch (e) {
+					// ignore
+				}
+			},
+			restoreDraft() {
+				try {
+					const saved = uni.getStorageSync(DRAFT_KEY)
+					if (saved && typeof saved === 'object') {
+						this.form = { ...this.form, ...saved }
+					}
+				} catch (e) {
+					// ignore
+				}
+			},
+			clearDraft() {
+				try {
+					uni.removeStorageSync(DRAFT_KEY)
+				} catch (e) {
+					// ignore
+				}
+			},
 			async loadCertification() {
 				try {
 					this.certification = await getMyOrganizationCertification()
@@ -136,9 +166,11 @@
 			},
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
+				this.saveDraft()
 			},
 			onNameInput(e) {
 				this.form.requestedName = e.detail.value
+				this.saveDraft()
 				this.scheduleNameCheck()
 			},
 			scheduleNameCheck() {
@@ -163,6 +195,7 @@
 			onTypeChange(e) {
 				const opt = this.typeOptions[Number(e.detail.value)] || this.typeOptions[0]
 				this.form.requestedType = opt ? opt.value : ''
+				this.saveDraft()
 			},
 			async onSubmit() {
 				if (!this.certification.canApply) {
@@ -215,6 +248,7 @@
 					})
 					uni.hideLoading()
 				uni.showToast({ title: '已提交，等待平台管理员审核', icon: 'none', duration: 2000 })
+				this.clearDraft()
 				safeBackWithToast('', 1200)
 				} catch (e) {
 					uni.hideLoading()

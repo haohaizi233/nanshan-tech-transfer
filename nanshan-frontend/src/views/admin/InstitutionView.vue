@@ -7,7 +7,7 @@ import {
 } from 'vue'
 
 import { api } from '../../api/client'
-import { confirmDialog } from '../../utils/appDialog.js'
+import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
 import { validateContactWay } from '../../utils/contactValidation.js'
 
 const KIND_OPTIONS = [
@@ -421,6 +421,13 @@ const exportData = async () => {
       })
       all.push(...(data.list || []))
       if (page >= (data.totalPages || 1)) break
+    }
+
+    if (page >= 20) {
+      await alertDialog({
+        title: '导出提示',
+        message: '导出数据超过1000条上限，仅导出前1000条。如需完整数据请缩小筛选范围或联系管理员。',
+      })
     }
 
     const csv = [

@@ -2,28 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { api } from '../../api/client'
+import { actionLabel } from '../../utils/auditLabels.js'
 
 const fmtTime = (v) => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
-
-const ACTION_LABELS = {
-  'achievement.approve': '通过成果审核',
-  'achievement.reject': '驳回成果',
-  'achievement.submit': '提交成果',
-  'achievement.create': '创建成果',
-  'achievement.update': '更新成果',
-  'achievement.offline': '下架成果',
-  'demand.approve': '通过需求审核',
-  'demand.reject': '驳回需求',
-  'demand.submit': '提交需求',
-  'demand.create': '创建需求',
-  'demand.update': '更新需求',
-  'demand.cancel': '取消需求',
-  'demand.close': '关闭需求',
-  'institution.create': '新增机构',
-  'institution.update': '更新机构',
-  'institution.online': '上架机构',
-  'institution.offline': '下架机构'
-}
 
 const RESOURCE_TYPE_LABELS = {
   achievement: '成果',
@@ -175,7 +156,7 @@ const pages = computed(() => {
   return list
 })
 
-const actionText = (action) => ACTION_LABELS[action] || action || '-'
+const actionText = (action) => actionLabel(action)
 
 const resourceTypeText = (type) => RESOURCE_TYPE_LABELS[type] || type || '-'
 
@@ -252,6 +233,7 @@ const cellTitle = (value) => {
 
         <div class="actions">
           <button
+            type="button"
             class="primary-btn"
             @click="search"
           >
@@ -259,6 +241,7 @@ const cellTitle = (value) => {
           </button>
 
           <button
+            type="button"
             class="default-btn"
             @click="reset"
           >
@@ -389,6 +372,7 @@ const cellTitle = (value) => {
         </select>
 
         <button
+          type="button"
           :disabled="currentPage === 1"
           @click="goPage(currentPage - 1)"
         >
@@ -407,6 +391,7 @@ const cellTitle = (value) => {
 
           <button
             v-else
+            type="button"
             :class="{
               active:
                 currentPage === page
@@ -418,6 +403,7 @@ const cellTitle = (value) => {
         </template>
 
         <button
+          type="button"
           :disabled="currentPage === totalPages"
           @click="goPage(currentPage + 1)"
         >

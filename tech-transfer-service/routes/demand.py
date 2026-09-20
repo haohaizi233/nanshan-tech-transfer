@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from core.response import success, get_request_id
 from core.middleware import identity, optional_identity
 from core.errors import bad_request
+from core.idempotency import idempotent_create, current_key, cache_response
 from core.request_schemas import (
     DemandCreateRequest,
     DemandUpdateRequest,
@@ -35,14 +36,16 @@ def demands_list(request: Request, user: dict = Depends(optional_identity)):
 
 @router.post("/demands", status_code=201)
 def demands_create(request: Request, body: DemandCreateRequest, user: dict = Depends(identity)):
-    idem_key = request.headers.get("X-Idempotency-Key")
-    if idem_key:
-        print(f"[demand] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
+    replay = idempotent_create(request, user)
+    if replay is not None:
+        return replay
     detail = create_demand(
         user["userId"], user.get("userNo", ""), body.as_dict(),
         request_id=get_request_id(),
     )
-    return success(detail, "创建成功")
+    result = success(detail, "创建成功")
+    cache_response(int(user["userId"]), current_key(request), 201, result)
+    return result
 
 
 @router.get("/demands/{demand_id}")

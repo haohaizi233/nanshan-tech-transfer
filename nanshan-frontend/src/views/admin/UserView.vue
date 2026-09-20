@@ -6,11 +6,13 @@ import {
   ref
 } from 'vue'
 
-import { api, getSavedUser } from '../../api/client'
-import { confirmDialog, promptDialog } from '../../utils/appDialog.js'
+import { api } from '../../api/client'
+import { alertDialog, confirmDialog, promptDialog } from '../../utils/appDialog.js'
 import { useAbortable } from '../../api/useAbortable'
+import { useAuthStore } from '../../stores/auth.js'
 
 const { run: runApi } = useAbortable()
+const authStore = useAuthStore()
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '正常' },
@@ -26,7 +28,7 @@ const USER_TYPE_LABELS = {
 
 const typeLabel = v => USER_TYPE_LABELS[v] || v || '未填写'
 
-const isPlatformAdmin = computed(() => ((getSavedUser()?.roles) || []).includes('admin'))
+const isPlatformAdmin = computed(() => (authStore.user?.roles || []).includes('admin'))
 
 const membershipText = user => (user.organizationMemberships || [])
   .map(m => `${m.orgName}（${m.role === 'admin' ? '管理员' : '成员'}）`)
@@ -220,6 +222,13 @@ const exportData = async () => {
       })
       all.push(...(data.list || []))
       if (page >= (data.totalPages || 1)) break
+    }
+
+    if (page >= 20) {
+      await alertDialog({
+        title: '导出提示',
+        message: '导出数据超过1000条上限，仅导出前1000条。如需完整数据请缩小筛选范围或联系管理员。',
+      })
     }
 
     const csv = [

@@ -1,16 +1,18 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, getSavedUser } from '../../api/client'
+import { api } from '../../api/client'
 import { useAbortable } from '../../api/useAbortable'
+import { useAuthStore } from '../../stores/auth.js'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const loading = ref(false)
 const loadError = ref('')
 const detail = ref(null)
-const isPlatformAdmin = computed(() => (getSavedUser()?.roles || []).includes('admin'))
+const isPlatformAdmin = computed(() => (authStore.user?.roles || []).includes('admin'))
 
 const submitting = ref(false)
 const actionError = ref('')

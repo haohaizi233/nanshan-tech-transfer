@@ -134,6 +134,16 @@ def admin_institutions_create(
     return JSONResponse(status_code=201, content=success(data))
 
 
+# 静态段（import）必须在 {institution_id} 之前注册，避免被动态 catch-all 吞掉。
+@router.post("/admin/institutions/import", tags=["admin-institutions"])
+def admin_institutions_import(
+    body: InstitutionImportRequest,
+    admin: dict = Depends(admin_identity),
+):
+    data = import_institutions(admin, body.as_dict(), request_id=get_request_id())
+    return success(data, f"导入完成：新增 {data['created']}，更新 {data['updated']}")
+
+
 @router.get("/admin/institutions/{institution_id}", tags=["admin-institutions"])
 def admin_institutions_detail(institution_id: int, admin: dict = Depends(admin_identity)):
     return success(get_institution_admin(institution_id))
@@ -149,15 +159,6 @@ def admin_institutions_update(
         admin, institution_id, body.model_dump(exclude_unset=True), request_id=get_request_id(),
     )
     return success(data)
-
-
-@router.post("/admin/institutions/import", tags=["admin-institutions"])
-def admin_institutions_import(
-    body: InstitutionImportRequest,
-    admin: dict = Depends(admin_identity),
-):
-    data = import_institutions(admin, body.as_dict(), request_id=get_request_id())
-    return success(data, f"导入完成：新增 {data['created']}，更新 {data['updated']}")
 
 
 @router.delete("/admin/institutions/{institution_id}", tags=["admin-institutions"])

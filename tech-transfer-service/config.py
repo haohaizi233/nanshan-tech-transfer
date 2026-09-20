@@ -97,10 +97,13 @@ class Settings(BaseSettings):
     CAPITAL_DB_PASSWORD: str = "123456"  # 本地开发默认值
 
     # ── JWT（staging/production 必须提供强密钥）─────────────
-    JWT_SECRET: str = "tech-transfer-dev-secret-key"  # 本地开发默认值
+    JWT_SECRET: str = "tech-transfer-dev-secret-key"  # 本地开发默认值；生产由 assert_environment 拦截
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRES: int = 7200  # 秒
     REFRESH_TOKEN_EXPIRES_DAYS: int = 14
+
+    # ── uvicorn workers（生产多进程；需与 DB 连接池 × workers ≤ PG max_connections）──
+    UVICORN_WORKERS: int = 2
 
     # ── CORS（staging/production 需显式白名单）──────────────
     # NoDecode：跳过 pydantic-settings 的 JSON 预解码，交给下方 validator

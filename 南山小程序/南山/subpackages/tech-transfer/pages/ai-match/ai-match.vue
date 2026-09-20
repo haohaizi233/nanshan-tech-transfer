@@ -175,6 +175,9 @@
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
+	import { safeNavigateTo } from '../../utils/nav.mjs'
+
+	const SUBPACKAGE_ROOT = '/subpackages/tech-transfer/'
 
 	const ACTIVE_STATUSES = ['published', 'matched']
 
@@ -294,7 +297,8 @@
 					uni.showToast({ title: '暂不支持查看该卡片详情', icon: 'none' })
 					return
 				}
-				HostBridge.navigate(target.path, target.query)
+				// 卡片详情统一走分包内页面，并用 safeNavigateTo 规避 10 层页面栈上限
+				safeNavigateTo(SUBPACKAGE_ROOT + target.path, target.query)
 			},
 			goPostDemand() {
 				HostBridge.navigate('pages/post-demand/post-demand')

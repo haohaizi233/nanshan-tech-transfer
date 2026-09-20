@@ -36,14 +36,22 @@ def _client_ip(request) -> str:
 
 
 def check_login_rate(request, account: str = ""):
-    """登录端点限流：按 IP + 按账号双重限频。"""
+    """登录端点限流：按 IP + 按账号双重限频。
+
+    IP 维度 20/60s 容忍正常多端登录与测试；账号维度 5/300s 才是暴力破解主防线
+    （同一账号 5 分钟内 5 次失败即锁定该账号窗口）。
+    """
     ip = _client_ip(request)
-    _check(f"login:ip:{ip}", limit=10, window_s=60)
+    _check(f"login:ip:{ip}", limit=20, window_s=60)
     if account:
         _check(f"login:acct:{account}", limit=5, window_s=300)
 
 
 def check_register_rate(request):
-    """注册端点限流：按 IP 限频，防止批量账号创建。"""
+    """注册端点限流：按 IP 限频，防止批量账号创建。
+
+    阈值 30/5min：单 IP 5 分钟内注册超 30 个账号即视为批量脚本。
+    正常用户极少注册，该阈值对真实流量无感，但能阻断自动化批量创建。
+    """
     ip = _client_ip(request)
-    _check(f"register:ip:{ip}", limit=5, window_s=300)
+    _check(f"register:ip:{ip}", limit=30, window_s=300)

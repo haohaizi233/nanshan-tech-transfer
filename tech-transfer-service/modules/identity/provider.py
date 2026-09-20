@@ -54,4 +54,11 @@ def get_identity_provider() -> IdentityProvider:
                 f"[FATAL] MockIdentityProvider 不允许在 {settings.APP_ENV} 环境运行"
             )
         return MockIdentityProvider()
+    if settings.AUTH_PROVIDER == "wechat":
+        # 微信 code2session 登录尚未接入：需 AppID/AppSecret + 小程序 code 换 openid。
+        # 当前生产正式登录方式为手机号 + 密码（routes/auth.py 的 login/register）。
+        # 接入微信登录时在此返回 WeChatIdentityProvider()，并补 .env 配置。
+        raise RuntimeError(
+            "微信登录尚未实现；当前正式登录方式为手机号 + 密码（AUTH_PROVIDER=mock 仅限本地）"
+        )
     raise RuntimeError(f"未实现的 AUTH_PROVIDER: {settings.AUTH_PROVIDER}")

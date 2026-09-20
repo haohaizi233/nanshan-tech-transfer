@@ -24,6 +24,12 @@
 			</view>
 		</view>
 
+		<view v-if="needLogin" class="empty">
+			<text class="empty-title">请登录后查看</text>
+			<text class="empty-desc">该内容仅对登录用户可见</text>
+			<button class="btn" size="mini" @click="goLogin">去登录</button>
+		</view>
+
 		<view v-if="list.length === 0" class="empty">
 			<text class="empty-title">{{ emptyTitle }}</text>
 			<text class="empty-desc">{{ emptyDesc }}</text>
@@ -85,12 +91,13 @@
 	export default {
 		data() {
 			return {
-				aiEnabled: AI_FEATURE_ENABLED,
-				pageType: 'demand',
-				publicationTab: 'published',
-				intentTab: 0,
-				intentAutoSwitched: false,
-				list: []
+			aiEnabled: AI_FEATURE_ENABLED,
+			pageType: 'demand',
+			publicationTab: 'published',
+			intentTab: 0,
+			intentAutoSwitched: false,
+			needLogin: false,
+			list: []
 			}
 		},
 		computed: {
@@ -133,6 +140,12 @@
 		},
 		onLoad(options) {
 			this.pageType = options.type || 'demand'
+			// 深链入口（分享链接）直达时，若无任何会话令牌则拦截为登录提示，避免渲染空壳/接口 401 闪烁
+			if (!HostBridge.getStorage('tt_access_token')) {
+				this.needLogin = true
+				uni.setNavigationBarTitle({ title: '请登录' })
+				return
+			}
 			if (this.pageType === 'demand' || this.pageType === 'result') {
 				this.publicationTab = 'published'
 			}
@@ -147,9 +160,13 @@
 			})
 		},
 		onShow() {
+			if (this.needLogin) return
 			this.loadList()
 		},
 		methods: {
+			goLogin() {
+				HostBridge.navigate('pages/mine/mine')
+			},
 			selectPublicationTab(tab) {
 				if (this.publicationTab === tab) return
 				this.publicationTab = tab

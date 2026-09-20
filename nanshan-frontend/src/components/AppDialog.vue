@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import {
   cancelDialog,
@@ -13,17 +13,61 @@ const confirmClass = computed(() => (
   dialogState.tone === 'danger' ? 'app-dialog-confirm danger' : 'app-dialog-confirm'
 ))
 
+// 用 scoped ref 取代 document.querySelector，避免全局查询误伤其他弹窗。
+const dialogRef = ref(null)
+let lastFocusedElement = null
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function getFocusable() {
+  const root = dialogRef.value
+  if (!root) return []
+  return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR))
+}
+
+function focusFirst() {
+  const nodes = getFocusable()
+  // prompt 优先聚焦输入框，其余聚焦确认按钮（如存在）。
+  if (isPrompt.value) {
+    const textarea = nodes.find((n) => n.tagName === 'TEXTAREA')
+    if (textarea) {
+      textarea.focus()
+      return
+    }
+  }
+  const target = nodes.find((n) => n.classList.contains('app-dialog-confirm')) || nodes[0]
+  if (target) target.focus()
+}
+
 watch(() => dialogState.visible, (visible) => {
   if (visible) {
+    // 记录触发元素，关闭后归还焦点。
+    lastFocusedElement = document.activeElement
     window.addEventListener('keydown', onKeydown)
     nextTick(() => {
-      const root = document.querySelector('.app-dialog')
-      const target = root?.querySelector('textarea, .app-dialog-confirm')
-      target?.focus()
+      focusFirst()
     })
     return
   }
   window.removeEventListener('keydown', onKeydown)
+  // 归还焦点到触发元素，便于键盘用户继续操作。
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    nextTick(() => {
+      try {
+        lastFocusedElement.focus()
+      } catch {
+        // ignore
+      }
+    })
+    lastFocusedElement = null
+  }
 })
 
 onBeforeUnmount(() => {
@@ -32,8 +76,34 @@ onBeforeUnmount(() => {
 
 const onKeydown = (event) => {
   if (event.key === 'Escape') {
-    event.preventDefault()
-    cancelDialog()
+    // alert 类型为模态提示，不允许 ESC 关闭；confirm/prompt 允许。
+    if (!isAlert.value) {
+      event.preventDefault()
+      cancelDialog()
+    }
+    return
+  }
+  if (event.key === 'Tab') {
+    // 焦点陷阱：在弹窗内循环，不外泄到背景。
+    const nodes = getFocusable()
+    if (!nodes.length) {
+      event.preventDefault()
+      return
+    }
+    const first = nodes[0]
+    const last = nodes[nodes.length - 1]
+    const active = document.activeElement
+    if (event.shiftKey) {
+      if (active === first || !dialogRef.value?.contains(active)) {
+        event.preventDefault()
+        last.focus()
+      }
+    } else {
+      if (active === last || !dialogRef.value?.contains(active)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
   }
 }
 </script>
@@ -46,6 +116,7 @@ const onKeydown = (event) => {
       @click.self="cancelDialog"
     >
       <section
+        ref="dialogRef"
         class="app-dialog"
         role="dialog"
         aria-modal="true"

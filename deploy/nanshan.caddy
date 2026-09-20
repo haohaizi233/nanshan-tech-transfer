@@ -8,9 +8,11 @@
 		header_up Authorization {header.Authorization}
 		transport http {
 			dial_timeout 10s
-			response_header_timeout 60s
-			read_timeout 120s
-			write_timeout 120s
+			# AI 评估/对话最长 ~90s，第三方 Provider ~120s；网关须 ≥ 最慢上游首字节时间，
+			# 否则上游仍在跑而网关已向客户端返回 502。提到 130s 留足余量。
+			response_header_timeout 130s
+			read_timeout 180s
+			write_timeout 180s
 		}
 	}
 }

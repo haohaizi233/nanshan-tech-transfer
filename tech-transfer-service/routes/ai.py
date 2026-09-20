@@ -5,6 +5,7 @@ POST /ai/evaluation-tasks、GET /ai/evaluation-tasks/{taskId}（异步任务）�
 需求匹配与自然语言对话同步经本服务转发到独立的 ai-agent；成果评估沿用
 异步任务制（202 + 轮询），执行由独立 worker 认领，不把企业微信长连接嵌进本进程。
 """
+import threading
 import urllib.error
 import urllib.request
 
@@ -23,6 +24,10 @@ from modules.ai.chat_store import append_message, list_messages, clear_messages
 
 # 与小程序 config/feature-flags.js 同步；实际开关读 settings.AI_FEATURE_ENABLED。
 AI_FEATURE_ENABLED = settings.AI_FEATURE_ENABLED
+
+# 同步阻塞 LLM 调用并发上限：避免少量请求同时打满上游连接/线程池。
+# 信号量在进程内共享，acquire 期间阻塞调用线程，release 后下一请求进入。
+_AI_CONCURRENCY = threading.Semaphore(max(1, int(getattr(settings, "AI_MAX_CONCURRENT", 4))))
 
 
 def require_ai_enabled():
@@ -80,8 +85,9 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=settings.AI_AGENT_TIMEOUT) as resp:
-            body = resp.read()
+        with _AI_CONCURRENCY:
+            with urllib.request.urlopen(req, timeout=settings.AI_AGENT_TIMEOUT) as resp:
+                body = resp.read()
         return json.loads(body.decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         print(f"[ai/chat] agent 调用失败: {exc!r}")

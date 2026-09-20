@@ -1,9 +1,9 @@
 """
 初始化账号密码登录（幂等，可重复执行）：
 1. 应用 migrations/pg/004_user_credential.sql（user_credential 表）
-2. 种子管理员：username=admin / password=Admin@2026（app_user + user_profile + user_role + user_credential 全套）
+2. 种子管理员：username=admin（密码须显式传入，创建后立即修改）
 
-用法：python tools/seed_admin_account.py [username] [password]
+用法：python tools/seed_admin_account.py <username> <password>
 """
 
 import sys
@@ -21,7 +21,11 @@ MIGRATION = Path(__file__).resolve().parent.parent / "migrations" / "pg" / "004_
 
 def main():
     username = sys.argv[1] if len(sys.argv) > 1 else "admin"
-    password = sys.argv[2] if len(sys.argv) > 2 else "Admin@2026"
+    if len(sys.argv) <= 2:
+        print("[ERROR] 必须显式传入密码：python tools/seed_admin_account.py <username> <password>")
+        print("        不得使用默认密码，创建后请立即修改。")
+        sys.exit(1)
+    password = sys.argv[2]
     display_name = "系统管理员"
 
     conn = psycopg2.connect(

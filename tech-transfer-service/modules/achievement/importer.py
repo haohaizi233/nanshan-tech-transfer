@@ -1,6 +1,7 @@
 """PPT/PDF 成果资料导入：只抽取并写入 staging，绝不自动发布。"""
 from __future__ import annotations
 
+import gc
 import json
 import re
 from pathlib import Path
@@ -94,11 +95,17 @@ def upload_candidate_media(records: list[dict], created_by: int, uploader) -> li
         raw_images: list[dict] = []
         warnings: list[dict] = []
         for image in record.get("images", []):
+            blob = image.get("data")
             try:
-                file = uploader(int(created_by), image["filename"], image["mimeType"], image["data"])
+                file = uploader(int(created_by), image["filename"], image["mimeType"], blob)
             except BizError as error:
                 warnings.append({"filename": image["filename"], "message": error.message})
                 continue
+            finally:
+                # 释放图片二进制：上传/校验完成后立即丢弃引用，避免整批图片
+                # 候选在内存中堆积导致大文档导入 OOM。
+                image["data"] = None
+                del blob
             uploaded.append(file)
             uploaded_file_ids.append(int(file["id"]))
             raw_images.append(
@@ -110,6 +117,9 @@ def upload_candidate_media(records: list[dict], created_by: int, uploader) -> li
             record["raw"]["images"] = raw_images
         if warnings:
             record["raw"]["imageUploadWarnings"] = warnings
+        # 单条记录处理完毕：清空候选图片列表，仅保留已上传的 fileId 元数据。
+        record["images"] = []
+        gc.collect()
     return uploaded_file_ids
 
 

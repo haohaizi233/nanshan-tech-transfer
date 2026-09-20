@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from core.response import success, get_request_id
 from core.middleware import identity, optional_identity
 from core.errors import bad_request
+from core.idempotency import idempotent_create, current_key, cache_response
 from core.request_schemas import (
     AchievementCreateRequest,
     AchievementOfflineRequest,
@@ -56,14 +57,16 @@ def achievement_detail(ach_id: int, user: dict = Depends(optional_identity)):
 
 @router.post("/achievements", status_code=201, summary="创建成果（draft）")
 def achievements_create(request: Request, body: AchievementCreateRequest, user: dict = Depends(identity)):
-    idem_key = request.headers.get("X-Idempotency-Key")
-    if idem_key:
-        print(f"[achievement] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
+    replay = idempotent_create(request, user)
+    if replay is not None:
+        return replay
     detail = create_achievement(
         user["userId"], user.get("userNo", ""), body.as_dict(),
         request_id=get_request_id(),
     )
-    return success(detail, "创建成功")
+    result = success(detail, "创建成功")
+    cache_response(int(user["userId"]), current_key(request), 201, result)
+    return result
 
 
 @router.patch("/achievements/{ach_id}", summary="编辑成果（owner + 乐观锁 + draft/rejected）")

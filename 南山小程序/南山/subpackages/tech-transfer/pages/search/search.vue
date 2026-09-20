@@ -69,12 +69,12 @@
 					</view>
 					<view v-if="item.metaLine || item.orgCertified" class="meta-row-inline">
 						<text v-if="item.metaLine" class="meta">{{ item.metaLine }}</text>
-						<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
-							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
-							<text>认证</text>
-						</view>
+					<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+						<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit" lazy-load></image>
+						<text>认证</text>
 					</view>
-					<text class="desc">{{ item.demandDesc }}</text>
+				</view>
+				<text class="desc">{{ item.demandDesc }}</text>
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn" size="mini" @click.stop="openDetail('demand', item.id)">我要对接</button>
 					</view>
@@ -91,7 +91,7 @@
 					<view v-if="item.source" class="meta-row-inline">
 						<text class="meta">{{ item.source }}</text>
 						<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
-							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit" lazy-load></image>
 							<text>认证</text>
 						</view>
 					</view>

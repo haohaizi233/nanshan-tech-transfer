@@ -37,6 +37,23 @@
 		onHide: function() {
 			console.log('App Hide')
 			stopNotificationPolling()
+		},
+		// 全局错误兜底：避免运行时错误导致整页白屏，改为提示用户稍后重试。
+		onError: function(err) {
+			console.error('[App] global onError:', err)
+			try {
+				uni.showToast({ title: '出错了，请稍后重试', icon: 'none' })
+			} catch (e) {
+				// ignore
+			}
+		},
+		onUnhandledRejection: function(res) {
+			console.error('[App] unhandled rejection:', res && res.reason)
+			try {
+				uni.showToast({ title: '出错了，请稍后重试', icon: 'none' })
+			} catch (e) {
+				// ignore
+			}
 		}
 	}
 </script>

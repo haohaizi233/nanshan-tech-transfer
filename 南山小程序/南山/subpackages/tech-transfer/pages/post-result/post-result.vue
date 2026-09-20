@@ -519,21 +519,23 @@
 				if (!this.validate()) return
 				this.previewing = false
 
-				this.submitting = true
-				try {
-					const created = await createAchievement(this.buildBody())
-					clearPublishDraft('achievement')
-					// 提交审核：draft → pending_review（提交后即可发起 AI 评估）
-					await submitAchievement(created.id, created.version)
-					this.submittedId = created.id
-					this.submitted = true
-					uni.showToast({ title: '提交成功', icon: 'success' })
-				} catch (e) {
-					console.error('[post-result] submit failed:', e)
-					uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none' })
-				} finally {
-					this.submitting = false
-				}
+			this.submitting = true
+			uni.showLoading({ title: '提交中', mask: true })
+			try {
+				const created = await createAchievement(this.buildBody())
+				clearPublishDraft('achievement')
+				// 提交审核：draft → pending_review（提交后即可发起 AI 评估）
+				await submitAchievement(created.id, created.version)
+				this.submittedId = created.id
+				this.submitted = true
+				uni.showToast({ title: '提交成功', icon: 'success' })
+			} catch (e) {
+				console.error('[post-result] submit failed:', e)
+				uni.showToast({ title: (e && e.message) || '提交失败，请稍后重试', icon: 'none' })
+			} finally {
+				uni.hideLoading()
+				this.submitting = false
+			}
 			},
 			async onStartEvaluation() {
 				if (!this.aiEnabled || !this.submittedId || this.evaluating) return

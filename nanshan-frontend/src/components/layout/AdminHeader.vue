@@ -25,63 +25,6 @@ const showUserMenu = ref(false)
 
 const displayName = computed(() => authStore.displayName)
 
-const pageMap = {
-  '/admin/overview': {
-    parent: '首页',
-    name: '数据概览'
-  },
-
-  '/admin/achievements': {
-    parent: '成果管理',
-    name: '成果列表'
-  },
-
-  '/admin/requirements': {
-    parent: '需求管理',
-    name: '需求列表'
-  },
-
-  '/admin/cooperation': {
-    parent: '合作对接管理',
-    name: '对接列表'
-  },
-
-  '/admin/institutions': {
-    parent: '机构管理',
-    name: '机构列表'
-  },
-
-  '/admin/users': {
-    parent: '用户管理',
-    name: '用户列表'
-  },
-
-  '/admin/ai': {
-    parent: 'AI推荐管理',
-    name: '推荐列表'
-  },
-
-  '/admin/content': {
-    parent: '内容管理',
-    name: '轮播图管理'
-  },
-
-  '/admin/system': {
-    parent: '系统管理',
-    name: '系统设置'
-  },
-
-  '/admin/logs': {
-    parent: '操作日志',
-    name: '日志列表'
-  },
-
-  '/admin/capital': {
-    parent: '资本对接管理',
-    name: '资源列表'
-  }
-}
-
 const breadcrumb = computed(() => {
   return {
     parent:
@@ -258,6 +201,7 @@ const savePassword = async () => {
         type="button"
         class="notification-button"
         title="待办通知"
+        @click="router.push('/admin/logs')"
       >
         <svg
           viewBox="0 0 24 24"

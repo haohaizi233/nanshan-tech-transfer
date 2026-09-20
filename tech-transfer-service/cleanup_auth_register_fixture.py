@@ -10,10 +10,17 @@ conn = psycopg2.connect(**DB)
 try:
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         for phone in PHONES:
+            # 同时按 user_profile.phone 与 user_credential.username 查找，
+            # 避免漏掉仅有 credential 而无 profile 的残留账号。
             cur.execute(
-            "SELECT u.id FROM app_user u JOIN user_profile p ON p.user_id = u.id WHERE p.phone = %s",
-            (phone,),
-        )
+                """
+                SELECT u.id FROM app_user u
+                LEFT JOIN user_profile p ON p.user_id = u.id
+                LEFT JOIN user_credential c ON c.user_id = u.id
+                WHERE p.phone = %s OR c.username = %s
+                """,
+                (phone, phone),
+            )
             rows = cur.fetchall() or []
             for row in rows:
                 uid = row["id"]

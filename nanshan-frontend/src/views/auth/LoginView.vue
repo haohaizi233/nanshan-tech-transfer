@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../../stores/auth'
@@ -7,6 +7,8 @@ import { useAuthStore } from '../../stores/auth'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+
+const REMEMBER_KEY = 'nanshan_admin_remember_user'
 
 const form = reactive({
   username: '',
@@ -16,6 +18,14 @@ const form = reactive({
 
 const loading = ref(false)
 const errorMsg = ref('')
+
+onMounted(() => {
+  const savedUsername = localStorage.getItem(REMEMBER_KEY)
+  if (savedUsername) {
+    form.username = savedUsername
+    form.remember = true
+  }
+})
 
 const handleLogin = async () => {
   if (!form.username || !form.password) {
@@ -28,6 +38,11 @@ const handleLogin = async () => {
 
   try {
     const user = await authStore.login(form.username.trim(), form.password)
+    if (form.remember) {
+      localStorage.setItem(REMEMBER_KEY, form.username.trim())
+    } else {
+      localStorage.removeItem(REMEMBER_KEY)
+    }
     const roles = user.roles || []
     const defaultPath = roles.includes('org_admin') && !roles.includes('admin')
       ? '/admin/achievements'
