@@ -6,6 +6,8 @@ import html
 import math
 import re
 
+from opencc import OpenCC
+
 # 对外禁止出现的源站域名/路径片段（大小写不敏感）
 _LEAK_MARKERS = (
     "googleapis.com",
@@ -64,11 +66,22 @@ _SOURCE_URL_RE = re.compile(
     re.IGNORECASE,
 )
 _PUB_NO_RE = re.compile(r"^[A-Za-z]{1,4}[\d.]{4,24}[A-Za-z]?$", re.IGNORECASE)
+# t2s 只做字形；tw2sp 同时把台湾用词收到大陆简体（軟體→软件、資訊→信息）。
+# 词典进程内加载一次。无 CJK 的英/数字字段直接跳过。
+_T2S = OpenCC("tw2sp")
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
 
 
 def is_publication_no(value: str) -> bool:
     text = (value or "").strip()
     return bool(text) and bool(_PUB_NO_RE.match(text)) and len(text) <= 32
+
+
+def to_simplified(text: str) -> str:
+    """把繁体中文转为简体。英文、公开号、无汉字文本原样返回。"""
+    if not text or not _CJK_RE.search(text):
+        return text
+    return _T2S.convert(text)
 
 
 def clean_text(value) -> str:
@@ -77,7 +90,7 @@ def clean_text(value) -> str:
     text = html.unescape(str(value))
     text = _HTML_TAG_RE.sub("", text)
     text = _SOURCE_URL_RE.sub("", text)
-    return " ".join(text.split()).strip()
+    return to_simplified(" ".join(text.split()).strip())
 
 
 def _semantic_marker(kind: str, value: str) -> str:
@@ -124,7 +137,8 @@ def _clean_multiline_rich(value) -> str:
     text = repair_broken_subscripts(text)
     text = _FORMULA_BREAK_RE.sub("", text)
     text = _SUBSCRIPT_WRAP_RE.sub("", text)
-    return re.sub(r"\ue001\n(?=\S)", "\ue001", text)
+    text = re.sub(r"\ue001\n(?=\S)", "\ue001", text)
+    return to_simplified(text)
 
 
 def clean_multiline(value) -> str:
@@ -192,7 +206,7 @@ def _paragraph_blocks(text: str) -> list[dict[str, str]]:
 
 
 def _contains_cjk(text: str) -> bool:
-    return bool(re.search(r"[\u3400-\u9fff]", text))
+    return bool(_CJK_RE.search(text))
 
 
 def _is_math_fragment(text: str) -> bool:

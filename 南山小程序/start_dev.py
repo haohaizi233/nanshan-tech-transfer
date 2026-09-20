@@ -72,6 +72,7 @@ FRONTEND_DIR = ROOT / "南山"
 ADMIN_FRONTEND_DIR = ROOT.parent / "nanshan-frontend"
 ADMIN_DIST_INDEX = ADMIN_FRONTEND_DIR / "dist" / "index.html"
 API_SERVER_DIR = ROOT.parent / "tech-transfer-service"
+AI_AGENT_DIR = ROOT.parent / "nanshan-ai-agent"
 # 启动器常由系统 Python 调起；后端必须优先使用项目已验证的虚拟环境，
 # 否则系统级 FastAPI/Pydantic 的版本漂移会在路由注册阶段导致启动失败。
 BACKEND_VENV_PYTHON = ROOT.parent / ".venv" / "Scripts" / "python.exe"
@@ -80,6 +81,8 @@ BACKEND_URL = "http://127.0.0.1:8787"
 HEALTH_URL = BACKEND_URL + "/api/health"
 API_ROOT = BACKEND_URL + "/api/tech-transfer/v1"
 BACKEND_PORT = 8787
+AI_AGENT_PORT = 8001
+AI_AGENT_HEALTH_URL = f"http://127.0.0.1:{AI_AGENT_PORT}/health"
 H5_PORT = 5173
 H5_PUBLIC_PATH = "/h5/"
 H5_URL = f"http://127.0.0.1:{H5_PORT}"
@@ -460,14 +463,29 @@ def get_lan_ips():
 
 
 # ── Health / 依赖 ─────────────────────────────────────────────
+def _localhost_request(url, timeout=3):
+    """本机探活不走系统代理（避免 7890 等对 127.0.0.1 返回 502）。"""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(url, timeout=timeout)
+
+
 def fetch_health(timeout=3):
     """返回 (http_ok, data_dict)。http_ok=False 表示端口上没有 HTTP 服务。"""
     try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=timeout) as resp:
+        with _localhost_request(HEALTH_URL, timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8"))
             return True, body
     except urllib.error.HTTPError:
         return True, None  # 有 HTTP 响应但非 200
+    except Exception:
+        return False, None
+
+
+def fetch_ai_agent_health(timeout=3):
+    try:
+        with _localhost_request(AI_AGENT_HEALTH_URL, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return resp.status == 200 and body.get("status") == "ok", body
     except Exception:
         return False, None
 
@@ -499,7 +517,7 @@ def wait_backend_ready(proc, timeout=30):
 
 def ensure_backend_deps():
     """检查 import 名，安装以 requirements.txt 为准。"""
-    required = ("fastapi", "uvicorn", "psycopg2", "jwt", "pypdfium2", "PIL")
+    required = ("fastapi", "uvicorn", "psycopg2", "jwt", "pypdfium2", "PIL", "opencc")
     probe = subprocess.run(
         [BACKEND_PYTHON, "-c", "import importlib.util,sys; missing=[m for m in sys.argv[1:] if importlib.util.find_spec(m) is None]; print(','.join(missing))", *required],
         capture_output=True, text=True,
@@ -630,6 +648,60 @@ def start_backend(lan):
         error("后端未就绪")
         sys.exit(1)
     return proc
+
+
+def wait_ai_agent_ready(proc, timeout=30):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc is not None and proc.poll() is not None:
+            sys.exit("[FATAL] nanshan-ai-agent 进程异常退出，请检查上方报错")
+        healthy, _body = fetch_ai_agent_health(timeout=2)
+        if healthy:
+            ok(f"nanshan-ai-agent Ready：http://127.0.0.1:{AI_AGENT_PORT}")
+            return True
+        time.sleep(0.5)
+    warn(f"AI Agent {timeout}s 内未就绪，/ai/chat 将返回 503")
+    return False
+
+
+def start_ai_agent():
+    if not AI_AGENT_DIR.is_dir():
+        warn(f"未找到 nanshan-ai-agent 目录：{AI_AGENT_DIR}，跳过 AI 助手启动")
+        return None
+    print(f"  启动中：nanshan-ai-agent（uvicorn）→ http://127.0.0.1:{AI_AGENT_PORT}")
+    env = os.environ.copy()
+    env.setdefault("APP_ENV", "local")
+    env.setdefault("DB_HOST", os.environ.get("DB_HOST", "127.0.0.1"))
+    env.setdefault("DB_PORT", os.environ.get("DB_PORT", "5432"))
+    env.setdefault("DB_NAME", os.environ.get("DB_NAME", "tech_transfer"))
+    env.setdefault("DB_USER", os.environ.get("DB_USER", "postgres"))
+    env.setdefault("DB_PASSWORD", os.environ.get("DB_PASSWORD", "postgres123"))
+    proc = subprocess.Popen(
+        [
+            BACKEND_PYTHON, "-m", "uvicorn", "app.main:app",
+            "--host", "127.0.0.1", "--port", str(AI_AGENT_PORT),
+        ],
+        cwd=AI_AGENT_DIR,
+        env=env,
+    )
+    register_process("ai-agent", proc)
+    wait_ai_agent_ready(proc)
+    return proc
+
+
+def resolve_ai_agent():
+    """返回 (proc|None)。proc=None 表示复用已有 ai-agent。"""
+    if not AI_AGENT_DIR.is_dir():
+        skip("未找到 nanshan-ai-agent，跳过 AI 助手")
+        return None
+    healthy, _body = fetch_ai_agent_health()
+    if healthy:
+        ok(f"检测到现有 nanshan-ai-agent :{AI_AGENT_PORT}，直接复用")
+        return None
+    if port_listening(AI_AGENT_PORT):
+        warn(f"端口 {AI_AGENT_PORT} 已被占用但 health 异常，/ai/chat 可能 503")
+        return None
+    return start_ai_agent()
 
 
 # ── CLI watch 进程派生（launch 命令均为阻塞式 watch 模式） ────
@@ -1200,6 +1272,7 @@ def run_doctor():
         ("jwt", "PyJWT"),
         ("pypdfium2", "pypdfium2"),
         ("PIL", "Pillow"),
+        ("opencc", "opencc-python-reimplemented"),
     ):
         probe = subprocess.run(
             [BACKEND_PYTHON, "-c", "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)", mod],
@@ -1412,6 +1485,8 @@ def print_summary(runtimes, lan, tunnel_urls=None, caddy_info=None):
     print(f"  FastAPI       {BACKEND_URL}")
     print(f"  Health        {HEALTH_URL}")
     print(f"  API Root      {API_ROOT}")
+    ai_ok, _ = fetch_ai_agent_health(timeout=2)
+    print(f"  AI Agent      http://127.0.0.1:{AI_AGENT_PORT}  ({'READY' if ai_ok else 'OFF'})")
     if lan and lan_ips:
         print(f"  FastAPI (LAN) http://{lan_ips[0]}:{BACKEND_PORT}")
     print()
@@ -1533,8 +1608,8 @@ def main():
     else:
         skip("无前端 Runtime 目标")
 
-    # [2/5] 后端环境
-    print("[2/5] 检查后端环境（依赖 / PostgreSQL）")
+    # [2/6] 后端环境
+    print("[2/6] 检查后端环境（依赖 / PostgreSQL）")
     if need_backend:
         deps_ok = ensure_backend_deps()
         if not deps_ok and args.strict:
@@ -1544,20 +1619,28 @@ def main():
         skip("跳过后端（--frontend-only）")
 
     # 公网后台由 FastAPI 静态托管 nanshan-frontend/dist；构建必须在后端启动前完成。
-    print("[3/5] 检查后台管理 H5")
+    print("[3/6] 检查后台管理 H5")
     if not ensure_admin_h5_current():
         return 1
 
-    # [4/5] 启动 FastAPI（唯一实例，8787 三分支）
-    print("[4/5] 启动 FastAPI 后端")
+    # [4/6] 启动 FastAPI（唯一实例，8787 三分支）
+    print("[4/6] 启动 FastAPI 后端")
     backend_proc = None
     if need_backend:
         backend_proc = resolve_backend(lan=args.lan)
     else:
         skip("跳过后端（--frontend-only）")
 
-    # [5/5] 启动前端 Runtime
-    print("[5/5] 启动前端 Runtime")
+    # [5/6] 启动 nanshan-ai-agent（/ai/chat 代理目标，默认 8001）
+    print("[5/6] 启动 AI Agent")
+    ai_agent_proc = None
+    if need_backend:
+        ai_agent_proc = resolve_ai_agent()
+    else:
+        skip("跳过 AI Agent（--frontend-only）")
+
+    # [6/6] 启动前端 Runtime
+    print("[6/6] 启动前端 Runtime")
     status = {"backend": "READY" if (backend_proc is not None or fetch_health()[0]) else "OFF",
               "weixin": "OFF", "h5": "OFF", "tunnel": "OFF", "caddy": "OFF"}
 
@@ -1650,6 +1733,14 @@ def main():
                 except SystemExit as e:
                     error(f"后端重启失败：{e}")
                     return 1
+            aproc = managed_processes.get("ai-agent")
+            if aproc is not None and aproc.poll() is not None:
+                warn("检测到 nanshan-ai-agent 进程退出，5s 后自动重启 ...")
+                time.sleep(5)
+                try:
+                    ai_agent_proc = start_ai_agent()
+                except SystemExit as e:
+                    warn(f"AI Agent 重启失败：{e}")
             # frpc watchdog：仅看护本启动器 spawn 的 frpc，最多重启 3 次
             tproc = managed_processes.get("tunnel")
             if tproc is not None and tproc.poll() is not None and tunnel_info is not None:

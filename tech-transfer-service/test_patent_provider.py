@@ -17,6 +17,7 @@ from modules.patent.normalize import (
     map_patent_info,
     map_search_hit,
     repair_broken_subscripts,
+    to_simplified,
 )
 from modules.patent.service import get_patent, search_patents
 
@@ -74,6 +75,29 @@ def main():
     assert infer_patent_type("CN217384194U") == "utility_model"
     assert infer_patent_type("CN305516311S") == "design"
     assert clean_text("<b>北京银行</b>股份有限公司") == "北京银行股份有限公司"
+    assert to_simplified("CN108604342B") == "CN108604342B"
+    assert to_simplified("Software interface testing method") == "Software interface testing method"
+    assert to_simplified("基於NFC進行資料傳輸的方法及移動設備") == "基于NFC进行数据传输的方法及移动设备"
+    assert to_simplified("發明專利 / 軟體測試") == "发明专利 / 软件测试"
+    traditional_hit = dict(GOOGLE_HIT)
+    traditional_hit["title"] = "基於nfc進行資料傳輸的方法及移動設備"
+    traditional_hit["assignee"] = "<b>華為技術有限公司</b>"
+    traditional_hit["snippet"] = "所述移動設備基於<b>北京銀行</b>相關情景資訊"
+    traditional_mapped = map_search_hit(traditional_hit)
+    assert traditional_mapped["title"] == "基于nfc进行数据传输的方法及移动设备"
+    assert traditional_mapped["applicant"] == "华为技术有限公司"
+    assert "相关情景信息" in traditional_mapped["snippet"]
+    traditional_info = map_patent_info({
+        **INFO_RAW,
+        "title": "三座標測量儀",
+        "abstract": "一種實用新型。",
+        "claims": "1. 一種裝置。",
+        "description": "說明書正文。\n第二行。",
+    }, "CN217384194U", None)
+    assert traditional_info["title"] == "三座标测量仪"
+    assert traditional_info["abstract"] == "一种实用新型。"
+    assert traditional_info["claims"] == "1. 一种设备。"
+    assert traditional_info["descriptionBlocks"][0]["text"] == "说明书正文。"
     assert repair_broken_subscripts("高度范围在\n内，h\n1\n第一个是") == "高度范围在\n内，h₁\n第一个是"
     assert "w₁" in clean_multiline("差值大于前一个符号的宽w\n1\n。")
     assert repair_broken_subscripts("Figure\n1\nshows") == "Figure\n1\nshows"

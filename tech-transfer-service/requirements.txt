@@ -10,6 +10,8 @@ pymysql>=1.1.0
 # 专利说明书本页预览：把 PDF 页渲染成 PNG（H5 / 小程序共用）
 pypdfium2>=4.30.0
 Pillow>=10.0.0
+# 专利检索/详情出站：繁体中文转简体（纯 Python OpenCC，进程内单例词典）
+opencc-python-reimplemented>=0.1.7
 # 批量导入：仅在 tools/import_achievement_documents.py 使用，先进入 staging，绝不直接发布。
 python-pptx>=1.0.2
 pypdf>=5.0.0
