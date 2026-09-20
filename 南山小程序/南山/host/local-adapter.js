@@ -63,7 +63,7 @@ const LocalAdapter = {
   },
 
   async _request(options) {
-    const { method = 'GET', path, query, body, headers = {} } = options
+    const { method = 'GET', path, query, body, headers = {}, timeout = 60000 } = options
     const env = this._getEnvironment()
 
     let url = effectiveApiBase() + env.apiPrefix + path
@@ -89,7 +89,7 @@ const LocalAdapter = {
         method: method.toUpperCase(),
         data: body,
         header: headers,
-        timeout: 60000,
+        timeout,
         success: (res) => {
           resolve(res.data)
         },

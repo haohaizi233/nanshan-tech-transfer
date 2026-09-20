@@ -281,6 +281,7 @@
 						type: reply.type,
 						payload: reply.payload,
 					})
+					await this.loadHistory()
 				} catch (e) {
 					const code = e && e.code
 					let msg = (e && e.message) || 'AI 助手暂时不可用，请稍后重试。'
@@ -348,6 +349,7 @@
 						agentMsg || ('找到 ' + cards.length + ' 条相关科技成果，点击卡片可查看详情。'),
 						{ type: 'agent-cards', payload: { cards } }
 					)
+					await this.loadHistory()
 				} catch (e) {
 					const code = e && e.code
 					let msg = (e && e.message) || '匹配失败，请稍后重试。'

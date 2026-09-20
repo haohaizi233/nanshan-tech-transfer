@@ -5,6 +5,7 @@ POST /ai/evaluation-tasks、GET /ai/evaluation-tasks/{taskId}（异步任务）�
 需求匹配与自然语言对话同步经本服务转发到独立的 ai-agent；成果评估沿用
 异步任务制（202 + 轮询），执行由独立 worker 认领，不把企业微信长连接嵌进本进程。
 """
+import logging
 import threading
 import urllib.error
 import urllib.request
@@ -20,7 +21,9 @@ from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRe
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
 )
-from modules.ai.chat_store import append_message, list_messages, clear_messages
+from modules.ai.chat_store import append_message, append_turn, list_messages, clear_messages
+
+logger = logging.getLogger("nanshan.error")
 
 # 与小程序 config/feature-flags.js 同步；实际开关读 settings.AI_FEATURE_ENABLED。
 AI_FEATURE_ENABLED = settings.AI_FEATURE_ENABLED
@@ -105,14 +108,13 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
     result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
     # 入库：用户提问 + 助手回复（含卡片快照）。失败 503 不会走到这里，不入脏历史。
     try:
-        append_message(user["userId"], "user", user_message)
         agent_message = (result or {}).get("message") or ""
         data = (result or {}).get("data")
         cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
-        append_message(user["userId"], "assistant", agent_message, cards=cards)
+        append_turn(user["userId"], user_message, agent_message, cards=cards)
     except Exception as exc:
         # 入库失败不影响主流程，仅记录日志
-        print(f"[ai/chat] 聊天记录入库失败: {exc!r}")
+        logger.exception("[ai/chat] 聊天记录入库失败 user_id=%s", user["userId"])
     return success(result, result.get("message") or "ok")
 
 
@@ -232,11 +234,15 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
 
     # 入库：用户发起匹配（以需求标题记录）+ 助手成果推荐（卡片快照）
     try:
-        append_message(user["userId"], "user", f"匹配需求：{title}" if title else "匹配需求")
         agent_message = (result or {}).get("message") or ""
-        append_message(user["userId"], "assistant", agent_message, cards=cards if cards else None)
+        append_turn(
+            user["userId"],
+            f"匹配需求：{title}" if title else "匹配需求",
+            agent_message,
+            cards=cards if cards else None,
+        )
     except Exception as exc:
-        print(f"[ai/match] 聊天记录入库失败: {exc!r}")
+        logger.exception("[ai/match] 聊天记录入库失败 user_id=%s", user["userId"])
 
     return success(
         {

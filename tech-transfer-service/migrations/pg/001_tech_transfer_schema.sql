@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS public.auth_session (
     issued_at   TIMESTAMPTZ  NOT NULL,
     expires_at  TIMESTAMPTZ  NOT NULL,
     revoked_at  TIMESTAMPTZ  DEFAULT NULL,
+    consumed_at TIMESTAMPTZ  DEFAULT NULL,
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_auth_session_jti UNIQUE (refresh_jti)

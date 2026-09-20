@@ -17,6 +17,22 @@ from db import get_cursor
 _VALID_ROLES = ('user', 'assistant')
 
 
+def append_turn(user_id: int, user_message: str, assistant_message: str, cards=None) -> None:
+    """原子写入一轮对话（user + assistant），避免只落一半。"""
+    cards_json = Json(cards) if cards is not None else None
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            '''INSERT INTO ai_chat_message (user_id, role, content, cards)
+               VALUES (%s, 'user', %s, NULL)''',
+            (user_id, user_message),
+        )
+        cur.execute(
+            '''INSERT INTO ai_chat_message (user_id, role, content, cards)
+               VALUES (%s, 'assistant', %s, %s)''',
+            (user_id, assistant_message or '', cards_json),
+        )
+
+
 def append_message(user_id: int, role: str, content: str, cards=None) -> dict:
     """追加一条聊天消息，返回 {id, createdAt}。"""
     if role not in _VALID_ROLES:

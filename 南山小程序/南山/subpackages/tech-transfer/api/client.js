@@ -237,7 +237,7 @@ export async function authLogout() {
  * 统一请求：非 /auth/* 路径先保证会话可用；POST/PATCH 自动携带
  * X-Idempotency-Key；401 类错误刷新一次后重试
  */
-export async function apiRequest(method, path, query, body) {
+export async function apiRequest(method, path, query, body, options = {}) {
   if (!path.startsWith('/auth/')) {
     await ensureSession()
   }
@@ -248,7 +248,10 @@ export async function apiRequest(method, path, query, body) {
       'tt_' + Date.now() + '_' + Math.floor(Math.random() * 100000)
   }
 
-  const res = await HostBridge.request({ method, path, query, body, headers })
+  const requestOpts = { method, path, query, body, headers }
+  if (options.timeout) requestOpts.timeout = options.timeout
+
+  const res = await HostBridge.request(requestOpts)
 
   if (res.code === 0) return res.data
 
@@ -258,7 +261,7 @@ export async function apiRequest(method, path, query, body) {
   ) {
     const newToken = await doRefreshToken()
     if (newToken) {
-      const retry = await HostBridge.request({ method, path, query, body, headers })
+      const retry = await HostBridge.request(requestOpts)
       if (retry.code === 0) return retry.data
     }
     clearSession()

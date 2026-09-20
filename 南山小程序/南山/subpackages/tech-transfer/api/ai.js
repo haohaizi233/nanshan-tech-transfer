@@ -17,6 +17,9 @@ import { AI_FEATURE_ENABLED } from '../../../config/feature-flags.js'
 export const POLL_INTERVAL_MS = 3000
 export const POLL_MAX_MS = 120000
 
+/** AI 对话/匹配同步链路最长等待（须 ≥ 后端 AI_AGENT_TIMEOUT 90s + 余量） */
+export const AI_CHAT_TIMEOUT_MS = 120000
+
 export function isTerminalStatus(status) {
   return status === 'succeeded' || status === 'failed'
 }
@@ -38,7 +41,7 @@ export function assertAiRuntimeEnabled() {
  */
 export async function matchDemand(demandId) {
   assertAiRuntimeEnabled()
-  return apiRequest('POST', '/ai/match', null, { demandId })
+  return apiRequest('POST', '/ai/match', null, { demandId }, { timeout: AI_CHAT_TIMEOUT_MS })
 }
 
 // ── 成果评估 ──────────────────────────────────────────────────
@@ -73,7 +76,7 @@ export async function getEvaluationTask(taskId) {
  */
 export async function chatWithAgent(message) {
   assertAiRuntimeEnabled()
-  return apiRequest('POST', '/ai/chat', null, { message })
+  return apiRequest('POST', '/ai/chat', null, { message }, { timeout: AI_CHAT_TIMEOUT_MS })
 }
 
 // ── 聊天记录持久化（切页/重登后历史不丢）─────────────────────
