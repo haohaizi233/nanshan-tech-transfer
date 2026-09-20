@@ -1,0 +1,123 @@
+###############################################################################
+# 需求：公开列表/详情 + 用户创建/编辑/提交/取消/关闭
+# 依赖：userLogin
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 需求列表（可匿名）
+# @name listDemands
+GET {{api}}/demands?page=1&pageSize=10
+Accept: application/json
+
+> {%
+const list = response.body && response.body.data && response.body.data.list;
+if (list && list.length) {
+  client.global.set("publishedDemandId", String(list[0].id));
+}
+%}
+
+### 需求列表：关键词
+GET {{api}}/demands?page=1&pageSize=10&keyword=人工智能
+Accept: application/json
+
+### 需求详情
+GET {{api}}/demands/{{publishedDemandId}}
+Accept: application/json
+
+### 需求详情（登录）
+GET {{api}}/demands/{{publishedDemandId}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 创建需求（draft）
+# @name createDemand
+POST {{api}}/demands
+Authorization: {{auth}}
+Content-Type: application/json
+X-Idempotency-Key: dmd-http-{{$uuid}}
+X-Request-Id: {{$uuid}}
+
+{
+  "title": "HTTP用例需求-{{$timestamp}}",
+  "description": "用于 REST Client 功能覆盖的技术需求草稿。",
+  "region": "深圳市南山区",
+  "orgName": "HTTP测试企业",
+  "orgIntro": "用于接口测试的企业信息。",
+  "categoryName": "人工智能",
+  "coopMode": ["技术合作", "成果转让"],
+  "budgetMinWan": 10,
+  "budgetMaxWan": 30,
+  "budgetNegotiable": false,
+  "expectDeadline": "2026-12-31",
+  "contactName": "测试联系人",
+  "contactPhone": "13800138000",
+  "contactEmail": "demand.http@example.com",
+  "tags": ["AI", "HTTP"]
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("myDemandId", String(response.body.data.id));
+  client.global.set("myDemandVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 编辑需求
+# @name updateDemand
+PATCH {{api}}/demands/{{myDemandId}}
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": {{myDemandVersion}},
+  "title": "HTTP用例需求-已编辑",
+  "budgetMinWan": 20,
+  "budgetMaxWan": 50,
+  "tags": ["AI", "已编辑"]
+}
+
+> {%
+if (response.body && response.body.data && response.body.data.version) {
+  client.global.set("myDemandVersion", String(response.body.data.version));
+}
+%}
+
+### 提交审核
+# @name submitDemand
+POST {{api}}/demands/{{myDemandId}}/submit
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": {{myDemandVersion}}
+}
+
+> {%
+if (response.body && response.body.data && response.body.data.version) {
+  client.global.set("myDemandVersion", String(response.body.data.version));
+}
+%}
+
+### 取消需求（draft/pending_review 等可取消状态）
+POST {{api}}/demands/{{myDemandId}}/cancel
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": {{myDemandVersion}},
+  "reasonCode": "user_cancel",
+  "reasonNote": "HTTP 用例取消"
+}
+
+### 关闭需求（published 后关闭；请换已发布需求 ID）
+POST {{api}}/demands/{{publishedDemandId}}/close
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reasonCode": "fulfilled",
+  "reasonNote": "HTTP 用例关闭"
+}

@@ -321,8 +321,8 @@ onBeforeUnmount(() => Object.values(candidateImageUrls.value).forEach(URL.revoke
 .status-tag.imported { background: #e8f8ef; color: #159458; }
 .status-tag.failed { background: #fff0f1; color: #d94d5e; }
 
-.detail { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; }
-.detail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #edf1f5; }
+.detail { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.detail-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #edf1f5; }
 .detail-header h3 { margin: 0; color: #1d2b3e; font-size: 16px; }
 .detail-header p { margin: 5px 0 0; color: #98a5b5; font-size: 12px; }
 .publish-button { flex-shrink: 0; height: 36px; padding: 0 24px; border: 0; border-radius: 6px; background: #1677ff; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
@@ -330,8 +330,8 @@ onBeforeUnmount(() => Object.values(candidateImageUrls.value).forEach(URL.revoke
 .publish-button:disabled { opacity: .55; cursor: not-allowed; }
 .published-badge { flex-shrink: 0; padding: 6px 14px; border-radius: 6px; background: #e8f8ef; color: #159458; font-size: 13px; font-weight: 600; }
 
-.phone-preview { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 20px; background: #f5f7fa; display: flex; justify-content: center; }
-.phone-screen { width: 375px; max-width: 100%; background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.1); overflow: hidden; }
+.phone-preview { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px; background: #f5f7fa; display: flex; flex-direction: column; align-items: center; }
+.phone-screen { width: 375px; max-width: 100%; flex-shrink: 0; background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.1); overflow: hidden; }
 .mp-title-section { padding: 20px 16px 14px; border-bottom: 1px solid #f0f4f8; }
 .mp-title { margin: 0; font-size: 20px; font-weight: 700; color: #1a1a1a; line-height: 1.4; }
 .mp-title-en { margin: 6px 0 0; font-size: 13px; color: #999; }

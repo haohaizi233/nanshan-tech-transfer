@@ -1,0 +1,37 @@
+# 南山科转通 · 根目录统一依赖
+# 安装：python -m venv .venv && .venv\Scripts\Activate.ps1 && pip install -r requestment.txt
+# 覆盖：tech-transfer-service、nanshan-ai-agent，以及仓库内 Python 工具/测试脚本
+
+# ── FastAPI 运行时（tech-transfer-service :8787 / nanshan-ai-agent :8000）──
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.8.0
+pydantic-settings>=2.7.0
+python-multipart>=0.0.12
+starlette>=0.40.0
+
+# ── 配置 / HTTP 客户端 ────────────────────────────────────────
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# ── 数据库 ────────────────────────────────────────────────────
+psycopg2-binary>=2.9.0
+# pymysql 仅 tools/ 一次性 ETL、迁移脚本使用（业务运行时零 MySQL 依赖）
+pymysql>=1.1.0
+
+# ── 身份与鉴权 ────────────────────────────────────────────────
+pyjwt>=2.8.0
+
+# ── 文件 / 专利 PDF 预览 / 导入 ────────────────────────────────
+Pillow>=10.0.0
+pypdfium2>=4.30.0
+pypdf>=5.0.0
+python-pptx>=1.0.2
+openpyxl>=3.1.0
+
+# ── 文档与契约校验工具（tools/validate_openapi.py 等）──────────
+PyYAML>=6.0.0
+
+# ── 遗留 Flask API（南山小程序/tools/api-server，可与 FastAPI 并存）──
+flask>=3.0.0
+flask-cors>=4.0.0

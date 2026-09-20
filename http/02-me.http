@@ -1,0 +1,77 @@
+###############################################################################
+# 当前用户：资料 / 改密 / 我的成果·需求·收藏·对接
+# 依赖：先执行 http/01-auth.http 的 userLogin
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 当前用户资料
+# @name getMe
+GET {{api}}/me
+Authorization: {{auth}}
+Accept: application/json
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("profileVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 未登录访问 /me（预期 401）
+GET {{api}}/me
+Accept: application/json
+
+### 更新个人资料（version 来自 getMe；勿改 orgId）
+# @name patchProfile
+PATCH {{api}}/me/profile
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": {{profileVersion}},
+  "displayName": "HTTP资料用户",
+  "userType": "researcher",
+  "subjectType": "university",
+  "phone": "13800138002",
+  "email": "profile.http@example.com",
+  "wechat": "http_wechat",
+  "companyText": "南山测试高校",
+  "orgTitle": "研究员",
+  "businessCapabilities": ["provide_achievement", "joint_rnd"]
+}
+
+### 修改密码（会改真实密码，默认注释账号请按需执行）
+# @name changePassword
+POST {{api}}/me/password
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "currentPassword": "{{userPassword}}",
+  "newPassword": "{{userPassword}}"
+}
+
+### 我的需求列表
+GET {{api}}/me/demands?page=1&pageSize=10
+Authorization: {{auth}}
+
+### 我的需求（按状态）
+GET {{api}}/me/demands?page=1&pageSize=10&status=published
+Authorization: {{auth}}
+
+### 我的成果列表
+GET {{api}}/me/achievements?page=1&pageSize=10
+Authorization: {{auth}}
+
+### 我的成果（草稿）
+GET {{api}}/me/achievements?page=1&pageSize=10&status=draft
+Authorization: {{auth}}
+
+### 我的收藏
+GET {{api}}/me/favorites?page=1&pageSize=10
+Authorization: {{auth}}
+
+### 我的对接意向
+GET {{api}}/me/cooperations?page=1&pageSize=10
+Authorization: {{auth}}

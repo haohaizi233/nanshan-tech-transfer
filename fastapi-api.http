@@ -1,0 +1,37 @@
+###############################################################################
+# 南山科转通 FastAPI HTTP 测试套件（入口）
+#
+# 环境文件：http-client.env.json（选 env: dev）
+# 服务：
+#   tech-transfer-service  http://127.0.0.1:8787
+#   nanshan-ai-agent       http://127.0.0.1:8000
+#
+# 推荐顺序：
+#   1. http/00-health.http
+#   2. http/01-auth.http     ← 先跑三个登录，写入 adminToken / userToken / orgAdminToken
+#   3. 其余模块按需
+#
+# 写接口会改库。状态机类请求（submit/approve/offline/对接流转）依赖当前数据状态，
+# 失败时把列表接口返回的 id、version 填进环境变量或全局变量即可重试。
+###############################################################################
+
+### 快速探活
+GET {{baseUrl}}/health
+Accept: application/json
+
+### 分文件清单（VS Code REST Client / JetBrains HTTP Client 打开对应文件执行）
+# http/00-health.http                 健康检查（两套服务）
+# http/01-auth.http                   登录/注册/bootstrap/刷新/注销
+# http/02-me.http                     当前用户资料、改密、我的列表
+# http/03-achievements.http           成果公开读 + 用户写 + 提交/下线
+# http/04-demands.http                需求公开读 + 用户写 + 提交/取消/关闭
+# http/05-favorites-search-files.http 收藏、统一搜索、文件、遗留资本接口
+# http/06-cooperations.http           对接意向全状态机
+# http/07-institutions.http           机构公开库 + 入驻申请
+# http/08-ai.http                     评估任务/对话/匹配/聊天记录
+# http/09-patents.http                专利检索/详情/PDF
+# http/10-notifications.http          站内通知
+# http/11-membership.http             机构认证与成员审核
+# http/12-admin-content.http          后台成果/需求/导入/审计
+# http/13-admin-ops.http              看板/机构运营/对接协助/用户
+# http/14-ai-agent.http               nanshan-ai-agent 直连对话

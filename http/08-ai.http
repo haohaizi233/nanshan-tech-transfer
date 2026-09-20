@@ -1,0 +1,73 @@
+###############################################################################
+# AI（tech-transfer-service 转发层）
+# 依赖：userLogin；AI_FEATURE_ENABLED=true 且 ai-agent 可达
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 创建成果评估任务（异步 202）
+# @name createEvalTask
+POST {{api}}/ai/evaluation-tasks
+Authorization: {{auth}}
+Content-Type: application/json
+X-Idempotency-Key: eval-http-{{$uuid}}
+
+{
+  "achievementId": {{publishedAchievementId}}
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("taskId", String(response.body.data.id || response.body.data.taskId || ""));
+}
+%}
+
+### 评估任务详情（轮询）
+GET {{api}}/ai/evaluation-tasks/{{taskId}}
+Authorization: {{auth}}
+
+### 自然语言对话：找成果
+# @name aiChatAchievement
+POST {{api}}/ai/chat
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "message": "帮我找人工智能、机器视觉相关的科技成果"
+}
+
+### 自然语言对话：找需求
+POST {{api}}/ai/chat
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "message": "有没有生物医药方面的技术需求"
+}
+
+### 对话失败：空 message
+POST {{api}}/ai/chat
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "message": "   "
+}
+
+### 需求-成果匹配（仅需求 owner + published/matched）
+POST {{api}}/ai/match
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "demandId": {{publishedDemandId}}
+}
+
+### 聊天历史
+GET {{api}}/ai/chat/messages
+Authorization: {{auth}}
+
+### 清空聊天历史
+DELETE {{api}}/ai/chat/messages
+Authorization: {{auth}}

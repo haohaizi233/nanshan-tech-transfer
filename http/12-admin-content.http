@@ -1,0 +1,261 @@
+###############################################################################
+# 管理端：成果/需求审核、代录、导入暂存、审计
+# 依赖：adminLogin（部分列表也可用 orgAdminLogin）
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@adminAuth = Bearer {{adminToken}}
+@orgAuth = Bearer {{orgAdminToken}}
+
+### 成果导入批次列表
+GET {{api}}/admin/achievement-imports?page=1&pageSize=20
+Authorization: {{adminAuth}}
+
+### 导入批次详情
+GET {{api}}/admin/achievement-imports/{{batchId}}
+Authorization: {{adminAuth}}
+
+### 确认导入条目为草稿
+POST {{api}}/admin/achievement-imports/{{batchId}}/items/{{itemId}}/confirm
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "title": "导入确认覆盖标题"
+}
+
+### 一键发布导入条目
+POST {{api}}/admin/achievement-imports/{{batchId}}/items/{{itemId}}/publish
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{}
+
+### 清空导入暂存（破坏性，按需执行）
+POST {{api}}/admin/achievement-imports/clear
+Authorization: {{adminAuth}}
+
+### 需求分类字典（后台）
+GET {{api}}/admin/demand-categories
+Authorization: {{adminAuth}}
+
+### 内容归属机构列表
+GET {{api}}/admin/content-organizations
+Authorization: {{adminAuth}}
+
+### 后台成果列表
+# @name adminListAchievements
+GET {{api}}/admin/achievements?page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+> {%
+const list = response.body && response.body.data && response.body.data.list;
+if (list && list.length) {
+  client.global.set("adminAchievementId", String(list[0].id));
+  client.global.set("adminAchievementVersion", String(list[0].version || 1));
+}
+%}
+
+### 后台成果列表：关键词
+GET {{api}}/admin/achievements?page=1&pageSize=10&keyword=HTTP
+
+### 机构管理员成果列表（应仅本机构）
+GET {{api}}/admin/achievements?page=1&pageSize=10
+Authorization: {{orgAuth}}
+
+### 后台创建成果
+# @name adminCreateAchievement
+POST {{api}}/admin/achievements
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "title": "后台新增成果-HTTP-{{$timestamp}}",
+  "maturityLevel": "02_lab",
+  "pricingMode": "negotiable",
+  "techIntro": "用于测试后台新增成果接口",
+  "sourceOrgName": "南山测试机构",
+  "applicationFields": ["人工智能", "智能制造"],
+  "inventorRefs": [
+    {
+      "name": "测试发明人",
+      "orgName": "南山测试机构",
+      "personType": "first_inventor",
+      "sortOrder": 1
+    }
+  ]
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("adminAchievementId", String(response.body.data.id));
+  client.global.set("adminAchievementVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 成果审核队列
+GET {{api}}/admin/achievements/review-queue?page=1&pageSize=20
+Authorization: {{adminAuth}}
+
+### 后台成果详情
+GET {{api}}/admin/achievements/{{adminAchievementId}}
+Authorization: {{adminAuth}}
+
+### 后台编辑成果
+PATCH {{api}}/admin/achievements/{{adminAchievementId}}
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminAchievementVersion}},
+  "title": "后台新增成果-已编辑",
+  "pricingMode": "transfer",
+  "priceMinWan": 20,
+  "priceMaxWan": 50
+}
+
+### 机构认领无归属成果
+POST {{api}}/admin/achievements/{{adminAchievementId}}/claim-organization
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminAchievementVersion}}
+}
+
+### 平台代录成果提交审核
+POST {{api}}/admin/achievements/{{adminAchievementId}}/submit
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminAchievementVersion}}
+}
+
+### 审核通过成果
+POST {{api}}/admin/achievements/{{adminAchievementId}}/approve
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminAchievementVersion}}
+}
+
+### 审核驳回成果
+POST {{api}}/admin/achievements/{{adminAchievementId}}/reject
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminAchievementVersion}},
+  "reason": "材料不完整，请补充技术简介。"
+}
+
+### 后台需求列表
+# @name adminListDemands
+GET {{api}}/admin/demands?page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+> {%
+const list = response.body && response.body.data && response.body.data.list;
+if (list && list.length) {
+  client.global.set("adminDemandId", String(list[0].id));
+  client.global.set("adminDemandVersion", String(list[0].version || 1));
+}
+%}
+
+### 机构管理员需求列表
+GET {{api}}/admin/demands?page=1&pageSize=10
+Authorization: {{orgAuth}}
+
+### 后台创建需求
+# @name adminCreateDemand
+POST {{api}}/admin/demands
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "title": "后台新增需求-HTTP-{{$timestamp}}",
+  "description": "用于验证后台新增需求接口。",
+  "region": "深圳市南山区",
+  "orgName": "后台测试企业",
+  "orgIntro": "用于接口测试的企业信息。",
+  "categoryName": "人工智能",
+  "coopMode": ["技术合作", "成果转让"],
+  "budgetMinWan": 10,
+  "budgetMaxWan": 30,
+  "budgetNegotiable": false,
+  "expectDeadline": "2026-12-31",
+  "contactName": "测试联系人",
+  "contactPhone": "13800138000",
+  "tags": ["AI", "测试"]
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("adminDemandId", String(response.body.data.id));
+  client.global.set("adminDemandVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 需求审核队列
+GET {{api}}/admin/demands/review-queue?page=1&pageSize=20
+Authorization: {{adminAuth}}
+
+### 后台需求详情
+GET {{api}}/admin/demands/{{adminDemandId}}
+Authorization: {{adminAuth}}
+
+### 后台编辑需求
+PATCH {{api}}/admin/demands/{{adminDemandId}}
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminDemandVersion}},
+  "title": "后台新增需求-已编辑",
+  "budgetMinWan": 20,
+  "budgetMaxWan": 50,
+  "tags": ["AI", "已编辑"]
+}
+
+### 机构认领无归属需求
+POST {{api}}/admin/demands/{{adminDemandId}}/claim-organization
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminDemandVersion}}
+}
+
+### 平台代录需求提交审核
+POST {{api}}/admin/demands/{{adminDemandId}}/submit
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminDemandVersion}}
+}
+
+### 审核通过需求
+POST {{api}}/admin/demands/{{adminDemandId}}/approve
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminDemandVersion}}
+}
+
+### 审核驳回需求
+POST {{api}}/admin/demands/{{adminDemandId}}/reject
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": {{adminDemandVersion}},
+  "reason": "预算信息不完整。"
+}
+
+### 审计日志
+GET {{api}}/admin/audit-logs?page=1&pageSize=20
+Authorization: {{adminAuth}}

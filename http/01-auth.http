@@ -1,0 +1,157 @@
+###############################################################################
+# 身份：登录 / 注册 / bootstrap / 刷新 / 注销
+#
+# 不要用 http://127.0.0.1:8787/docs 的 Try it out 测登录。
+# 该接口用 Depends(json_body) 读 body，OpenAPI 不声明 Request Body，
+# Swagger 发出去是空 JSON，后端就会返回「请输入账号和密码」。
+#
+# 正确测法：在本文件点 Send；或 curl（见下方注释）。
+###############################################################################
+
+@host = http://127.0.0.1:8787
+@api = {{host}}/api/tech-transfer/v1
+@adminUsername = admin
+@adminPassword = Admin@2026
+@userUsername = zhangsan
+@userPassword = Test@2026
+@orgAdminUsername = lisi
+@orgAdminPassword = lisilisi
+@phone = 13800138000
+@phonePassword = Test@2026
+@hostCredential = local-dev-ticket-dev-user-001
+
+### 后台账号登录（管理员）—— 请先执行，写入 adminToken
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "admin",
+  "password": "Admin@2026"
+}
+
+> {%
+client.global.set("adminToken", response.body.data.accessToken);
+client.global.set("adminRefreshToken", response.body.data.refreshToken);
+%}
+
+### 后台账号登录（普通用户）
+# @name userLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "{{userUsername}}",
+  "password": "{{userPassword}}"
+}
+
+> {%
+client.global.set("userToken", response.body.data.accessToken);
+client.global.set("userRefreshToken", response.body.data.refreshToken);
+%}
+
+### 后台账号登录（机构管理员）
+# @name orgAdminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "{{orgAdminUsername}}",
+  "password": "{{orgAdminPassword}}"
+}
+
+> {%
+client.global.set("orgAdminToken", response.body.data.accessToken);
+client.global.set("orgAdminRefreshToken", response.body.data.refreshToken);
+%}
+
+### 小程序手机号登录
+# @name phoneLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "password": "{{phonePassword}}"
+}
+
+### 登录失败：缺账号或密码
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin"
+}
+
+### 后台用户名注册（成功后需再登录；账号已存在会 409）
+# @name registerUsername
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "username": "http_user_{{$timestamp}}",
+  "password": "Test@2026",
+  "displayName": "HTTP用例用户",
+  "phone": "13900001111",
+  "email": "http.user.{{$timestamp}}@example.com"
+}
+
+### 小程序手机号注册（成功后直接签发会话）
+# @name registerPhone
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "phone": "13700001111",
+  "password": "Test@2026",
+  "displayName": "手机号注册用户"
+}
+
+### 宿主凭证换会话（本地票据）
+# @name bootstrap
+POST {{api}}/auth/bootstrap
+Content-Type: application/json
+
+{
+  "hostCredential": "{{hostCredential}}"
+}
+
+### bootstrap 失败：缺少凭证
+POST {{api}}/auth/bootstrap
+Content-Type: application/json
+
+{}
+
+### 刷新会话（依赖上方 adminLogin）
+# @name refresh
+POST {{api}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{adminRefreshToken}}"
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("adminToken", response.body.data.accessToken);
+  client.global.set("adminRefreshToken", response.body.data.refreshToken);
+}
+%}
+
+### 刷新失败：缺少 refreshToken
+POST {{api}}/auth/refresh
+Content-Type: application/json
+
+{}
+
+### 注销（吊销 refreshToken；请用单独签发的 token，避免冲掉正在用的会话）
+# @name logout
+POST {{api}}/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{adminRefreshToken}}"
+}

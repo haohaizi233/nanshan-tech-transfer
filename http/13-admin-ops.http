@@ -1,0 +1,191 @@
+###############################################################################
+# 管理端运营：看板 / 入驻审核 / 机构 CRUD / 对接协助 / 用户只读
+# 依赖：adminLogin；对接协助部分机构管理员也可用
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@adminAuth = Bearer {{adminToken}}
+@orgAuth = Bearer {{orgAdminToken}}
+
+### 看板汇总
+GET {{api}}/admin/dashboard/summary
+Authorization: {{adminAuth}}
+
+### 管理端通知摘要
+GET {{api}}/admin/notifications/summary
+Authorization: {{adminAuth}}
+
+### 待办
+GET {{api}}/admin/dashboard/todos?limit=20
+Authorization: {{adminAuth}}
+
+### 趋势
+GET {{api}}/admin/dashboard/trend?days=7
+Authorization: {{adminAuth}}
+
+### 机构入驻申请列表
+GET {{api}}/admin/institution-registrations?page=1&pageSize=20
+Authorization: {{adminAuth}}
+
+### 待审核入驻
+GET {{api}}/admin/institution-registrations?registrationStatus=pending
+Authorization: {{adminAuth}}
+
+### 通过机构入驻
+POST {{api}}/admin/institution-registrations/{{registrationId}}/approve
+Authorization: {{adminAuth}}
+
+### 驳回机构入驻
+POST {{api}}/admin/institution-registrations/{{registrationId}}/reject
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "reason": "主体资质材料不足。"
+}
+
+### 后台机构列表
+GET {{api}}/admin/institutions?page=1&pageSize=10&kind=enterprise
+Authorization: {{adminAuth}}
+
+### 后台创建机构
+# @name adminCreateInstitution
+POST {{api}}/admin/institutions
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "kind": "enterprise",
+  "name": "HTTP后台机构-{{$timestamp}}",
+  "region": "深圳市南山区",
+  "intro": "REST Client 创建的测试机构",
+  "label": "测试",
+  "sortOrder": 0,
+  "userType": "enterprise",
+  "contact": "测试联系人",
+  "phone": "13800138888"
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("adminInstitutionId", String(response.body.data.id));
+}
+%}
+
+### 后台机构详情
+GET {{api}}/admin/institutions/{{adminInstitutionId}}
+Authorization: {{adminAuth}}
+
+### 后台更新机构
+PATCH {{api}}/admin/institutions/{{adminInstitutionId}}
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "intro": "已更新简介",
+  "label": "HTTP",
+  "region": "广东·深圳南山"
+}
+
+### 批量导入机构
+POST {{api}}/admin/institutions/import
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "items": [
+    {
+      "kind": "invest",
+      "name": "HTTP导入投资机构-{{$timestamp}}",
+      "region": "深圳市",
+      "intro": "导入用例"
+    }
+  ]
+}
+
+### 机构上线
+POST {{api}}/admin/institutions/{{adminInstitutionId}}/online
+Authorization: {{adminAuth}}
+
+### 机构下线
+POST {{api}}/admin/institutions/{{adminInstitutionId}}/offline
+Authorization: {{adminAuth}}
+
+### 删除机构（破坏性）
+DELETE {{api}}/admin/institutions/{{adminInstitutionId}}
+Authorization: {{adminAuth}}
+
+### 后台对接列表
+GET {{api}}/admin/cooperations?page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+### 机构管理员对接列表
+GET {{api}}/admin/cooperations?page=1&pageSize=10
+Authorization: {{orgAuth}}
+
+### 后台对接详情
+GET {{api}}/admin/cooperations/{{intentId}}
+Authorization: {{adminAuth}}
+
+### 后台接受对接
+POST {{api}}/admin/cooperations/{{intentId}}/accept
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": 1
+}
+
+### 后台驳回对接
+POST {{api}}/admin/cooperations/{{intentId}}/reject
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "当前成果暂不开放该合作方向。"
+}
+
+### 平台协助阶段流转（仅 assisted + pending）
+POST {{api}}/admin/cooperations/{{intentId}}/assist-status
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "assistStatus": "contacting",
+  "note": "已电话联系目标机构",
+  "nextFollowupAt": "2026-09-21T10:00:00+08:00"
+}
+
+### 平台代目标机构状态机（accept 需 assistStatus=target_agreed）
+POST {{api}}/admin/cooperations/{{intentId}}/assist-transition
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "action": "accept",
+  "version": 1,
+  "confirmationNote": "目标机构已口头确认同意对接。"
+}
+
+### 平台代 reject
+POST {{api}}/admin/cooperations/{{intentId}}/assist-transition
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "version": 1,
+  "reason": "目标机构明确拒绝该合作方向。"
+}
+
+### 用户列表（只读）
+GET {{api}}/admin/users?page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+### 用户列表：关键词
+GET {{api}}/admin/users?page=1&pageSize=10&keyword=admin
+
+### 用户详情
+GET {{api}}/admin/users/{{userId}}
+Authorization: {{adminAuth}}

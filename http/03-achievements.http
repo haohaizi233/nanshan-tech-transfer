@@ -1,0 +1,128 @@
+###############################################################################
+# 成果：公开列表/详情/字典 + 用户创建/编辑/提交/下线
+# 依赖：userLogin
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 成果列表（仅 published，可匿名）
+# @name listAchievements
+GET {{api}}/achievements?page=1&pageSize=10
+Accept: application/json
+
+> {%
+const list = response.body && response.body.data && response.body.data.list;
+if (list && list.length) {
+  client.global.set("publishedAchievementId", String(list[0].id));
+}
+%}
+
+### 成果列表：关键词 + 分类 + 成熟度
+GET {{api}}/achievements?page=1&pageSize=10&keyword=智能&categoryCode=&maturityLevel=02_lab
+Accept: application/json
+
+### 成果分类字典
+GET {{api}}/achievements/categories
+Accept: application/json
+
+### 成果产业目录
+GET {{api}}/achievements/industries
+Accept: application/json
+
+### 成果详情（匿名；非 published 且非 owner 返回 data=null）
+GET {{api}}/achievements/{{publishedAchievementId}}
+Accept: application/json
+
+### 成果详情（登录，可见收藏/联系方式权限）
+GET {{api}}/achievements/{{publishedAchievementId}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 创建成果（draft）
+# @name createAchievement
+POST {{api}}/achievements
+Authorization: {{auth}}
+Content-Type: application/json
+X-Idempotency-Key: ach-http-{{$uuid}}
+X-Request-Id: {{$uuid}}
+
+{
+  "title": "HTTP用例成果-{{$timestamp}}",
+  "titleEn": "HTTP Sample Achievement",
+  "maturityLevel": "02_lab",
+  "pricingMode": "negotiable",
+  "techIntro": "用于 REST Client 功能覆盖的科技成果草稿。",
+  "sourceOrgName": "南山HTTP测试机构",
+  "applicationFields": ["人工智能", "智能制造"],
+  "inventorRefs": [
+    {
+      "name": "测试发明人",
+      "orgName": "南山HTTP测试机构",
+      "personType": "first_inventor",
+      "sortOrder": 1
+    }
+  ]
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("myAchievementId", String(response.body.data.id));
+  client.global.set("myAchievementVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 编辑成果（owner + 乐观锁，仅 draft/rejected）
+# @name updateAchievement
+PATCH {{api}}/achievements/{{myAchievementId}}
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": {{myAchievementVersion}},
+  "title": "HTTP用例成果-已编辑",
+  "pricingMode": "transfer",
+  "priceMinWan": 20,
+  "priceMaxWan": 50,
+  "techIntro": "编辑后的技术简介。"
+}
+
+> {%
+if (response.body && response.body.data && response.body.data.version) {
+  client.global.set("myAchievementVersion", String(response.body.data.version));
+}
+%}
+
+### 提交审核（draft/rejected/offline → pending_review）
+# @name submitAchievement
+POST {{api}}/achievements/{{myAchievementId}}/submit
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": {{myAchievementVersion}}
+}
+
+> {%
+if (response.body && response.body.data && response.body.data.version) {
+  client.global.set("myAchievementVersion", String(response.body.data.version));
+}
+%}
+
+### 下线成果（published → offline；需已发布成果）
+POST {{api}}/achievements/{{publishedAchievementId}}/offline
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "HTTP 用例下线",
+  "reasonCode": "offline_by_owner"
+}
+
+### 提交失败：缺少 version
+POST {{api}}/achievements/{{myAchievementId}}/submit
+Authorization: {{auth}}
+Content-Type: application/json
+
+{}

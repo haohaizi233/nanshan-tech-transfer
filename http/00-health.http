@@ -1,0 +1,25 @@
+###############################################################################
+# 健康检查（tech-transfer-service + nanshan-ai-agent）
+# 环境：根目录 http-client.env.json → 选择 dev
+# 先启动：tech-transfer-service :8787 ；ai-agent :8000
+###############################################################################
+
+### 存活探针（负载均衡 / Caddy）
+# @name health
+GET {{baseUrl}}/health
+Accept: application/json
+
+### API 健康检查（DB 连通 + 运行环境）
+# @name apiHealth
+GET {{baseUrl}}/api/health
+Accept: application/json
+
+### AI Agent 存活
+# @name aiAgentHealth
+GET {{aiAgentUrl}}/health
+Accept: application/json
+
+### AI Agent 数据库连通
+# @name aiAgentDbHealth
+GET {{aiAgentUrl}}/health/db
+Accept: application/json

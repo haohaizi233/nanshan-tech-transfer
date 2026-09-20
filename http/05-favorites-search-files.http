@@ -1,0 +1,96 @@
+###############################################################################
+# 收藏 / 统一搜索 / 文件上传 / 遗留资本对接
+# 依赖：userLogin；收藏目标请用已发布成果/需求
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 收藏成果（幂等 PUT）
+PUT {{api}}/favorites/achievement/{{publishedAchievementId}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 收藏需求
+PUT {{api}}/favorites/demand/{{publishedDemandId}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 取消收藏成果
+DELETE {{api}}/favorites/achievement/{{publishedAchievementId}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 取消收藏需求
+DELETE {{api}}/favorites/demand/{{publishedDemandId}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 统一搜索：全部类型
+GET {{api}}/search?q=人工智能&type=all&page=1&pageSize=10
+Authorization: {{auth}}
+Accept: application/json
+
+### 统一搜索：仅成果 + 成熟度
+GET {{api}}/search?q=芯片&type=achievement&maturityLevel=02_lab&page=1&pageSize=10
+Authorization: {{auth}}
+
+### 统一搜索：仅需求
+GET {{api}}/search?q=视觉&type=demand&page=1&pageSize=10
+Authorization: {{auth}}
+
+### 搜索失败：q 为空
+GET {{api}}/search?q=&type=all
+Authorization: {{auth}}
+
+### 上传媒体（成果/需求附件）
+# @name uploadFile
+POST {{api}}/files
+Authorization: {{auth}}
+Content-Type: multipart/form-data; boundary=----HttpClientBoundary
+
+------HttpClientBoundary
+Content-Disposition: form-data; name="file"; filename="http-sample.txt"
+Content-Type: text/plain
+
+HTTP Client sample upload
+------HttpClientBoundary--
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("uploadedFileId", String(response.body.data.id));
+}
+%}
+
+### 读取已上传文件
+GET {{api}}/files/{{uploadedFileId}}
+Authorization: {{auth}}
+
+### 读取缩略图变体
+GET {{api}}/files/{{uploadedFileId}}?variant=thumbnail
+Authorization: {{auth}}
+
+### 用 query access_token 读取（小程序预览场景）
+GET {{api}}/files/{{uploadedFileId}}?access_token={{userToken}}
+
+### 删除未被引用的上传文件
+DELETE {{api}}/files/{{uploadedFileId}}
+Authorization: {{auth}}
+
+### 遗留文件代理 GET /api/file/{fileId}
+GET {{baseUrl}}/api/file/{{legacyFileId}}
+
+### 遗留：平台载体列表
+GET {{baseUrl}}/api/platform-base?page=1&pageSize=10&type=all
+Accept: application/json
+
+### 遗留：平台载体 type=poc
+GET {{baseUrl}}/api/platform-base?page=1&pageSize=10&type=poc
+
+### 遗留：投资机构
+GET {{baseUrl}}/api/invest-orgs?page=1&pageSize=10&keyword=
+Accept: application/json
+
+### 遗留：服务机构
+GET {{baseUrl}}/api/service-orgs?page=1&pageSize=10
+Accept: application/json

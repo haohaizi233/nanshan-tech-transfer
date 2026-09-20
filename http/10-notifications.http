@@ -1,0 +1,42 @@
+###############################################################################
+# 站内通知
+# 依赖：userLogin
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 通知未读摘要
+GET {{api}}/me/notifications/summary
+Authorization: {{auth}}
+Accept: application/json
+
+### 通知列表
+# @name listNotifications
+GET {{api}}/me/notifications?page=1&pageSize=20
+Authorization: {{auth}}
+Accept: application/json
+
+> {%
+const list = response.body && response.body.data && (response.body.data.list || response.body.data);
+if (Array.isArray(list) && list.length) {
+  client.global.set("notificationId", String(list[0].id));
+}
+%}
+
+### 按分类标记已读
+POST {{api}}/me/notifications/read
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "category": "cooperation"
+}
+
+### 单条标记已读
+POST {{api}}/me/notifications/{{notificationId}}/read
+Authorization: {{auth}}
+
+### 全部标记已读
+POST {{api}}/me/notifications/read-all
+Authorization: {{auth}}

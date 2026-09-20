@@ -1,0 +1,38 @@
+###############################################################################
+# nanshan-ai-agent 直连（默认 uvicorn :8000）
+# 与 tech-transfer-service 的 POST /ai/chat 是两套服务
+###############################################################################
+
+### 查科技成果
+POST {{aiAgentUrl}}/api/ai/chat
+Content-Type: application/json
+Accept: application/json
+
+{
+  "message": "帮我找机器学习用于生态环境遥感监测的科技成果",
+  "exclude_owner_user_id": 32
+}
+
+### 查技术需求
+POST {{aiAgentUrl}}/api/ai/chat
+Content-Type: application/json
+
+{
+  "message": "有没有生物医药、深圳地区、预算 50 万左右的技术需求"
+}
+
+### 超范围问题（out_of_scope）
+POST {{aiAgentUrl}}/api/ai/chat
+Content-Type: application/json
+
+{
+  "message": "今天天气怎么样"
+}
+
+### 缺技术方向（引导补关键词）
+POST {{aiAgentUrl}}/api/ai/chat
+Content-Type: application/json
+
+{
+  "message": "帮我找成果"
+}

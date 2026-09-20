@@ -1,0 +1,223 @@
+###############################################################################
+# 机构认证 / 成员申请 / 机构管理员审核 / 平台管理员审核
+# 依赖：userLogin + orgAdminLogin + adminLogin
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@userAuth = Bearer {{userToken}}
+@orgAuth = Bearer {{orgAdminToken}}
+@adminAuth = Bearer {{adminToken}}
+
+### 我的机构成员身份
+GET {{api}}/me/organization-memberships?page=1&pageSize=10
+Authorization: {{userAuth}}
+
+### 我的机构认证状态
+GET {{api}}/me/organization-certification
+Authorization: {{userAuth}}
+
+### 我的入会申请列表
+GET {{api}}/me/organization-membership-applications?page=1&pageSize=10
+Authorization: {{userAuth}}
+
+### 我的入会申请（pending）
+GET {{api}}/me/organization-membership-applications?status=pending&page=1&pageSize=10
+Authorization: {{userAuth}}
+
+### 申请加入机构
+# @name applyMembership
+POST {{api}}/me/organization-membership-applications
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "orgId": {{orgId}},
+  "realName": "HTTP申请人",
+  "department": "技术部",
+  "title": "工程师",
+  "workEmail": "member.http@example.com",
+  "proofMaterial": "工牌扫描件说明",
+  "applyNote": "REST Client 功能覆盖"
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("applicationId", String(response.body.data.id));
+  client.global.set("applicationVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 取消入会申请
+POST {{api}}/me/organization-membership-applications/{{applicationId}}/cancel
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "version": {{applicationVersion}}
+}
+
+### 申请成为机构管理员
+POST {{api}}/me/organization-admin-applications
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "orgId": {{orgId}},
+  "realName": "HTTP管理员申请人",
+  "department": "管理部",
+  "title": "主任",
+  "workEmail": "orgadmin.http@example.com",
+  "proofMaterial": "任命文件说明",
+  "reason": "负责本单位科转业务"
+}
+
+### 申请新建机构（登录用户）
+POST {{api}}/me/organization-applications
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "requestedName": "HTTP新建机构-{{$timestamp}}",
+  "requestedType": "enterprise",
+  "creditCode": "HTTP-NEW-{{$timestamp}}",
+  "website": "https://example.com",
+  "region": "深圳市南山区",
+  "address": "科技园一路",
+  "contactName": "李四",
+  "contactPhone": "13800138003",
+  "contactEmail": "neworg.http@example.com",
+  "proofMaterial": "营业执照说明"
+}
+
+### 机构管理员：成员列表
+GET {{api}}/org-admin/members?orgId={{orgId}}&page=1&pageSize=10
+Authorization: {{orgAuth}}
+
+### 机构管理员：成员列表（active）
+GET {{api}}/org-admin/members?orgId={{orgId}}&status=active&page=1&pageSize=10
+Authorization: {{orgAuth}}
+
+### 机构管理员：入会申请列表
+GET {{api}}/org-admin/membership-applications?orgId={{orgId}}&status=pending&page=1&pageSize=10
+Authorization: {{orgAuth}}
+
+### 机构管理员：通过入会
+POST {{api}}/org-admin/membership-applications/{{applicationId}}/approve
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": 1
+}
+
+### 机构管理员：驳回入会
+POST {{api}}/org-admin/membership-applications/{{applicationId}}/reject
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "材料不完整，请补充工牌与在职证明。"
+}
+
+### 机构管理员：撤销成员
+POST {{api}}/org-admin/members/{{membershipId}}/revoke
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "人员已离职"
+}
+
+### 平台：认证申请队列
+GET {{api}}/admin/certification-applications?status=pending&page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+### 平台：新建机构申请
+GET {{api}}/admin/organization-applications?status=pending&page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+### 平台：入会申请
+GET {{api}}/admin/organization-membership-applications?status=pending&page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+### 平台：通过入会
+POST {{api}}/admin/organization-membership-applications/{{applicationId}}/approve
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1
+}
+
+### 平台：驳回入会
+POST {{api}}/admin/organization-membership-applications/{{applicationId}}/reject
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "平台审核：主体信息不符。"
+}
+
+### 平台：通过新建机构
+POST {{api}}/admin/organization-applications/{{applicationId}}/approve
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1
+}
+
+### 平台：驳回新建机构
+POST {{api}}/admin/organization-applications/{{applicationId}}/reject
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "机构名称与信用代码无法核验。"
+}
+
+### 平台：机构管理员申请队列
+GET {{api}}/admin/organization-admin-applications?status=pending&page=1&pageSize=10
+Authorization: {{adminAuth}}
+
+### 平台：通过机构管理员申请
+POST {{api}}/admin/organization-admin-applications/{{applicationId}}/approve
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1
+}
+
+### 平台：驳回机构管理员申请
+POST {{api}}/admin/organization-admin-applications/{{applicationId}}/reject
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "申请人与机构无隶属关系。"
+}
+
+### 平台：授予机构管理员
+POST {{api}}/admin/organization-memberships/{{membershipId}}/grant-admin
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1
+}
+
+### 平台：撤销机构管理员
+POST {{api}}/admin/organization-memberships/{{membershipId}}/revoke-admin
+Authorization: {{adminAuth}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "reason": "不再担任该机构管理员"
+}

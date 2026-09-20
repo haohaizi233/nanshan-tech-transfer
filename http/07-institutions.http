@@ -1,0 +1,66 @@
+###############################################################################
+# 机构：公开列表/详情 + 公开入驻申请
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+
+### 机构列表（全部）
+# @name listInstitutions
+GET {{api}}/institutions?page=1&pageSize=10&kind=all
+Accept: application/json
+
+> {%
+const list = response.body && response.body.data && response.body.data.list;
+if (list && list.length) {
+  client.global.set("institutionId", String(list[0].id));
+}
+%}
+
+### 机构列表：高校
+GET {{api}}/institutions?kind=university&page=1&pageSize=10&keyword=
+
+### 机构列表：平台载体 + type=poc
+GET {{api}}/institutions?kind=platform&type=poc&page=1&pageSize=10
+
+### 机构列表：投资 / 服务 / 企业 / 院所
+GET {{api}}/institutions?kind=invest&page=1&pageSize=10
+
+###
+GET {{api}}/institutions?kind=service&page=1&pageSize=10
+
+###
+GET {{api}}/institutions?kind=enterprise&keyword=创新&page=1&pageSize=10
+
+### 非法 kind
+GET {{api}}/institutions?kind=invalid
+
+### 机构详情
+GET {{api}}/institutions/{{institutionId}}
+Accept: application/json
+
+### 机构详情：不存在
+GET {{api}}/institutions/999999999
+
+### 公开机构入驻申请（会创建账号，重复 username 会 409）
+# @name submitInstitutionRegistration
+POST {{api}}/institution-registrations
+Content-Type: application/json
+
+{
+  "kind": "enterprise",
+  "name": "HTTP入驻测试企业-{{$timestamp}}",
+  "region": "广东·深圳南山",
+  "creditCode": "HTTP-ORG-{{$timestamp}}",
+  "intro": "用于验证机构注册申请功能。",
+  "contactName": "张三",
+  "contactPhone": "13800138001",
+  "email": "org.http.{{$timestamp}}@example.com",
+  "username": "org_http_{{$timestamp}}",
+  "password": "Test@2026"
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("registrationId", String(response.body.data.id || response.body.data.institutionId || ""));
+}
+%}

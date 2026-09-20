@@ -1,0 +1,66 @@
+###############################################################################
+# 专利检索 / PDF / 页图 / 搜索历史
+# 依赖：userLogin
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@auth = Bearer {{userToken}}
+
+### 专利列表（关键词）
+# @name listPatents
+GET {{api}}/patents?page=1&pageSize=10&keyword=芯片
+Authorization: {{auth}}
+Accept: application/json
+
+> {%
+const list = response.body && response.body.data && response.body.data.list;
+if (list && list.length) {
+  const no = list[0].publicationNo || list[0].publication_no || list[0].id;
+  if (no) client.global.set("publicationNo", String(no));
+}
+%}
+
+### 专利列表：权利人
+GET {{api}}/patents?page=1&pageSize=10&assignee=华为
+Authorization: {{auth}}
+
+### 搜索历史（keyword）
+GET {{api}}/patents/search-history?mode=keyword
+Authorization: {{auth}}
+
+### 搜索历史（assignee）
+GET {{api}}/patents/search-history?mode=assignee
+Authorization: {{auth}}
+
+### 记录搜索历史
+POST {{api}}/patents/search-history
+Authorization: {{auth}}
+Content-Type: application/json
+
+{
+  "mode": "keyword",
+  "keyword": "机器视觉"
+}
+
+### 专利详情
+GET {{api}}/patents/{{publicationNo}}
+Authorization: {{auth}}
+Accept: application/json
+
+### 专利详情：指定语言
+GET {{api}}/patents/{{publicationNo}}?language=zh
+Authorization: {{auth}}
+
+### 专利 PDF（流式）
+GET {{api}}/patents/{{publicationNo}}/pdf
+Authorization: {{auth}}
+Accept: application/pdf
+
+### 专利 PDF 页元数据
+GET {{api}}/patents/{{publicationNo}}/pdf/pages
+Authorization: {{auth}}
+
+### 专利 PDF 单页 PNG
+GET {{api}}/patents/{{publicationNo}}/pdf/pages/1
+Authorization: {{auth}}
+Accept: image/png

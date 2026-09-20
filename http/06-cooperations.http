@@ -1,0 +1,107 @@
+###############################################################################
+# 对接意向：创建 / 详情 / 状态机 / 事件时间线
+# 依赖：userLogin + orgAdminLogin；目标须 published 且非本人成果/需求
+# 创建必须 contactShareConsent=true
+###############################################################################
+
+@api = {{baseUrl}}/api/tech-transfer/v1
+@userAuth = Bearer {{userToken}}
+@orgAuth = Bearer {{orgAdminToken}}
+
+### 发起对接（成果）
+# @name createCooperation
+POST {{api}}/cooperations
+Authorization: {{userAuth}}
+Content-Type: application/json
+X-Idempotency-Key: coop-http-{{$uuid}}
+
+{
+  "targetType": "achievement",
+  "targetId": {{publishedAchievementId}},
+  "intentType": "transfer",
+  "message": "HTTP 用例：希望进一步了解该成果的技术参数、合作方式与交付周期。",
+  "contactShareConsent": true
+}
+
+> {%
+if (response.body && response.body.data) {
+  client.global.set("intentId", String(response.body.data.id));
+  client.global.set("intentVersion", String(response.body.data.version || 1));
+}
+%}
+
+### 发起对接失败：未同意共享联系方式
+POST {{api}}/cooperations
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "targetType": "achievement",
+  "targetId": {{publishedAchievementId}},
+  "message": "缺少 consent",
+  "contactShareConsent": false
+}
+
+### 对接详情
+GET {{api}}/cooperations/{{intentId}}
+Authorization: {{userAuth}}
+Accept: application/json
+
+### 对接事件时间线
+GET {{api}}/cooperations/{{intentId}}/events?page=1&pageSize=20
+Authorization: {{userAuth}}
+
+### 目标方接受（请用目标机构管理员 token）
+POST {{api}}/cooperations/{{intentId}}/accept
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": {{intentVersion}}
+}
+
+> {%
+if (response.body && response.body.data && response.body.data.version) {
+  client.global.set("intentVersion", String(response.body.data.version));
+}
+%}
+
+### 目标方驳回
+POST {{api}}/cooperations/{{intentId}}/reject
+Authorization: {{orgAuth}}
+Content-Type: application/json
+
+{
+  "version": {{intentVersion}},
+  "reason": "当前成果暂不开放该合作方向。"
+}
+
+### 双方确认
+POST {{api}}/cooperations/{{intentId}}/confirm
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "version": {{intentVersion}}
+}
+
+### 取消对接
+POST {{api}}/cooperations/{{intentId}}/cancel
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "version": {{intentVersion}},
+  "reason": "HTTP 用例取消对接"
+}
+
+### 完成对接
+POST {{api}}/cooperations/{{intentId}}/complete
+Authorization: {{userAuth}}
+Content-Type: application/json
+
+{
+  "version": {{intentVersion}},
+  "remark": "HTTP 用例完成",
+  "outcome": "signed"
+}
