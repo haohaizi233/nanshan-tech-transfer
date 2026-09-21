@@ -54,8 +54,9 @@ class _DropNotFoundAccessLog(logging.Filter):
         if status == 404:
             return False
         # 角标按产品要求高频轮询。成功响应不携带诊断价值，保留 4xx/5xx 便于排障。
-        is_notification_summary = full_path.split("?", 1)[0].endswith(
-            "/me/notifications/summary"
+        path = full_path.split("?", 1)[0]
+        is_notification_summary = path.endswith(
+            ("/me/notifications/summary", "/admin/notifications/summary")
         )
         return not (method == "GET" and is_notification_summary and 200 <= status < 300)
 

@@ -47,6 +47,17 @@ def test_uvicorn_successful_notification_summary_is_filtered():
     assert not _DropNotFoundAccessLog().filter(record)
 
 
+def test_uvicorn_successful_admin_notification_summary_is_filtered():
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1, "%s", (), None
+    )
+    record.args = (
+        "127.0.0.1", "GET",
+        "/api/tech-transfer/v1/admin/notifications/summary", "1.1", 200,
+    )
+    assert not _DropNotFoundAccessLog().filter(record)
+
+
 def test_uvicorn_server_error_access_log_is_kept():
     record = logging.LogRecord(
         "uvicorn.access", logging.INFO, __file__, 1, "%s", (), None

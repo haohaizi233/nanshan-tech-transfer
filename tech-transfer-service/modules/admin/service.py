@@ -615,16 +615,67 @@ def dashboard_summary() -> dict:
     }
 
 
-def notification_summary() -> dict:
-    """轻量后台角标：仅聚合待处理数量，不读取待办正文或列表。"""
-    data = dashboard_summary()
+def _notification_categories(*, review: int, cooperation: int, organization: int, membership: int) -> dict:
     categories = {
-        "review": data["pendingAchievements"] + data["pendingDemands"],
-        "cooperation": data["pendingCooperations"],
-        "organization": data["pendingOrganizationApplications"],
-        "membership": data["pendingOrganizationAdminApplications"] + data["pendingMembershipApplications"],
+        "review": int(review),
+        "cooperation": int(cooperation),
+        "organization": int(organization),
+        "membership": int(membership),
     }
     return {"total": sum(categories.values()), "categories": categories}
+
+
+def notification_summary(scope: dict | None = None) -> dict:
+    """轻量后台角标：仅聚合待处理数量，不读取待办正文或列表。
+
+    平台管理员看全平台待办；机构管理员只看本机构成果/需求待审、相关对接，
+    以及本机构成员认证申请。机构入驻/机构管理员申请仍属平台审核范围。
+    """
+    if not scope or scope.get("isPlatformAdmin"):
+        data = dashboard_summary()
+        return _notification_categories(
+            review=data["pendingAchievements"] + data["pendingDemands"],
+            cooperation=data["pendingCooperations"],
+            organization=data["pendingOrganizationApplications"],
+            membership=data["pendingOrganizationAdminApplications"] + data["pendingMembershipApplications"],
+        )
+
+    org_ids = scope_org_ids(scope)
+    if not org_ids:
+        return _notification_categories(review=0, cooperation=0, organization=0, membership=0)
+
+    ach_pred, ach_params = organization_content_scope(scope, "a")
+    dmd_pred, dmd_params = organization_content_scope(scope, "d")
+    coop_sql, coop_params = _coop_org_visibility_sql(scope)
+    member_clause, member_params = _sql_in("org_id", org_ids)
+
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT
+              (SELECT COUNT(*) FROM achievement a
+                WHERE a.status = 'pending_review' AND a.deleted_at IS NULL
+                  AND ({ach_pred})) AS pending_achievements,
+              (SELECT COUNT(*) FROM demand d
+                WHERE d.status = 'pending_review' AND d.deleted_at IS NULL
+                  AND ({dmd_pred})) AS pending_demands,
+              (SELECT COUNT(*) FROM cooperation_intent ci
+                LEFT JOIN achievement a ON ci.target_type = 'achievement' AND ci.target_id = a.id
+                LEFT JOIN demand d ON ci.target_type = 'demand' AND ci.target_id = d.id
+                WHERE ci.status = 'pending' AND ({coop_sql})) AS pending_cooperations,
+              (SELECT COUNT(*) FROM organization_membership_application
+                WHERE status = 'pending' AND {member_clause}) AS pending_membership_applications
+            """,
+            ach_params + dmd_params + coop_params + member_params,
+        )
+        row = cur.fetchone() or {}
+
+    return _notification_categories(
+        review=int(row.get("pending_achievements") or 0) + int(row.get("pending_demands") or 0),
+        cooperation=int(row.get("pending_cooperations") or 0),
+        organization=0,
+        membership=int(row.get("pending_membership_applications") or 0),
+    )
 
 
 def dashboard_todos(limit: int = 20) -> dict:

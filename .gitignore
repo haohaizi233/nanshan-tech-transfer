@@ -7,6 +7,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Node
+node_modules/
+
 # Compiled output
 南山小程序/南山/unpackage/
 

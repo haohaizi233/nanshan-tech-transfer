@@ -14,10 +14,10 @@
                           frpc 隧道 ── 43.138.138.200:8076(API)/8077(H5)
 
 用法：
-  python start_dev.py                     # 默认全部拉起 = FastAPI + 微信 + H5 + frp 隧道 + Caddy（同 --all）
-  python start_dev.py --all               # FastAPI + 微信 + H5 + 隧道 + Caddy（与默认相同）
-  python start_dev.py --weixin            # FastAPI + 仅微信小程序 + 隧道 + Caddy
-  python start_dev.py --h5                # FastAPI + 仅 H5 + 隧道 + Caddy
+  python start_dev.py                     # 默认 FastAPI + H5 + frp 隧道 + Caddy（不打开微信开发者工具）
+  python start_dev.py --h5                # 与默认相同：FastAPI + 仅 H5
+  python start_dev.py --weixin            # FastAPI + 微信小程序（会打开微信开发者工具）
+  python start_dev.py --all               # FastAPI + 微信 + H5
   python start_dev.py --no-tunnel         # 关闭 frp 外网隧道（纯本地联调）
   python start_dev.py --no-caddy          # 不启动 Caddy（https://inanshan.sjhcip.com）
   python start_dev.py --backend-only      # 仅 FastAPI（+ 隧道 + Caddy）
@@ -88,9 +88,13 @@ H5_PUBLIC_PATH = "/h5/"
 H5_URL = f"http://127.0.0.1:{H5_PORT}"
 H5_PAGE_URL = f"{H5_URL}{H5_PUBLIC_PATH}"
 
-HBX_CLI_DEFAULT = Path(r"D:\HBuilderX\HBuilderX.5.15.2026070915\HBuilderX\cli.exe")
-HBX_ROOT_DIRS = [Path(r"D:\HBuilderX"), Path(r"C:\Program Files\HBuilderX")]
-WECHAT_DEVTOOLS_DEFAULT = Path(r"D:\微信开发者工具\微信web开发者工具\cli.bat")
+HBX_CLI_DEFAULT = Path(r"D:\HBuilder X\cli.exe")
+HBX_ROOT_DIRS = [
+    Path(r"D:\HBuilder X"),
+    Path(r"D:\HBuilderX"),
+    Path(r"C:\Program Files\HBuilderX"),
+]
+WECHAT_DEVTOOLS_DEFAULT = Path(r"D:\微信web开发者工具\cli.bat")
 
 # frp 隧道（frpc.toml：serverAddr + [[proxies]] localPort→remotePort）
 FRPC_SCAN_ROOTS = [Path.home() / "Desktop", Path("D:\\")]
@@ -252,6 +256,64 @@ def install_lifecycle_handlers():
             signal.signal(signal.SIGTERM, _on_sigint)
         except (ValueError, OSError):
             pass
+
+
+def _decode_cli_output(raw):
+    if not raw:
+        return ""
+    for enc in ("utf-8", "gbk", "cp936"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def hbx_supports_launch(hbx_cli):
+    """HBuilderX 4.87 内置 CLI 没有 launch；5.x 才支持 cli launch web / mp-weixin。"""
+    try:
+        ret = subprocess.run(
+            [str(hbx_cli)],
+            capture_output=True, timeout=20,
+        )
+    except Exception:
+        return False
+    text = _decode_cli_output((ret.stdout or b"") + (ret.stderr or b""))
+    return "launch web" in text.lower() or "launch mp-weixin" in text.lower()
+
+
+_hbx_project_opened = False
+
+
+def open_hbuilderx_project(hbx_cli):
+    """4.87 无 launch 时：拉起 HBuilderX 并打开小程序工程，供 GUI 点运行。"""
+    global _hbx_project_opened
+    if _hbx_project_opened:
+        return
+    try:
+        subprocess.Popen(
+            [str(hbx_cli), "open"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+        )
+        subprocess.Popen(
+            [str(hbx_cli), "project", "open", "--path", str(FRONTEND_DIR)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+        )
+        _hbx_project_opened = True
+    except Exception as e:
+        warn(f"打开 HBuilderX 工程失败：{e}")
+
+
+def open_wechat_devtools():
+    exe = WECHAT_DEVTOOLS_DEFAULT.parent / "微信开发者工具.exe"
+    if exe.is_file():
+        subprocess.Popen(
+            [str(exe)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        return True
+    return False
 
 
 # ── HBuilderX CLI 检测 ────────────────────────────────────────
@@ -654,7 +716,8 @@ def wait_ai_agent_ready(proc, timeout=30):
     deadline = time.time() + timeout
     while time.time() < deadline:
         if proc is not None and proc.poll() is not None:
-            sys.exit("[FATAL] nanshan-ai-agent 进程异常退出，请检查上方报错")
+            error("nanshan-ai-agent 进程异常退出，请检查上方报错；后端/H5 仍会继续启动")
+            return False
         healthy, _body = fetch_ai_agent_health(timeout=2)
         if healthy:
             ok(f"nanshan-ai-agent Ready：http://127.0.0.1:{AI_AGENT_PORT}")
@@ -739,6 +802,14 @@ def spawn_cli_watch(args_list, ready_markers):
 # ── 微信 Runtime ─────────────────────────────────────────────
 def run_weixin(hbx_cli):
     print("  调用 HBuilderX 编译并运行到微信开发者工具 ...")
+    if not hbx_supports_launch(hbx_cli):
+        warn("当前 HBuilderX CLI 不支持 launch（4.87），改为打开工程与微信开发者工具")
+        open_hbuilderx_project(hbx_cli)
+        if open_wechat_devtools():
+            ok("已打开 HBuilderX 工程与微信开发者工具；请在 HBuilderX 点「运行到小程序」")
+        else:
+            ok("已打开 HBuilderX 工程；请手动打开微信开发者工具并运行到小程序")
+        return True
     proc, ready, _ = spawn_cli_watch(
         [str(hbx_cli), "launch", "mp-weixin", "--project", str(FRONTEND_DIR)],
         ready_markers=["微信开发者工具已启动", "ready in"],
@@ -787,13 +858,48 @@ def run_h5(hbx_cli, lan):
         if not stop_h5_server():
             return False
 
+    if not hbx_supports_launch(hbx_cli):
+        npm = which("npm.cmd") or which("npm")
+        hx_npm = Path(r"D:\HBuilder X\plugins\npm\npm.cmd")
+        hx_node = Path(r"D:\HBuilder X\plugins\node")
+        if hx_npm.is_file() and not npm:
+            npm = str(hx_npm)
+        if (FRONTEND_DIR / "package.json").is_file() and npm:
+            print("  HBuilderX 4.87 无 launch，改用 Vite uni H5（:5173）")
+            env = os.environ.copy()
+            # 与 vite.config.js 一致：按 HBuilderX 根目录编译，避免 /main.js 不被 mount
+            env["UNI_INPUT_DIR"] = str(FRONTEND_DIR)
+            if hx_node.is_dir():
+                env["PATH"] = str(hx_node) + os.pathsep + env.get("PATH", "")
+            proc = subprocess.Popen(
+                [npm, "run", "dev:h5"],
+                cwd=FRONTEND_DIR,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            register_process("h5", proc)
+            if wait_h5_ready(proc, timeout=120):
+                ok(f"H5 已就绪：{H5_PAGE_URL}")
+                mark_h5_current()
+                return True
+            error("Vite uni H5 未在 120s 内监听 5173")
+            return False
+        warn("当前 HBuilderX CLI 不支持 launch web（4.87），且无法启动 Vite H5")
+        open_hbuilderx_project(hbx_cli)
+        ok("已打开 HBuilderX 工程；请点「运行到浏览器」以启动 H5 :5173")
+        return True
+
     proc, _, _ = spawn_cli_watch(
         [str(hbx_cli), "launch", "web", "--project", str(FRONTEND_DIR)],
         ready_markers=[],
     )
     register_process("h5", proc)
 
-    if not wait_h5_ready():
+    if not wait_h5_ready(proc):
         if proc.poll() is not None:
             error("HBuilderX H5 启动失败（进程已退出），请检查上方输出")
         else:
@@ -812,7 +918,7 @@ def run_h5(hbx_cli, lan):
     return True
 
 
-def wait_h5_ready(timeout=300):
+def wait_h5_ready(proc=None, timeout=300):
     """轮询 H5 dev server 首页直到 HTTP 200（process started ≠ service ready）。
 
     首次冷编译（HBuilderX 全量 build）实测可达 1-3 分钟，超时必须远大于此，
@@ -820,6 +926,8 @@ def wait_h5_ready(timeout=300):
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if proc is not None and proc.poll() is not None:
+            return False
         if port_listening(H5_PORT):
             try:
                 with urllib.request.urlopen(H5_URL, timeout=2) as resp:
@@ -1290,6 +1398,10 @@ def run_doctor():
 
     hbx, source = find_hbx_cli()
     check("HBuilderX CLI", hbx is not None, f"{hbx}（{source}）" if hbx else "未找到，请设置 HBX_CLI 环境变量")
+    if hbx is not None:
+        launch_ok = hbx_supports_launch(hbx)
+        check("HBuilderX launch", launch_ok,
+              "cli launch web / mp-weixin" if launch_ok else "4.87 无 launch，将打开 GUI 工程")
     check("H5 构建方式", True, "纯 HBuilderX 工程（无 package.json），H5 dev server 由 HBuilderX 内置提供")
 
     check("微信开发者工具 CLI", WECHAT_DEVTOOLS_DEFAULT.exists(), str(WECHAT_DEVTOOLS_DEFAULT))
@@ -1517,6 +1629,8 @@ def print_summary(runtimes, lan, tunnel_urls=None, caddy_info=None):
         print(f"  Health        {caddy_info['health_url']}")
     print()
     print("真机调试（微信小程序）：")
+    if FrontendRuntime.WEIXIN not in runtimes:
+        print("  本次未打开微信开发者工具。需要时请用：python start_dev.py --weixin")
     print("  开发者工具 / 扫码  走 https://inanshan.sjhcip.com（config/local.env.js API_BASE_WEIXIN）")
     print("  请在小程序后台把 request 合法域名配成该 HTTPS 域名；开发版可先勾选「不校验合法域名」")
     api_tunnel_url = next((u for label, u in tunnel_urls if label == "API"), None) if tunnel_urls else None
@@ -1532,9 +1646,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="南山科转通 Multi-Runtime 前后端一键联调启动器")
     parser.add_argument("--backend-only", action="store_true", help="只启动 FastAPI 后端")
     parser.add_argument("--frontend-only", action="store_true", help="只启动前端 Runtime（配合 --weixin/--h5/--all）")
-    parser.add_argument("--weixin", action="store_true", help="FastAPI + 微信小程序 Runtime")
-    parser.add_argument("--h5", action="store_true", help="FastAPI + H5 Runtime")
-    parser.add_argument("--all", action="store_true", help="FastAPI + 微信 + H5")
+    parser.add_argument("--weixin", action="store_true",
+                        help="启动微信小程序 Runtime（会打开微信开发者工具）")
+    parser.add_argument("--h5", action="store_true", help="启动 H5 Runtime（默认已开启，不必再传）")
+    parser.add_argument("--all", action="store_true", help="同时启动微信小程序 + H5（会打开微信开发者工具）")
     parser.add_argument("--tunnel", dest="tunnel", action="store_true", default=True,
                         help="启动 frpc 外网隧道（默认开启；frpc.toml：8076→8787 / 8077→5173）并做端到端健康验证")
     parser.add_argument("--no-tunnel", dest="tunnel", action="store_false",
@@ -1576,19 +1691,17 @@ def main():
 
     install_lifecycle_handlers()
 
-    # 解析 Runtime 目标（默认全部拉起：FastAPI + 微信 + H5 + 隧道）
+    # 解析 Runtime 目标：默认只起 H5，避免每次 start 都弹出微信开发者工具
     runtimes = set()
     if args.backend_only:
         runtimes = set()
-    elif args.all:
+    elif args.all or (args.weixin and args.h5):
         runtimes = {FrontendRuntime.WEIXIN, FrontendRuntime.H5}
-    elif args.weixin and not args.h5:
+    elif args.weixin:
         runtimes = {FrontendRuntime.WEIXIN}
-    elif args.h5 and not args.weixin:
-        runtimes = {FrontendRuntime.H5}
     else:
-        # 无参数（默认）或 --weixin --h5 同时给：等价 --all
-        runtimes = {FrontendRuntime.WEIXIN, FrontendRuntime.H5}
+        # 无参数 / 仅 --h5：FastAPI + H5
+        runtimes = {FrontendRuntime.H5}
 
     need_backend = not args.frontend_only
 

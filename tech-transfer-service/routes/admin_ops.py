@@ -2,7 +2,7 @@
 admin 运营路由（Release Closure）—— Dashboard / Institution / Cooperation(只读) / Users(只读)
 
 与 routes/admin.py（审核组，已冻结）分文件注册，互不影响；
-鉴权同一 admin_identity（登录 + user_role 实时查库）。
+平台运营接口走 admin_identity；后台角标走 backend_identity（机构管理员可按本机构范围读取）。
 
 Institution Create/Update 使用 Pydantic Schema（§21）；
 其余为 GET 查询参数。写操作：service 层同事务写审计（§16）。
@@ -60,8 +60,8 @@ def admin_dashboard_summary(admin: dict = Depends(admin_identity)):
 
 
 @router.get("/admin/notifications/summary", tags=["admin-dashboard"])
-def admin_notification_summary(admin: dict = Depends(admin_identity)):
-    return success(notification_summary())
+def admin_notification_summary(scope: dict = Depends(backend_identity)):
+    return success(notification_summary(scope))
 
 
 @router.get("/admin/dashboard/todos", tags=["admin-dashboard"])
