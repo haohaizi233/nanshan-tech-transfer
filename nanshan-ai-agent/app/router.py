@@ -1,7 +1,7 @@
 import json
 import re
 
-from app.llm_client import chat_completion
+from app.llm_client import LLMError, chat_completion
 from app.schemas import RouteResult
 
 
@@ -309,7 +309,159 @@ def _extract_json(text: str) -> dict:
     return json.loads(match.group())
 
 
+_ACHIEVEMENT_MARKERS = re.compile(
+    r"成果|科研成果|技术成果|科技成果|技术方案",
+)
+_DEMAND_MARKERS = re.compile(
+    r"技术需求|企业需求|企业难题|技术难题|(?:的)?需求",
+)
+_GREETING_ONLY = re.compile(
+    r"^(你好|您好|早上好|下午好|晚上好|谢谢|再见|在吗|嗨|hello|hi)[!！。.?？~～\s]*$",
+    re.IGNORECASE,
+)
+
+_QUERY_STOPWORDS = {
+    "帮我", "给我", "请", "查一下", "查询", "查", "找", "搜索", "搜", "看看",
+    "有没有", "有哪些", "一下", "有关", "相关", "方面", "领域", "的", "科技",
+    "技术", "成果", "需求", "企业", "公司", "一些", "几个", "多少", "什么",
+    "如何", "怎么", "能否", "可以", "想要", "希望", "关于", "用于", "需要",
+}
+
+_KEYWORD_NOISE = (
+    "有没有", "有哪些", "关于", "有关", "帮我", "给我", "用于", "需要",
+    "企业", "查询", "搜索",
+)
+
+_LEADING_NOISE = re.compile(
+    r"^(?:帮我|给我|请|麻烦|查一下|找一下|搜一下|查询一下|搜索一下|"
+    r"查询|搜索|看看|查查|找找|查|找|搜|一下|"
+    r"有没有|有哪些|有啥|是否有|关于|有关)+"
+)
+_TRAILING_NOISE = re.compile(
+    r"(?:有哪些|有没有|吗|呢|看看|一下|[?？。！!，,.\s])+$"
+)
+
+
+def _normalize_query_keyword(keyword: str) -> str:
+    keyword = (keyword or "").strip()
+    while keyword:
+        trimmed = False
+        for suffix in ("方面", "领域", "相关", "科技", "技术", "的"):
+            if keyword.endswith(suffix) and len(keyword) > len(suffix):
+                keyword = keyword[: -len(suffix)]
+                trimmed = True
+                break
+        if not trimmed:
+            break
+    if not keyword or keyword in _QUERY_STOPWORDS:
+        return ""
+    if any(noise in keyword for noise in _KEYWORD_NOISE):
+        return ""
+    return keyword
+
+
+def _strip_query_noise(text: str) -> str:
+    cleaned = (text or "").strip()
+    prev = None
+    while prev != cleaned:
+        prev = cleaned
+        cleaned = _LEADING_NOISE.sub("", cleaned)
+        cleaned = _TRAILING_NOISE.sub("", cleaned)
+        cleaned = cleaned.strip()
+    return cleaned
+
+
+def _extract_simple_topic(cleaned: str, suffix: str) -> str:
+    """只接受「主题 + 方面/相关 + 成果/需求」短模板，避免把整句当关键词。"""
+    match = re.fullmatch(
+        rf"([\u4e00-\u9fa5A-Za-z0-9]{{2,12}}?)(?:方面|领域|相关)?的?{suffix}",
+        cleaned,
+    )
+    if not match:
+        return ""
+    return _normalize_query_keyword(match.group(1))
+
+
+def _extract_query_keywords(text: str, kind: str) -> list[str]:
+    cleaned = _strip_query_noise(text)
+    if not cleaned:
+        return []
+
+    if kind == "achievement":
+        keyword = _extract_simple_topic(
+            cleaned,
+            r"(?:科技)?(?:成果|技术方案)",
+        )
+    else:
+        keyword = _extract_simple_topic(
+            cleaned,
+            r"(?:技术)?需求",
+        )
+
+    return [keyword] if keyword else []
+
+
+def try_heuristic_classify(user_message: str) -> RouteResult | None:
+    """短句模板快速路由；复杂问法返回 None，交给 LLM。"""
+    text = (user_message or "").strip()
+    if not text:
+        return None
+
+    if _GREETING_ONLY.match(text):
+        return RouteResult(
+            intent="out_of_scope",
+            keywords=[],
+            reason="寒暄问候",
+        )
+
+    has_achievement = bool(_ACHIEVEMENT_MARKERS.search(text))
+    has_demand = bool(_DEMAND_MARKERS.search(text))
+
+    if has_achievement and has_demand:
+        return None
+
+    if has_achievement:
+        keywords = _extract_query_keywords(text, "achievement")
+        if not keywords:
+            return None
+        return RouteResult(
+            intent="search_achievement",
+            keywords=keywords,
+            reason="规则解析：科技成果查询",
+        )
+
+    if has_demand:
+        keywords = _extract_query_keywords(text, "demand")
+        if not keywords:
+            return None
+        return RouteResult(
+            intent="search_demand",
+            keywords=keywords,
+            reason="规则解析：技术需求查询",
+        )
+
+    return None
+
+
 def classify_intent(
+    user_message: str,
+) -> RouteResult:
+    heuristic = try_heuristic_classify(user_message)
+    # 寒暄可跳过 LLM；短模板查询也可跳过。复杂问法必须走 LLM 抽词。
+    if heuristic is not None:
+        return heuristic
+
+    try:
+        return _classify_intent_llm(user_message)
+    except LLMError as exc:
+        fallback = try_heuristic_classify(user_message)
+        if fallback is not None:
+            print("[Router] LLM 不可用，规则兜底:", repr(exc))
+            return fallback
+        raise
+
+
+def _classify_intent_llm(
     user_message: str,
 ) -> RouteResult:
 
@@ -327,8 +479,9 @@ def classify_intent(
     # 第一次调用
     output = chat_completion(
         messages=messages,
-        max_tokens=1200,
+        max_tokens=800,
         temperature=0.0,
+        timeout=45,
     )
 
     try:
@@ -386,8 +539,9 @@ out_of_scope
 
         retry_output = chat_completion(
             messages=retry_messages,
-            max_tokens=1200,
+            max_tokens=800,
             temperature=0.0,
+            timeout=45,
         )
 
         parsed = _extract_json(retry_output)

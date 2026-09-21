@@ -177,6 +177,10 @@ def rerank_results(
     # 最多送20条给模型，控制上下文长度
     candidates = candidates[:20]
 
+    # 候选数不超过 top_n 时直接返回，省掉一次 LLM 重排（常见慢路径）。
+    if len(candidates) <= top_n:
+        return candidates[:top_n]
+
     if intent == "search_achievement":
         llm_candidates = [
             _achievement_for_llm(item)
@@ -275,9 +279,10 @@ def _call_reranker(
     try:
         output = chat_completion(
             messages=messages,
-            max_tokens=2000,
+            max_tokens=1200,
             temperature=0.0,
             response_format={"type": "json_object"},
+            timeout=50,
         )
         return _extract_json(output)
 
@@ -326,9 +331,10 @@ def _call_reranker(
     try:
         retry_output = chat_completion(
             messages=retry_messages,
-            max_tokens=2000,
+            max_tokens=1200,
             temperature=0.0,
             response_format={"type": "json_object"},
+            timeout=50,
         )
         return _extract_json(retry_output)
     except Exception as exc:
