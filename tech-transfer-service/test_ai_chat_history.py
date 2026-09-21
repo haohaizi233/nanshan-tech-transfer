@@ -99,7 +99,7 @@ if chat_ok:
         else:
             check("无卡片时 assistant 仍入库", True, "")
 else:
-    # 503 仍保留 user+失败提示，避免刷新后用户看不到刚发的问题
+    # 502/503 仍保留 user+失败提示，避免刷新后用户看不到刚发的问题
     resp = requests.get(f"{BASE}/ai/chat/messages", headers=h_a, timeout=10)
     msgs = resp.json().get("data", {}).get("messages") or []
     check("ai-agent 不可达时仍保留失败对话", len(msgs) >= 2, f"got {len(msgs)} 条")

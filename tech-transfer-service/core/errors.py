@@ -83,6 +83,7 @@ TT_INST_REG_40902 = ("TT_INST_REG_40902", "机构注册申请当前状态不允�
 
 # ── Patent ──────────────────────────────────────────────────
 TT_PATENT_40401 = ("TT_PATENT_40401", "专利不存在", 404)
+TT_PATENT_50201 = ("TT_PATENT_50201", "专利查询上游调用失败", 502)
 TT_PATENT_50301 = ("TT_PATENT_50301", "专利查询服务不可用", 503)
 
 # ── File ────────────────────────────────────────────────────
@@ -187,6 +188,11 @@ def ai_unavailable(msg="AI 服务不可用", details=None):
     return BizError(code, msg, status, details)
 
 
+def ai_provider_failed(msg="AI Provider 调用失败", details=None):
+    code, message, status = TT_AI_50201
+    return BizError(code, msg, status, details)
+
+
 def patent_not_found(msg="专利不存在", details=None):
     code, message, status = TT_PATENT_40401
     return BizError(code, msg, status, details)
@@ -194,6 +200,11 @@ def patent_not_found(msg="专利不存在", details=None):
 
 def patent_unavailable(msg="专利查询服务不可用", details=None):
     code, message, status = TT_PATENT_50301
+    return BizError(code, msg, status, details)
+
+
+def patent_provider_failed(msg="专利查询上游调用失败", details=None):
+    code, message, status = TT_PATENT_50201
     return BizError(code, msg, status, details)
 
 

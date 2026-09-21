@@ -27,12 +27,15 @@
   python start_dev.py --status            # 查看运行状态，不启动
   python start_dev.py --build-h5          # H5 production build（不启动后端）
   python start_dev.py --strict            # 严格模式：任何组件失败即退出非 0
+  python start_dev.py --restart-backend   # 强制重启 FastAPI，日志打到本窗口
 
 说明：
   - HBuilderX CLI 运行 H5 / 微信均为「HBuilderX owned」进程，启动器不强制关闭它们；
     Ctrl+C 只 terminate 本启动器自己 spawn 的进程（FastAPI / frpc / caddy）。
-  - 8787 已有健康的南山 FastAPI 时自动复用，退出启动器不会终止它；
-    但若后端源码比监听进程新（如 git pull 之后），会先终止旧进程再重新启动，
+  - 8787 已有健康的南山 FastAPI 时，普通终端会复用（退出启动器不会终止它）；
+    PyCharm Run 窗口捕获不到子进程/复用进程的 stdout，因此会接管并重启后端，
+    把 uvicorn 请求日志转到本窗口。也可显式加 --restart-backend。
+    若后端源码比监听进程新（如 git pull 之后），同样会先终止旧进程再启动，
     避免复用旧代码导致「前端拉到最新但接口还是旧行为」。
   - 外网转发使用 frp（frpc.toml：serverAddr + 8076→8787 + 8077→5173），
     默认随启动器一起拉起 frpc 并做外网端到端健康验证（--no-tunnel 关闭）；
@@ -210,6 +213,47 @@ managed_processes = {}
 
 def register_process(key, proc):
     managed_processes[key] = proc
+
+
+def running_in_pycharm():
+    """PyCharm Run/Debug 会设置 PYCHARM_HOSTED，其控制台只显示主进程 stdout。"""
+    if os.environ.get("PYCHARM_HOSTED"):
+        return True
+    return any(
+        key.upper().startswith("PYCHARM") or key.upper().startswith("JETBRAINS")
+        for key in os.environ
+    )
+
+
+def spawn_logged(args, cwd, env, key):
+    """启动子进程并把 stdout/stderr 回显到启动器控制台。
+
+    PyCharm Run 窗口不会自动捕获「继承 stdout 的孙进程」输出；必须 PIPE 再 print。
+    """
+    env = dict(env)
+    env["PYTHONUNBUFFERED"] = "1"
+    proc = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    register_process(key, proc)
+
+    def reader():
+        try:
+            for line in proc.stdout:
+                print(line, end="", flush=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=reader, daemon=True, name=f"{key}-log").start()
+    return proc
 
 
 def shutdown_managed(kill_fallback=True):
@@ -659,35 +703,53 @@ def backend_is_stale():
         f"现有后端（PID={','.join(map(str, procs))}）启动早于代码更新"
         f"（{len(stale_files)} 个源文件已变更，最新 {newest.name}），重启以加载新代码"
     )
+    stop_existing_backend(procs)
+    return True
+
+
+def stop_existing_backend(procs=None):
+    """终止 8787 监听进程及其 uvicorn reload worker。"""
+    if procs is None:
+        owners = port_pids(BACKEND_PORT)
+        procs = owners + [p for p in _spawn_child_pids(owners) if p not in owners]
     for pid in procs:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=15)
     for _ in range(20):
         if not port_listening(BACKEND_PORT):
-            break
+            return
         time.sleep(0.5)
-    if port_listening(BACKEND_PORT):
-        # 理论上不应到达：所有已知持有者都已终止。可能句柄被更隐蔽的进程复制。
-        error(f"旧后端进程已终止，但端口 {BACKEND_PORT} 仍被占用（socket 句柄被隐藏进程持有）")
-        error("  请手动排查：netstat -ano | findstr :8787，或重启电脑后重试")
-        sys.exit(1)
-    return True
+    error(f"旧后端进程已终止，但端口 {BACKEND_PORT} 仍被占用（socket 句柄被隐藏进程持有）")
+    error("  请手动排查：netstat -ano | findstr :8787，或重启电脑后重试")
+    sys.exit(1)
 
 
-def resolve_backend(lan):
+def resolve_backend(lan, restart=False):
     """返回 (proc|None)。proc=None 表示复用已有后端。"""
-    if not port_listening(BACKEND_PORT):
+    take_over = restart or running_in_pycharm()
+    if port_listening(BACKEND_PORT):
+        http_ok, body = fetch_health()
+        healthy = (
+            http_ok and body and isinstance(body.get("data"), dict)
+            and body["data"].get("status") in ("ok", "degraded")
+        )
+        if healthy:
+            if take_over:
+                why = "PyCharm 控制台看不到复用进程日志" if running_in_pycharm() and not restart else "已指定 --restart-backend"
+                warn(f"{why}，正在接管 :{BACKEND_PORT} 并重启 FastAPI")
+                stop_existing_backend()
+                return start_backend(lan)
+            if backend_is_stale():
+                return start_backend(lan)
+            ok(f"检测到现有 FastAPI :{BACKEND_PORT}，直接复用")
+            warn("复用模式下本窗口没有 FastAPI 请求日志（日志在原进程）")
+            warn("  若要在本窗口看日志：加上 --restart-backend 后重跑")
+            if body["data"].get("database") == "ok":
+                ok(f"PostgreSQL Ready（appUsers={body['data'].get('appUsers')}）")
+            else:
+                warn("PostgreSQL Unavailable（现有后端）")
+            return None
+    else:
         return start_backend(lan)
-
-    http_ok, body = fetch_health()
-    if http_ok and body and isinstance(body.get("data"), dict) and body["data"].get("status") in ("ok", "degraded"):
-        if backend_is_stale():
-            return start_backend(lan)
-        ok(f"检测到现有 FastAPI :{BACKEND_PORT}，直接复用")
-        if body["data"].get("database") == "ok":
-            ok(f"PostgreSQL Ready（appUsers={body['data'].get('appUsers')}）")
-        else:
-            warn("PostgreSQL Unavailable（现有后端）")
-        return None
 
     pid = port_pid(BACKEND_PORT)
     pid_desc = f"（PID={pid}）" if pid else "（PID 未知）"
@@ -704,8 +766,12 @@ def start_backend(lan):
     env.setdefault("APP_ENV", "local")
     env.setdefault("HOST_MODE", "local")
     env.setdefault("AUTH_PROVIDER", "mock")
-    proc = subprocess.Popen([BACKEND_PYTHON, "-u", "app.py"], cwd=API_SERVER_DIR, env=env)
-    register_process("backend", proc)
+    proc = spawn_logged(
+        [BACKEND_PYTHON, "-u", "app.py"],
+        cwd=API_SERVER_DIR,
+        env=env,
+        key="backend",
+    )
     if not wait_backend_ready(proc):
         error("后端未就绪")
         sys.exit(1)
@@ -739,15 +805,15 @@ def start_ai_agent():
     env.setdefault("DB_NAME", os.environ.get("DB_NAME", "tech_transfer"))
     env.setdefault("DB_USER", os.environ.get("DB_USER", "postgres"))
     env.setdefault("DB_PASSWORD", os.environ.get("DB_PASSWORD", "postgres123"))
-    proc = subprocess.Popen(
+    proc = spawn_logged(
         [
             BACKEND_PYTHON, "-m", "uvicorn", "app.main:app",
             "--host", "127.0.0.1", "--port", str(AI_AGENT_PORT),
         ],
         cwd=AI_AGENT_DIR,
         env=env,
+        key="ai-agent",
     )
-    register_process("ai-agent", proc)
     wait_ai_agent_ready(proc)
     return proc
 
@@ -1663,6 +1729,11 @@ def parse_args():
     parser.add_argument("--status", action="store_true", help="查看当前运行状态，不启动")
     parser.add_argument("--build-h5", action="store_true", help="H5 production build（不启动 FastAPI）")
     parser.add_argument("--strict", action="store_true", help="严格模式：任何组件失败即退出非 0")
+    parser.add_argument(
+        "--restart-backend",
+        action="store_true",
+        help="强制重启 FastAPI，把请求日志打到本窗口（PyCharm 默认也会接管）",
+    )
     return parser.parse_args()
 
 
@@ -1740,7 +1811,7 @@ def main():
     print("[4/6] 启动 FastAPI 后端")
     backend_proc = None
     if need_backend:
-        backend_proc = resolve_backend(lan=args.lan)
+        backend_proc = resolve_backend(lan=args.lan, restart=args.restart_backend)
     else:
         skip("跳过后端（--frontend-only）")
 

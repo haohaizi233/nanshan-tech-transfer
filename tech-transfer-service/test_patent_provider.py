@@ -198,7 +198,9 @@ def main():
 
     _assert_upstream_key_is_query_param()
     _assert_http_json_retries_then_succeeds()
-    _assert_http_json_422_maps_unavailable()
+    _assert_http_json_422_exposes_upstream_status()
+    _assert_http_json_502_exposes_upstream_status()
+    _assert_http_json_connection_reset_is_503()
 
     print("PASS: patent provider normalize")
 
@@ -265,7 +267,7 @@ def _assert_http_json_retries_then_succeeds():
     assert calls["n"] == 2
 
 
-def _assert_http_json_422_maps_unavailable():
+def _assert_http_json_422_exposes_upstream_status():
     calls = {"n": 0}
 
     def fake_urlopen(req, timeout=0):
@@ -278,10 +280,54 @@ def _assert_http_json_422_maps_unavailable():
     with patch.object(provider.urllib.request, "urlopen", fake_urlopen):
         try:
             provider._http_json("/patent_search", {"q": "x"}, 5)
-            raise AssertionError("expected 422 to map to patent unavailable")
+            raise AssertionError("expected 422 to map to patent provider failed")
+        except BizError as exc:
+            assert exc.code == "TT_PATENT_50201"
+            assert exc.http_status == 502
+            assert (exc.details or {}).get("layer") == "provider"
+            assert (exc.details or {}).get("providerStatus") == 422
+    assert calls["n"] == 1
+
+
+def _assert_http_json_502_exposes_upstream_status():
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        raise _http_error(502, b"Bad Gateway")
+
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), \
+            patch.object(provider.time, "sleep"):
+        try:
+            provider._http_json("/patent_search", {"q": "x"}, 5)
+            raise AssertionError("expected 502 to map to patent provider failed")
+        except BizError as exc:
+            assert exc.code == "TT_PATENT_50201"
+            assert exc.http_status == 502
+            assert (exc.details or {}).get("layer") == "provider"
+            assert (exc.details or {}).get("providerStatus") == 502
+            assert "Bad Gateway" in ((exc.details or {}).get("upstreamBody") or "")
+    assert calls["n"] == 3
+
+
+def _assert_http_json_connection_reset_is_503():
+    from http.client import RemoteDisconnected
+    from urllib.error import URLError
+
+    def fake_urlopen(req, timeout=0):
+        raise URLError(RemoteDisconnected("Remote end closed connection without response"))
+
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), \
+            patch.object(provider.time, "sleep"):
+        try:
+            provider._http_json("/patent_search", {"q": "x"}, 5)
+            raise AssertionError("expected connection reset to map to unavailable")
         except BizError as exc:
             assert exc.code == "TT_PATENT_50301"
-    assert calls["n"] == 1
+            assert exc.http_status == 503
+            assert (exc.details or {}).get("layer") == "provider"
+            assert (exc.details or {}).get("reason") == "connection_reset"
+            assert (exc.details or {}).get("providerStatus") is None
 
 
 if __name__ == "__main__":

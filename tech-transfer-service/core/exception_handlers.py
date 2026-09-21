@@ -132,11 +132,45 @@ _HTTP_EXC_CODE_MAP = {
 }
 
 
+def _attach_upstream_headers(resp, details) -> None:
+    """把上游分层诊断写到响应头，方便 DevTools Headers 直接看到是谁的问题。"""
+    if not isinstance(details, dict) or not details.get("layer"):
+        return
+    resp.headers["X-Upstream-Layer"] = str(details.get("layer"))[:32]
+    reason = details.get("reason")
+    if reason:
+        resp.headers["X-Upstream-Reason"] = str(reason)[:64]
+    status = None
+    for key in ("llmStatus", "providerStatus", "agentStatus", "upstreamStatus"):
+        if details.get(key) is not None:
+            status = details[key]
+            break
+    resp.headers["X-Upstream-Status"] = str(status) if status is not None else "none"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(BizError)
     async def _handle_biz_error(request: Request, e: BizError):
         _log_error(request, e.http_status, e.code)
-        return error(e.code, e.message, e.http_status, e.details)
+        if isinstance(e.details, dict) and e.details.get("layer"):
+            logger.error(
+                "upstream error request_id=%s method=%s path=%s layer=%s "
+                "upstream_status=%s reason=%s body=%s",
+                get_request_id(),
+                request.method,
+                request.url.path,
+                e.details.get("layer"),
+                e.details.get("llmStatus")
+                if e.details.get("llmStatus") is not None
+                else e.details.get("providerStatus")
+                if e.details.get("providerStatus") is not None
+                else e.details.get("agentStatus"),
+                e.details.get("reason"),
+                e.details.get("upstreamBody"),
+            )
+        resp = error(e.code, e.message, e.http_status, e.details)
+        _attach_upstream_headers(resp, e.details)
+        return resp
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(request: Request, e: RequestValidationError):

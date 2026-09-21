@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from config import settings
 from core.response import success, get_request_id
 from core.middleware import identity
-from core.errors import BizError, ai_unavailable, bad_request
+from core.errors import BizError, TT_COMMON_42901, ai_provider_failed, ai_unavailable, bad_request
 from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
@@ -77,12 +77,112 @@ def evaluation_task_detail(task_id: int, user: dict = Depends(identity)):
 # ── 自然语言对话代理（nanshan-ai-agent demo）──────────────────
 # 小程序自由问答经本路由转发到独立的 ai-agent 服务，回包结构为
 # {success, intent, message, data:[achievement|demand 卡片]}。
-# ai-agent 不可达时返回 ai_unavailable，保持前端契约统一。
-def _read_http_error_body(exc: urllib.error.HTTPError, limit: int = 300) -> str:
+# 失败不再一律映射 503：agent 不可达 → 503；上层模型/agent 有回包 → 502，
+# details 带 layer / llmStatus / reason，方便区分是模型还是本地代理的问题。
+_UPSTREAM_BODY_LIMIT = 300
+
+
+def _read_http_error_body(exc: urllib.error.HTTPError, limit: int = _UPSTREAM_BODY_LIMIT) -> str:
     try:
         return exc.read(limit).decode("utf-8", "replace")
     except Exception:
         return ""
+
+
+def _safe_snippet(text: str, limit: int = _UPSTREAM_BODY_LIMIT) -> str:
+    text = (text or "").replace("\r\n", "\n").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
+
+def _network_reason(exc: BaseException) -> str:
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        name = type(cur).__name__
+        text = str(cur).lower()
+        if isinstance(cur, TimeoutError) or name in {"TimeoutError", "ReadTimeoutError"}:
+            return "timeout"
+        if "timed out" in text:
+            return "timeout"
+        if name in {"RemoteDisconnected", "ConnectionResetError"} or (
+            "closed connection" in text or "connection reset" in text or "disconnected" in text
+        ):
+            return "connection_reset"
+        if name == "ConnectionRefusedError" or "refused" in text:
+            return "connection_refused"
+        nxt = None
+        if isinstance(cur, urllib.error.URLError) and not isinstance(cur, urllib.error.HTTPError):
+            reason = getattr(cur, "reason", None)
+            if isinstance(reason, BaseException):
+                nxt = reason
+        cur = nxt or cur.__cause__
+    return "unreachable"
+
+
+def _parse_agent_error_details(agent_status: int, body: str) -> dict:
+    """从 ai-agent 错误回包抽出可对外的诊断字段，不含内部路径/密钥。"""
+    details: dict = {
+        "layer": "agent",
+        "agentStatus": agent_status,
+        "reason": "http_error",
+    }
+    payload = None
+    if body:
+        try:
+            payload = json.loads(body)
+        except (ValueError, TypeError):
+            payload = None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, dict):
+        layer = detail.get("layer")
+        if layer in ("llm", "agent"):
+            details["layer"] = layer
+        if detail.get("llmStatus") is not None:
+            try:
+                details["llmStatus"] = int(detail["llmStatus"])
+            except (TypeError, ValueError):
+                details["llmStatus"] = detail["llmStatus"]
+        reason = detail.get("llmReason") or detail.get("agentReason") or detail.get("reason")
+        if reason:
+            details["reason"] = str(reason)[:64]
+        llm_body = detail.get("llmBody")
+        if isinstance(llm_body, str) and llm_body.strip():
+            details["upstreamBody"] = _safe_snippet(llm_body)
+        elif details.get("layer") != "llm" and detail.get("message"):
+            details["upstreamBody"] = _safe_snippet(str(detail["message"]))
+    elif isinstance(detail, str) and detail.strip():
+        details["upstreamBody"] = _safe_snippet(detail)
+    elif body:
+        details["upstreamBody"] = _safe_snippet(body)
+    return details
+
+
+def _raise_from_agent_http(agent_status: int, body: str) -> None:
+    details = _parse_agent_error_details(agent_status, body)
+    logger.warning(
+        "[ai/chat] agent http error status=%s layer=%s llm_status=%s reason=%s body=%s",
+        agent_status,
+        details.get("layer"),
+        details.get("llmStatus"),
+        details.get("reason"),
+        details.get("upstreamBody"),
+    )
+    if agent_status == 429:
+        code, message, status = TT_COMMON_42901
+        raise BizError(code, "AI 请求过于频繁，请稍后重试", status, details)
+    if details.get("layer") == "llm" or agent_status in (500, 502, 504):
+        raise ai_provider_failed("AI Provider 调用失败", details)
+    raise ai_unavailable("AI 助手暂时不可用，请稍后重试", details)
+
+
+def _raise_from_agent_network(exc: Exception) -> None:
+    reason = _network_reason(exc)
+    details = {"layer": "agent", "reason": reason}
+    logger.warning("[ai/chat] agent 调用失败 reason=%s err=%r", reason, exc)
+    raise ai_unavailable("AI 助手暂时不可用，请稍后重试", details)
 
 
 def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
@@ -98,6 +198,7 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
         method="POST",
     )
     last_exc: Exception | None = None
+    last_http: tuple[int, str] | None = None
     for attempt in range(_AGENT_RETRY_TIMES):
         try:
             with _AI_CONCURRENCY:
@@ -110,14 +211,18 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
         except urllib.error.HTTPError as exc:
             last_exc = exc
             body = _read_http_error_body(exc)
+            last_http = (exc.code, body)
             logger.warning(
                 "[ai/chat] agent http error status=%s attempt=%s body=%s",
                 exc.code, attempt + 1, body,
             )
-            if exc.code in _AGENT_RETRY_STATUS and attempt < _AGENT_RETRY_TIMES - 1:
+            # 上层模型已经在 agent 内重试过；再转一圈只会把浏览器空等拉长。
+            preview = _parse_agent_error_details(exc.code, body)
+            retryable = exc.code in _AGENT_RETRY_STATUS and preview.get("layer") != "llm"
+            if retryable and attempt < _AGENT_RETRY_TIMES - 1:
                 time.sleep(_AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)])
                 continue
-            raise ai_unavailable("AI 助手暂时不可用，请稍后重试") from None
+            _raise_from_agent_http(exc.code, body)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
             last_exc = exc
             logger.warning("[ai/chat] agent 调用失败 attempt=%s err=%r", attempt + 1, exc)
@@ -127,9 +232,18 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
             if retryable and attempt < _AGENT_RETRY_TIMES - 1:
                 time.sleep(_AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)])
                 continue
-            raise ai_unavailable("AI 助手暂时不可用，请稍后重试") from None
+            if isinstance(exc, ValueError):
+                raise ai_provider_failed(
+                    "AI Agent 返回格式异常",
+                    {"layer": "agent", "reason": "invalid_response"},
+                ) from None
+            _raise_from_agent_network(exc)
     logger.warning("[ai/chat] agent 调用失败 err=%r", last_exc)
-    raise ai_unavailable("AI 助手暂时不可用，请稍后重试")
+    if last_http is not None:
+        _raise_from_agent_http(last_http[0], last_http[1])
+    if last_exc is not None:
+        _raise_from_agent_network(last_exc)
+    raise ai_unavailable("AI 助手暂时不可用，请稍后重试", {"layer": "agent", "reason": "unreachable"})
 
 
 def _persist_failed_turn(user_id: int, user_message: str, assistant_message: str) -> None:
@@ -151,7 +265,7 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
     try:
         result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
     except BizError as exc:
-        if exc.http_status == 503:
+        if exc.http_status in (502, 503, 429):
             _persist_failed_turn(user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试")
         raise
     # 入库：用户提问 + 助手回复（含卡片快照）

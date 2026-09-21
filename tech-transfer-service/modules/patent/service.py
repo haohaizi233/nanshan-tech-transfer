@@ -143,7 +143,10 @@ def _pdf_bytes(pub: str) -> bytes:
             continue
         total += len(chunk)
         if total > _PDF_MAX_BYTES:
-            raise patent_unavailable("说明书文件过大，暂无法预览")
+            raise patent_unavailable(
+                "说明书文件过大，暂无法预览",
+                {"layer": "local", "reason": "pdf_too_large"},
+            )
         chunks.append(chunk)
     data = b"".join(chunks)
     if not data:
@@ -162,7 +165,10 @@ def _pdfium():
         import pypdfium2 as pdfium
     except ImportError:
         logger.warning("pypdfium2 is not installed")
-        raise patent_unavailable("说明书预览组件未安装，请执行 pip install pypdfium2 Pillow") from None
+        raise patent_unavailable(
+            "说明书预览组件未安装，请执行 pip install pypdfium2 Pillow",
+            {"layer": "local", "reason": "preview_not_installed"},
+        ) from None
     return pdfium
 
 
@@ -174,7 +180,10 @@ def _open_pdf(pub: str, data: bytes):
         raise
     except Exception:
         logger.warning("patent pdf open failed pub=%s", pub, exc_info=True)
-        raise patent_unavailable() from None
+        raise patent_unavailable(
+            "专利查询服务不可用",
+            {"layer": "local", "reason": "pdf_open_failed"},
+        ) from None
 
 
 def _pdf_page_count(pub: str, data: bytes) -> int:
@@ -196,7 +205,10 @@ def _render_page(pub: str, data: bytes, page: int) -> bytes:
             image = bitmap.to_pil()
         except Exception:
             logger.warning("patent pdf render failed pub=%s page=%s", pub, page, exc_info=True)
-            raise patent_unavailable() from None
+            raise patent_unavailable(
+                "专利查询服务不可用",
+                {"layer": "local", "reason": "pdf_render_failed"},
+            ) from None
         buf = BytesIO()
         image.save(buf, format="PNG")
         return buf.getvalue()
