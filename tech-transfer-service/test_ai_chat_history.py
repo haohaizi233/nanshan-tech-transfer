@@ -6,7 +6,7 @@ AI 聊天记录入库 回归测试 —— /ai/chat/messages（GET/DELETE）+ /ai
 - GET 空历史 → messages 为空数组
 - POST /ai/chat 成功后 → 历史新增 user + assistant 两条；assistant 卡片快照可回放
 - DELETE /ai/chat/messages → 清空；再 GET → 空
-- ai-agent 不可达（503）时 → 不入库（历史仍为空），保证不写脏历史
+- ai-agent 不可达（503）时 → 仍入库 user+assistant 失败提示，刷新后可见用户原问题
 
 依赖：后端已启动；routes/ai.py 中 AI_FEATURE_ENABLED=True。
 成功路径（验证入库）需要 ai-agent 可达；不可达时本测试降级为只校验边界与清空。
@@ -99,10 +99,13 @@ if chat_ok:
         else:
             check("无卡片时 assistant 仍入库", True, "")
 else:
-    # 503 不应入库：历史仍为空
+    # 503 仍保留 user+失败提示，避免刷新后用户看不到刚发的问题
     resp = requests.get(f"{BASE}/ai/chat/messages", headers=h_a, timeout=10)
     msgs = resp.json().get("data", {}).get("messages") or []
-    check("ai-agent 不可达时历史仍为空", len(msgs) == 0, f"got {len(msgs)} 条（不应入库脏历史）")
+    check("ai-agent 不可达时仍保留失败对话", len(msgs) >= 2, f"got {len(msgs)} 条")
+    if len(msgs) >= 2:
+        check("失败对话首条 role=user", msgs[0].get("role") == "user", str(msgs[0]))
+        check("失败对话次条 role=assistant", msgs[1].get("role") == "assistant", str(msgs[1]))
 print()
 
 # ── 4. 清空后再查 → 空 ────────────────────────────────────────

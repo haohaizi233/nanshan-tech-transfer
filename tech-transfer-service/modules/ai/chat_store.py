@@ -7,7 +7,7 @@
 设计要点：
 - 只持久化真实对话轮（用户文本、助手文本/卡片）；欢迎语、demand-picker 等过渡 UI 不入库。
 - 卡片存完整快照而非仅 id：加载即开即用、零回查；卡片自带 id，点击仍跳最新详情页。
-- 失败的 AI 调用（503 等）不入库，避免脏历史。
+- 失败的 AI 调用（503 等）由 routes/ai.py 通过 append_turn 入库，刷新后仍可见用户原问题。
 """
 
 from psycopg2.extras import Json
