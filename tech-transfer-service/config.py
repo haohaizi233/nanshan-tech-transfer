@@ -122,6 +122,7 @@ class Settings(BaseSettings):
     MEDIA_ROOT: str = ""
     MEDIA_BASE_URL: str = "/api/tech-transfer/v1/files"
     MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
+    MAX_IMPORT_BYTES: int = 80 * 1024 * 1024
 
     # ── 专利检索 Provider（密钥只在服务端，禁止下发前端）──
     PATENT_PROVIDER_BASE: str = ""

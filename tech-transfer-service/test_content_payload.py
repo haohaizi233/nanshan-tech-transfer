@@ -401,6 +401,24 @@ class ContentPayloadTests(unittest.TestCase):
         with self.assertRaises(BizError):
             parse_content_payload({"industryIds": [0]})
 
+    def test_uploaded_document_rejects_old_ppt_and_empty_payload(self):
+        from modules.achievement.importer import stage_uploaded_document
+        with self.assertRaises(BizError):
+            stage_uploaded_document("成果.ppt", b"not-empty", 1)
+        with self.assertRaises(BizError):
+            stage_uploaded_document("成果.pptx", b"", 1)
+        with self.assertRaises(BizError):
+            stage_uploaded_document("成果.docx", b"not-empty", 1)
+
+    def test_admin_import_upload_route_is_registered(self):
+        route_source = (Path(__file__).parent / "routes" / "admin.py").read_text(encoding="utf-8")
+        importer_source = (Path(__file__).parent / "modules" / "achievement" / "importer.py").read_text(encoding="utf-8")
+        self.assertIn('@router.post("/admin/achievement-imports")', route_source)
+        self.assertIn("stage_uploaded_documents", route_source)
+        self.assertIn("list[UploadFile]", route_source)
+        self.assertIn("def stage_uploaded_documents", importer_source)
+        self.assertIn("旧版 .ppt 请先另存为 .pptx 后再导入", importer_source)
+
 
 if __name__ == "__main__":
     unittest.main()

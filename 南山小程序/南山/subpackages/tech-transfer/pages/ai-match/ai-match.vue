@@ -20,8 +20,18 @@
 			:scroll-into-view="scrollIntoView"
 			scroll-with-animation
 		>
+			<view v-if="chatPreview.collapsed" class="history-fold" @click="historyExpanded = true">
+				<text class="history-fold__text">更早的 {{ chatPreview.hiddenCount }} 条对话已折叠，点击展开</text>
+			</view>
 			<view
-				v-for="msg in messages"
+				v-else-if="chatPreview.canCollapse"
+				class="history-fold history-fold--open"
+				@click="historyExpanded = false"
+			>
+				<text class="history-fold__text">收起较早对话</text>
+			</view>
+			<view
+				v-for="msg in visibleMessages"
 				:id="'msg-' + msg.id"
 				:key="msg.id"
 			>
@@ -131,8 +141,39 @@
 			</view>
 		</view>
 
+		<view v-if="pendingQueue.length" class="queue-dock">
+			<view class="queue-dock__head">
+				<text class="queue-dock__title">排队 {{ pendingQueue.length }} 条，生成结束后自动发送</text>
+				<text
+					v-if="queuePreview.collapsed"
+					class="queue-dock__toggle"
+					@click="queueExpanded = true"
+				>展开</text>
+				<text
+					v-else-if="pendingQueue.length > queuePreviewCount"
+					class="queue-dock__toggle"
+					@click="queueExpanded = false"
+				>收起</text>
+			</view>
+			<view
+				v-for="item in queuePreview.visible"
+				:key="item.id"
+				class="queue-item"
+			>
+				<text class="queue-item__text">{{ item.text }}</text>
+				<text class="queue-item__remove" @click.stop="removeQueued(item.id)">取消</text>
+			</view>
+			<view
+				v-if="queuePreview.collapsed"
+				class="queue-item queue-item--more"
+				@click="queueExpanded = true"
+			>
+				<text class="queue-item__text">还有 {{ queuePreview.hiddenCount }} 条已折叠</text>
+			</view>
+		</view>
+
 		<view class="composer">
-			<text class="composer__hint">回答由人工智能生成，请注意甄别</text>
+			<text class="composer__hint">{{ composerHint }}</text>
 			<view class="composer__row">
 			<input
 				class="composer__input"
@@ -140,11 +181,10 @@
 				:value="inputText"
 				placeholder="输入问题，或 / 调用技能"
 				confirm-type="send"
-				:disabled="typing"
 				@input="onInput"
 				@confirm="onSend"
 			/>
-			<button class="composer__btn" size="mini" :disabled="typing" @click="onSend">发送</button>
+			<button class="composer__btn" size="mini" :disabled="!canSend" @click="onSend">{{ sendLabel }}</button>
 			</view>
 		</view>
 
@@ -172,6 +212,21 @@
 		formatAgentReply,
 		cardNavigateTarget
 	} from '../../api/ai-chat.mjs'
+	import {
+		CHAT_COLLAPSE_THRESHOLD,
+		INFLIGHT_POLL_MS,
+		INFLIGHT_WAIT_MS,
+		MAX_QUEUE_SIZE,
+		QUEUE_PREVIEW_COUNT,
+		dequeueMessage,
+		enqueueMessage,
+		findInflightStatus,
+		loadQueueState,
+		previewChatMessages,
+		previewQueue,
+		removeQueueItem,
+		saveQueueState
+	} from '../../api/ai-chat-queue.mjs'
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
@@ -180,6 +235,10 @@
 	const SUBPACKAGE_ROOT = '/subpackages/tech-transfer/'
 
 	const ACTIVE_STATUSES = ['published', 'matched']
+
+	function waitMs(ms) {
+		return new Promise((resolve) => setTimeout(resolve, ms))
+	}
 
 	export default {
 		components: {
@@ -193,25 +252,72 @@
 			suggestions: getChatSuggestions(),
 			inputText: '',
 			typing: false,
-			scrollIntoView: ''
+			scrollIntoView: '',
+			pendingQueue: [],
+			inflightText: '',
+			queueExpanded: false,
+			historyExpanded: false,
+			waitingDemandPick: false,
+			queuePreviewCount: QUEUE_PREVIEW_COUNT
 		}
 	},
 	computed: {
 		showSuggestions() {
-			return !this.typing && this.messages.length <= 1
+			return !this.typing && this.messages.length <= 1 && !this.pendingQueue.length
 		},
 		skillOptions() {
 			return isSlashDraft(this.inputText) ? filterSkills(this.inputText) : []
+		},
+		canSend() {
+			return !!(this.inputText || '').trim()
+		},
+		sendLabel() {
+			return this.typing ? '排队' : '发送'
+		},
+		composerHint() {
+			if (this.typing) return '正在生成中，发送后会排队，结束后自动发出'
+			if (this.pendingQueue.length) return '还有排队消息，当前回复结束后会自动发送'
+			return '回答由人工智能生成，请注意甄别'
+		},
+		chatPreview() {
+			const preview = previewChatMessages(this.messages, this.historyExpanded)
+			return {
+				...preview,
+				canCollapse: this.historyExpanded && this.messages.length > CHAT_COLLAPSE_THRESHOLD
+			}
+		},
+		visibleMessages() {
+			return this.chatPreview.visible
+		},
+		queuePreview() {
+			return previewQueue(this.pendingQueue, this.queueExpanded)
 		}
 	},
 	onLoad() {
+		this._alive = true
 		if (!this.aiEnabled) {
 			uni.setNavigationBarTitle({ title: '南山科转通' })
 			return
 		}
-		this.loadHistory()
+		this.resumeSession()
+	},
+	onHide() {
+		if (!this.aiEnabled) return
+		this.persistQueue()
+	},
+	onUnload() {
+		this._alive = false
+		if (!this.aiEnabled) return
+		this.persistQueue()
 	},
 	methods: {
+		persistQueue() {
+			saveQueueState({
+				queue: this.pendingQueue,
+				inflight: this.inflightText,
+				draft: this.inputText,
+			}, uni)
+		},
 		async loadHistory() {
 			// 从后端回放历史聊天（切页/重登后不丢）。欢迎语前置，历史卡片快照复用
 			// 现有 agent-cards 模板渲染，openCard 仍按 card.id 跳最新详情页。
@@ -232,6 +338,74 @@
 				// 历史拉取失败时保留欢迎语，不阻塞当前会话
 				this.messages = [createWelcomeMessage()]
 			}
+		},
+		ensureLocalUserMessage(text) {
+			const last = this.messages[this.messages.length - 1]
+			if (last && last.role === 'user' && last.content === text) return
+			this.messages.push(createMessage('user', text))
+			this.scrollToBottom()
+		},
+		async waitForInflightTurn(text) {
+			const deadline = Date.now() + INFLIGHT_WAIT_MS
+			while (this._alive && Date.now() < deadline) {
+				await waitMs(INFLIGHT_POLL_MS)
+				if (!this._alive) return 'left'
+				await this.loadHistory()
+				if (findInflightStatus(this.messages, text) === 'done') return 'done'
+				this.ensureLocalUserMessage(text)
+			}
+			return 'timeout'
+		},
+		async resumeSession() {
+			const saved = loadQueueState(uni)
+			this.pendingQueue = saved.queue
+			if (saved.draft) this.inputText = saved.draft
+			this.inflightText = saved.inflight
+			await this.loadHistory()
+			if (!this._alive) return
+			const status = findInflightStatus(this.messages, this.inflightText)
+			if (status === 'idle' || status === 'done') {
+				this.inflightText = ''
+				this.persistQueue()
+				this.pumpQueue()
+				return
+			}
+			this.ensureLocalUserMessage(this.inflightText)
+			this.typing = true
+			const result = await this.waitForInflightTurn(this.inflightText)
+			if (!this._alive) return
+			this.typing = false
+			if (result === 'done') {
+				this.inflightText = ''
+				this.persistQueue()
+				this.pumpQueue()
+				return
+			}
+			const text = this.inflightText
+			this.inflightText = ''
+			this.dispatchUserText(text)
+		},
+		pumpQueue() {
+			if (!this._alive || this.typing || this.waitingDemandPick) return
+			const { queue, item } = dequeueMessage(this.pendingQueue)
+			if (!item) {
+				this.persistQueue()
+				return
+			}
+			this.pendingQueue = queue
+			this.persistQueue()
+			this.dispatchUserText(item.text)
+		},
+		finishTurn() {
+			this.typing = false
+			this.inflightText = ''
+			this.persistQueue()
+			this.scrollToBottom()
+			if (this._alive) this.pumpQueue()
+		},
+		removeQueued(id) {
+			this.pendingQueue = removeQueueItem(this.pendingQueue, id)
+			this.persistQueue()
 		},
 		onInput(e) {
 			this.inputText = e.detail.value
@@ -257,10 +431,28 @@
 			onSend() {
 				if (!this.aiEnabled) return
 				const text = (this.inputText || '').trim()
-				if (!text || this.typing) return
+				if (!text) return
+				if (this.typing) {
+					const { queue, item, overflow } = enqueueMessage(this.pendingQueue, text, MAX_QUEUE_SIZE)
+					if (overflow) {
+						uni.showToast({ title: '排队已满，请等待当前回复', icon: 'none' })
+						return
+					}
+					this.inputText = ''
+					this.pendingQueue = queue
+					if (item && this.pendingQueue.length > QUEUE_PREVIEW_COUNT) this.queueExpanded = false
+					this.persistQueue()
+					return
+				}
 				this.inputText = ''
-				this.messages.push(createMessage('user', text))
-				this.scrollToBottom()
+				this.persistQueue()
+				this.dispatchUserText(text)
+			},
+			dispatchUserText(text) {
+				this.waitingDemandPick = false
+				this.ensureLocalUserMessage(text)
+				this.inflightText = text
+				this.persistQueue()
 				const skill = resolveSkillCommand(text)
 				if (skill && skill.id === 'match') {
 					this.runMatchSkill()
@@ -268,6 +460,7 @@
 				}
 				if (text.startsWith('/')) {
 					this.pushMessage('assistant', '未识别的技能。输入 / 查看可用技能，当前支持 /匹配。')
+					this.finishTurn()
 					return
 				}
 				this.runAgentChat(text)
@@ -276,6 +469,7 @@
 				this.typing = true
 				try {
 					const res = await chatWithAgent(text)
+					if (!this._alive) return
 					const reply = formatAgentReply(res)
 					this.pushMessage('assistant', reply.content, {
 						type: reply.type,
@@ -283,14 +477,14 @@
 					})
 					await this.loadHistory()
 				} catch (e) {
+					if (!this._alive) return
 					const code = e && e.code
 					let msg = (e && e.message) || 'AI 助手暂时不可用，请稍后重试。'
 					if (code === 'AI_DISABLED') msg = '该功能即将开放'
 					this.pushMessage('assistant', msg)
 					// 失败时不拉历史：服务端可能尚未入库，loadHistory 会冲掉刚显示的问答
 				} finally {
-					this.typing = false
-					this.scrollToBottom()
+					if (this._alive) this.finishTurn()
 				}
 			},
 			openCard(card) {
@@ -307,10 +501,14 @@
 			},
 			async runMatchSkill() {
 				if (!this.aiEnabled) return
-				if (!ensureLoginForDock()) return
+				if (!ensureLoginForDock()) {
+					this.finishTurn()
+					return
+				}
 				this.typing = true
 				try {
 					const data = await getMyDemands({ page: 1, pageSize: 50 })
+					if (!this._alive) return
 					const demands = (data.list || [])
 						.map(toDemandCard)
 						.filter((d) => ACTIVE_STATUSES.indexOf(d.status) >= 0)
@@ -322,23 +520,33 @@
 						)
 						return
 					}
+					this.waitingDemandPick = true
 					this.pushMessage('assistant', '请选择一条已发布需求，我将为它推荐合适的技术成果：', {
 						type: 'demand-picker',
 						payload: { demands }
 					})
 				} catch (e) {
+					if (!this._alive) return
 					this.pushMessage('assistant', (e && e.message) || '需求加载失败，请稍后重试。')
 				} finally {
+					if (!this._alive) return
 					this.typing = false
+					this.inflightText = ''
+					this.persistQueue()
 					this.scrollToBottom()
+					if (!this.waitingDemandPick) this.pumpQueue()
 				}
 			},
 			async onPickDemand(demand) {
 				if (!this.aiEnabled || this.typing) return
+				this.waitingDemandPick = false
 				this.typing = true
 				this.pushMessage('user', '匹配需求：' + demand.title)
+				this.inflightText = '匹配需求：' + demand.title
+				this.persistQueue()
 				try {
 					const res = await matchDemand(demand.id)
+					if (!this._alive) return
 					const cards = (res && res.cards) || []
 					const agentMsg = (res && res.agentMessage) || ''
 					if (!cards.length) {
@@ -352,13 +560,13 @@
 					)
 					await this.loadHistory()
 				} catch (e) {
+					if (!this._alive) return
 					const code = e && e.code
 					let msg = (e && e.message) || '匹配失败，请稍后重试。'
 					if (code === 'AI_DISABLED') msg = '该功能即将开放'
 					this.pushMessage('assistant', msg)
 				} finally {
-					this.typing = false
-					this.scrollToBottom()
+					if (this._alive) this.finishTurn()
 				}
 			}
 		}
@@ -789,6 +997,82 @@
 		height: 24rpx;
 	}
 
+	.history-fold {
+		margin: 0 0 20rpx;
+		padding: 16rpx 20rpx;
+		background: #ffffff;
+		border: 1rpx dashed #dce6f8;
+		border-radius: 16rpx;
+		text-align: center;
+	}
+
+	.history-fold--open {
+		border-style: solid;
+	}
+
+	.history-fold__text {
+		font-size: 24rpx;
+		color: #2b73f8;
+	}
+
+	.queue-dock {
+		flex: 0 0 auto;
+		margin: 0 20rpx 8rpx;
+		background: #f7f9fc;
+		border: 1rpx solid #dce6f8;
+		border-radius: 16rpx;
+		padding: 12rpx 16rpx 8rpx;
+	}
+
+	.queue-dock__head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8rpx;
+	}
+
+	.queue-dock__title {
+		flex: 1;
+		font-size: 22rpx;
+		color: #666666;
+		padding-right: 12rpx;
+	}
+
+	.queue-dock__toggle {
+		flex-shrink: 0;
+		font-size: 22rpx;
+		color: #2b73f8;
+	}
+
+	.queue-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 10rpx 0;
+	}
+
+	.queue-item__text {
+		flex: 1;
+		min-width: 0;
+		font-size: 24rpx;
+		color: #333333;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.queue-item__remove {
+		flex-shrink: 0;
+		margin-left: 16rpx;
+		font-size: 22rpx;
+		color: #999999;
+	}
+
+	.queue-item--more .queue-item__text {
+		color: #2b73f8;
+	}
+
 	.skill-sheet {
 		flex: 0 0 auto;
 		margin: 0 20rpx 8rpx;
@@ -874,5 +1158,9 @@
 		background: #2b73f8 !important;
 		color: #ffffff !important;
 		border-radius: 12rpx;
+	}
+
+	.composer__btn[disabled] {
+		opacity: 0.45;
 	}
 </style>

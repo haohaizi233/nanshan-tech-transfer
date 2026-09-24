@@ -60,17 +60,15 @@ def record_history(user_id: int, mode: str, keyword: str) -> dict:
             (user_id, mode, keyword),
         )
         row = cur.fetchone()
-        cur.execute(
-            """
-            DELETE FROM patent_search_history
-            WHERE id IN (
-                SELECT id
-                FROM patent_search_history
-                WHERE user_id=%s AND search_mode=%s
-                ORDER BY updated_at DESC, id DESC
-                OFFSET %s
-            )
-            """,
-            (user_id, mode, HISTORY_LIMIT),
-        )
     return _item(row)
+
+
+def clear_history(user_id: int, mode: str = "keyword") -> dict:
+    mode, _ = normalize_history_input(mode, "_")
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "DELETE FROM patent_search_history WHERE user_id=%s AND search_mode=%s",
+            (user_id, mode),
+        )
+        deleted = cur.rowcount
+    return {"deleted": deleted}

@@ -9,8 +9,21 @@ import {
 import { useRouter } from 'vue-router'
 
 import { api, getToken } from '../../api/client'
+import {
+  IMPORT_ACCEPT,
+  confirmAndRunAchievementImport,
+  readDirectoryFiles,
+  snapshotFileList,
+  summarizeAchievementImport,
+} from '../../utils/importAchievementDocuments.js'
 import { resolveContentFormActions } from '../../utils/contentFormActions.js'
-import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
+import {
+  alertDialog,
+  closeProgressDialog,
+  confirmDialog,
+  openProgressDialog,
+  updateProgressDialog,
+} from '../../utils/appDialog.js'
 import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
 import { extractAchievementFields, mergeExtractedFields } from '../../utils/extractAchievementFields.js'
 import { useAbortable } from '../../api/useAbortable'
@@ -56,6 +69,10 @@ const loading = ref(false)
 const loadError = ref('')
 
 const exporting = ref(false)
+const importingDocs = ref(false)
+const importProgress = ref('')
+const fileInput = ref(null)
+const folderInput = ref(null)
 
 const modalVisible = ref(false)
 const modalMode = ref('view')
@@ -389,10 +406,7 @@ const loadMediaPreview = async (item) => {
       headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
     })
     if (!response.ok) return
-    mediaPreviewUrls.value = {
-      ...mediaPreviewUrls.value,
-      [fileId]: URL.createObjectURL(await response.blob()),
-    }
+    mediaPreviewUrls.value[fileId] = URL.createObjectURL(await response.blob())
   } catch {
     // 无权限或文件失效时仍保留文件名，避免阻断整张表单。
   }
@@ -771,6 +785,60 @@ const downloadAchievement = item => {
   URL.revokeObjectURL(url)
 }
 
+const openFilePicker = () => {
+  if (importingDocs.value) return
+  fileInput.value?.click()
+}
+
+const openFolderPicker = async () => {
+  if (importingDocs.value) return
+  if (typeof window.showDirectoryPicker === 'function') {
+    try {
+      const dir = await window.showDirectoryPicker({ mode: 'read' })
+      await runImportFlow(await readDirectoryFiles(dir))
+    } catch (error) {
+      if (error?.name === 'AbortError') return
+      await alertDialog({ title: '导入失败', message: error.message || '无法读取文件夹' })
+    }
+    return
+  }
+  folderInput.value?.click()
+}
+
+const importDocuments = async event => {
+  const files = snapshotFileList(event.target.files)
+  event.target.value = ''
+  await runImportFlow(files)
+}
+
+const runImportFlow = async files => {
+  if (!files?.length || importingDocs.value) return
+  importingDocs.value = true
+  try {
+    const data = await confirmAndRunAchievementImport(files, {
+      api,
+      confirmDialog,
+      openProgressDialog,
+      updateProgressDialog,
+      closeProgressDialog,
+    })
+    if (!data) return
+    await alertDialog({
+      title: '导入完成',
+      message: summarizeAchievementImport(data) + '。可在导入暂存页预览并发布。',
+    })
+    router.push('/admin/achievement-imports')
+  } catch (error) {
+    await alertDialog({
+      title: error.code === 'NO_IMPORT_FILES' ? '未找到可导入文件' : '导入失败',
+      message: error.message || '请检查文件后重试',
+    })
+  } finally {
+    importingDocs.value = false
+    importProgress.value = ''
+  }
+}
+
 const exportData = async () => {
   if (exporting.value) return
 
@@ -947,7 +1015,13 @@ onMounted(() => {
         </div>
 
         <div class="right-actions">
-          <button v-if="isPlatformAdmin" type="button" class="default-button" @click="router.push('/admin/achievement-imports')">导入暂存</button>
+          <template v-if="isPlatformAdmin">
+            <input ref="fileInput" class="hidden-file" type="file" :accept="IMPORT_ACCEPT" multiple @change="importDocuments" />
+            <input ref="folderInput" class="hidden-file" type="file" webkitdirectory directory multiple @change="importDocuments" />
+            <button type="button" class="primary-button" :disabled="importingDocs" @click="openFilePicker">{{ importingDocs ? (importProgress || '导入中…') : '选择文件' }}</button>
+            <button type="button" class="default-button" :disabled="importingDocs" @click="openFolderPicker">导入文件夹</button>
+            <button type="button" class="default-button" @click="router.push('/admin/achievement-imports')">导入暂存</button>
+          </template>
           <button type="button" class="primary-button" @click="openCreate">新增成果</button>
           <button
             type="button"
@@ -1666,6 +1740,37 @@ onMounted(() => {
 .reject-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.file-button {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-button.disabled {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.hidden-file {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
 }
 
 .table-card {

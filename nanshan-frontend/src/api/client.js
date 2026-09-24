@@ -149,8 +149,10 @@ export async function api(path, {
 }
 
 async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet }) {
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData
   const buildHeaders = () => {
-    const headers = { 'Content-Type': 'application/json' }
+    const headers = {}
+    if (!isForm) headers['Content-Type'] = 'application/json'
     const token = getToken()
     if (token) {
       headers.Authorization = `Bearer ${token}`
@@ -162,7 +164,7 @@ async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn40
     fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : (isForm ? body : JSON.stringify(body)),
       signal: attemptSignal || signal,
     })
 

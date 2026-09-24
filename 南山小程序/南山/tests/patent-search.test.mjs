@@ -20,6 +20,20 @@ test('patent type labels stay user-facing', () => {
 test('patent search client provides server-backed recent-query methods', () => {
   assert.equal(typeof patentApi.getPatentSearchHistory, 'function')
   assert.equal(typeof patentApi.savePatentSearchHistory, 'function')
+  assert.equal(typeof patentApi.clearPatentSearchHistory, 'function')
+  assert.equal(typeof patentApi.getAllPatentSearchHistory, 'function')
+  assert.equal(typeof patentApi.clearAllPatentSearchHistory, 'function')
+})
+
+test('patent search history is merged across keyword and assignee modes', () => {
+  const merged = patentApi.mergePatentSearchHistory(
+    [{ keyword: '科技经济', mode: 'keyword', updatedAt: '2026-09-21T08:00:00' }],
+    [{ keyword: '华南理工大学', mode: 'assignee', updatedAt: '2026-09-21T09:00:00' }],
+  )
+  assert.equal(merged.length, 2)
+  assert.equal(merged[0].keyword, '华南理工大学')
+  assert.equal(merged[0].mode, 'assignee')
+  assert.equal(merged[1].keyword, '科技经济')
 })
 
 test('patent detail decodes every routed preview field before rendering', () => {
@@ -116,6 +130,16 @@ test('patent pages are registered and never mention upstream hosts', () => {
     assert.doesNotMatch(source, /43\.138\.138\.200:8081/)
   }
 
+  const listPage = readFileSync(
+    new URL('../subpackages/tech-transfer/pages/patent-list/patent-list.vue', import.meta.url),
+    'utf8',
+  )
+  assert.doesNotMatch(listPage, /max-height:\s*92rpx/)
+  assert.match(listPage, /history-tags\.is-expanded/)
+  assert.match(listPage, /收起/)
+  assert.match(listPage, /onClearHistory/)
+  assert.match(listPage, /清空/)
+
   const detail = readFileSync(
     new URL('../subpackages/tech-transfer/pages/patent-detail/patent-detail.vue', import.meta.url),
     'utf8',
@@ -134,6 +158,8 @@ test('patent client talks only to the local patents API', () => {
     'utf8',
   )
   assert.match(api, /apiRequest\('GET', '\/patents'/)
+  assert.match(api, /retryRequest\(\(\) => apiRequest\('GET', '\/patents'/)
+  assert.match(api, /attempts:\s*3/)
   assert.match(api, /\/patents\/\$\{encodeURIComponent\(publicationNo\)\}/)
   assert.match(api, /\/pdf\/pages/)
   assert.doesNotMatch(api, /openDocument/)

@@ -2,7 +2,7 @@
 
 from core.errors import BizError
 from db import get_cursor
-from modules.patent.history import list_history, normalize_history_input, record_history
+from modules.patent.history import clear_history, list_history, normalize_history_input, record_history
 
 
 def main():
@@ -35,6 +35,30 @@ def main():
         assert len(assignee_rows) == 1
         assert assignee_rows[0]["keyword"] == f"{prefix}assignee"
         assert assignee_rows[0]["mode"] == "assignee"
+        # 触发器兜底：绕过服务层连插 12 条，库内仍只留 10
+        with get_cursor(commit=True) as cur:
+            for number in range(12):
+                cur.execute(
+                    """
+                    INSERT INTO patent_search_history (user_id, search_mode, keyword)
+                    VALUES (%s, 'keyword', %s)
+                    ON CONFLICT (user_id, search_mode, keyword)
+                    DO UPDATE SET updated_at=CURRENT_TIMESTAMP
+                    """,
+                    (user_id, f"{prefix}raw_{number}"),
+                )
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n FROM patent_search_history
+                WHERE user_id=%s AND search_mode='keyword' AND keyword LIKE %s
+                """,
+                (user_id, prefix + "%"),
+            )
+            assert cur.fetchone()["n"] == 10
+        cleared = clear_history(user_id, "keyword")
+        assert cleared["deleted"] >= 10
+        assert list_history(user_id, "keyword")["list"] == []
+        assert list_history(user_id, "assignee")["list"]
     finally:
         with get_cursor(commit=True) as cur:
             cur.execute("DELETE FROM patent_search_history WHERE user_id=%s AND keyword LIKE %s", (user_id, prefix + "%"))

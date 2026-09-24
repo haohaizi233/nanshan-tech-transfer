@@ -4,7 +4,7 @@ admin 路由 —— 管理审核组（06-api-design.md §15）
 统一：需登录 + user_role 实时校验 admin 角色（非 admin 403 TT_ADMIN_40301）；
 写操作幂等由状态机校验保证（重复审核 409），不要求 X-Idempotency-Key；全部记审计。
 """
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from core.response import success, get_request_id
 from core.middleware import admin_identity, backend_identity
@@ -39,7 +39,14 @@ from modules.admin.service import (
     soft_delete_achievement_admin,
     soft_delete_demand_admin,
 )
-from modules.achievement.importer import list_import_batches, get_import_batch, confirm_import_item, clear_import_batches, publish_import_item
+from modules.achievement.importer import (
+    list_import_batches,
+    get_import_batch,
+    confirm_import_item,
+    clear_import_batches,
+    publish_import_item,
+    stage_uploaded_documents,
+)
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
 
@@ -47,6 +54,27 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])
 @router.get("/admin/achievement-imports")
 def admin_achievement_imports(request: Request, admin: dict = Depends(admin_identity)):
     return success(list_import_batches(request.query_params.get("page", 1), request.query_params.get("pageSize", 20)))
+
+
+@router.post("/admin/achievement-imports")
+async def admin_achievement_import_upload(
+    files: list[UploadFile] = File(...),
+    sourceOrg: str = Form(""),
+    admin: dict = Depends(admin_identity),
+):
+    """管理员上传 PPTX/PDF，解析后写入导入暂存，不自动发布。"""
+    uploads = []
+    for item in files:
+        uploads.append((item.filename or "upload.pptx", await item.read()))
+        await item.close()
+    created_by = int(admin.get("userId") or admin.get("id") or 0)
+    if not created_by:
+        from core.errors import bad_request
+        raise bad_request("无法识别导入人")
+    return success(
+        stage_uploaded_documents(uploads, created_by, (sourceOrg or "").strip() or None),
+        "导入暂存已创建",
+    )
 
 
 # 静态段（clear）必须在 {batch_id} 之前注册，避免被动态 catch-all 吞掉。

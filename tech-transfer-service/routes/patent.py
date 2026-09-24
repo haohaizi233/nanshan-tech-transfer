@@ -20,7 +20,7 @@ from modules.patent.service import (
     render_patent_pdf_page,
     search_patents,
 )
-from modules.patent.history import list_history, record_history
+from modules.patent.history import clear_history, list_history, record_history
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["patents"])
 
@@ -41,6 +41,11 @@ def patent_search_history(mode: str = "keyword", user: dict = Depends(identity))
 def record_patent_search_history(body: PatentSearchHistoryRequest, user: dict = Depends(identity)):
     payload = body.as_dict()
     return success(record_history(user["userId"], payload.get("mode"), payload.get("keyword")))
+
+
+@router.delete("/patents/search-history")
+def patent_search_history_clear(mode: str = "keyword", user: dict = Depends(identity)):
+    return success(clear_history(user["userId"], mode), "搜索记录已清空")
 
 
 @router.get("/patents/{publication_no}/pdf")

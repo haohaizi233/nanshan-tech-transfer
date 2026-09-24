@@ -12,6 +12,8 @@ const DEFAULTS = {
   inputPlaceholder: '',
   inputRequired: false,
   error: '',
+  percent: 0,
+  detail: '',
 }
 
 export const dialogState = reactive({ ...DEFAULTS })
@@ -104,6 +106,7 @@ export function promptDialog({
 
 export function submitDialog() {
   if (!dialogState.visible) return
+  if (dialogState.type === 'progress') return
   if (dialogState.type === 'prompt') {
     const value = String(dialogState.inputValue || '').trim()
     if (dialogState.inputRequired && !value) {
@@ -118,5 +121,45 @@ export function submitDialog() {
 
 export function cancelDialog() {
   if (!dialogState.visible) return
+  if (dialogState.type === 'progress') return
   finish(dialogState.type === 'prompt' ? null : dialogState.type === 'alert' ? undefined : false)
+}
+
+export function openProgressDialog({
+  title = '正在处理',
+  message = '',
+  percent = 0,
+  detail = '',
+} = {}) {
+  pendingResolve = null
+  Object.assign(dialogState, DEFAULTS, {
+    visible: true,
+    type: 'progress',
+    title,
+    message,
+    percent: clampPercent(percent),
+    detail,
+  })
+}
+
+export function updateProgressDialog({ title, message, percent, detail } = {}) {
+  if (!dialogState.visible || dialogState.type !== 'progress') return
+  if (title != null) dialogState.title = title
+  if (message != null) dialogState.message = message
+  if (detail != null) dialogState.detail = detail
+  if (percent != null) dialogState.percent = clampPercent(percent)
+}
+
+export function closeProgressDialog() {
+  if (!dialogState.visible || dialogState.type !== 'progress') return
+  dialogState.visible = false
+  Object.assign(dialogState, DEFAULTS)
+  const next = queue.shift()
+  if (next) show(next)
+}
+
+function clampPercent(value) {
+  const percent = Number(value)
+  if (!Number.isFinite(percent)) return 0
+  return Math.max(0, Math.min(100, Math.round(percent)))
 }

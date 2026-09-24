@@ -5,6 +5,7 @@
  */
 
 import { apiRequest } from './client.js'
+import { retryRequest } from './request-retry.js'
 import HostBridge from '../../../host/host-bridge.js'
 import { resolveServiceOrigin } from './api-origin.js'
 
@@ -23,20 +24,66 @@ export async function searchPatents(params = {}) {
   const query = { page, pageSize }
   if (keyword) query.keyword = keyword
   if (assignee) query.assignee = assignee
-  return apiRequest('GET', '/patents', query)
+  return retryRequest(() => apiRequest('GET', '/patents', query), { attempts: 3 })
 }
 
 export function getPatentSearchHistory(mode = 'keyword') {
   return apiRequest('GET', '/patents/search-history', { mode })
 }
 
+export function mergePatentSearchHistory(keywordList, assigneeList, limit = 10) {
+  const rows = []
+  for (const item of [...(keywordList || []), ...(assigneeList || [])]) {
+    if (!item || !item.keyword) continue
+    rows.push({
+      keyword: item.keyword,
+      mode: item.mode === 'assignee' ? 'assignee' : 'keyword',
+      updatedAt: item.updatedAt || '',
+    })
+  }
+  rows.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+  const seen = new Set()
+  const unique = []
+  for (const item of rows) {
+    const key = `${item.mode}:${item.keyword}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(item)
+    if (unique.length >= limit) break
+  }
+  return unique
+}
+
+export async function getAllPatentSearchHistory() {
+  const [keyword, assignee] = await Promise.all([
+    getPatentSearchHistory('keyword'),
+    getPatentSearchHistory('assignee'),
+  ])
+  return mergePatentSearchHistory(keyword && keyword.list, assignee && assignee.list)
+}
+
+export async function clearAllPatentSearchHistory() {
+  const [keyword, assignee] = await Promise.all([
+    clearPatentSearchHistory('keyword'),
+    clearPatentSearchHistory('assignee'),
+  ])
+  return { keyword, assignee }
+}
+
 export function savePatentSearchHistory(keyword, mode = 'keyword') {
   return apiRequest('POST', '/patents/search-history', undefined, { keyword, mode })
 }
 
+export function clearPatentSearchHistory(mode = 'keyword') {
+  return apiRequest('DELETE', '/patents/search-history', { mode })
+}
+
 export async function getPatentDetail(publicationNo, language = '') {
   const query = language ? { language } : undefined
-  return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}`, query)
+  return retryRequest(
+    () => apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}`, query),
+    { attempts: 3 },
+  )
 }
 
 export function resolvePatentApiOrigin(env = {}, pageLocation = globalThis.location) {

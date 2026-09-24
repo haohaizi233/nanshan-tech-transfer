@@ -4,8 +4,10 @@ from __future__ import annotations
 import gc
 import json
 import re
+import tempfile
 from pathlib import Path
 
+from config import settings
 from core.errors import BizError, bad_request
 from db import get_cursor
 from modules.audit.service import record as audit_record
@@ -606,6 +608,63 @@ def stage_document(path: str | Path, created_by: int | None, source_org_name: st
                     pass
         raise
     return {"batchId": batch_id, "total": len(records), "staged": sum(not r["errors"] for r in records), "failed": sum(bool(r["errors"]) for r in records)}
+
+
+def _safe_import_filename(filename: str, suffix: str) -> str:
+    name = Path(str(filename or "")).name.strip()
+    cleaned = re.sub(r"[^\w.\u4e00-\u9fff-]+", "_", name).strip("._")
+    if not cleaned:
+        return f"import{suffix}"
+    if not cleaned.lower().endswith(suffix):
+        cleaned = f"{cleaned}{suffix}"
+    return cleaned[:180]
+
+
+def stage_uploaded_document(filename: str, data: bytes, created_by: int | None, source_org_name: str | None = None) -> dict:
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix == ".ppt":
+        raise bad_request("旧版 .ppt 请先另存为 .pptx 后再导入")
+    if suffix not in {".pptx", ".pdf"}:
+        raise bad_request("只支持 .pptx 或 .pdf 导入")
+    if not data:
+        raise bad_request("导入文件为空")
+    max_bytes = int(getattr(settings, "MAX_IMPORT_BYTES", 0) or settings.MAX_UPLOAD_BYTES)
+    if len(data) > max_bytes:
+        raise bad_request(f"导入文件不能超过 {max_bytes // 1024 // 1024}MB")
+    with tempfile.TemporaryDirectory(prefix="tt-import-") as tmpdir:
+        path = Path(tmpdir) / _safe_import_filename(filename, suffix)
+        path.write_bytes(data)
+        return stage_document(path, created_by, source_org_name)
+
+
+def stage_uploaded_documents(
+    uploads: list[tuple[str, bytes]],
+    created_by: int | None,
+    source_org_name: str | None = None,
+) -> dict:
+    if not uploads:
+        raise bad_request("请选择要导入的 PPTX 或 PDF 文件")
+    batches = []
+    errors = []
+    for filename, data in uploads:
+        display_name = Path(str(filename or "未命名")).name or "未命名"
+        try:
+            result = stage_uploaded_document(filename, data, created_by, source_org_name)
+            batches.append({"filename": display_name, **result})
+        except BizError as error:
+            errors.append({"filename": display_name, "message": error.message})
+    if not batches:
+        raise bad_request(errors[0]["message"] if errors else "导入失败")
+    payload = {
+        "list": batches,
+        "errors": errors,
+        "total": sum(item["total"] for item in batches),
+        "staged": sum(item["staged"] for item in batches),
+        "failed": sum(item["failed"] for item in batches),
+    }
+    if len(batches) == 1:
+        payload["batchId"] = batches[0]["batchId"]
+    return payload
 
 
 def list_import_batches(page: int = 1, page_size: int = 20) -> dict:

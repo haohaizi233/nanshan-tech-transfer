@@ -28,8 +28,16 @@
     </view>
 
     <view v-if="history.length" class="history-box">
-      <text class="history-title">搜索记录</text>
-      <view class="history-tags">
+      <view class="history-head">
+        <text class="history-title">搜索记录</text>
+        <view class="history-actions">
+          <text class="history-clear" @click="onClearHistory">清空</text>
+          <text v-if="history.length > 5" class="history-toggle" @click="toggleHistory">
+            {{ historyExpanded ? '收起' : '展开' }}
+          </text>
+        </view>
+      </view>
+      <view class="history-tags" :class="{ 'is-expanded': historyExpanded }">
         <text
           v-for="item in history"
           :key="`${item.mode}-${item.keyword}`"
@@ -93,7 +101,8 @@
 
 <script>
 import {
-  getPatentSearchHistory,
+  clearAllPatentSearchHistory,
+  getAllPatentSearchHistory,
   getPatentTypeLabel,
   savePatentSearchHistory,
   searchPatents,
@@ -114,6 +123,7 @@ export default {
       searched: false,
       error: '',
       history: [],
+      historyExpanded: false,
     }
   },
   onLoad() {
@@ -141,10 +151,31 @@ export default {
     clearKeyword() {
       this.keyword = ''
     },
-    switchMode(mode) {
+    toggleHistory() {
+      this.historyExpanded = !this.historyExpanded
+    },
+    onClearHistory() {
+      uni.showModal({
+        title: '提示',
+        content: '确定清空全部搜索记录吗？',
+        success: (res) => {
+          if (!res.confirm) return
+          clearAllPatentSearchHistory()
+            .then(() => {
+              this.history = []
+              this.historyExpanded = false
+            })
+            .catch(() => {
+              uni.showToast({ title: '清空失败', icon: 'none' })
+            })
+        },
+      })
+    },
+    async switchMode(mode) {
       if (this.mode === mode) return
       this.mode = mode
-      this.loadHistory()
+      this.historyExpanded = false
+      await this.loadHistory()
       if (this.searched && this.keyword.trim()) {
         this.loadList(true)
       }
@@ -160,8 +191,7 @@ export default {
     },
     async loadHistory() {
       try {
-        const data = await getPatentSearchHistory(this.mode)
-        this.history = (data && data.list) || []
+        this.history = await getAllPatentSearchHistory()
       } catch (e) {
         this.history = []
       }
@@ -302,30 +332,54 @@ export default {
 }
 
 .history-box {
-  padding: 18rpx 24rpx 0;
+  padding: 18rpx 24rpx 20rpx;
   background: #fff;
   border-bottom: 1rpx solid #f0f0f0;
 }
 
-.history-title {
-  display: block;
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 12rpx;
+}
+
+.history-title {
   color: #697386;
   font-size: 24rpx;
   line-height: 32rpx;
 }
 
+.history-actions {
+  display: flex;
+  align-items: center;
+}
+
+.history-clear,
+.history-toggle {
+  color: #2b73f8;
+  font-size: 24rpx;
+  line-height: 32rpx;
+  padding: 4rpx 0 4rpx 16rpx;
+}
+
 .history-tags {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 12rpx;
-  max-height: 92rpx;
+  /* 两行完整标签：48rpx * 2 + 12rpx 行距，避免拦腰截断第二行 */
+  max-height: 108rpx;
   overflow: hidden;
-  padding-bottom: 18rpx;
+}
+
+.history-tags.is-expanded {
+  max-height: none;
 }
 
 .history-tag {
   max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
   padding: 8rpx 20rpx;
   border-radius: 24rpx;

@@ -9,6 +9,7 @@ import {
 
 const isPrompt = computed(() => dialogState.type === 'prompt')
 const isAlert = computed(() => dialogState.type === 'alert')
+const isProgress = computed(() => dialogState.type === 'progress')
 const confirmClass = computed(() => (
   dialogState.tone === 'danger' ? 'app-dialog-confirm danger' : 'app-dialog-confirm'
 ))
@@ -76,8 +77,8 @@ onBeforeUnmount(() => {
 
 const onKeydown = (event) => {
   if (event.key === 'Escape') {
-    // alert 类型为模态提示，不允许 ESC 关闭；confirm/prompt 允许。
-    if (!isAlert.value) {
+    // 进度弹窗不可中断；alert 也不允许 ESC 关闭。
+    if (!isAlert.value && !isProgress.value) {
       event.preventDefault()
       cancelDialog()
     }
@@ -113,7 +114,7 @@ const onKeydown = (event) => {
     <div
       v-if="dialogState.visible"
       class="app-dialog-mask"
-      @click.self="cancelDialog"
+      @click.self="!isProgress && cancelDialog()"
     >
       <section
         ref="dialogRef"
@@ -125,6 +126,7 @@ const onKeydown = (event) => {
         <header class="app-dialog-header">
           <h2 id="app-dialog-title">{{ dialogState.title }}</h2>
           <button
+            v-if="!isProgress"
             type="button"
             class="app-dialog-close"
             aria-label="关闭"
@@ -136,6 +138,12 @@ const onKeydown = (event) => {
 
         <div class="app-dialog-body">
           <p v-if="dialogState.message">{{ dialogState.message }}</p>
+          <div v-if="isProgress" class="app-dialog-progress" role="progressbar" :aria-valuenow="dialogState.percent" aria-valuemin="0" aria-valuemax="100">
+            <div class="app-dialog-progress-track">
+              <div class="app-dialog-progress-bar" :style="{ width: dialogState.percent + '%' }" />
+            </div>
+            <p class="app-dialog-progress-meta">{{ dialogState.percent }}%{{ dialogState.detail ? ` · ${dialogState.detail}` : '' }}</p>
+          </div>
           <textarea
             v-if="isPrompt"
             v-model="dialogState.inputValue"
@@ -151,7 +159,7 @@ const onKeydown = (event) => {
           </p>
         </div>
 
-        <footer class="app-dialog-footer">
+        <footer v-if="!isProgress" class="app-dialog-footer">
           <button
             v-if="!isAlert"
             type="button"
@@ -281,5 +289,31 @@ const onKeydown = (event) => {
 
 .app-dialog-confirm.danger {
   background: #ef5360;
+}
+
+.app-dialog-progress {
+  margin-top: 16px;
+}
+
+.app-dialog-progress-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef6;
+}
+
+.app-dialog-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: #1677ff;
+  transition: width .2s ease;
+}
+
+.app-dialog-progress-meta {
+  margin: 10px 0 0;
+  color: #66778b;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
 }
 </style>

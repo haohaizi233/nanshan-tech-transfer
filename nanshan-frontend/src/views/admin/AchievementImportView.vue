@@ -1,8 +1,21 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { api, getToken } from '../../api/client'
-import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
+import {
+  alertDialog,
+  closeProgressDialog,
+  confirmDialog,
+  openProgressDialog,
+  updateProgressDialog,
+} from '../../utils/appDialog.js'
+import {
+  IMPORT_ACCEPT,
+  confirmAndRunAchievementImport,
+  readDirectoryFiles,
+  snapshotFileList,
+  summarizeAchievementImport,
+} from '../../utils/importAchievementDocuments.js'
 
 const batches = ref([])
 const loading = ref(false)
@@ -12,7 +25,15 @@ const detailLoading = ref(false)
 const publishingId = ref(null)
 const clearing = ref(false)
 const candidateImageUrls = ref({})
+const candidateImageErrors = ref({})
+const inflightImageIds = new Set()
+const lightboxIndex = ref(-1)
 const activeItemIndex = ref(0)
+const importing = ref(false)
+const importProgress = ref('')
+const sourceOrg = ref('')
+const fileInput = ref(null)
+const folderInput = ref(null)
 
 const formatTime = value => value ? String(value).replace('T', ' ').slice(0, 16) : '—'
 
@@ -32,7 +53,8 @@ const previewImages = computed(() => {
   return images.map(img => ({
     fileId: img.fileId,
     filename: img.filename,
-    url: candidateImageUrls.value[img.fileId] || '',
+    url: candidateImageUrls.value[Number(img.fileId)] || candidateImageUrls.value[img.fileId] || '',
+    failed: Boolean(candidateImageErrors.value[Number(img.fileId)] || candidateImageErrors.value[img.fileId]),
     width: img.width,
     height: img.height,
   }))
@@ -45,29 +67,46 @@ const previewLinks = computed(() => activeNormalized.value.links || [])
 
 async function loadCandidateImage(image) {
   const fileId = Number(image?.fileId)
-  if (!fileId || candidateImageUrls.value[fileId]) return
+  if (!fileId || candidateImageUrls.value[fileId] || inflightImageIds.has(fileId)) return
+  inflightImageIds.add(fileId)
   try {
     const response = await fetch(`/api/tech-transfer/v1/files/${fileId}`, {
       headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
     })
-    if (!response.ok) return
-    candidateImageUrls.value = {
-      ...candidateImageUrls.value,
-      [fileId]: URL.createObjectURL(await response.blob()),
+    if (!response.ok) {
+      candidateImageErrors.value[fileId] = true
+      return
     }
-  } catch { /* keep metadata visible even if file unreadable */ }
-}
-
-function loadCandidateImages(batch) {
-  for (const item of batch?.items || []) {
-    for (const image of item.raw?.images || []) loadCandidateImage(image)
+    const blob = await response.blob()
+    const typed = blob.type && blob.type.startsWith('image/') ? blob : new Blob([blob], { type: image?.mimeType || 'image/jpeg' })
+    // 就地写入，避免多张图并行完成后互相覆盖，只剩最后一张能预览。
+    candidateImageUrls.value[fileId] = URL.createObjectURL(typed)
+  } catch {
+    candidateImageErrors.value[fileId] = true
+  }
+  finally {
+    inflightImageIds.delete(fileId)
   }
 }
 
+function loadItemImages(item) {
+  for (const image of item?.raw?.images || []) loadCandidateImage(image)
+}
+
+watch(activeItem, (item) => {
+  lightboxIndex.value = -1
+  if (item) loadItemImages(item)
+})
+
 // 撤销所有已创建的 blob URL，释放 GPU/内存；切换批次或清空暂存时必须调用
 function revokeCandidateUrls() {
-  Object.values(candidateImageUrls.value).forEach(URL.revokeObjectURL)
+  Object.values(candidateImageUrls.value).forEach((url) => {
+    if (url) URL.revokeObjectURL(url)
+  })
   candidateImageUrls.value = {}
+  candidateImageErrors.value = {}
+  inflightImageIds.clear()
+  lightboxIndex.value = -1
 }
 
 async function loadBatches() {
@@ -91,7 +130,7 @@ async function selectBatch(batch) {
   activeItemIndex.value = 0
   try {
     selectedBatch.value = await api(`/admin/achievement-imports/${batch.id}`)
-    loadCandidateImages(selectedBatch.value)
+    loadItemImages(selectedBatch.value.items?.[0])
   } catch (error) {
     await alertDialog({ title: '加载失败', message: error.message || '导入详情加载失败' })
   } finally {
@@ -123,6 +162,64 @@ async function clearStaging() {
   }
 }
 
+function openFilePicker() {
+  if (importing.value) return
+  fileInput.value?.click()
+}
+
+async function openFolderPicker() {
+  if (importing.value) return
+  if (typeof window.showDirectoryPicker === 'function') {
+    try {
+      const dir = await window.showDirectoryPicker({ mode: 'read' })
+      await runImportFlow(await readDirectoryFiles(dir))
+    } catch (error) {
+      if (error?.name === 'AbortError') return
+      await alertDialog({ title: '导入失败', message: error.message || '无法读取文件夹' })
+    }
+    return
+  }
+  folderInput.value?.click()
+}
+
+async function importDocuments(event) {
+  const files = snapshotFileList(event.target.files)
+  event.target.value = ''
+  await runImportFlow(files)
+}
+
+async function runImportFlow(files) {
+  if (!files?.length || importing.value) return
+  importing.value = true
+  try {
+    const data = await confirmAndRunAchievementImport(files, {
+      api,
+      sourceOrg: sourceOrg.value,
+      confirmDialog,
+      openProgressDialog,
+      updateProgressDialog,
+      closeProgressDialog,
+    })
+    if (!data) return
+    await alertDialog({
+      title: '导入完成',
+      message: summarizeAchievementImport(data),
+    })
+    await loadBatches()
+    const nextId = data.batchId || data.list?.[0]?.batchId
+    const next = batches.value.find(item => item.id === nextId) || batches.value[0]
+    if (next) await selectBatch(next)
+  } catch (error) {
+    await alertDialog({
+      title: error.code === 'NO_IMPORT_FILES' ? '未找到可导入文件' : '导入失败',
+      message: error.message || '请检查文件后重试',
+    })
+  } finally {
+    importing.value = false
+    importProgress.value = ''
+  }
+}
+
 async function publishItem(item) {
   if (publishingId.value || item.status !== 'staged' || (item.validationErrors || []).length) return
   const ok = await confirmDialog({
@@ -151,11 +248,16 @@ onBeforeUnmount(revokeCandidateUrls)
     <header class="page-header">
       <div>
         <h2>成果导入暂存</h2>
-        <p>右侧直接预览小程序前端展示样式，确认无误后一键发布。</p>
+        <p>可选择多个 .pptx/.pdf，或直接导入整个文件夹。右侧预览小程序样式，确认无误后一键发布。</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="default-button" :disabled="clearing" @click="clearStaging">{{ clearing ? '清空中…' : '清空暂存' }}</button>
-        <button type="button" class="default-button" :disabled="loading" @click="loadBatches">刷新</button>
+        <input v-model="sourceOrg" class="org-input" type="text" maxlength="80" placeholder="来源机构（可选）" :disabled="importing" />
+        <input ref="fileInput" class="hidden-file" type="file" :accept="IMPORT_ACCEPT" multiple @change="importDocuments" />
+        <input ref="folderInput" class="hidden-file" type="file" webkitdirectory directory multiple @change="importDocuments" />
+        <button type="button" class="primary-button" :disabled="importing" @click="openFilePicker">{{ importing ? (importProgress || '导入中…') : '选择文件' }}</button>
+        <button type="button" class="default-button" :disabled="importing" @click="openFolderPicker">导入文件夹</button>
+        <button type="button" class="default-button" :disabled="clearing || importing" @click="clearStaging">{{ clearing ? '清空中…' : '清空暂存' }}</button>
+        <button type="button" class="default-button" :disabled="loading || importing" @click="loadBatches">刷新</button>
       </div>
     </header>
 
@@ -163,7 +265,7 @@ onBeforeUnmount(revokeCandidateUrls)
     <div class="layout">
       <section class="card batches">
         <p v-if="loading" class="state">加载中…</p>
-        <p v-else-if="!batches.length" class="state">暂无导入批次。可使用服务端导入工具创建暂存批次。</p>
+        <p v-else-if="!batches.length" class="state">暂无导入批次。点击右上角「选择文件」或「导入文件夹」上传 .pptx / .pdf。</p>
         <template v-for="batch in batches" :key="batch.id">
           <button type="button" class="batch" :class="{ active: selectedBatch && selectedBatch.id === batch.id }" @click="selectBatch(batch)">
             <strong>{{ batch.sourceFilename }}</strong>
@@ -217,10 +319,20 @@ onBeforeUnmount(revokeCandidateUrls)
 
               <div v-if="previewImages.length" :class="['mp-media-section', previewImages.length === 1 ? 'mp-media-single' : '']">
                 <div v-if="previewImages.length === 1" class="mp-single-image">
-                  <img :src="previewImages[0].url" :alt="previewImages[0].filename" />
+                  <button v-if="previewImages[0].url" type="button" class="mp-image-hit" @click="lightboxIndex = 0">
+                    <img :src="previewImages[0].url" :alt="previewImages[0].filename" />
+                  </button>
+                  <div v-else-if="previewImages[0].failed" class="mp-image-loading">图片文件缺失，无法预览</div>
+                  <div v-else class="mp-image-loading">正在加载图片…</div>
                 </div>
                 <div v-else class="mp-image-grid">
-                  <img v-for="(img, i) in previewImages" :key="i" :src="img.url" :alt="img.filename" />
+                  <figure v-for="(img, i) in previewImages" :key="img.fileId || i" class="mp-image-card">
+                    <button v-if="img.url" type="button" class="mp-image-hit" @click="lightboxIndex = i">
+                      <img :src="img.url" :alt="img.filename" />
+                    </button>
+                    <div v-else-if="img.failed" class="mp-image-loading">图片文件缺失，无法预览</div>
+                    <div v-else class="mp-image-loading">正在加载图片…</div>
+                  </figure>
                 </div>
               </div>
 
@@ -296,6 +408,10 @@ onBeforeUnmount(revokeCandidateUrls)
               <details class="mp-raw"><summary>查看原始解析文本</summary><pre>{{ activeRaw.text }}</pre></details>
             </div>
           </div>
+          <div v-if="lightboxIndex >= 0 && previewImages[lightboxIndex]?.url" class="lightbox" @click="lightboxIndex = -1">
+            <img :src="previewImages[lightboxIndex].url" :alt="previewImages[lightboxIndex].filename" />
+            <p>{{ previewImages[lightboxIndex].filename }}</p>
+          </div>
         </template>
       </section>
     </div>
@@ -307,7 +423,12 @@ onBeforeUnmount(revokeCandidateUrls)
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .page-header h2 { margin: 0; color: #1d2b3e; }
 .page-header p { margin: 7px 0 0; color: #78879a; font-size: 13px; }
-.header-actions { display: flex; gap: 10px; }
+.header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; position: relative; }
+.org-input { height: 36px; width: 180px; padding: 0 10px; border: 1px solid #d9e2ee; border-radius: 5px; color: #4a5c72; }
+.primary-button { height: 36px; padding: 0 16px; border: 0; border-radius: 5px; background: #1677ff; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.primary-button:hover { background: #0958d9; }
+.primary-button:disabled, .default-button:disabled { opacity: .55; cursor: not-allowed; }
+.hidden-file { position: fixed; left: 0; top: 0; width: 0; height: 0; opacity: 0; }
 .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; height: calc(100vh - 190px); min-height: 460px; overflow: hidden; }
 .card { min-height: 0; border: 1px solid #e5ebf3; border-radius: 10px; background: #fff; box-shadow: 0 2px 12px rgba(38,70,110,.06); }
 .state { padding: 36px; color: #8794a5; text-align: center; }
@@ -349,7 +470,13 @@ onBeforeUnmount(revokeCandidateUrls)
 .mp-media-single { display: flex; justify-content: center; }
 .mp-single-image img { max-width: 100%; max-height: 280px; border-radius: 8px; object-fit: contain; }
 .mp-image-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.mp-image-card { margin: 0; }
+.mp-image-hit { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .mp-image-grid img { width: 100%; max-height: 280px; border-radius: 8px; background: #f5f7fa; object-fit: contain; }
+.mp-image-loading { display: flex; align-items: center; justify-content: center; min-height: 88px; border-radius: 8px; background: #f5f7fa; color: #8794a5; font-size: 13px; }
+.lightbox { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: rgba(16, 24, 40, .72); cursor: zoom-out; }
+.lightbox img { max-width: min(92vw, 960px); max-height: 82vh; object-fit: contain; border-radius: 8px; background: #fff; }
+.lightbox p { margin: 0; color: #fff; font-size: 13px; }
 
 .mp-section { padding: 14px 16px; border-bottom: 1px solid #f5f7fa; }
 .mp-section-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 8px; }
