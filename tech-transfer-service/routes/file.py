@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from core.errors import BizError, TT_FILE_40001, TT_FILE_40401, TT_FILE_50201
+from core.file_token import generate_file_token, verify_file_token
 from core.middleware import identity, identity_from_access_token, optional_identity
 from core.response import success
 from modules.file.service import (
@@ -63,9 +64,16 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(identit
 def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict = Depends(optional_identity)):
     actor = user
     if actor.get("userId") is None:
-        queried = identity_from_access_token(request.query_params.get("access_token") or "")
-        if queried:
-            actor = queried
+        # L3: 优先校验短时效 file_token（HMAC 签名，5 分钟过期，不进日志）
+        file_token = request.query_params.get("file_token") or ""
+        token_user_id = verify_file_token(file_token, file_id) if file_token else None
+        if token_user_id is not None:
+            actor = {"userId": token_user_id, "userNo": "", "roles": ["user"]}
+        else:
+            # 向后兼容：旧版 access_token query（标记废弃）
+            queried = identity_from_access_token(request.query_params.get("access_token") or "")
+            if queried:
+                actor = queried
     # 不信任 JWT roles 快照：实时查 user_role 表判定平台管理员（与 admin_identity 同源）。
     actor_id = actor.get("userId")
     can_review_import_media = False
@@ -99,3 +107,11 @@ def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict =
 def delete_uploaded(file_id: int, user: dict = Depends(identity)):
     delete_uploaded_file(file_id, user["userId"])
     return success(None, "已删除")
+
+
+@router.post("/api/tech-transfer/v1/files/{file_id}/token", summary="生成短时效文件访问 token（L3）")
+def create_file_token(file_id: int, user: dict = Depends(identity)):
+    """生成 5 分钟有效的 HMAC 签名 token，用于 <image> 等无法设置请求头的场景。
+    避免 JWT access_token 走 URL query 导致泄露到日志/Referer。"""
+    token = generate_file_token(user["userId"], file_id, ttl_seconds=300)
+    return success({"fileToken": token, "expiresIn": 300}, "ok")

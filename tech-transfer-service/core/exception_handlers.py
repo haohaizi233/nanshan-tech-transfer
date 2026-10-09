@@ -14,6 +14,7 @@ traceback / SQL / 内部路径 / 连接串 / 密钥等实现细节 —— 完整
 from __future__ import annotations
 
 import logging
+import re
 
 import psycopg2
 from fastapi import FastAPI, Request
@@ -40,6 +41,26 @@ logger = logging.getLogger("nanshan.error")
 # 校验错误 details 条数上限（防恶意超长错误列表撑爆响应）
 _MAX_VALIDATION_DETAILS = 20
 
+# L8: 上游错误正文外发前脱敏（屏蔽内部 URL/堆栈/密钥等）
+_SENSITIVE_PATTERNS = [
+    (re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE), "[REDACTED_URL]"),
+    (re.compile(r"(?:password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*\S+", re.IGNORECASE), "[REDACTED_CREDENTIAL]"),
+    (re.compile(r"Traceback \(most recent call last\).*", re.DOTALL), "[REDACTED_TRACEBACK]"),
+    (re.compile(r'File "[^"]+", line \d+.*', re.DOTALL), "[REDACTED_FRAME]"),
+    (re.compile(r"(?:postgresql|mysql|redis)://[^\s\"'<>]+", re.IGNORECASE), "[REDACTED_CONN_STRING]"),
+    (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "[REDACTED_IP]"),
+]
+
+
+def _desensitize_upstream_body(text: str, limit: int = 300) -> str:
+    """L8: 上游错误正文脱敏，去掉内部 URL/堆栈/连接串/IP/凭据。"""
+    text = (text or "").replace("\r\n", "\n").strip()
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        text = pattern.sub(replacement, text)
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    return text
+
 
 class _DropNotFoundAccessLog(logging.Filter):
     """过滤公网扫描 404 与高频通知摘要的成功 access log。"""
@@ -64,14 +85,37 @@ class _DropNotFoundAccessLog(logging.Filter):
 def configure_logging() -> None:
     """进程级日志格式（幂等：root 已有 handler 时不重复配置）。
 
+    L5/L7：LOG_LEVEL 环境变量可调；LOG_DIR 非空时落盘 RotatingFileHandler 轮转。
     uvicorn 自身 logger 独立配置不受影响；这里保证业务异常日志
     带时间戳/级别/logger 名，便于与 requestId 关联排查。
     """
-    if not logging.getLogger().handlers:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        )
+    from config import settings as _settings
+
+    log_level = getattr(_settings, "LOG_LEVEL", "INFO")
+    log_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+    root = logging.getLogger()
+    if not root.handlers:
+        root.setLevel(getattr(logging, log_level, logging.INFO))
+        console = logging.StreamHandler()
+        console.setFormatter(logging.Formatter(log_format))
+        root.addHandler(console)
+
+        # L7: LOG_DIR 非空时落盘 + 轮转（20MB × 5）
+        log_dir = getattr(_settings, "LOG_DIR", "")
+        if log_dir:
+            from logging.handlers import RotatingFileHandler
+            from pathlib import Path as _Path
+            log_path = _Path(log_dir)
+            log_path.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                log_path / "tech-transfer-service.log",
+                maxBytes=getattr(_settings, "LOG_MAX_BYTES", 20 * 1024 * 1024),
+                backupCount=getattr(_settings, "LOG_BACKUP_COUNT", 5),
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(logging.Formatter(log_format))
+            root.addHandler(file_handler)
 
     # Uvicorn 会独立输出 access log。公网暴露后，404 几乎全部来自目录扫描，
     # 保留其他状态（尤其 4xx 鉴权失败和所有 5xx），仅静默不存在的路径。
@@ -152,6 +196,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(BizError)
     async def _handle_biz_error(request: Request, e: BizError):
         _log_error(request, e.http_status, e.code)
+        # L8: 上游错误正文脱敏后再外发（内部 URL/堆栈/凭据不进响应）
+        safe_details = e.details
+        if isinstance(e.details, dict) and e.details.get("upstreamBody"):
+            safe_details = {**e.details, "upstreamBody": _desensitize_upstream_body(str(e.details["upstreamBody"]))}
         if isinstance(e.details, dict) and e.details.get("layer"):
             logger.error(
                 "upstream error request_id=%s method=%s path=%s layer=%s "
@@ -168,8 +216,8 @@ def register_exception_handlers(app: FastAPI) -> None:
                 e.details.get("reason"),
                 e.details.get("upstreamBody"),
             )
-        resp = error(e.code, e.message, e.http_status, e.details)
-        _attach_upstream_headers(resp, e.details)
+        resp = error(e.code, e.message, e.http_status, safe_details)
+        _attach_upstream_headers(resp, safe_details)
         return resp
 
     @app.exception_handler(RequestValidationError)

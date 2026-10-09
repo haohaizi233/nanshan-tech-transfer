@@ -109,7 +109,7 @@ def chat_completion(
     remaining = remaining_seconds()
     if remaining is not None and remaining <= 0:
         raise LLMError("AI 请求已超过总时限", reason="timeout")
-    acquire_timeout = min(0.25, remaining) if remaining is not None else 0.25
+    acquire_timeout = min(3.0, remaining) if remaining is not None else 3.0  # L6: 放宽到 3s 防误报 overloaded
     if not _LLM_SLOTS.acquire(timeout=acquire_timeout):
         raise LLMError("AI 模型并发繁忙，请稍后重试", reason="overloaded")
     try:

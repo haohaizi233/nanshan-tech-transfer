@@ -124,11 +124,20 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
     MAX_IMPORT_BYTES: int = 80 * 1024 * 1024
 
+    # ── 日志（L5/L7：LOG_LEVEL 可配 + RotatingFileHandler 落盘轮转）──
+    LOG_LEVEL: str = "INFO"
+    LOG_DIR: str = ""  # 空=仅控制台；非空=落盘到该目录（RotatingFileHandler 20MB×5）
+    LOG_MAX_BYTES: int = 20 * 1024 * 1024
+    LOG_BACKUP_COUNT: int = 5
+
+    # ── 请求超时上限（M1：sync 路由保护）────────────────────
+    MAX_REQUEST_SECONDS: float = 60.0
+
     # ── 专利检索 Provider（密钥只在服务端，禁止下发前端）──
     PATENT_PROVIDER_BASE: str = ""
     PATENT_PROVIDER_KEY: str = ""
-    PATENT_PROVIDER_TIMEOUT: int = 45
-    PATENT_PDF_TIMEOUT: int = 60
+    PATENT_PROVIDER_TIMEOUT: int = 30
+    PATENT_PDF_TIMEOUT: int = 45
 
     # ── AI 能力开关（与前端 feature-flags.js 对齐）──────────
     AI_FEATURE_ENABLED: bool = True
@@ -138,7 +147,7 @@ class Settings(BaseSettings):
     # ai-agent 与本服务同机部署（默认 127.0.0.1:8001，见 nanshan-ai-agent/run_local.bat
     # 与 start_dev.py 的 AI_AGENT_PORT）；.env 必须显式配置，禁止依赖隐式默认值。
     AI_AGENT_URL: str = "http://127.0.0.1:8001/api/ai/chat"
-    AI_AGENT_TIMEOUT: int = 100  # Agent 对整次聊天限制 90 秒，主服务预留清理与响应时间
+    AI_AGENT_TIMEOUT: int = 30  # 秒；主服务转发 ai-agent 的单次超时（M1：防止 sync 路由长阻塞耗尽线程池）
     # 同步阻塞 LLM 转发并发上限（routes/ai.py 的信号量）；运维可通过 .env 调参。
     AI_MAX_CONCURRENT: int = 4
 
@@ -202,11 +211,42 @@ class Settings(BaseSettings):
             raise ValueError("AI_MAX_CONCURRENT / AI_AGENT_TIMEOUT 必须 >= 1")
         return v
 
+    @field_validator("LOG_LEVEL")
+    @classmethod
+    def _validate_log_level(cls, v: str) -> str:
+        level = v.strip().upper()
+        if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError(f"LOG_LEVEL 必须是 DEBUG/INFO/WARNING/ERROR/CRITICAL 之一，当前: {v}")
+        return level
+
+    @field_validator("MAX_REQUEST_SECONDS")
+    @classmethod
+    def _validate_max_request_seconds(cls, v: float) -> float:
+        if v < 1 or v > 300:
+            raise ValueError("MAX_REQUEST_SECONDS 必须在 1-300 秒之间")
+        return v
+
+    @field_validator("MAX_UPLOAD_BYTES", "MAX_IMPORT_BYTES")
+    @classmethod
+    def _validate_upload_limits(cls, v: int) -> int:
+        if v < 1024:
+            raise ValueError("MAX_UPLOAD_BYTES / MAX_IMPORT_BYTES 必须 >= 1KB")
+        return v
+
     @model_validator(mode="after")
     def _validate_pool_order(self):
         if self.DB_POOL_MIN > self.DB_POOL_MAX:
             raise ValueError(
                 f"DB_POOL_MIN({self.DB_POOL_MIN}) 不能大于 DB_POOL_MAX({self.DB_POOL_MAX})"
+            )
+        # L8: 连接池总量约束 — DB_POOL_MAX × UVICORN_WORKERS 不应超过保守上限（100）
+        total_conns = self.DB_POOL_MAX * max(1, self.UVICORN_WORKERS)
+        if total_conns > 100:
+            import warnings
+            warnings.warn(
+                f"DB_POOL_MAX({self.DB_POOL_MAX}) × UVICORN_WORKERS({self.UVICORN_WORKERS}) = {total_conns}，"
+                f"可能超过 PostgreSQL max_connections，请确认 PG 配置",
+                stacklevel=2,
             )
         return self
 

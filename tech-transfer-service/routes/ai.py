@@ -19,6 +19,7 @@ from config import settings
 from core.response import success, get_request_id
 from core.middleware import identity
 from core.errors import BizError, TT_COMMON_42901, ai_provider_failed, ai_unavailable, bad_request
+from core.idempotency import idempotent_create, cache_response as cache_idem_response
 from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
@@ -57,16 +58,21 @@ def evaluation_tasks_create(request: Request, body: EvaluationTaskRequest, user:
     if not isinstance(achievement_id, int) or achievement_id <= 0:
         from core.errors import bad_request
         raise bad_request("achievementId 必须为正整数")
-    idem_key = request.headers.get("X-Idempotency-Key")
-    if idem_key:
-        print(f"[ai] X-Idempotency-Key received: {idem_key} (replay protection NOT IMPLEMENTED)")
+    # L2: X-Idempotency-Key 幂等去重（TTL 10min，重复请求直接回放缓存响应）
+    idem_resp = idempotent_create(request, user)
+    if idem_resp is not None:
+        return idem_resp
     task, is_new = create_evaluation_task(
         user["userId"], user.get("userNo", ""), achievement_id,
         request_id=get_request_id(),
     )
     if not is_new:
-        return JSONResponse(status_code=200, content=success(task, "任务进行中"))
-    return success(task, "任务已受理")
+        resp = JSONResponse(status_code=200, content=success(task, "任务进行中"))
+    else:
+        resp = JSONResponse(status_code=202, content=success(task, "任务已受理"))
+    # L2: 仅缓存成功响应，供后续重复请求回放
+    cache_idem_response(user["userId"], (request.headers.get("X-Idempotency-Key") or "").strip(), resp.status_code, success(task, "任务已受理"))
+    return resp
 
 
 @router.get("/ai/evaluation-tasks/{task_id}")

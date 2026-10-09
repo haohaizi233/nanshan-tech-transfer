@@ -225,7 +225,7 @@ def _h5_dev_url(full_path: str, query: str) -> str:
 def _h5_from_dev(full_path: str, query: str):
     target = _h5_dev_url(full_path, query)
     try:
-        with _h5_opener().open(target, timeout=60) as resp:
+        with _h5_opener().open(target, timeout=15) as resp:  # M1: 降低 H5 代理超时
             headers = {}
             content_type = resp.headers.get("Content-Type")
             cache = resp.headers.get("Cache-Control")
@@ -266,6 +266,23 @@ def mini_program_h5(request: Request, full_path: str = ""):
         status_code=503,
     )
 
+
+# ── 请求超时保护（M1：sync 路由保护，防止长阻塞耗尽线程池）────
+import asyncio
+
+@app.middleware("http")
+async def request_timeout_middleware(request: Request, call_next):
+    max_seconds = getattr(settings, "MAX_REQUEST_SECONDS", 60.0)
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=max_seconds)
+    except asyncio.TimeoutError:
+        from core.response import error as error_response
+        from core.errors import TT_COMMON_50301
+        code, message, status = TT_COMMON_50301
+        return JSONResponse(
+            status_code=504,
+            content={"code": code, "message": "请求处理超时，请稍后重试", "requestId": get_request_id()},
+        )
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────
 # 客户端 X-Request-Id 合法（受限字符集/长度）→ 复用；否则服务端生成。

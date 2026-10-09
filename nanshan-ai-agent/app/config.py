@@ -1,4 +1,8 @@
+"""
+L5: ai-agent 配置校验 — 启动时检查必填项，缺失时 fail-fast。
+"""
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,6 +32,42 @@ class Settings:
     DB_STATEMENT_TIMEOUT_MS = int(os.getenv("AI_DB_STATEMENT_TIMEOUT_MS", "5000"))
     AI_CHAT_TIMEOUT_SECONDS = float(os.getenv("AI_CHAT_TIMEOUT_SECONDS", "90"))
     AI_CHAT_MAX_CONCURRENCY = int(os.getenv("AI_CHAT_MAX_CONCURRENCY", "4"))
+
+    # L5: 日志级别可配
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+    def validate(self) -> None:
+        """启动自检：必填配置缺失时终止进程，避免「启动假成功，首请求才失败」。"""
+        violations = []
+
+        if not self.LLM_API_URL:
+            violations.append("LLM_API_URL 未配置")
+        if not self.LLM_API_KEY:
+            violations.append("LLM_API_KEY 未配置")
+        if not self.LLM_MODEL:
+            violations.append("LLM_MODEL 未配置")
+        if not self.DB_HOST:
+            violations.append("DB_HOST 未配置")
+        if not self.DB_NAME:
+            violations.append("DB_NAME 未配置")
+        if not self.DB_USER:
+            violations.append("DB_USER / AI_DB_USER 未配置")
+        if not self.DB_PASSWORD:
+            violations.append("DB_PASSWORD / AI_DB_PASSWORD 未配置")
+        if self.AI_CHAT_MAX_CONCURRENCY < 1:
+            violations.append(f"AI_CHAT_MAX_CONCURRENCY 必须 >= 1，当前: {self.AI_CHAT_MAX_CONCURRENCY}")
+        if self.DB_MAX_CONN < 1:
+            violations.append(f"AI_DB_MAX_CONN 必须 >= 1，当前: {self.DB_MAX_CONN}")
+        if self.LOG_LEVEL not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            violations.append(f"LOG_LEVEL 非法: {self.LOG_LEVEL}")
+
+        if violations:
+            sys.stderr.write(
+                "[FATAL] ai-agent 配置校验失败：\n  - "
+                + "\n  - ".join(violations)
+                + "\n请检查 .env 或环境变量后重新启动\n"
+            )
+            sys.exit(1)
 
 
 settings = Settings()

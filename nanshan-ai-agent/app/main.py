@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from threading import BoundedSemaphore
 
@@ -8,6 +9,16 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.config import settings
+
+# L5: 启动自检 — 必填配置缺失时终止进程，避免启动假成功
+settings.validate()
+
+# L7: 统一 logger，替代 print()
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("nanshan.ai-agent")
 from app.database import get_db
 from app.llm_client import LLMError, set_fallback_provider
 from app.router import classify_intent
