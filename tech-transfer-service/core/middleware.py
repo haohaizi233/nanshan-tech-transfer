@@ -3,11 +3,15 @@ FastAPI 依赖：认证（identity）与请求体解析（json_body）
 
 - identity 等价于 Flask 版 auth_required 装饰器
 - json_body 等价于 request.get_json(silent=True) or {}
+
+鉴权查询走 core.auth_cache 的 30s 短 TTL 缓存（M8），把每请求 2-3 次
+DB 往返降为偶发一次；角色/状态写路径通过 auth_cache.invalidate_user() 即时失效。
 """
 
 import jwt
 from fastapi import Depends, Request
 
+from core import auth_cache
 from core.errors import BizError, TT_COMMON_40101, TT_COMMON_40102
 from core.jwt_utils import decode_token
 

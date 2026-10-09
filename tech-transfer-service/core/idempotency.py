@@ -16,6 +16,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 _TTL_SECONDS = 10 * 60
+# 容量硬上限（M7）：超出时按插入序（FIFO）淘汰最旧条目，防止长时间运行内存无限增长
+_MAX_ENTRIES = 5000
 _store: dict[tuple[int, str], tuple[float, Any]] = {}
 _lock_clean_counter = 0
 
@@ -50,7 +52,11 @@ def cache_response(user_id: int, idempotency_key: str, status_code: int, body: A
     if not (200 <= status_code < 300):
         return
     _evict_expired()
-    _store[(user_id, idempotency_key)] = (time.time(), (status_code, body))
+    key = (user_id, idempotency_key)
+    if key not in _store and len(_store) >= _MAX_ENTRIES:
+        # FIFO 淘汰最旧条目（dict 保持插入序），为新响应腾位置
+        _store.pop(next(iter(_store)), None)
+    _store[key] = (time.time(), (status_code, body))
 
 
 def idempotent_create(request: Request, user: dict):

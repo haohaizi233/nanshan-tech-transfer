@@ -47,6 +47,25 @@ class MockIdentityProvider(IdentityProvider):
         )
 
 
+class PasswordIdentityProvider(IdentityProvider):
+    """手机号 + 密码登录模式（AUTH_PROVIDER=phone_password，staging/production 默认）。
+
+    正式登录走 routes/auth.py 的 /auth/login（login_phone_session /
+    password_login_session），不使用宿主票据引导（/auth/bootstrap）。票据验证一律
+    拒绝，杜绝「任意票据伪造身份」的旁路。
+    """
+
+    ISSUER = "local-account"
+
+    def verify(self, host_credential: str) -> ExternalIdentity:
+        code, message, status = TT_AUTH_40103
+        raise BizError(
+            code,
+            "当前环境使用手机号+密码登录，不支持票据引导登录",
+            status,
+        )
+
+
 def get_identity_provider() -> IdentityProvider:
     if settings.AUTH_PROVIDER == "mock":
         if settings.is_production_like:
@@ -54,6 +73,8 @@ def get_identity_provider() -> IdentityProvider:
                 f"[FATAL] MockIdentityProvider 不允许在 {settings.APP_ENV} 环境运行"
             )
         return MockIdentityProvider()
+    if settings.AUTH_PROVIDER in ("phone_password", "password"):
+        return PasswordIdentityProvider()
     if settings.AUTH_PROVIDER == "wechat":
         # 微信 code2session 登录尚未接入：需 AppID/AppSecret + 小程序 code 换 openid。
         # 当前生产正式登录方式为手机号 + 密码（routes/auth.py 的 login/register）。

@@ -135,9 +135,12 @@ class Settings(BaseSettings):
 
     # ── nanshan-ai-agent demo（自然语言查询成果/需求）──────
     # 独立 FastAPI 服务，本服务通过 HTTP 转发 /ai/chat；为空则禁用聊天代理。
-    # ai-agent 部署在 LLM 同一台公网机（见 nanshan-ai-agent/.env 的 LLM_API_URL）。
-    AI_AGENT_URL: str = "http://43.138.138.200:8000/api/ai/chat"
+    # ai-agent 与本服务同机部署（默认 127.0.0.1:8001，见 nanshan-ai-agent/run_local.bat
+    # 与 start_dev.py 的 AI_AGENT_PORT）；.env 必须显式配置，禁止依赖隐式默认值。
+    AI_AGENT_URL: str = "http://127.0.0.1:8001/api/ai/chat"
     AI_AGENT_TIMEOUT: int = 100  # Agent 对整次聊天限制 90 秒，主服务预留清理与响应时间
+    # 同步阻塞 LLM 转发并发上限（routes/ai.py 的信号量）；运维可通过 .env 调参。
+    AI_MAX_CONCURRENT: int = 4
 
     # ── 爱马仕 Hermes / OpenAI 兼容 Provider（密钥只在服务端）──
     # 企业微信 Bot 长连接由爱马仕 gateway 持有（服务器在别处），本服务只走 HTTP。
@@ -190,6 +193,13 @@ class Settings(BaseSettings):
     def _validate_acquire_timeout(cls, v: float) -> float:
         if v < 0:
             raise ValueError("DB_POOL_ACQUIRE_TIMEOUT 必须 >= 0")
+        return v
+
+    @field_validator("AI_MAX_CONCURRENT", "AI_AGENT_TIMEOUT")
+    @classmethod
+    def _validate_ai_limits(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("AI_MAX_CONCURRENT / AI_AGENT_TIMEOUT 必须 >= 1")
         return v
 
     @model_validator(mode="after")
@@ -297,10 +307,11 @@ def assert_environment():
     if settings.DEBUG:
         violations.append("DEBUG=true")
     secret = settings.JWT_SECRET.strip()
-    if (not secret) or (secret.lower() in _WEAK_SECRETS) or ("change-me" in secret.lower()) or len(secret) < 16:
-        violations.append("JWT_SECRET 为空/弱密钥/默认开发密钥（需 ≥16 位随机值）")
-    if settings.DB_PASSWORD in _WEAK_DB_PASSWORDS:
-        violations.append("DB_PASSWORD 为空/弱密码/本地开发默认值")
+    if (not secret) or (secret.lower() in _WEAK_SECRETS) or ("change-me" in secret.lower()) or len(secret) < 32:
+        violations.append("JWT_SECRET 为空/弱密钥/默认开发密钥（需 ≥32 位随机值，openssl rand -hex 32）")
+    password = settings.DB_PASSWORD.strip()
+    if password in _WEAK_DB_PASSWORDS or len(password) < 12:
+        violations.append("DB_PASSWORD 为空/弱密码/本地开发默认值（需 ≥12 位强密码）")
     if "127.0.0.1" in settings.API_BASE or "localhost" in settings.API_BASE:
         violations.append(f"API_BASE={settings.API_BASE} 指向本机回环地址")
     if not settings.CORS_ORIGINS:
