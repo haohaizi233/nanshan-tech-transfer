@@ -9,7 +9,7 @@ from starlette.responses import Response
 
 from app.config import settings
 from app.database import get_db
-from app.llm_client import LLMError
+from app.llm_client import LLMError, set_fallback_provider
 from app.router import classify_intent
 from app.schemas import ChatRequest, ChatResponse
 
@@ -34,6 +34,15 @@ app = FastAPI(
     title="南山科转通 AI Agent",
     version="0.3.0",
 )
+
+# 注册备用 LLM Provider（主 Provider 不可用时自动切换）
+if settings.LLM_FALLBACK_URL and settings.LLM_FALLBACK_KEY:
+    set_fallback_provider(
+        settings.LLM_FALLBACK_URL,
+        settings.LLM_FALLBACK_KEY,
+        settings.LLM_FALLBACK_MODEL or "gpt-4o-mini",
+    )
+
 _chat_slots = BoundedSemaphore(settings.AI_CHAT_MAX_CONCURRENCY)
 _chat_executor = ThreadPoolExecutor(
     max_workers=settings.AI_CHAT_MAX_CONCURRENCY,

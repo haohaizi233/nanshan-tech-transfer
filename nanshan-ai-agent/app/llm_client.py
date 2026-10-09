@@ -38,6 +38,21 @@ _UPSTREAM_BODY_LIMIT = 800
 _LLM_SLOTS = threading.BoundedSemaphore(4)
 _logger = logging.getLogger(__name__)
 
+# ── LLM Provider 轮询 fallback ──────────────────────────────────────────
+# 主 Provider 不可用时自动切换到备用 Provider。
+# 配置方式：在 .env 中添加 LLM_FALLBACK_URL / LLM_FALLBACK_KEY / LLM_FALLBACK_MODEL
+_FALLBACK_URL = None  # 由 config.py 注入
+_FALLBACK_KEY = None
+_FALLBACK_MODEL = None
+
+
+def set_fallback_provider(url: str, key: str, model: str):
+    """注册备用 LLM Provider（由 app 启动时调用）。"""
+    global _FALLBACK_URL, _FALLBACK_KEY, _FALLBACK_MODEL
+    _FALLBACK_URL = url
+    _FALLBACK_KEY = key
+    _FALLBACK_MODEL = model
+
 
 def _snippet(text: str, limit: int = _UPSTREAM_BODY_LIMIT) -> str:
     text = (text or "").replace("\r\n", "\n").strip()
@@ -122,10 +137,40 @@ def _chat_completion(
 ) -> str:
     """
     调用公司内部 Qwen Chat Completions API。
+    主 Provider 不可用时自动切换到备用 Provider（如 Hermes）。
     """
+    try:
+        return _call_llm(
+            settings.LLM_API_URL,
+            settings.LLM_API_KEY,
+            settings.LLM_MODEL,
+            messages, max_tokens, temperature, response_format, timeout,
+        )
+    except LLMError as primary_err:
+        if _FALLBACK_URL and _FALLBACK_KEY:
+            _logger.warning("LLM 主 Provider 不可用（%s），切换到备用 Provider", primary_err.reason)
+            return _call_llm(
+                _FALLBACK_URL,
+                _FALLBACK_KEY,
+                _FALLBACK_MODEL,
+                messages, max_tokens, temperature, response_format, timeout,
+            )
+        raise
 
+
+def _call_llm(
+    api_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict],
+    max_tokens: int = 500,
+    temperature: float = 0.1,
+    response_format: dict | None = None,
+    timeout: int = 60,
+) -> str:
+    """调用指定的 LLM Provider。"""
     payload = {
-        "model": settings.LLM_MODEL,
+        "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -144,12 +189,13 @@ def _chat_completion(
         "temperature": temperature,
         "response_format": response_format,
         "enable_thinking": False,
-        "url": settings.LLM_API_URL,
+        "url": api_url,
     }
 
     headers = {
         "Content-Type": "application/json",
-        "x-api-key": settings.LLM_API_KEY,
+        "x-api-key": api_key,
+        "Authorization": f"Bearer {api_key}",
     }
 
     response = None
@@ -165,10 +211,11 @@ def _chat_completion(
         attempt_timeout = min(timeout, remaining) if remaining is not None else timeout
         try:
             response = requests.post(
-                settings.LLM_API_URL,
+                api_url,
                 headers=headers,
                 json=payload,
                 timeout=(min(3.0, attempt_timeout), attempt_timeout),
+                verify=False,
             )
             last_status = response.status_code
             # 网关瞬时错误（502/503/504/429）退避重试；其余 4xx/5xx 直接抛出

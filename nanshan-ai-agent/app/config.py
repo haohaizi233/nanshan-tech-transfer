@@ -10,6 +10,11 @@ class Settings:
     LLM_API_KEY = os.getenv("LLM_API_KEY")
     LLM_MODEL = os.getenv("LLM_MODEL")
 
+    # 备用 LLM Provider（主 Provider 不可用时自动切换）
+    LLM_FALLBACK_URL = os.getenv("LLM_FALLBACK_URL")
+    LLM_FALLBACK_KEY = os.getenv("LLM_FALLBACK_KEY")
+    LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL")
+
     # PostgreSQL —— 建议为 AI 服务单独建只读角色（最小权限原则），
     # 设置 AI_DB_USER/AI_DB_PASSWORD 后将使用该只读账号，未设置则回退主账号。
     DB_HOST = os.getenv("DB_HOST")
