@@ -3,19 +3,18 @@ Comprehensive tests for core.middleware (identity, admin_identity, etc.)
 and core.exception_handlers and core.idempotency.
 """
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 import jwt
+import pytest
 
 from config import settings
-
 
 # ── core.jwt_utils ──────────────────────────────────────────
 
 class TestJwtUtils:
     def test_sign_and_decode_access_token(self):
-        from core.jwt_utils import sign_access_token, decode_token
+        from core.jwt_utils import decode_token, sign_access_token
         token = sign_access_token(42, "U042", ["user", "admin"])
         payload = decode_token(token)
         assert payload["sub"] == "42"
@@ -24,7 +23,7 @@ class TestJwtUtils:
         assert payload["type"] == "access"
 
     def test_sign_and_decode_refresh_token(self):
-        from core.jwt_utils import sign_refresh_token, decode_token
+        from core.jwt_utils import decode_token, sign_refresh_token
         token, jti = sign_refresh_token(42)
         assert len(jti) == 32  # uuid hex
         payload = decode_token(token)
@@ -50,7 +49,7 @@ class TestJwtUtils:
             decode_token("invalid.token.here")
 
     def test_decode_wrong_secret(self):
-        from core.jwt_utils import sign_access_token, decode_token
+        from core.jwt_utils import decode_token
         now = int(time.time())
         payload = {
             "sub": "1", "userNo": "U001", "roles": ["user"],
@@ -79,7 +78,7 @@ class TestIdempotency:
         assert get_cached(1, "nokey") is None
 
     def test_empty_key(self):
-        from core.idempotency import get_cached, cache_response
+        from core.idempotency import cache_response, get_cached
         assert get_cached(1, "") is None
         cache_response(1, "", 201, {})  # Should be no-op
         assert get_cached(1, "") is None
@@ -97,7 +96,7 @@ class TestIdempotency:
         assert get_cached(2, "key1") == (201, {"user": 2})
 
     def test_max_entries_eviction(self):
-        from core.idempotency import cache_response, get_cached, _MAX_ENTRIES
+        from core.idempotency import _MAX_ENTRIES, cache_response
         for i in range(_MAX_ENTRIES + 10):
             cache_response(1, f"key{i}", 201, {"i": i})
         from core.idempotency import _store
@@ -178,24 +177,24 @@ class TestMiddlewareIdentity:
         return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
     def test_identity_no_header(self):
-        from core.middleware import identity
         from core.errors import BizError
+        from core.middleware import identity
         req = self._make_request()
         with pytest.raises(BizError) as exc_info:
             identity(req)
         assert exc_info.value.code == "TT_COMMON_40101"
 
     def test_identity_invalid_token(self):
-        from core.middleware import identity
         from core.errors import BizError
+        from core.middleware import identity
         req = self._make_request("Bearer invalid.token.here")
         with pytest.raises(BizError) as exc_info:
             identity(req)
         assert exc_info.value.code == "TT_COMMON_40102"
 
     def test_identity_expired_token(self):
-        from core.middleware import identity
         from core.errors import BizError
+        from core.middleware import identity
         token = self._make_token(expired=True)
         req = self._make_request(f"Bearer {token}")
         with pytest.raises(BizError) as exc_info:
@@ -203,8 +202,8 @@ class TestMiddlewareIdentity:
         assert exc_info.value.code == "TT_COMMON_40102"
 
     def test_identity_refresh_token_rejected(self):
-        from core.middleware import identity
         from core.errors import BizError
+        from core.middleware import identity
         token = self._make_token(token_type="refresh")
         req = self._make_request(f"Bearer {token}")
         with pytest.raises(BizError) as exc_info:
@@ -223,8 +222,8 @@ class TestMiddlewareIdentity:
 
     @patch("core.middleware._user_is_active", return_value=False)
     def test_identity_inactive_user(self, mock_active):
-        from core.middleware import identity
         from core.errors import BizError
+        from core.middleware import identity
         token = self._make_token()
         req = self._make_request(f"Bearer {token}")
         with pytest.raises(BizError) as exc_info:
@@ -287,8 +286,8 @@ class TestMiddlewareIdentity:
     @patch("core.middleware._is_admin_role", return_value=False)
     @patch("core.middleware._user_is_active", return_value=True)
     def test_admin_identity_not_admin(self, mock_active, mock_admin):
-        from core.middleware import admin_identity
         from core.errors import BizError
+        from core.middleware import admin_identity
         token = self._make_token()
         req = self._make_request(f"Bearer {token}")
         with pytest.raises(BizError) as exc_info:
@@ -308,8 +307,8 @@ class TestMiddlewareIdentity:
     @patch("core.middleware._org_admin_info", return_value=([], False))
     @patch("core.middleware._user_is_active", return_value=True)
     def test_org_admin_identity_not_org_admin(self, mock_active, mock_org):
-        from core.middleware import org_admin_identity
         from core.errors import BizError
+        from core.middleware import org_admin_identity
         token = self._make_token()
         req = self._make_request(f"Bearer {token}")
         with pytest.raises(BizError):
@@ -339,8 +338,8 @@ class TestMiddlewareIdentity:
     @patch("core.middleware._org_admin_info", return_value=([], False))
     @patch("core.middleware._user_is_active", return_value=True)
     def test_backend_identity_regular_user(self, mock_active, mock_org):
-        from core.middleware import backend_identity
         from core.errors import BizError
+        from core.middleware import backend_identity
         token = self._make_token()
         req = self._make_request(f"Bearer {token}")
         with pytest.raises(BizError):
@@ -360,10 +359,11 @@ class TestMiddlewareIdentity:
 
     @pytest.mark.asyncio
     async def test_json_body_valid(self):
-        from core.middleware import json_body
-        from starlette.requests import Request
         import json
-        import asyncio
+
+        from starlette.requests import Request
+
+        from core.middleware import json_body
 
         body_bytes = json.dumps({"key": "value"}).encode()
         scope = {
@@ -381,8 +381,9 @@ class TestMiddlewareIdentity:
 
     @pytest.mark.asyncio
     async def test_json_body_invalid(self):
-        from core.middleware import json_body
         from starlette.requests import Request
+
+        from core.middleware import json_body
 
         scope = {
             "type": "http",
@@ -464,7 +465,7 @@ class TestExceptionHandlers:
         assert _is_path_param_error([]) is False
 
     def test_max_validation_details(self):
-        from core.exception_handlers import _safe_validation_details, _MAX_VALIDATION_DETAILS
+        from core.exception_handlers import _MAX_VALIDATION_DETAILS, _safe_validation_details
         errors = [{"loc": ["body", f"field{i}"], "msg": "err"} for i in range(30)]
         details = _safe_validation_details(errors)
         assert len(details) == _MAX_VALIDATION_DETAILS

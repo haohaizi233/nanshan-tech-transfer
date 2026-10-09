@@ -3,10 +3,9 @@ Comprehensive tests for modules/ (business logic layer).
 Covers: maturity, content, patent normalize/history, identity provider/context,
 audit, search, favorite, capital, notification, ai chat_store, membership schemas.
 """
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ── modules.achievement.maturity ────────────────────────────
 
@@ -18,7 +17,7 @@ class TestMaturity:
         assert "05_mass_ready" in MATURITY_LEVELS
 
     def test_maturity_labels_match_levels(self):
-        from modules.achievement.maturity import MATURITY_LEVELS, MATURITY_LABELS
+        from modules.achievement.maturity import MATURITY_LABELS, MATURITY_LEVELS
         for level in MATURITY_LEVELS:
             assert level in MATURITY_LABELS
             assert len(MATURITY_LABELS[level]) > 0
@@ -100,14 +99,14 @@ class TestContent:
         assert result is None
 
     def test_text_required_empty_raises(self):
-        from modules.achievement.content import _text
         from core.errors import BizError
+        from modules.achievement.content import _text
         with pytest.raises(BizError):
             _text("", "field", 100, required=True)
 
     def test_text_too_long_raises(self):
-        from modules.achievement.content import _text
         from core.errors import BizError
+        from modules.achievement.content import _text
         with pytest.raises(BizError):
             _text("x" * 101, "field", 100)
 
@@ -122,26 +121,26 @@ class TestContent:
         assert _sort_order("7", "field", 0) == 7
 
     def test_sort_order_invalid(self):
-        from modules.achievement.content import _sort_order
         from core.errors import BizError
+        from modules.achievement.content import _sort_order
         with pytest.raises(BizError):
             _sort_order("abc", "field", 0)
 
     def test_sort_order_negative(self):
-        from modules.achievement.content import _sort_order
         from core.errors import BizError
+        from modules.achievement.content import _sort_order
         with pytest.raises(BizError):
             _sort_order(-1, "field", 0)
 
     def test_sort_order_too_large(self):
-        from modules.achievement.content import _sort_order
         from core.errors import BizError
+        from modules.achievement.content import _sort_order
         with pytest.raises(BizError):
             _sort_order(10001, "field", 0)
 
     def test_sort_order_bool_raises(self):
-        from modules.achievement.content import _sort_order
         from core.errors import BizError
+        from modules.achievement.content import _sort_order
         with pytest.raises(BizError):
             _sort_order(True, "field", 0)
 
@@ -161,8 +160,8 @@ class TestContent:
         assert result["tags"] == ["AI", "ML"]
 
     def test_parse_content_payload_tags_too_many(self):
-        from modules.achievement.content import parse_content_payload
         from core.errors import BizError
+        from modules.achievement.content import parse_content_payload
         with pytest.raises(BizError):
             parse_content_payload({"tags": [f"t{i}" for i in range(21)]})
 
@@ -175,8 +174,8 @@ class TestContent:
         assert result["media"][1]["role"] == "gallery"
 
     def test_parse_content_payload_media_and_legacy_conflict(self):
-        from modules.achievement.content import parse_content_payload
         from core.errors import BizError
+        from modules.achievement.content import parse_content_payload
         with pytest.raises(BizError):
             parse_content_payload({"media": [], "mediaFileIds": [1]})
 
@@ -283,37 +282,37 @@ class TestIdentityProvider:
         assert ei.display_name == "User 1"
 
     def test_mock_provider_valid(self):
-        from modules.identity.provider import MockIdentityProvider
         from config import MOCK_TICKET_PREFIX
+        from modules.identity.provider import MockIdentityProvider
         provider = MockIdentityProvider()
         result = provider.verify(f"{MOCK_TICKET_PREFIX}test-user")
         assert result.issuer == "local-dev"
         assert result.external_subject == "test-user"
 
     def test_mock_provider_default_subject(self):
-        from modules.identity.provider import MockIdentityProvider
         from config import MOCK_TICKET_PREFIX
+        from modules.identity.provider import MockIdentityProvider
         provider = MockIdentityProvider()
         result = provider.verify(MOCK_TICKET_PREFIX)
         assert result.external_subject == "dev-user-001"
 
     def test_mock_provider_invalid_credential(self):
-        from modules.identity.provider import MockIdentityProvider
         from core.errors import BizError
+        from modules.identity.provider import MockIdentityProvider
         provider = MockIdentityProvider()
         with pytest.raises(BizError):
             provider.verify("invalid-credential")
 
     def test_mock_provider_empty_credential(self):
-        from modules.identity.provider import MockIdentityProvider
         from core.errors import BizError
+        from modules.identity.provider import MockIdentityProvider
         provider = MockIdentityProvider()
         with pytest.raises(BizError):
             provider.verify("")
 
     def test_password_provider_rejects_all(self):
-        from modules.identity.provider import PasswordIdentityProvider
         from core.errors import BizError
+        from modules.identity.provider import PasswordIdentityProvider
         provider = PasswordIdentityProvider()
         with pytest.raises(BizError):
             provider.verify("any-credential")
@@ -461,26 +460,27 @@ class TestPatentHistory:
         assert kw == "AI"
 
     def test_normalize_history_input_invalid_mode(self):
-        from modules.patent.history import normalize_history_input
         from core.errors import BizError
+        from modules.patent.history import normalize_history_input
         with pytest.raises(BizError):
             normalize_history_input("invalid", "AI")
 
     def test_normalize_history_input_empty_keyword(self):
-        from modules.patent.history import normalize_history_input
         from core.errors import BizError
+        from modules.patent.history import normalize_history_input
         with pytest.raises(BizError):
             normalize_history_input("keyword", "")
 
     def test_normalize_history_input_long_keyword(self):
-        from modules.patent.history import normalize_history_input
         from core.errors import BizError
+        from modules.patent.history import normalize_history_input
         with pytest.raises(BizError):
             normalize_history_input("keyword", "x" * 129)
 
     def test_item_format(self):
-        from modules.patent.history import _item
         from datetime import datetime
+
+        from modules.patent.history import _item
         row = {
             "keyword": "AI",
             "search_mode": "keyword",

@@ -8,10 +8,8 @@ Comprehensive tests for core modules:
 - core.pagination (parse_page_args)
 - core.request_schemas (all Pydantic models)
 """
-import pytest
-from unittest.mock import patch, MagicMock
-from contextvars import ContextVar
 
+import pytest
 
 # ── core.errors ─────────────────────────────────────────────
 
@@ -41,11 +39,20 @@ class TestErrorCodes:
 
     def test_common_codes(self):
         from core.errors import (
-            TT_COMMON_40001, TT_COMMON_40101, TT_COMMON_40102,
-            TT_COMMON_40301, TT_COMMON_40401, TT_COMMON_40402,
-            TT_COMMON_40901, TT_COMMON_40902, TT_COMMON_42901,
-            TT_COMMON_50001, TT_COMMON_40501, TT_COMMON_42201,
-            TT_COMMON_40903, TT_COMMON_50301,
+            TT_COMMON_40001,
+            TT_COMMON_40101,
+            TT_COMMON_40102,
+            TT_COMMON_40301,
+            TT_COMMON_40401,
+            TT_COMMON_40402,
+            TT_COMMON_40501,
+            TT_COMMON_40901,
+            TT_COMMON_40902,
+            TT_COMMON_40903,
+            TT_COMMON_42201,
+            TT_COMMON_42901,
+            TT_COMMON_50001,
+            TT_COMMON_50301,
         )
         for code in [TT_COMMON_40001, TT_COMMON_40101, TT_COMMON_40102,
                      TT_COMMON_40301, TT_COMMON_40401, TT_COMMON_40402,
@@ -62,16 +69,38 @@ class TestErrorCodes:
 
     def test_domain_codes(self):
         from core.errors import (
-            TT_ACH_40301, TT_ACH_40401, TT_ACH_40901,
-            TT_DMD_40301, TT_DMD_40401, TT_DMD_40901,
-            TT_COOP_40001, TT_COOP_40301, TT_COOP_40401, TT_COOP_40901, TT_COOP_40902,
+            TT_ACH_40301,
+            TT_ACH_40401,
+            TT_ACH_40901,
+            TT_ADMIN_40001,
+            TT_ADMIN_40301,
+            TT_AI_40301,
+            TT_AI_40401,
+            TT_AI_42901,
+            TT_AI_50201,
+            TT_AI_50301,
+            TT_COOP_40001,
+            TT_COOP_40301,
+            TT_COOP_40401,
+            TT_COOP_40901,
+            TT_COOP_40902,
+            TT_DMD_40301,
+            TT_DMD_40401,
+            TT_DMD_40901,
             TT_FAV_40401,
-            TT_AI_40301, TT_AI_40401, TT_AI_42901, TT_AI_50201, TT_AI_50301,
-            TT_ADMIN_40301, TT_ADMIN_40001,
-            TT_INST_40001, TT_INST_40401, TT_INST_40901,
-            TT_INST_REG_40001, TT_INST_REG_40901, TT_INST_REG_40401, TT_INST_REG_40902,
-            TT_PATENT_40401, TT_PATENT_50201, TT_PATENT_50301,
-            TT_FILE_40001, TT_FILE_40401, TT_FILE_50201,
+            TT_FILE_40001,
+            TT_FILE_40401,
+            TT_FILE_50201,
+            TT_INST_40001,
+            TT_INST_40401,
+            TT_INST_40901,
+            TT_INST_REG_40001,
+            TT_INST_REG_40401,
+            TT_INST_REG_40901,
+            TT_INST_REG_40902,
+            TT_PATENT_40401,
+            TT_PATENT_50201,
+            TT_PATENT_50301,
         )
         codes = [TT_ACH_40301, TT_ACH_40401, TT_ACH_40901,
                  TT_DMD_40301, TT_DMD_40401, TT_DMD_40901,
@@ -236,7 +265,7 @@ class TestConvenienceConstructors:
 
 class TestResponse:
     def test_success_default(self):
-        from core.response import success, set_request_id
+        from core.response import set_request_id, success
         set_request_id("test-req-123")
         result = success({"id": 1})
         assert result["code"] == 0
@@ -245,7 +274,7 @@ class TestResponse:
         assert result["requestId"] == "test-req-123"
 
     def test_success_custom_message(self):
-        from core.response import success, set_request_id
+        from core.response import set_request_id, success
         set_request_id("test-req-456")
         result = success(None, "created")
         assert result["message"] == "created"
@@ -264,7 +293,7 @@ class TestResponse:
         assert resp.status_code == 422
 
     def test_set_get_request_id(self):
-        from core.response import set_request_id, get_request_id
+        from core.response import get_request_id, set_request_id
         set_request_id("req-xyz")
         assert get_request_id() == "req-xyz"
 

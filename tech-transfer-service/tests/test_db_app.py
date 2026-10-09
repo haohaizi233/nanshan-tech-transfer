@@ -2,11 +2,9 @@
 Comprehensive tests for db.py and app.py (lifespan, health, middleware).
 """
 import time
-from unittest.mock import patch, MagicMock, PropertyMock
-import threading
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ── db.py ───────────────────────────────────────────────────
 
@@ -102,8 +100,8 @@ class TestDB:
         assert _ping(mock_conn) is False
 
     def test_release_conn_normal(self):
-        from db import _release_conn, _pool
         import db as db_module
+        from db import _release_conn
         mock_pool = MagicMock()
         db_module._pool = mock_pool
         mock_conn = MagicMock()
@@ -114,8 +112,8 @@ class TestDB:
 
     def test_release_conn_no_pool(self):
         """After close_pool, release should close connection directly."""
-        from db import _release_conn
         import db as db_module
+        from db import _release_conn
         db_module._pool = None
         mock_conn = MagicMock()
         _release_conn(mock_conn)
@@ -123,8 +121,8 @@ class TestDB:
 
     def test_release_conn_recycle(self):
         """Old connections should be recycled."""
-        from db import _release_conn, _CONN_RECYCLE_SECONDS
         import db as db_module
+        from db import _CONN_RECYCLE_SECONDS, _release_conn
         mock_pool = MagicMock()
         db_module._pool = mock_pool
         mock_conn = MagicMock()
@@ -137,8 +135,8 @@ class TestDB:
 
     def test_get_cursor_context_manager(self):
         """get_cursor should yield a cursor and handle commit/rollback."""
-        from db import get_cursor
         import db as db_module
+        from db import get_cursor
 
         mock_conn = MagicMock()
         mock_cur = MagicMock()
@@ -152,8 +150,8 @@ class TestDB:
 
     def test_get_cursor_commit(self):
         """get_cursor with commit=True should commit on success."""
-        from db import get_cursor
         import db as db_module
+        from db import get_cursor
 
         mock_conn = MagicMock()
         mock_cur = MagicMock()
@@ -167,8 +165,8 @@ class TestDB:
 
     def test_get_cursor_exception_rollback(self):
         """get_cursor should rollback on exception."""
-        from db import get_cursor
         import db as db_module
+        from db import get_cursor
 
         mock_conn = MagicMock()
         mock_cur = MagicMock()
@@ -183,8 +181,8 @@ class TestDB:
 
     def test_transaction_context_manager(self):
         """transaction should commit on success."""
-        from db import transaction
         import db as db_module
+        from db import transaction
 
         mock_conn = MagicMock()
 
@@ -196,8 +194,8 @@ class TestDB:
 
     def test_transaction_exception_rollback(self):
         """transaction should rollback on exception."""
-        from db import transaction
         import db as db_module
+        from db import transaction
 
         mock_conn = MagicMock()
 
@@ -210,9 +208,10 @@ class TestDB:
 
     def test_acquire_conn_timeout(self):
         """Pool exhaustion with timeout should raise OperationalError."""
-        from db import _acquire_conn
-        import db as db_module
         import psycopg2
+
+        import db as db_module
+        from db import _acquire_conn
 
         mock_pool = MagicMock()
         mock_pool.getconn.side_effect = psycopg2.pool.PoolError("pool exhausted")
@@ -226,8 +225,8 @@ class TestDB:
 
     def test_dirty_conn_replacement(self):
         """Dirty connections should be pinged and replaced if bad."""
-        from db import get_conn
         import db as db_module
+        from db import get_conn
 
         mock_conn = MagicMock()
         mock_conn_id = id(mock_conn)
@@ -261,8 +260,9 @@ class TestApp:
 
     def test_health_endpoint(self):
         """Health endpoint should exist."""
-        from app import app
         from fastapi.testclient import TestClient
+
+        from app import app
 
         with patch("db.init_pool"), \
              patch("db.close_pool"), \
@@ -281,8 +281,9 @@ class TestApp:
 
     def test_health_degraded(self):
         """Health endpoint returns degraded when DB fails."""
-        from app import app
         from fastapi.testclient import TestClient
+
+        from app import app
 
         with patch("db.init_pool"), \
              patch("db.close_pool"), \
@@ -302,8 +303,9 @@ class TestApp:
 
     def test_request_id_middleware(self):
         """Requests should get X-Request-Id header."""
-        from app import app
         from fastapi.testclient import TestClient
+
+        from app import app
 
         with patch("db.init_pool"), \
              patch("db.close_pool"), \
@@ -319,8 +321,9 @@ class TestApp:
 
     def test_custom_request_id(self):
         """Client-provided X-Request-Id should be reused."""
-        from app import app
         from fastapi.testclient import TestClient
+
+        from app import app
 
         with patch("db.init_pool"), \
              patch("db.close_pool"), \
@@ -336,8 +339,9 @@ class TestApp:
 
     def test_security_headers(self):
         """Responses should include security headers."""
-        from app import app
         from fastapi.testclient import TestClient
+
+        from app import app
 
         with patch("db.init_pool"), \
              patch("db.close_pool"), \
@@ -356,8 +360,9 @@ class TestApp:
 
     def test_not_found_error_contract(self):
         """404 should return unified error contract."""
-        from app import app
         from fastapi.testclient import TestClient
+
+        from app import app
 
         with patch("db.init_pool"), \
              patch("db.close_pool"), \

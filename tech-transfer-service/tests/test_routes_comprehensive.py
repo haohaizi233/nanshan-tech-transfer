@@ -4,10 +4,10 @@ Covers auth, me, achievement, demand, cooperation, favorite, search, capital,
 institution, patent, file, membership, notification, ai routes.
 """
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 import jwt
+import pytest
 
 from config import settings
 
