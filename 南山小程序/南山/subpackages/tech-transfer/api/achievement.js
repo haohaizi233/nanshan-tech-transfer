@@ -17,7 +17,9 @@ export async function getAchievements(params = {}) {
   if (category) query.category = category
   if (maturityLevel) query.maturityLevel = maturityLevel
   if (industryId) query.industryId = industryId
-  return apiRequest('GET', '/achievements', query)
+  return getCurrentUser()
+    ? apiRequest('GET', '/achievements', query)
+    : publicRequest('GET', '/achievements', query)
 }
 
 export async function getAchievementDetail(id) {
@@ -66,16 +68,22 @@ export async function searchAchievements(params = {}) {
   if (pageSize) query.pageSize = pageSize
   if (categoryCode) query.categoryCode = categoryCode
   if (maturityLevel) query.maturityLevel = maturityLevel
-  const data = await apiRequest('GET', '/search', query)
+  const data = getCurrentUser()
+    ? await apiRequest('GET', '/search', query)
+    : await publicRequest('GET', '/search', query)
   return data.achievements
 }
 
 export async function getAchievementCategories() {
-  return apiRequest('GET', '/achievements/categories')
+  return getCurrentUser()
+    ? apiRequest('GET', '/achievements/categories')
+    : publicRequest('GET', '/achievements/categories')
 }
 
 export async function getAchievementIndustries() {
-  return apiRequest('GET', '/achievements/industries')
+  return getCurrentUser()
+    ? apiRequest('GET', '/achievements/industries')
+    : publicRequest('GET', '/achievements/industries')
 }
 
 // ── 写接口（post-result 发布链路） ───────────────────────────

@@ -1,5 +1,13 @@
-from fastapi import FastAPI, HTTPException
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from threading import BoundedSemaphore
 
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
+from starlette.responses import Response
+
+from app.config import settings
 from app.database import get_db
 from app.llm_client import LLMError
 from app.router import classify_intent
@@ -19,11 +27,17 @@ from app.formatters import (
 )
 
 from app.reranker import rerank_results
+from app.runtime_budget import reset_deadline, set_deadline
 
 
 app = FastAPI(
     title="南山科转通 AI Agent",
     version="0.3.0",
+)
+_chat_slots = BoundedSemaphore(settings.AI_CHAT_MAX_CONCURRENCY)
+_chat_executor = ThreadPoolExecutor(
+    max_workers=settings.AI_CHAT_MAX_CONCURRENCY,
+    thread_name_prefix="ai-chat",
 )
 
 
@@ -50,21 +64,57 @@ def db_health():
             "result": result,
         }
 
-    except Exception as exc:
-        return {
-            "status": "error",
-            "database": "tech_transfer",
-            "error": str(exc),
-        }
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "database": "tech_transfer",
+                "error": "database_unavailable",
+            },
+        )
 
 
-@app.post(
-    "/api/ai/chat",
-    response_model=ChatResponse,
-)
-def ai_chat(
-    request: ChatRequest,
-):
+@app.post("/api/ai/chat", response_model=ChatResponse)
+async def ai_chat(body: ChatRequest, http_request: Request):
+    if not _chat_slots.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail={"message": "AI 请求繁忙，请稍后重试。", "reason": "overloaded"},
+        )
+    try:
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(_chat_executor, _run_ai_chat, body)
+    except Exception:
+        _chat_slots.release()
+        raise
+
+    deadline = loop.time() + settings.AI_CHAT_TIMEOUT_SECONDS
+    while not future.done():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            future.cancel()
+            raise HTTPException(
+                status_code=504,
+                detail={"message": "AI 响应超时，请缩短问题后重试。", "reason": "timeout"},
+            )
+        if await http_request.is_disconnected():
+            future.cancel()
+            return Response(status_code=499)
+        await asyncio.wait((future,), timeout=min(0.2, remaining))
+    return await future
+
+
+def _run_ai_chat(body: ChatRequest):
+    deadline_token = set_deadline(settings.AI_CHAT_TIMEOUT_SECONDS)
+    try:
+        return _process_ai_chat(body)
+    finally:
+        reset_deadline(deadline_token)
+        _chat_slots.release()
+
+
+def _process_ai_chat(request: ChatRequest):
 
     try:
         route = classify_intent(
@@ -75,11 +125,21 @@ def ai_chat(
         print(
             "[LLM Error]",
             repr(exc),
+            "llmStatus=",
+            exc.status_code,
+            "reason=",
+            exc.reason,
         )
 
         raise HTTPException(
             status_code=502,
-            detail="AI服务暂时不可用，请稍后重试。",
+            detail={
+                "message": "AI服务暂时不可用，请稍后重试。",
+                "layer": "llm",
+                "llmStatus": exc.status_code,
+                "llmReason": exc.reason,
+                "llmBody": (exc.body or "")[:300],
+            },
         )
 
     except Exception as exc:
@@ -90,7 +150,11 @@ def ai_chat(
 
         raise HTTPException(
             status_code=500,
-            detail="AI业务意图识别失败，请稍后重试。",
+            detail={
+                "message": "AI业务意图识别失败，请稍后重试。",
+                "layer": "agent",
+                "agentReason": "router_error",
+            },
         )
 
     # =========================
@@ -138,6 +202,29 @@ def ai_chat(
                 limit=20,
                 exclude_owner_user_id=request.exclude_owner_user_id,
             )
+            # 种子账号挂了绝大部分成果时，排除归属会把库搜空或只剩噪音；
+            # 他人成果不足 3 条则回退不过滤，避免「暂未找到」。
+            if (
+                request.exclude_owner_user_id is not None
+                and len(candidates) < 3
+            ):
+                fallback = search_achievements(
+                    keywords=route.keywords,
+                    organization=route.organization,
+                    min_price_wan=route.min_price_wan,
+                    max_price_wan=route.max_price_wan,
+                    min_maturity=route.min_maturity,
+                    limit=20,
+                    exclude_owner_user_id=None,
+                )
+                if len(fallback) > len(candidates):
+                    print(
+                        "[Achievement] exclude_owner 候选不足，回退为不过滤归属",
+                        request.exclude_owner_user_id,
+                        "kept",
+                        len(fallback),
+                    )
+                    candidates = fallback
 
             results = rerank_results(
                 intent="search_achievement",
@@ -153,8 +240,12 @@ def ai_chat(
             )
 
             raise HTTPException(
-                status_code=500,
-                detail="科技成果查询失败。",
+                status_code=503,
+                detail={
+                    "message": "数据库暂时繁忙，请稍后重试。",
+                    "layer": "agent",
+                    "agentReason": "achievement_database_unavailable",
+                },
             )
 
         if not results:
@@ -195,6 +286,28 @@ def ai_chat(
                 limit=20,
                 exclude_owner_user_id=request.exclude_owner_user_id,
             )
+            if (
+                request.exclude_owner_user_id is not None
+                and len(candidates) < 3
+            ):
+                fallback = search_demands(
+                    keywords=route.keywords,
+                    organization=route.organization,
+                    region=route.region,
+                    min_budget_wan=route.min_budget_wan,
+                    max_budget_wan=route.max_budget_wan,
+                    coop_modes=route.coop_modes,
+                    limit=20,
+                    exclude_owner_user_id=None,
+                )
+                if len(fallback) > len(candidates):
+                    print(
+                        "[Demand] exclude_owner 候选不足，回退为不过滤归属",
+                        request.exclude_owner_user_id,
+                        "kept",
+                        len(fallback),
+                    )
+                    candidates = fallback
 
             results = rerank_results(
                 intent="search_demand",
@@ -210,8 +323,12 @@ def ai_chat(
             )
 
             raise HTTPException(
-                status_code=500,
-                detail="技术需求查询失败。",
+                status_code=503,
+                detail={
+                    "message": "数据库暂时繁忙，请稍后重试。",
+                    "layer": "agent",
+                    "agentReason": "demand_database_unavailable",
+                },
             )
 
         if not results:
@@ -237,5 +354,9 @@ def ai_chat(
 
     raise HTTPException(
         status_code=500,
-        detail="未知业务类型。",
+        detail={
+            "message": "未知业务类型。",
+            "layer": "agent",
+            "agentReason": "unknown_intent",
+        },
     )

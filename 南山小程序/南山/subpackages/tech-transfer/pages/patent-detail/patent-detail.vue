@@ -141,8 +141,9 @@
 </template>
 
 <script>
-import { getPatentDetail, getPatentTypeLabel } from '../../api/patent.js'
+import { getPatentDetail, getPatentTypeLabel, isPatentLoginRequired } from '../../api/patent.js'
 import PdfPreviewOverlay from '../../components/pdf-preview-overlay.vue'
+import HostBridge from '../../../../host/host-bridge.js'
 import { buildPatentDetailSeed, mergePatentDetail } from '../../utils/patent-detail-state.mjs'
 import {
   PATENT_DETAIL_NAV_ITEMS,
@@ -197,7 +198,19 @@ export default {
         this.detail = mergePatentDetail(this.detail || {}, remote)
         uni.setNavigationBarTitle({ title: this.detail.publicationNo || '专利详情' })
       } catch (e) {
-        this.error = (e && e.message) || '加载失败'
+        if (isPatentLoginRequired(e)) {
+          this.error = '专利详情需要登录，请先登录或注册后查看。'
+          uni.showModal({
+            title: '登录后查看专利',
+            content: this.error,
+            confirmText: '去登录',
+            success: (result) => {
+              if (result.confirm) HostBridge.navigate('pages/mine/mine')
+            },
+          })
+        } else {
+          this.error = (e && e.message) || '加载失败'
+        }
       } finally {
         this.loading = false
       }

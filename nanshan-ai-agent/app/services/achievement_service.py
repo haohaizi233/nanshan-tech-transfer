@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.database import get_db
+from app.services.query_utils import escape_like_term, normalize_search_terms
 
 
 # 第一版先用受控同义词表
@@ -31,6 +32,19 @@ KEYWORD_EXPANSIONS = {
     "生物医药": [
         "生物医药",
         "生物",
+        "医药",
+        "生物医学",
+        "生物技术",
+        "biology",
+        "biological",
+        "pharmaceutical",
+        "medical",
+    ],
+    "生物": [
+        "生物",
+        "生物医药",
+        "生物医学",
+        "生物技术",
         "医药",
         "biology",
         "biological",
@@ -75,7 +89,7 @@ def get_allowed_maturity_levels(
 def expand_keywords(keywords: list[str]) -> list[str]:
     result: list[str] = []
 
-    for keyword in keywords:
+    for keyword in normalize_search_terms(keywords):
         keyword = keyword.strip()
 
         if not keyword:
@@ -89,6 +103,8 @@ def expand_keywords(keywords: list[str]) -> list[str]:
         for item in expansions:
             if item not in result:
                 result.append(item)
+            if len(result) >= 8:
+                return result
 
     return result
 
@@ -170,16 +186,16 @@ def search_achievements(
 
         for term in search_terms:
 
-            like_value = f"%{term}%"
+            like_value = f"%{escape_like_term(term)}%"
 
             keyword_conditions.append(
                 """
                 (
-                    title ILIKE %s
-                    OR tech_intro ILIKE %s
-                    OR source_org_name ILIKE %s
-                    OR application_fields::text ILIKE %s
-                    OR innovation_points::text ILIKE %s
+                    title ILIKE %s ESCAPE E'\\\\'
+                    OR tech_intro ILIKE %s ESCAPE E'\\\\'
+                    OR source_org_name ILIKE %s ESCAPE E'\\\\'
+                    OR application_fields::text ILIKE %s ESCAPE E'\\\\'
+                    OR innovation_points::text ILIKE %s ESCAPE E'\\\\'
                 )
                 """
             )
@@ -204,11 +220,11 @@ def search_achievements(
 
     if organization:
         conditions.append(
-            "source_org_name ILIKE %s"
+            "source_org_name ILIKE %s ESCAPE E'\\\\'"
         )
 
         params.append(
-            f"%{organization}%"
+            f"%{escape_like_term(organization)}%"
         )
 
     # =========================

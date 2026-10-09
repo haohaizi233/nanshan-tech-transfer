@@ -5,7 +5,7 @@
  * 自填单位（companyText）仅为展示文本，不代表认证。
  */
 
-import { apiRequest, getCurrentUser, setCurrentUser } from './client.js'
+import { apiRequest, publicRequest, getCurrentUser, setCurrentUser } from './client.js'
 import { normalizeOrganizationCertification } from './organization-certification-state.mjs'
 import HostBridge from '../../../host/host-bridge.js'
 
@@ -88,11 +88,14 @@ export async function getMyOrganizationCertification() {
 
 /** 搜索 canonical 机构（仅 active，复用公开机构目录接口） */
 export async function searchInstitutions(keyword, page, pageSize) {
-  return apiRequest('GET', '/institutions', {
+  const query = {
     keyword: keyword || '',
     page: page || 1,
     pageSize: pageSize || 20
-  }, null)
+  }
+  return getCurrentUser()
+    ? apiRequest('GET', '/institutions', query, null)
+    : publicRequest('GET', '/institutions', query, null)
 }
 
 /** 我发起的成员申请列表 */

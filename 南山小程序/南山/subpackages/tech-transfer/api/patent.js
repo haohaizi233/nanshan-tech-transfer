@@ -104,6 +104,16 @@ export async function getPatentPdfPagesMeta(publicationNo) {
   return apiRequest('GET', `/patents/${encodeURIComponent(publicationNo)}/pdf/pages`)
 }
 
+export function isPatentLoginRequired(error) {
+  return !!(
+    error &&
+    (error.message === '未登录，请先登录' ||
+      error.code === 'TT_COMMON_40101' ||
+      error.code === 'TT_COMMON_40102' ||
+      error.code === 'TT_AUTH_40104')
+  )
+}
+
 function canUseBlobUrl() {
   try {
     return typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined'

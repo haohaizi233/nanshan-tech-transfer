@@ -26,7 +26,7 @@ _running_count = 0
 
 
 def _clip(reason: str) -> str:
-    text = (reason or "AI Provider 调用失败").strip()
+    text = (reason or "AI 服务暂时不可用，请稍后重试").strip()
     return text[:FAIL_REASON_MAX]
 
 

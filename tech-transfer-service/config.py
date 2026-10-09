@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     # 独立 FastAPI 服务，本服务通过 HTTP 转发 /ai/chat；为空则禁用聊天代理。
     # ai-agent 部署在 LLM 同一台公网机（见 nanshan-ai-agent/.env 的 LLM_API_URL）。
     AI_AGENT_URL: str = "http://43.138.138.200:8000/api/ai/chat"
-    AI_AGENT_TIMEOUT: int = 180  # ai-agent 含 2 次 LLM（路由+重排），慢查询常 >90s
+    AI_AGENT_TIMEOUT: int = 100  # Agent 对整次聊天限制 90 秒，主服务预留清理与响应时间
 
     # ── 爱马仕 Hermes / OpenAI 兼容 Provider（密钥只在服务端）──
     # 企业微信 Bot 长连接由爱马仕 gateway 持有（服务器在别处），本服务只走 HTTP。

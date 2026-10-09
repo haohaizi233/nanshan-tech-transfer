@@ -188,9 +188,18 @@ def ai_unavailable(msg="AI 服务不可用", details=None):
     return BizError(code, msg, status, details)
 
 
-def ai_provider_failed(msg="AI Provider 调用失败", details=None):
-    code, message, status = TT_AI_50201
-    return BizError(code, msg, status, details)
+def ai_provider_failed(msg="AI 服务暂时不可用，请稍后重试", details=None):
+    code, _, status = TT_AI_50201
+    safe_msg = "AI 服务暂时不可用，请稍后重试"
+    text = (msg or safe_msg).strip()
+    lowered = text.lower()
+    if any(hint in lowered for hint in (
+        "provider", "qwen", "openai", "hermes", "deepseek",
+        "http", "https://", "timeout", "connection", "api_key",
+        "authorization", "ai_agent"
+    )):
+        text = safe_msg
+    return BizError(code, text, status, details)
 
 
 def patent_not_found(msg="专利不存在", details=None):

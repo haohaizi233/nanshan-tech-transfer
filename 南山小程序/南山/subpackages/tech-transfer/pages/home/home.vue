@@ -190,6 +190,7 @@
 <script>
 	import HostBridge from '../../../../host/host-bridge.js'
 	import AppTabbar from '../../components/app-tabbar.vue'
+			import { getCurrentUser } from '../../api/client.js'
 	import { ensureLoginForDock, getUserProfile } from '../../api/user.js'
 	import { getCapitalGroups } from '../../constants/capital-modules.js'
 	import { getAchievements } from '../../api/achievement.js'
@@ -285,17 +286,20 @@
 				const shouldRefreshDemand = target !== 'result'
 				const shouldRefreshResult = target !== 'demand'
 				// 收藏状态（后端 API，失败时列表仍正常展示，只是不带收藏标记）
+				const hasSession = Boolean(getCurrentUser())
 				let favDemandIds = new Set()
 				let favResultIds = new Set()
-				try {
-					const sets = await Promise.all([
-						shouldRefreshDemand ? getFavoriteIdSet('demand') : Promise.resolve(favDemandIds),
-						shouldRefreshResult ? getFavoriteIdSet('result') : Promise.resolve(favResultIds)
-					])
-					favDemandIds = sets[0]
-					favResultIds = sets[1]
-				} catch (e) {
-					console.error('[index] loadFavorites failed:', e)
+				if (hasSession) {
+					try {
+						const sets = await Promise.all([
+							shouldRefreshDemand ? getFavoriteIdSet('demand') : Promise.resolve(favDemandIds),
+							shouldRefreshResult ? getFavoriteIdSet('result') : Promise.resolve(favResultIds)
+						])
+						favDemandIds = sets[0]
+						favResultIds = sets[1]
+					} catch (e) {
+						console.error('[index] loadFavorites failed:', e)
+					}
 				}
 
 				// 需求列表（真实 API）

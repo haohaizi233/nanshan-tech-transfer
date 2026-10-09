@@ -2,7 +2,7 @@
 from http.client import RemoteDisconnected
 from urllib.error import URLError
 
-from core.errors import BizError
+from core.errors import BizError, ai_provider_failed
 from routes.ai import (
     _network_reason,
     _parse_agent_error_details,
@@ -60,6 +60,9 @@ expect_biz(
     lambda: _raise_from_agent_http(502, """{"detail":{"layer":"llm","llmStatus":401,"llmReason":"http_error"}}"""),
     status=502, code="TT_AI_50201", layer="llm", llm_status=401, reason="http_error",
 )
+
+exc = ai_provider_failed("AI Provider 调用失败", {"layer": "llm"})
+check("provider 错误文案脱敏", "AI Provider 调用失败" not in exc.message and "AI 服务暂时不可用" in exc.message, exc.message)
 
 print("\n[3] 上层模型 HTTP 502 → 对外 502 + llmStatus=502")
 expect_biz(

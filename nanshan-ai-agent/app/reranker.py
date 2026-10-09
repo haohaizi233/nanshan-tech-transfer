@@ -1,8 +1,7 @@
 import json
-import re
 from typing import Any
 
-from app.llm_client import chat_completion
+from app.llm_client import chat_completion, extract_llm_json
 
 
 RERANK_SYSTEM_PROMPT = """
@@ -53,39 +52,7 @@ RERANK_SYSTEM_PROMPT = """
 
 
 def _extract_json(text: str) -> dict:
-    text = text.strip()
-
-    text = re.sub(
-        r"^```(?:json)?\s*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    text = re.sub(
-        r"\s*```$",
-        "",
-        text,
-    )
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for match in re.finditer(r"\{", text):
-        try:
-            parsed, _ = decoder.raw_decode(text, match.start())
-        except json.JSONDecodeError:
-            continue
-
-        if isinstance(parsed, dict) and "results" in parsed:
-            return parsed
-
-    raise ValueError(
-        f"模型没有返回有效 JSON: {text[:300]}"
-    )
+    return extract_llm_json(text, required_any=("results",))
 
 
 def _short_text(
@@ -276,17 +243,16 @@ def _call_reranker(
         },
     ]
 
+    output = chat_completion(
+        messages=messages,
+        max_tokens=1200,
+        temperature=0.0,
+        response_format={"type": "json_object"},
+        timeout=50,
+    )
     try:
-        output = chat_completion(
-            messages=messages,
-            max_tokens=1200,
-            temperature=0.0,
-            response_format={"type": "json_object"},
-            timeout=50,
-        )
         return _extract_json(output)
-
-    except Exception as exc:
+    except (ValueError, TypeError) as exc:
         first_error = exc
 
     # 第二次强制 JSON

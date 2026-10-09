@@ -104,9 +104,11 @@ import {
   clearAllPatentSearchHistory,
   getAllPatentSearchHistory,
   getPatentTypeLabel,
+  isPatentLoginRequired,
   savePatentSearchHistory,
   searchPatents,
 } from '../../api/patent.js'
+import { getCurrentUser } from '../../api/client.js'
 import HostBridge from '../../../../host/host-bridge.js'
 
 export default {
@@ -186,8 +188,22 @@ export default {
         uni.showToast({ title: '请输入检索词', icon: 'none' })
         return
       }
+      if (!getCurrentUser()) {
+        this.promptLogin()
+        return
+      }
       this.saveHistory(kw)
       this.loadList(true)
+    },
+    promptLogin() {
+      uni.showModal({
+        title: '登录后检索专利',
+        content: '专利检索需要登录账号。登录或注册后即可继续。',
+        confirmText: '去登录',
+        success: (result) => {
+          if (result.confirm) HostBridge.navigate('pages/mine/mine')
+        },
+      })
     },
     async loadHistory() {
       try {
@@ -231,7 +247,12 @@ export default {
         this.hasMore = this.page < totalPages && rows.length > 0
         if (this.hasMore) this.page += 1
       } catch (e) {
-        this.error = (e && e.message) || '检索失败'
+        if (isPatentLoginRequired(e)) {
+          this.error = '登录状态已失效，请登录后继续检索。'
+          this.promptLogin()
+        } else {
+          this.error = (e && e.message) || '检索失败'
+        }
         if (reset) this.list = []
       } finally {
         this.loading = false

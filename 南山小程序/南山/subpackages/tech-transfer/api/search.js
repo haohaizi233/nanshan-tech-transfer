@@ -3,7 +3,7 @@
  * 需求/成果历史分开保存，各最多 10 条
  */
 
-import { apiRequest } from './client.js'
+import { apiRequest, publicRequest, getCurrentUser } from './client.js'
 
 const DEMAND_HISTORY_KEY = 'ns_search_history_demand'
 const RESULT_HISTORY_KEY = 'ns_search_history_result'
@@ -70,5 +70,7 @@ export async function searchAll(q, type = 'all', page = 1, pageSize = 10) {
   const query = { q, type }
   if (page) query.page = page
   if (pageSize) query.pageSize = pageSize
-  return apiRequest('GET', '/search', query)
+  return getCurrentUser()
+    ? apiRequest('GET', '/search', query)
+    : publicRequest('GET', '/search', query)
 }

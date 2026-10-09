@@ -1,7 +1,6 @@
-import json
 import re
 
-from app.llm_client import LLMError, chat_completion
+from app.llm_client import LLMError, chat_completion, extract_llm_json
 from app.schemas import RouteResult
 
 
@@ -264,49 +263,7 @@ limit:
 
 
 def _extract_json(text: str) -> dict:
-    """
-    尽可能从模型输出中提取 JSON。
-
-    即使模型偶尔返回 ```json ... ```，
-    也能做容错处理。
-    """
-
-    text = text.strip()
-
-    # 去掉 Markdown code fence
-    text = re.sub(
-        r"^```(?:json)?\s*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    text = re.sub(
-        r"\s*```$",
-        "",
-        text,
-    )
-
-    # 优先直接解析
-    try:
-        return json.loads(text)
-
-    except json.JSONDecodeError:
-        pass
-
-    # 容错：提取第一个 {...}
-    match = re.search(
-        r"\{.*\}",
-        text,
-        flags=re.DOTALL,
-    )
-
-    if not match:
-        raise ValueError(
-            f"模型没有返回 JSON: {text[:300]}"
-        )
-
-    return json.loads(match.group())
+    return extract_llm_json(text, required_any=("intent",))
 
 
 _ACHIEVEMENT_MARKERS = re.compile(
@@ -333,9 +290,13 @@ _KEYWORD_NOISE = (
 )
 
 _LEADING_NOISE = re.compile(
-    r"^(?:帮我|给我|请|麻烦|查一下|找一下|搜一下|查询一下|搜索一下|"
+    r"^(?:帮我|给我|请|麻烦|我要|我想要|想要|我想|我需要|需要|"
+    r"查一下|找一下|搜一下|查询一下|搜索一下|"
     r"查询|搜索|看看|查查|找找|查|找|搜|一下|"
     r"有没有|有哪些|有啥|是否有|关于|有关)+"
+)
+_DOMAIN_ONLY = re.compile(
+    r"^([\u4e00-\u9fa5A-Za-z0-9]{2,12}?)(?:方面|领域|相关)的?$"
 )
 _TRAILING_NOISE = re.compile(
     r"(?:有哪些|有没有|吗|呢|看看|一下|[?？。！!，,.\s])+$"
@@ -440,7 +401,40 @@ def try_heuristic_classify(user_message: str) -> RouteResult | None:
             reason="规则解析：技术需求查询",
         )
 
+    cleaned = _strip_query_noise(text)
+    domain_match = _DOMAIN_ONLY.fullmatch(cleaned)
+    domain = _normalize_query_keyword(domain_match.group(1)) if domain_match else ""
+    if domain:
+        return RouteResult(
+            intent="search_achievement",
+            keywords=[domain],
+            reason="规则解析：领域关键词",
+        )
+
     return None
+
+
+def _fallback_classify(user_message: str) -> RouteResult | None:
+    """Use explicit business markers when the model is unavailable; never infer filters."""
+    text = (user_message or "").strip()
+    has_achievement = bool(_ACHIEVEMENT_MARKERS.search(text))
+    has_demand = bool(_DEMAND_MARKERS.search(text))
+    if has_achievement == has_demand:
+        return None
+
+    intent = "search_achievement" if has_achievement else "search_demand"
+    kind = "achievement" if has_achievement else "demand"
+    keywords = _extract_query_keywords(text, kind)
+    if not keywords:
+        marker = (_ACHIEVEMENT_MARKERS if has_achievement else _DEMAND_MARKERS).search(text)
+        topic = _normalize_query_keyword(_strip_query_noise(text[:marker.start()])) if marker else ""
+        if topic:
+            keywords = [topic[:80]]
+    return RouteResult(
+        intent=intent,
+        keywords=keywords,
+        reason="规则兜底：模型暂不可用，未提取未明确条件",
+    )
 
 
 def classify_intent(
@@ -454,9 +448,9 @@ def classify_intent(
     try:
         return _classify_intent_llm(user_message)
     except LLMError as exc:
-        fallback = try_heuristic_classify(user_message)
+        fallback = _fallback_classify(user_message)
         if fallback is not None:
-            print("[Router] LLM 不可用，规则兜底:", repr(exc))
+            print("[Router] LLM 不可用，使用显式业务标记兜底:", repr(exc))
             return fallback
         raise
 

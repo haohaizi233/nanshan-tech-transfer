@@ -14,7 +14,9 @@ export async function getDemands(params = {}) {
   if (keyword) query.keyword = keyword
   if (categoryCode) query.categoryCode = categoryCode
   if (includeMine) query.includeMine = 'true'
-  return apiRequest('GET', '/demands', query)
+  return includeMine || getCurrentUser()
+    ? apiRequest('GET', '/demands', query)
+    : publicRequest('GET', '/demands', query)
 }
 
 export async function getDemandDetail(id) {

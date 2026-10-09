@@ -2,6 +2,7 @@ from typing import Any
 
 from app.database import get_db
 from app.services.achievement_service import expand_keywords
+from app.services.query_utils import escape_like_term, normalize_search_terms
 
 
 def _calculate_score(
@@ -57,7 +58,7 @@ def search_demands(
 
     limit = min(max(limit, 1), 30)
 
-    coop_modes = coop_modes or []
+    coop_modes = normalize_search_terms(coop_modes or [])[:5]
 
     search_terms = expand_keywords(
         keywords
@@ -96,16 +97,16 @@ def search_demands(
 
         for term in search_terms:
 
-            like_value = f"%{term}%"
+            like_value = f"%{escape_like_term(term)}%"
 
             keyword_conditions.append(
                 """
                 (
-                    title ILIKE %s
-                    OR description ILIKE %s
-                    OR org_name_snapshot ILIKE %s
-                    OR region ILIKE %s
-                    OR coop_mode::text ILIKE %s
+                    title ILIKE %s ESCAPE E'\\\\'
+                    OR description ILIKE %s ESCAPE E'\\\\'
+                    OR org_name_snapshot ILIKE %s ESCAPE E'\\\\'
+                    OR region ILIKE %s ESCAPE E'\\\\'
+                    OR coop_mode::text ILIKE %s ESCAPE E'\\\\'
                 )
                 """
             )
@@ -131,11 +132,11 @@ def search_demands(
     if organization:
 
         conditions.append(
-            "org_name_snapshot ILIKE %s"
+            "org_name_snapshot ILIKE %s ESCAPE E'\\\\'"
         )
 
         params.append(
-            f"%{organization}%"
+            f"%{escape_like_term(organization)}%"
         )
 
     # =========================
@@ -145,11 +146,11 @@ def search_demands(
     if region:
 
         conditions.append(
-            "region ILIKE %s"
+            "region ILIKE %s ESCAPE E'\\\\'"
         )
 
         params.append(
-            f"%{region}%"
+            f"%{escape_like_term(region)}%"
         )
 
     # =========================
@@ -193,11 +194,11 @@ def search_demands(
     for mode in coop_modes:
 
         conditions.append(
-            "coop_mode::text ILIKE %s"
+            "coop_mode::text ILIKE %s ESCAPE E'\\\\'"
         )
 
         params.append(
-            f"%{mode}%"
+            f"%{escape_like_term(mode)}%"
         )
 
     where_clause = " AND ".join(

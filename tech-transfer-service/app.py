@@ -175,6 +175,7 @@ if (_admin_dist / "index.html").is_file():
 _H5_DEV_ORIGIN = "http://127.0.0.1:5173"
 _H5_ROOT = Path(__file__).resolve().parent.parent / "南山小程序" / "南山"
 _H5_DIST_CANDIDATES = (
+    _H5_ROOT / "dist" / "build" / "h5",
     _H5_ROOT / "unpackage" / "dist" / "build" / "h5",
     _H5_ROOT / "unpackage" / "dist" / "dev" / "h5",
 )

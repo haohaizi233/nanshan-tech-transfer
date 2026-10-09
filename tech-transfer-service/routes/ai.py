@@ -174,7 +174,7 @@ def _raise_from_agent_http(agent_status: int, body: str) -> None:
         code, message, status = TT_COMMON_42901
         raise BizError(code, "AI 请求过于频繁，请稍后重试", status, details)
     if details.get("layer") == "llm" or agent_status in (500, 502, 504):
-        raise ai_provider_failed("AI Provider 调用失败", details)
+        raise ai_provider_failed("AI 服务暂时不可用，请稍后重试", details)
     raise ai_unavailable("AI 助手暂时不可用，请稍后重试", details)
 
 

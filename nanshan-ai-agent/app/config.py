@@ -19,6 +19,10 @@ class Settings:
     DB_PASSWORD = os.getenv("AI_DB_PASSWORD") or os.getenv("DB_PASSWORD")
     # 连接池上限：AI 服务并发低，限制连接数避免与主服务争抢 PG max_connections
     DB_MAX_CONN = int(os.getenv("AI_DB_MAX_CONN", "3"))
+    DB_POOL_WAIT_SECONDS = float(os.getenv("AI_DB_POOL_WAIT_SECONDS", "1.5"))
+    DB_STATEMENT_TIMEOUT_MS = int(os.getenv("AI_DB_STATEMENT_TIMEOUT_MS", "5000"))
+    AI_CHAT_TIMEOUT_SECONDS = float(os.getenv("AI_CHAT_TIMEOUT_SECONDS", "90"))
+    AI_CHAT_MAX_CONCURRENCY = int(os.getenv("AI_CHAT_MAX_CONCURRENCY", "4"))
 
 
 settings = Settings()
