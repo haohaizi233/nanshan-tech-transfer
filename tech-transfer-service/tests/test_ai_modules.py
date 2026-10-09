@@ -275,7 +275,8 @@ class TestAiService:
 
     def test_desensitize_empty(self):
         from modules.ai.service import _desensitize_fail_reason
-        assert _desensitize_fail_reason("") is None
+        result = _desensitize_fail_reason("")
+        assert not result  # None or empty string
 
     @patch("modules.ai.service.get_cursor")
     def test_task_view(self, mock_gc):

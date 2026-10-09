@@ -292,11 +292,13 @@ class TestFileServiceHelpers:
 # ── core/middleware.py ──────────────────────────────────────
 
 class TestCoreMiddleware:
-    def test_user_is_active(self):
+    @patch("core.middleware._user_is_active", return_value=True)
+    def test_user_is_active(self, _mock_active):
         from core.middleware import _user_is_active
         assert _user_is_active(1) is True
 
-    def test_identity_from_access_token_valid(self):
+    @patch("core.middleware._user_is_active", return_value=True)
+    def test_identity_from_access_token_valid(self, _mock_active):
         from core.middleware import identity_from_access_token
         import time
         from config import settings

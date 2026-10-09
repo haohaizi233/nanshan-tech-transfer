@@ -264,9 +264,7 @@ class TestApp:
 
         from app import app
 
-        with patch("db.init_pool"), \
-             patch("db.close_pool"), \
-             patch("db.get_cursor") as mock_gc:
+        with patch("app.get_cursor") as mock_gc:
             mock_cur = MagicMock()
             mock_cur.fetchone.return_value = (1,)
             mock_gc.return_value.__enter__ = MagicMock(return_value=mock_cur)
