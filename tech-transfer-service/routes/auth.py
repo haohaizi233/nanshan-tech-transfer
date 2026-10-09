@@ -8,7 +8,7 @@ from core.request_schemas import (
     RegisterRequest,
 )
 from core.errors import bootstrap_credential_invalid, BizError, TT_AUTH_40105, TT_COMMON_40102
-from core.rate_limit import check_login_rate, check_register_rate
+from core.rate_limit import check_ip_rate, check_login_rate, check_register_rate
 from modules.identity.provider import get_identity_provider
 from modules.identity.service import (
     bootstrap_session,
@@ -80,7 +80,9 @@ def bootstrap(body: BootstrapRequest):
 
 
 @router.post("/refresh")
-def refresh(body: RefreshTokenRequest):
+def refresh(body: RefreshTokenRequest, request: Request):
+    # M5: refresh token 防重放/枚举：按 IP 限频（10 次/60s），超限 429
+    check_ip_rate(request, "auth_refresh", limit=10, window_s=60)
     refresh_token = body.as_dict().get("refreshToken")
     if not refresh_token:
         code, message, status = TT_COMMON_40102
@@ -91,7 +93,9 @@ def refresh(body: RefreshTokenRequest):
 
 
 @router.post("/logout")
-def logout(body: RefreshTokenRequest):
+def logout(body: RefreshTokenRequest, request: Request):
+    # M5: 与 /refresh 同一限频桶，防止伪造 refreshToken 撞库
+    check_ip_rate(request, "auth_refresh", limit=10, window_s=60)
     refresh_token = body.as_dict().get("refreshToken")
     if not refresh_token:
         code, message, status = TT_COMMON_40102

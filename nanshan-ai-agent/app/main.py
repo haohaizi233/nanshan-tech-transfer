@@ -102,27 +102,31 @@ async def ai_chat(body: ChatRequest, http_request: Request):
             status_code=503,
             detail={"message": "AI 请求繁忙，请稍后重试。", "reason": "overloaded"},
         )
+    # H4: 槽位由本协程的 finally 统一释放（恰好一次）。
+    # 不能依赖工作线程的 finally —— future.cancel() 在任务未启动时会直接取消任务，
+    # 线程体（含 finally）根本不执行，槽位会永久泄漏直到 BoundedSemaphore 溢出。
     try:
         loop = asyncio.get_running_loop()
         future = loop.run_in_executor(_chat_executor, _run_ai_chat, body)
-    except Exception:
+        deadline = loop.time() + settings.AI_CHAT_TIMEOUT_SECONDS
+        while not future.done():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                # 线程池任务无法被真正中断：cancel() 只对尚未出队的任务生效，
+                # 已在跑的线程会继续到自然结束（线程池 max_workers 已兜底真实并发）。
+                # 无论 cancel 成败，槽位都在外层 finally 释放，不再泄漏。
+                future.cancel()
+                raise HTTPException(
+                    status_code=504,
+                    detail={"message": "AI 响应超时，请缩短问题后重试。", "reason": "timeout"},
+                )
+            if await http_request.is_disconnected():
+                future.cancel()
+                return Response(status_code=499)
+            await asyncio.wait((future,), timeout=min(0.2, remaining))
+        return await future
+    finally:
         _chat_slots.release()
-        raise
-
-    deadline = loop.time() + settings.AI_CHAT_TIMEOUT_SECONDS
-    while not future.done():
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            future.cancel()
-            raise HTTPException(
-                status_code=504,
-                detail={"message": "AI 响应超时，请缩短问题后重试。", "reason": "timeout"},
-            )
-        if await http_request.is_disconnected():
-            future.cancel()
-            return Response(status_code=499)
-        await asyncio.wait((future,), timeout=min(0.2, remaining))
-    return await future
 
 
 def _run_ai_chat(body: ChatRequest):
@@ -131,7 +135,6 @@ def _run_ai_chat(body: ChatRequest):
         return _process_ai_chat(body)
     finally:
         reset_deadline(deadline_token)
-        _chat_slots.release()
 
 
 def _process_ai_chat(request: ChatRequest):

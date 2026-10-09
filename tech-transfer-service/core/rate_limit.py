@@ -9,6 +9,7 @@
 
 内存护栏（M7）：桶按惰性修剪 + 定期全局清扫 + 硬上限，防止大量 IP/key 时无限增长。
 """
+import os
 import threading
 import time
 from collections import defaultdict, deque
@@ -22,6 +23,38 @@ _MAX_BUCKETS = 20000
 # 每 N 次检查触发一次全局清扫，删除窗口内已空的桶
 _CLEAN_EVERY = 256
 _check_counter = 0
+
+# N3: 可信反向代理列表（逗号分隔 IP/CIDR）。只有当 TCP 直连对端是可信代理时，
+# 才解析 X-Forwarded-For；否则 XFF 完全不可信（客户端可任意伪造），直接用对端 IP。
+# 默认只信任本机回环（Caddy/frp 与服务同机部署的拓扑）；多机拓扑用
+# TRUSTED_PROXIES=10.0.0.5,192.168.1.0/24 显式扩展。
+_DEFAULT_TRUSTED_PROXIES = ("127.0.0.1", "::1", "localhost")
+
+
+def _parse_trusted_proxies() -> tuple:
+    raw = os.getenv("TRUSTED_PROXIES", "")
+    items = [item.strip() for item in raw.split(",") if item.strip()]
+    return tuple(items) if items else _DEFAULT_TRUSTED_PROXIES
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    if not host:
+        return False
+    normalized = host.lower()
+    if normalized.startswith("::ffff:"):  # IPv4-mapped IPv6
+        normalized = normalized[7:]
+    for proxy in _parse_trusted_proxies():
+        proxy = proxy.lower()
+        if "/" in proxy:
+            try:
+                import ipaddress
+                if ipaddress.ip_address(normalized) in ipaddress.ip_network(proxy, strict=False):
+                    return True
+            except ValueError:
+                continue
+        elif normalized == proxy:
+            return True
+    return False
 
 
 def _sweep_locked(now: float) -> None:
@@ -51,17 +84,23 @@ def _check(key: str, limit: int, window_s: int):
 
 
 def _client_ip(request) -> str:
-    """真实客户端 IP。
+    """真实客户端 IP（N3: trusted-proxy 防 XFF 伪造）。
 
-    反代（Caddy/frp）会把上一跳的来源 IP 追加到 X-Forwarded-For 尾部，
-    因此只信任 XFF 的最后一跳——首段是客户端自带的，可任意伪造，绝不能用于限流。
+    只有当 TCP 直连对端（request.client.host）在 TRUSTED_PROXIES 白名单内时，
+    才信任 X-Forwarded-For：反代（Caddy/frp）会把上一跳来源 IP 追加到 XFF 尾部，
+    因此只取 XFF 的最后一跳——首段是客户端自带的，可任意伪造，绝不能用于限流。
+    直连（非可信代理）场景下 XFF 整体忽略，用 TCP 对端 IP 限流，
+    否则攻击者伪造 XFF 轮换假 IP 即可完全绕过 IP 维度限流。
     """
+    peer = request.client.host if request.client else "unknown"
+    if not _is_trusted_proxy(peer):
+        return peer
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
         last_hop = xff.split(",")[-1].strip()
         if last_hop:
             return last_hop
-    return request.client.host if request.client else "unknown"
+    return peer
 
 
 def check_login_rate(request, account: str = ""):

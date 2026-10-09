@@ -19,6 +19,13 @@ class Settings:
     LLM_FALLBACK_KEY = os.getenv("LLM_FALLBACK_KEY")
     LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL")
 
+    # M4: TLS 证书校验开关。默认开启；仅内网自签证书等特殊场景可显式关闭。
+    LLM_VERIFY_SSL = os.getenv("LLM_VERIFY_SSL", "true").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+    # N5: 主 + 备 Provider 共享的墙钟总超时预算（秒）。<=0 表示自动（2×单次 timeout，上限 120s）。
+    LLM_FALLBACK_BUDGET_SECONDS = float(os.getenv("LLM_FALLBACK_BUDGET_SECONDS", "0"))
+
     # PostgreSQL —— 建议为 AI 服务单独建只读角色（最小权限原则），
     # 设置 AI_DB_USER/AI_DB_PASSWORD 后将使用该只读账号，未设置则回退主账号。
     DB_HOST = os.getenv("DB_HOST")

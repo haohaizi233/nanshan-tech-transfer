@@ -50,6 +50,10 @@ def get_file(file_id: str, request: Request):
 
 @router.post("/api/tech-transfer/v1/files", status_code=201, summary="上传成果/需求媒体")
 async def upload_file(file: UploadFile = File(...), user: dict = Depends(identity)):
+    # M5: 按用户日配额（50 个/天）+ 突发频控（20 次/5 分钟），防磁盘耗尽
+    from core.rate_limit import check_user_daily_quota, check_user_rate
+    check_user_rate(user["userId"], "file_upload", limit=20, window_s=300)
+    check_user_daily_quota(user["userId"], "file_upload", limit=50)
     # UploadFile 不调用 read() 无上限后直接落盘，先受限读取，拒绝大文件以防内存耗尽。
     max_bytes = __import__("config").settings.MAX_UPLOAD_BYTES
     data = await file.read(max_bytes + 1)

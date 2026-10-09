@@ -33,16 +33,66 @@ def _user_is_active(user_id: int) -> bool:
     """Lightweight DB check: app_user.status must be 'active'.
 
     Closes the gap where a disabled user's existing access token remains
-    valid until JWT expiry (up to ACCESS_TOKEN_EXPIRES). One indexed query
-    per authenticated request; acceptable for this app's traffic profile.
+    valid until JWT expiry (up to ACCESS_TOKEN_EXPIRES).
+
+    M8: 结果进 core.auth_cache 的 30s 短 TTL 缓存，重复请求不再每请求查库；
+    用户状态写路径（禁用/启用）调用 auth_cache.invalidate_user() 即时失效，
+    即使漏调，最坏 30s 后自然过期。False 也缓存，防缓存穿透。
     """
     from db import get_cursor
-    with get_cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM app_user WHERE id = %s AND status = 'active'",
-            (user_id,),
-        )
-        return cur.fetchone() is not None
+
+    def _query() -> bool:
+        with get_cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM app_user WHERE id = %s AND status = 'active'",
+                (user_id,),
+            )
+            return cur.fetchone() is not None
+
+    return auth_cache.cached(("user_active", user_id), _query)
+
+
+def _is_admin_role(user_id: int) -> bool:
+    """user_role 表实时 admin 判定（M8: 30s TTL 缓存，写路径主动失效）。"""
+    from db import get_cursor
+
+    def _query() -> bool:
+        with get_cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
+                (user_id,),
+            )
+            return cur.fetchone() is not None
+
+    return auth_cache.cached(("admin_role", user_id), _query)
+
+
+def _org_admin_info(user_id: int) -> tuple[list[int], bool]:
+    """(机构管理员 org_id 列表, 是否系统 admin)。M8: 30s TTL 缓存。"""
+    from db import get_cursor
+
+    def _query() -> tuple[list[int], bool]:
+        with get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT m.org_id
+                FROM organization_membership m
+                JOIN institution i ON i.id = m.org_id AND i.status = 'active'
+                WHERE m.user_id = %s AND m.role = 'admin' AND m.status = 'active'
+                ORDER BY m.org_id
+                """,
+                (user_id,),
+            )
+            org_ids = [int(row["org_id"]) for row in (cur.fetchall() or [])]
+            cur.execute(
+                "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
+                (user_id,),
+            )
+            is_system_admin = bool(cur.fetchone())
+        return org_ids, is_system_admin
+
+    org_ids, is_system_admin = auth_cache.cached(("org_admin", user_id), _query)
+    return list(org_ids), bool(is_system_admin)
 
 
 def identity(request: Request) -> dict:
@@ -113,18 +163,13 @@ def admin_identity(request: Request) -> dict:
 
     不信任 JWT 内 roles 快照（角色变更后旧 token 立即失效），
     每次请求查库判定 —— 06 §授权：RBAC（user_role）+ TT_ADMIN_40301。
+    M8: 查库结果 30s TTL 缓存，角色授予/撤销写路径调用 auth_cache.invalidate_user()。
     """
     user = identity(request)
-    from db import get_cursor
-    from core.errors import TT_ADMIN_40301
-    with get_cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
-            (user["userId"],),
-        )
-        if not cur.fetchone():
-            code, message, status = TT_ADMIN_40301
-            raise BizError(code, message, status)
+    if not _is_admin_role(user["userId"]):
+        from core.errors import TT_ADMIN_40301
+        code, message, status = TT_ADMIN_40301
+        raise BizError(code, message, status)
     return user
 
 
@@ -135,27 +180,9 @@ def org_admin_identity(request: Request) -> dict:
     must still call ``assert_org_admin_for`` with the resource's canonical org id.
     """
     user = identity(request)
-    from db import get_cursor
     from core.errors import TT_ADMIN_40301
 
-    with get_cursor() as cur:
-        cur.execute(
-            """
-            SELECT m.org_id
-            FROM organization_membership m
-            JOIN institution i ON i.id = m.org_id AND i.status = 'active'
-            WHERE m.user_id = %s AND m.role = 'admin' AND m.status = 'active'
-            ORDER BY m.org_id
-            """,
-            (user["userId"],),
-        )
-        org_ids = [int(row["org_id"]) for row in (cur.fetchall() or [])]
-        cur.execute(
-            "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
-            (user["userId"],),
-        )
-        is_system_admin = bool(cur.fetchone())
-
+    org_ids, is_system_admin = _org_admin_info(user["userId"])
     if not org_ids and not is_system_admin:
         code, message, status = TT_ADMIN_40301
         raise BizError(code, "非机构管理员", status)
@@ -177,28 +204,11 @@ def backend_identity(request: Request) -> dict:
     实时查库——不使用 user_role 表达机构权限（与 org_admin_identity 同源）。
     """
     user = identity(request)
-    from db import get_cursor
     from core.errors import TT_ADMIN_40301
 
-    with get_cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
-            (user["userId"],),
-        )
-        if cur.fetchone():
-            return {**user, "isPlatformAdmin": True, "orgId": None}
-
-        cur.execute(
-            """
-            SELECT m.org_id
-            FROM organization_membership m
-            JOIN institution i ON i.id = m.org_id AND i.status = 'active'
-            WHERE m.user_id = %s AND m.role = 'admin' AND m.status = 'active'
-            ORDER BY m.org_id
-            """,
-            (user["userId"],),
-        )
-        org_ids = [int(row["org_id"]) for row in (cur.fetchall() or [])]
+    org_ids, is_system_admin = _org_admin_info(user["userId"])
+    if is_system_admin:
+        return {**user, "isPlatformAdmin": True, "orgId": None}
 
     if org_ids:
         return {

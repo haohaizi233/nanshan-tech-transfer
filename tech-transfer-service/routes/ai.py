@@ -20,6 +20,7 @@ from core.response import success, get_request_id
 from core.middleware import identity
 from core.errors import BizError, TT_COMMON_42901, ai_provider_failed, ai_unavailable, bad_request
 from core.idempotency import idempotent_create, cache_response as cache_idem_response
+from core.rate_limit import check_user_rate
 from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from modules.ai.service import (
     create_evaluation_task, get_evaluation_task,
@@ -262,6 +263,8 @@ def _persist_failed_turn(user_id: int, user_message: str, assistant_message: str
 
 @router.post("/ai/chat")
 def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
+    # M5: 用户级频控防 LLM 成本刷单（30 次/5 分钟，正常多轮对话不受影响）
+    check_user_rate(user["userId"], "ai_chat", limit=30, window_s=300)
     message = body.as_dict().get("message")
     if not isinstance(message, str) or not message.strip():
         raise bad_request("message 不能为空")
@@ -350,6 +353,8 @@ def _build_match_reasons(card: dict, keywords: list[str]) -> list[str]:
 
 @router.post("/ai/match")
 def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
+    # M5: 用户级频控（10 次/5 分钟）；匹配比对话更贵（全量检索 + 重排）
+    check_user_rate(user["userId"], "ai_match", limit=10, window_s=300)
     demand_id = body.as_dict().get("demandId")
     if not isinstance(demand_id, int) or demand_id <= 0:
         raise bad_request("demandId 必须为正整数")
