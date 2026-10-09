@@ -2,6 +2,10 @@ import json
 from typing import Any
 
 from app.llm_client import chat_completion, extract_llm_json
+from app.runtime_budget import remaining_seconds
+import logging
+
+_logger = logging.getLogger(__name__)
 
 
 RERANK_SYSTEM_PROMPT = """
@@ -145,7 +149,8 @@ def rerank_results(
     candidates = candidates[:20]
 
     # 候选数不超过 top_n 时直接返回，省掉一次 LLM 重排（常见慢路径）。
-    if len(candidates) <= top_n:
+    # E6: 阈值改为 3（候选极少时排序价值低；top_n 条时仍走 LLM 语义排序）
+    if len(candidates) <= 3:
         return candidates[:top_n]
 
     if intent == "search_achievement":
@@ -183,10 +188,7 @@ def rerank_results(
             raise ValueError("重排结果 results 必须是列表")
 
     except Exception as exc:
-        print(
-            "[Reranker Error]",
-            repr(exc),
-        )
+        _logger.warning("[Reranker Error] %r", exc)
 
         # 语义重排失败
         return candidates[:top_n]
@@ -295,12 +297,17 @@ def _call_reranker(
     ]
 
     try:
+        # E1: 第二次调用 timeout 取 min(50, remaining budget)，避免总预算溢出
+        remaining = remaining_seconds()
+        retry_timeout = int(min(50, remaining)) if remaining is not None else 50
+        if retry_timeout <= 0:
+            raise RuntimeError("重排超时预算已耗尽，跳过重试")
         retry_output = chat_completion(
             messages=retry_messages,
             max_tokens=1200,
             temperature=0.0,
             response_format={"type": "json_object"},
-            timeout=50,
+            timeout=retry_timeout,
         )
         return _extract_json(retry_output)
     except Exception as exc:

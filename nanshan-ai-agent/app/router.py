@@ -1,7 +1,10 @@
+import logging
 import re
 
 from app.llm_client import LLMError, chat_completion, extract_llm_json
 from app.schemas import RouteResult
+
+_logger = logging.getLogger(__name__)
 
 
 ROUTER_SYSTEM_PROMPT = """
@@ -450,7 +453,7 @@ def classify_intent(
     except LLMError as exc:
         fallback = _fallback_classify(user_message)
         if fallback is not None:
-            print("[Router] LLM 不可用，使用显式业务标记兜底:", repr(exc))
+            _logger.warning("[Router] LLM 不可用，使用显式业务标记兜底: %r", exc)
             return fallback
         raise
 

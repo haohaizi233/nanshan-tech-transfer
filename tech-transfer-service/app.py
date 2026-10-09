@@ -90,6 +90,8 @@ async def security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # E11: HSTS — 部署 HTTPS 后强制浏览器只走 TLS
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # 限制内嵌 iframe；API 响应不需要 CSP，仅对 HTML 页面设 frame-ancestors
     if "text/html" in response.headers.get("content-type", ""):
         response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
@@ -312,6 +314,7 @@ def health():
         with get_cursor() as cur:
             # 仅探活，不暴露用户总数（公开端点不应泄露业务量级）
             cur.execute("SELECT 1")
+        # R8: 不再暴露 authProvider/appEnv（公开端点不应泄露内部配置）
         return {
             "code": 0,
             "message": "ok",
@@ -319,8 +322,6 @@ def health():
                 "status": "ok",
                 "database": "ok",
                 "db": True,
-                "authProvider": settings.AUTH_PROVIDER,
-                "appEnv": settings.APP_ENV,
             },
         }
     except Exception:

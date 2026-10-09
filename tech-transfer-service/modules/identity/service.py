@@ -2,6 +2,7 @@ import json
 from typing import Optional
 
 from db import get_cursor
+from config import settings
 from modules.identity.context import IdentityContext
 from modules.identity.provider import ExternalIdentity
 from core.jwt_utils import sign_access_token, sign_refresh_token
@@ -193,9 +194,9 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
         cur.execute(
             """
             INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
-            VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '14 days')
+            VALUES (%s, %s, 'active', NOW(), NOW() + make_interval(days => %s))
             """,
-            (identity.userId, jti),
+            (identity.userId, jti, settings.REFRESH_TOKEN_EXPIRES_DAYS),
         )
 
         user = build_user_response(cur, identity.userId)
@@ -203,7 +204,7 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
     return {
         "accessToken": access_token,
         "refreshToken": refresh_token,
-        "expiresIn": 7200,
+        "expiresIn": settings.ACCESS_TOKEN_EXPIRES,
         "user": user,
         "isNewUser": is_new,
     }
@@ -221,14 +222,14 @@ def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
     cur.execute(
         """
         INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
-        VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '14 days')
+        VALUES (%s, %s, 'active', NOW(), NOW() + make_interval(days => %s))
         """,
-        (user_id, jti),
+        (user_id, jti, settings.REFRESH_TOKEN_EXPIRES_DAYS),
     )
     return {
         "accessToken": access_token,
         "refreshToken": refresh_token,
-        "expiresIn": 7200,
+        "expiresIn": settings.ACCESS_TOKEN_EXPIRES,
     }
 
 
@@ -521,9 +522,9 @@ def refresh_session(refresh_token: str) -> dict:
         cur.execute(
             """
             INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
-            VALUES (%s, %s, 'active', NOW(), NOW() + INTERVAL '14 days')
+            VALUES (%s, %s, 'active', NOW(), NOW() + make_interval(days => %s))
             """,
-            (user_id, new_jti),
+            (user_id, new_jti, settings.REFRESH_TOKEN_EXPIRES_DAYS),
         )
 
         user = build_user_response(cur, user_id)
@@ -531,7 +532,7 @@ def refresh_session(refresh_token: str) -> dict:
     return {
         "accessToken": access_token,
         "refreshToken": new_refresh_token,
-        "expiresIn": 7200,
+        "expiresIn": settings.ACCESS_TOKEN_EXPIRES,
         "user": user,
         "isNewUser": False,
     }

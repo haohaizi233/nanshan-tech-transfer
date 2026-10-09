@@ -167,19 +167,31 @@ def _release_conn(conn) -> None:
             _acquire_cond.notify()
 
 
+# E9: 异常后校验策略 — 仅在上次使用报错后探活，正常复用跳过 ping。
+# dirty 标记记录连接是否经历过异常
+_dirty_conns: set[int] = set()
+
+
 @contextmanager
 def get_conn():
     """借出一个池化连接，用毕归还（事务清理由 putconn 兜底）。
 
-    借出前做轻量 SELECT 1 预检：若连接已被对端断开，立即重建一条新连接，
-    避免业务游标拿到坏连接后报错（psycopg2 不会自动重连）。
+    E9: 异常后校验 — 仅标记为 dirty 的连接才做 SELECT 1 探活，
+    正常复用跳过 ping，避免高并发下每请求多一次 DB 往返。
     """
     conn = _acquire_conn()
+    conn_id = id(conn)
     try:
-        if not _ping(conn):
-            conn = _replace_conn(conn)
-        _conn_born.setdefault(id(conn), time.monotonic())
+        if conn_id in _dirty_conns:
+            _dirty_conns.discard(conn_id)
+            if not _ping(conn):
+                conn = _replace_conn(conn)
+                conn_id = id(conn)
+        _conn_born.setdefault(conn_id, time.monotonic())
         yield conn
+    except Exception:
+        _dirty_conns.add(conn_id)
+        raise
     finally:
         _release_conn(conn)
 

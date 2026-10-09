@@ -145,13 +145,9 @@ def _process_ai_chat(request: ChatRequest):
         )
 
     except LLMError as exc:
-        print(
-            "[LLM Error]",
-            repr(exc),
-            "llmStatus=",
-            exc.status_code,
-            "reason=",
-            exc.reason,
+        logger.warning(
+            "[LLM Error] %r llmStatus=%s reason=%s",
+            exc, exc.status_code, exc.reason,
         )
 
         raise HTTPException(
@@ -166,10 +162,7 @@ def _process_ai_chat(request: ChatRequest):
         )
 
     except Exception as exc:
-        print(
-            "[Router Error]",
-            repr(exc),
-        )
+        logger.warning("[Router Error] %r", exc)
 
         raise HTTPException(
             status_code=500,
@@ -241,11 +234,9 @@ def _process_ai_chat(request: ChatRequest):
                     exclude_owner_user_id=None,
                 )
                 if len(fallback) > len(candidates):
-                    print(
-                        "[Achievement] exclude_owner 候选不足，回退为不过滤归属",
-                        request.exclude_owner_user_id,
-                        "kept",
-                        len(fallback),
+                    logger.info(
+                        "[Achievement] exclude_owner 候选不足，回退为不过滤归属 %s kept=%d",
+                        request.exclude_owner_user_id, len(fallback),
                     )
                     candidates = fallback
 
@@ -257,10 +248,7 @@ def _process_ai_chat(request: ChatRequest):
             )
 
         except Exception as exc:
-            print(
-                "[Achievement DB Error]",
-                repr(exc),
-            )
+            logger.error("[Achievement DB Error] %r", exc)
 
             raise HTTPException(
                 status_code=503,
@@ -324,11 +312,9 @@ def _process_ai_chat(request: ChatRequest):
                     exclude_owner_user_id=None,
                 )
                 if len(fallback) > len(candidates):
-                    print(
-                        "[Demand] exclude_owner 候选不足，回退为不过滤归属",
-                        request.exclude_owner_user_id,
-                        "kept",
-                        len(fallback),
+                    logger.info(
+                        "[Demand] exclude_owner 候选不足，回退为不过滤归属 %s kept=%d",
+                        request.exclude_owner_user_id, len(fallback),
                     )
                     candidates = fallback
 
@@ -340,10 +326,7 @@ def _process_ai_chat(request: ChatRequest):
             )
 
         except Exception as exc:
-            print(
-                "[Demand DB Error]",
-                repr(exc),
-            )
+            logger.error("[Demand DB Error] %r", exc)
 
             raise HTTPException(
                 status_code=503,

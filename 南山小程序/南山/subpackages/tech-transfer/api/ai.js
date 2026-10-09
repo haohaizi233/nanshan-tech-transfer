@@ -17,8 +17,8 @@ import { AI_FEATURE_ENABLED } from '../../../config/feature-flags.js'
 export const POLL_INTERVAL_MS = 3000
 export const POLL_MAX_MS = 120000
 
-/** AI 对话/匹配同步链路最长等待（须 ≥ 后端 AI_AGENT_TIMEOUT 180s + 余量） */
-export const AI_CHAT_TIMEOUT_MS = 200000
+/** E5: AI 对话/匹配同步链路最长等待（与后端 MAX_REQUEST_SECONDS=60s 对齐，留 10s 余量） */
+export const AI_CHAT_TIMEOUT_MS = 70000
 
 export function isTerminalStatus(status) {
   return status === 'succeeded' || status === 'failed'

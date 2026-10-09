@@ -487,4 +487,4 @@ def _write_call_log(
     try:
         enqueue_llm_log(event)
     except Exception as exc:
-        print(f"[LLM] 写日志失败 err={exc!r}")
+        _logger.warning("[LLM] 写日志失败 err=%r", exc)

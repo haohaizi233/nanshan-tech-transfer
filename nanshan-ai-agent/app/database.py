@@ -33,6 +33,11 @@ def _get_pool():
                     connect_timeout=5,
                     options=f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS}",
                     cursor_factory=RealDictCursor,
+                    # E4: TCP keepalive，与主服务 db.py 保持一致
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=3,
                 )
     return _pool
 

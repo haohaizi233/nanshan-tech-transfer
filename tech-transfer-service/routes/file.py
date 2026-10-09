@@ -54,6 +54,24 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(identit
     from core.rate_limit import check_user_daily_quota, check_user_rate
     check_user_rate(user["userId"], "file_upload", limit=20, window_s=300)
     check_user_daily_quota(user["userId"], "file_upload", limit=50)
+    # E3: Content-Type 白名单校验，防止上传可执行文件/XSS
+    _ALLOWED_CONTENT_TYPES = {
+        "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
+        "video/mp4", "video/quicktime",
+        "audio/mpeg", "audio/wav",
+        "text/plain",
+    }
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in _ALLOWED_CONTENT_TYPES:
+        from core.errors import bad_request
+        raise bad_request(f"不支持的文件类型: {content_type}")
     # UploadFile 不调用 read() 无上限后直接落盘，先受限读取，拒绝大文件以防内存耗尽。
     max_bytes = __import__("config").settings.MAX_UPLOAD_BYTES
     data = await file.read(max_bytes + 1)

@@ -240,6 +240,8 @@ def admin_cooperation_assist_transition(
 
 
 # ── admin-users（READ ONLY，禁用/启用为 P1） ─────────────────
+# E2: 当前 admin-users 仅支持只读操作；未来若扩展禁用/启用用户写操作，
+# 必须同步接入 auth_cache.invalidate_user(user_id) 使缓存即时失效。
 
 @router.get("/admin/users", tags=["admin-users"])
 def admin_users_list(request: Request, scope: dict = Depends(backend_identity)):
