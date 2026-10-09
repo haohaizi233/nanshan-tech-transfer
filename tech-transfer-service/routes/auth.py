@@ -33,15 +33,26 @@ def login(body: LoginRequest, request: Request):
         code, message, status = TT_AUTH_40105
         raise BizError(code, "请输入账号和密码", status)
 
-    # 暴力破解防护：按 IP + 按账号双重限频
-    check_login_rate(request, account=phone or username)
+    # D8: IP 维度限流在认证前（防暴力破解扫描）；账号维度仅计失败
+    from core.rate_limit import _client_ip, _check
+    ip = _client_ip(request)
+    _check(f"login:ip:{ip}", limit=20, window_s=60)
 
-    if phone:
-        # 小程序端：手机号 + 密码（user_credential.phone 校验）
-        result = login_phone_session(phone, password)
-    else:
-        # 后台管理端：登录账号 + 密码（user_credential.username 校验）
-        result = password_login_session(username, password)
+    account = phone or username
+    try:
+        if phone:
+            # 小程序端：手机号 + 密码（user_credential.phone 校验）
+            result = login_phone_session(phone, password)
+        else:
+            # 后台管理端：登录账号 + 密码（user_credential.username 校验）
+            result = password_login_session(username, password)
+    except Exception:
+        # D8: 认证失败时才计入账号限流桶（成功登录不计数）
+        if account:
+            _check(f"login:acct:{account}", limit=5, window_s=300)
+        raise
+
+    # D8: 登录成功后不计入账号限流桶（只计失败次数）
     return success(result)
 
 

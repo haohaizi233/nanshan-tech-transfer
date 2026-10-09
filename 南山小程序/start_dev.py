@@ -763,9 +763,8 @@ def start_backend(lan):
     host = "0.0.0.0" if lan else "127.0.0.1"
     print(f"  启动中：FastAPI（uvicorn）→ http://{host}:{BACKEND_PORT}")
     env = os.environ.copy()
-    env.setdefault("APP_ENV", "local")
-    env.setdefault("HOST_MODE", "local")
-    env.setdefault("AUTH_PROVIDER", "mock")
+    # D2: 不再覆盖 APP_ENV/HOST_MODE/AUTH_PROVIDER
+    # 让 .env 和环境变量生效，防止静默还原安全配置
     proc = spawn_logged(
         [BACKEND_PYTHON, "-u", "app.py"],
         cwd=API_SERVER_DIR,

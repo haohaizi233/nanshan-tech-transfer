@@ -50,7 +50,8 @@ _FALLBACK_MODEL = None
 # - 预算耗尽时跳过 fallback 直接抛主 Provider 错误，杜绝「重试 + fallback」无界叠加。
 # - settings.LLM_FALLBACK_BUDGET_SECONDS > 0 时用配置值；否则自动 = min(2×timeout, timeout+60)。
 _FALLBACK_MIN_BUDGET = 1.0  # fallback 至少需要 1s 预算才值得切换
-_fallback_deadline = float("inf")
+# D5: 改为 thread-local 避免并发请求互相覆盖 deadline
+_fallback_deadline_local = threading.local()
 
 
 def _fallback_total_budget(timeout: float) -> float:
@@ -153,9 +154,9 @@ def _chat_completion(
     调用公司内部 Qwen Chat Completions API。
     主 Provider 不可用时自动切换到备用 Provider（如 Hermes）。
     """
-    # N5: 记录本次「主 + 备」调用的墙钟总预算截止点
-    global _fallback_deadline
-    _fallback_deadline = time.monotonic() + _fallback_total_budget(timeout)
+    # D5: 记录本次「主 + 备」调用的墙钟总预算截止点（thread-local，避免并发竞态）
+    deadline = time.monotonic() + _fallback_total_budget(timeout)
+    _fallback_deadline_local.value = deadline
     try:
         return _call_llm(
             settings.LLM_API_URL,
@@ -164,10 +165,14 @@ def _chat_completion(
             messages, max_tokens, temperature, response_format, timeout,
         )
     except LLMError as primary_err:
+        # D14: 401（API Key 错误）不触发 fallback，直接抛出
+        # 配置错误应被立即发现，而非静默烧备用额度
+        if primary_err.status_code == 401:
+            raise
         if _FALLBACK_URL and _FALLBACK_KEY:
             # N5: 主 + 备 Provider 共享墙钟总超时预算，防止主 Provider 重试耗尽
             # timeout 后 fallback 又拿到完整 timeout，总耗时无上界、线程被长期占用。
-            remaining = _fallback_deadline - time.monotonic()
+            remaining = _fallback_deadline_local.value - time.monotonic()
             if remaining < _FALLBACK_MIN_BUDGET:
                 _logger.warning(
                     "LLM fallback 跳过：总超时预算已耗尽（剩余 %.2fs）reason=%s",

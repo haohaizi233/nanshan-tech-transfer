@@ -127,7 +127,8 @@ check_health() {
 get_main_cmd() {
     local venv_activate="${SERVICE_DIR}/.venv/bin/activate"
     if [[ -f "${venv_activate}" ]]; then
-        echo "source ${venv_activate} && python app.py"
+        # D13: source是shell builtin，nohup无法执行；改用bash -c
+        echo "bash -c 'source ${venv_activate} && exec python app.py'"
     else
         echo "python3 app.py"
     fi
@@ -136,16 +137,16 @@ get_main_cmd() {
 get_ai_agent_cmd() {
     local venv_activate="${AI_AGENT_DIR}/.venv/bin/activate"
     if [[ -f "${venv_activate}" ]]; then
-        echo "source ${venv_activate} && uvicorn app.main:app --host 0.0.0.0 --port ${AI_AGENT_PORT}"
+        echo "bash -c 'source ${venv_activate} && exec uvicorn app.main:app --host 127.0.0.1 --port ${AI_AGENT_PORT}'"
     else
-        echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port ${AI_AGENT_PORT}"
+        echo "python3 -m uvicorn app.main:app --host 127.0.0.1 --port ${AI_AGENT_PORT}"
     fi
 }
 
 get_worker_cmd() {
     local venv_activate="${SERVICE_DIR}/.venv/bin/activate"
     if [[ -f "${venv_activate}" ]]; then
-        echo "source ${venv_activate} && python tools/run_ai_worker.py"
+        echo "bash -c 'source ${venv_activate} && exec python tools/run_ai_worker.py'"
     else
         echo "python3 tools/run_ai_worker.py"
     fi
@@ -183,6 +184,53 @@ cmd_start() {
     log_info "日志目录: ${LOG_DIR}"
     log_info "PID 目录: ${PID_DIR}"
     log_info "停止服务: $0 stop"
+
+    # M6: watchdog 守护循环 — 每 HEALTH_CHECK_INTERVAL 秒检查一次健康
+    # 进程崩溃时自动重启（最多 MAX_RESTART_ATTEMPTS 次连续失败）
+    log_info "=== 启动 watchdog 守护循环（间隔 ${HEALTH_CHECK_INTERVAL}s）==="
+    local restart_count=0
+    while true; do
+        sleep "${HEALTH_CHECK_INTERVAL}"
+        local unhealthy=0
+        # 检查每个进程是否还活着
+        for svc_name in tech-transfer ai-agent ai-worker; do
+            local pidfile="${PID_DIR}/${svc_name}.pid"
+            if [[ -f "${pidfile}" ]] && kill -0 "$(cat "${pidfile}")" 2>/dev/null; then
+                :  # 进程活着
+            else
+                log_warn "${svc_name} 进程已退出"
+                unhealthy=1
+            fi
+        done
+        # 健康检查（HTTP 端点）
+        if ! check_health "${HEALTH_URL}" "tech-transfer-service" > /dev/null 2>&1; then
+            unhealthy=1
+        fi
+        if [[ ${unhealthy} -eq 1 ]]; then
+            restart_count=$((restart_count + 1))
+            if [[ ${restart_count} -gt ${MAX_RESTART_ATTEMPTS} ]]; then
+                log_error "连续 ${MAX_RESTART_ATTEMPTS} 次重启失败，watchdog 退出"
+                exit 1
+            fi
+            log_warn "检测到异常，第 ${restart_count}/${MAX_RESTART_ATTEMPTS} 次重启..."
+            cmd_stop
+            sleep "${RESTART_DELAY}"
+            # 重新启动（不进入新的 watchdog）
+            ensure_dirs
+            start_process "tech-transfer" "${SERVICE_DIR}" "$(get_main_cmd)" \
+                "${LOG_DIR}/tech-transfer.log"
+            sleep 2
+            start_process "ai-agent" "${AI_AGENT_DIR}" "$(get_ai_agent_cmd)" \
+                "${LOG_DIR}/ai-agent.log"
+            sleep 2
+            start_process "ai-worker" "${SERVICE_DIR}" "$(get_worker_cmd)" \
+                "${LOG_DIR}/ai-worker.log"
+            sleep 2
+            log_info "重启完成，继续监控..."
+        else
+            restart_count=0  # 健康则重置连续失败计数
+        fi
+    done
 }
 
 cmd_stop() {

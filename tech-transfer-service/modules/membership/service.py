@@ -2,6 +2,7 @@
 
 import psycopg2
 
+from core import auth_cache
 from core.contact_validation import validate_email, validate_phone
 from core.errors import bad_request, conflict, forbidden, not_found
 from db import get_cursor, transaction
@@ -502,6 +503,7 @@ def _activate_membership(cur, user_id: int, org_id: int, role: str, actor_id: in
 
 def approve_membership_application(admin: dict, application_id: int, version: int,
                                    request_id=None) -> dict:
+    affected_user_id = None
     with transaction() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -530,6 +532,7 @@ def approve_membership_application(admin: dict, application_id: int, version: in
             reviewed = cur.fetchone()
             if not reviewed:
                 raise conflict("申请状态或版本已变更")
+            affected_user_id = application["user_id"]
             membership = _activate_membership(
                 cur, application["user_id"], application["org_id"], "member",
                 int(admin["userId"]), application.get("department"), application.get("title"),
@@ -543,7 +546,9 @@ def approve_membership_application(admin: dict, application_id: int, version: in
             )
             result = _map_application(reviewed)
             result["membership"] = _map_membership(membership)
-            return result
+    # D7: 角色/状态变更后立即失效鉴权缓存
+    auth_cache.invalidate_user(affected_user_id)
+    return result
 
 
 def reject_membership_application(admin: dict, application_id: int, version: int,
@@ -683,6 +688,7 @@ def apply_organization_admin(user: dict, body: dict) -> dict:
 
 def approve_organization_admin_application(admin: dict, application_id: int, version: int,
                                            request_id=None) -> dict:
+    affected_user_id = None
     with transaction() as conn:
         with conn.cursor() as cur:
             _assert_system_admin(cur, admin)
@@ -710,6 +716,7 @@ def approve_organization_admin_application(admin: dict, application_id: int, ver
             reviewed = cur.fetchone()
             if not reviewed:
                 raise conflict("申请状态或版本已变更")
+            affected_user_id = application["user_id"]
             membership = _activate_membership(
                 cur, application["user_id"], application["org_id"], "admin",
                 int(admin["userId"]), application.get("department"), application.get("title"),
@@ -723,7 +730,9 @@ def approve_organization_admin_application(admin: dict, application_id: int, ver
             )
             result = _map_application(reviewed)
             result["membership"] = _map_membership(membership)
-            return result
+    # D7: 角色/状态变更后立即失效鉴权缓存
+    auth_cache.invalidate_user(affected_user_id)
+    return result
 
 
 def reject_organization_admin_application(admin: dict, application_id: int, version: int,
@@ -736,6 +745,7 @@ def reject_organization_admin_application(admin: dict, application_id: int, vers
 
 def grant_organization_admin(admin: dict, membership_id: int, version: int,
                              request_id=None) -> dict:
+    affected_user_id = None
     with transaction() as conn:
         with conn.cursor() as cur:
             _assert_system_admin(cur, admin)
@@ -753,13 +763,17 @@ def grant_organization_admin(admin: dict, membership_id: int, version: int,
             granted = cur.fetchone()
             if not granted:
                 raise conflict("仅可授予当前有效普通成员管理员权限，或版本已变更")
+            affected_user_id = granted["user_id"]
             audit_record(
                 "organization_admin.grant", "organization_membership", membership_id,
                 admin["userId"], admin.get("userNo", ""),
                 {"orgId": granted["org_id"], "userId": granted["user_id"],
                  "from": "member", "to": "admin"}, request_id=request_id, cur=cur,
             )
-            return _map_membership(granted)
+            result = _map_membership(granted)
+    # D7: 角色变更后立即失效鉴权缓存
+    auth_cache.invalidate_user(affected_user_id)
+    return result
 
 
 def revoke_organization_admin(admin: dict, membership_id: int, version: int, reason: str,
@@ -767,6 +781,7 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
     reason = (reason or "").strip()
     if not reason:
         raise bad_request("撤销机构管理员必须填写原因")
+    affected_user_id = None
     with transaction() as conn:
         with conn.cursor() as cur:
             _assert_system_admin(cur, admin)
@@ -785,6 +800,7 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
             revoked = cur.fetchone()
             if not revoked:
                 raise conflict("仅可撤销当前有效管理员身份，或版本已变更")
+            affected_user_id = revoked["user_id"]
             audit_record(
                 "organization_admin.revoke", "organization_membership", membership_id,
                 admin["userId"], admin.get("userNo", ""),
@@ -792,7 +808,10 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
                  "role": "admin", "from": "active", "to": "revoked", "reason": reason},
                 request_id=request_id, cur=cur,
             )
-            return _map_membership(revoked)
+            result = _map_membership(revoked)
+    # D7: 角色变更后立即失效鉴权缓存
+    auth_cache.invalidate_user(affected_user_id)
+    return result
 
 
 def apply_organization(user: dict, body: dict) -> dict:

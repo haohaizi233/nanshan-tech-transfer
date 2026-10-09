@@ -76,7 +76,9 @@ try:
     health = requests.get(f"{BASE}/api/health", timeout=5)
 except requests.RequestException as e:
     print(f"\n[ABORT] 后端未启动（{e}）。请先运行 start_dev.py 或 python app.py")
-    sys.exit(1)
+    if __name__ == "__main__":
+        sys.exit(1)
+    health = None
 
 print("\n[0] 基础端点不受异常层影响")
 check("GET /api/health = 200 code=0", health.status_code == 200 and health.json().get("code") == 0,
@@ -287,4 +289,5 @@ check(f"全部 {len(ALL_ERROR_BODIES)} 个错误响应无敏感泄露", not leak
 
 print()
 print(f"=== T008 错误契约测试: {PASS} passed, {FAIL} failed ===")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

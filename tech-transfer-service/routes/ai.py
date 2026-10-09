@@ -208,9 +208,14 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
     last_http: tuple[int, str] | None = None
     for attempt in range(_AGENT_RETRY_TIMES):
         try:
-            with _AI_CONCURRENCY:
+            # D6: 信号量 acquire 加超时，防止无限阻塞导致线程饥饿
+            if not _AI_CONCURRENCY.acquire(timeout=30.0):
+                raise urllib.error.URLError("AI 并发繁忙，请稍后重试")
+            try:
                 with urllib.request.urlopen(req, timeout=settings.AI_AGENT_TIMEOUT) as resp:
                     body = resp.read()
+            finally:
+                _AI_CONCURRENCY.release()
             data = json.loads(body.decode("utf-8"))
             if not isinstance(data, dict):
                 raise ValueError("agent response is not a JSON object")
