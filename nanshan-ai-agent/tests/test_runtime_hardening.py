@@ -44,7 +44,7 @@ class RuntimeHardeningTests(unittest.TestCase):
         enqueue.assert_called_once()
 
     def test_reranker_network_error_does_not_issue_a_second_model_call(self):
-        candidates = [{"id": 1}, {"id": 2}, {"id": 3}]
+        candidates = [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}]
         with patch(
             "app.reranker.chat_completion",
             side_effect=LLMError("gateway unavailable", reason="connection_reset"),
@@ -56,7 +56,7 @@ class RuntimeHardeningTests(unittest.TestCase):
                 top_n=2,
             )
 
-        self.assertEqual(completion.call_count, 1)
+        self.assertEqual(completion.call_count, 1)  # 4条候选>3，走LLM
         self.assertEqual(result, candidates[:2])
 
     def test_database_discards_connection_after_query_error(self):

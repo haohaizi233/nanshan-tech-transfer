@@ -26,7 +26,7 @@ def _sweep_locked(now: float) -> None:
     expired = [key for key, (ts, _v) in _cache.items() if now - ts > TTL_SECONDS]
     for key in expired:
         _cache.pop(key, None)
-    while len(_cache) > _MAX_ENTRIES:
+    while len(_cache) >= _MAX_ENTRIES:
         _cache.pop(next(iter(_cache)), None)
 
 
