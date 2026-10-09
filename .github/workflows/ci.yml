@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mac
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: tech_transfer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: local
+      HOST_MODE: local
+      AUTH_PROVIDER: mock
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USER: mac
+      DB_PASSWORD: test
+      DB_NAME: tech_transfer_test
+      JWT_SECRET: ci-test-secret-key-for-github-actions-32chars!
+      PYTHONPATH: tech-transfer-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tech-transfer-service/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        working-directory: tech-transfer-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8
+
+      - name: Run database migrations
+        working-directory: tech-transfer-service
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_USER: mac
+          DB_PASSWORD: test
+          DB_NAME: tech_transfer_test
+        run: |
+          python run_migration.py || echo "Migration skipped or failed (non-critical for unit tests)"
+
+      - name: Run tests with coverage
+        working-directory: tech-transfer-service
+        run: |
+          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 -v
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            tech-transfer-service/coverage.xml
+            tech-transfer-service/htmlcov/
+
+      - name: Code quality check (flake8)
+        working-directory: tech-transfer-service
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Run flake8
+        working-directory: tech-transfer-service
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics

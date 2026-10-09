@@ -1,32 +1,44 @@
-# IDE
-.idea/
-.vscode/
+# GitHub Actions
+logs/
+*.log
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# Node
-node_modules/
+# Virtual environments
+.venv/
+venv/
+ENV/
 
-# Compiled output
-南山小程序/南山/unpackage/
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Cache
-tech-transfer-service/cache/
-.worktrees/
+# Testing
+.coverage
+htmlcov/
+coverage.xml
+.pytest_cache/
+.tox/
 
-# Logs
-*.log
-nanshan-ai-agent/logs/
-
-# Environment files（真实密钥不入库；.env.example 为可提交模板）
+# Environment
 .env
-.env.*
-!.env.example
+.env.local
+.env.*.local
 
 # OS
 .DS_Store
 Thumbs.db
-各高校卡片收集/
+
+# Runtime
+cache/
+outputs/
+logs/

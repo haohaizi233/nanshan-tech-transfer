@@ -1,0 +1,52 @@
+[project]
+name = "tech-transfer-service"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "test_*",
+    "tools/*",
+    "tools_*",
+    "etl_*",
+    "cleanup_*",
+    "inspect_*",
+    "_smoke_test.py",
+    "run_migration.py",
+    "__pycache__/*",
+    "migrations/*",
+    "docs/*",
+    "cache/*",
+    "outputs/*",
+    "legacy_capital_baseline.json",
+    "conftest.py",
+]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+    "pass",
+    "except.*:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
