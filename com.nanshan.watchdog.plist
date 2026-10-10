@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 服务标识 -->
+    <key>Label</key>
+    <string>com.nanshan.watchdog</string>
+
+    <!-- 启动命令：直接运行watchdog -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/mac/Desktop/南山小程序/watchdog.sh</string>
+        <string>start</string>
+    </array>
+
+    <!-- 工作目录 -->
+    <key>WorkingDirectory</key>
+    <string>/Users/mac/Desktop/南山小程序</string>
+
+    <!-- 开机自启动 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 崩溃后自动重启 -->
+    <key>KeepAlive</key>
+    <dict>
+        <!-- 进程退出时自动重启 -->
+        <key>SuccessfulExit</key>
+        <false/>
+        <!-- 网络可用时才启动 -->
+        <key>NetworkState</key>
+        <true/>
+    </dict>
+
+    <!-- 重启间隔（秒） -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- 日志路径 -->
+    <key>StandardOutPath</key>
+    <string>/Users/mac/Desktop/南山小程序/logs/watchdog-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mac/Desktop/南山小程序/logs/watchdog-stderr.log</string>
+
+    <!-- 高优先级（-20到20，越小越高） -->
+    <key>Nice</key>
+    <integer>-10</integer>
+
+    <!-- 资源限制 -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+
+    <!-- 超时设置 -->
+    <key>TimeOut</key>
+    <integer>30</integer>
+
+    <!-- 退出时清理 -->
+    <key>ExitTimeOut</key>
+    <integer>15</integer>
+</dict>
+</plist>
