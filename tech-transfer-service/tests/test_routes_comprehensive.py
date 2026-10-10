@@ -535,7 +535,7 @@ class TestInstitutionRoutes:
 
 class TestPatentRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
-    @patch("modules.patent.service.search_patents")
+    @patch("routes.patent.search_patents")
     def test_patent_search(self, mock_list, mock_active, client):
         mock_list.return_value = {"items": [], "total": 0}
         resp = client.get("/api/tech-transfer/v1/patents?q=AI",
@@ -543,7 +543,7 @@ class TestPatentRoutes:
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
-    @patch("modules.patent.service.get_patent")
+    @patch("routes.patent.get_patent")
     def test_patent_detail(self, mock_detail, mock_active, client):
         mock_detail.return_value = {"publicationNo": "CN12345678A", "title": "Test"}
         resp = client.get("/api/tech-transfer/v1/patents/CN12345678A",
@@ -578,9 +578,9 @@ class TestFileRoutes:
 
 class TestMembershipRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
-    @patch("routes.membership.list")
+    @patch("modules.membership.service.list_my_memberships")
     def test_list_memberships(self, mock_list, mock_active, client):
-        mock_list.return_value = {"items": []}
+        mock_list.return_value = {"list": [], "total": 0}
         resp = client.get("/api/tech-transfer/v1/me/organization-memberships",
                          headers=_auth())
         assert resp.status_code == 200
