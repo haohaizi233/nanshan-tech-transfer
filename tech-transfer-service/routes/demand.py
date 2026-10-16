@@ -6,24 +6,24 @@ Architecture source: openapi.yaml paths /demands, /demands/{id},
 """
 from fastapi import APIRouter, Depends, Request
 
-from core.response import success, get_request_id
-from core.middleware import identity, optional_identity
 from core.errors import bad_request
-from core.idempotency import idempotent_create, current_key, cache_response
+from core.idempotency import cache_response, current_key, idempotent_create
+from core.middleware import identity, optional_identity
 from core.request_schemas import (
     DemandCreateRequest,
     DemandUpdateRequest,
     ReasonVersionBody,
     VersionBody,
 )
+from core.response import get_request_id, success
 from modules.demand.service import (
-    list_demands,
-    get_demand_detail,
-    create_demand,
-    update_demand,
-    submit_demand,
     cancel_demand,
     close_demand,
+    create_demand,
+    get_demand_detail,
+    list_demands,
+    submit_demand,
+    update_demand,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["demand"])

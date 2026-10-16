@@ -38,14 +38,14 @@ print(f"[4] GET /me (verify): displayName={me2['displayName']}, orgTitle={me2['o
 bad_patch = {"version": 1, "displayName": "should_fail"}
 resp = requests.patch(f"{BASE}/me/profile", json=bad_patch, headers=headers, timeout=10)
 if resp.status_code == 409:
-    print(f"[5] Optimistic lock: correctly rejected (409)")
+    print("[5] Optimistic lock: correctly rejected (409)")
 else:
     print(f"[5] Optimistic lock: UNEXPECTED status={resp.status_code}, body={resp.text}")
 
 # 6. Test auth required (no token)
 resp = requests.get(f"{BASE}/me", timeout=10)
 if resp.status_code == 401:
-    print(f"[6] No-token access: correctly rejected (401)")
+    print("[6] No-token access: correctly rejected (401)")
 else:
     print(f"[6] No-token access: UNEXPECTED status={resp.status_code}")
 
@@ -53,7 +53,7 @@ else:
 resp = requests.post(f"{BASE}/auth/bootstrap",
     json={"hostCredential": "invalid-ticket"}, timeout=10)
 if resp.status_code == 401:
-    print(f"[7] Invalid credential: correctly rejected (401)")
+    print("[7] Invalid credential: correctly rejected (401)")
 else:
     print(f"[7] Invalid credential: UNEXPECTED status={resp.status_code}")
 

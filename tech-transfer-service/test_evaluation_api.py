@@ -15,6 +15,7 @@ import time
 import psycopg2
 import psycopg2.extras
 import requests
+
 from config import settings
 
 BASE = settings.API_BASE.rstrip("/") + settings.API_PREFIX

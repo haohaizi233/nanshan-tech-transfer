@@ -1,15 +1,14 @@
 import json
-from typing import Optional
 
-from db import get_cursor
 from config import settings
-from modules.identity.context import IdentityContext
-from modules.identity.provider import ExternalIdentity
+from core.contact_validation import is_valid_phone, validate_email, validate_phone
+from core.errors import TT_COMMON_40903, BizError, bad_request
 from core.jwt_utils import sign_access_token, sign_refresh_token
 from core.password import hash_password, verify_password
-from core.contact_validation import is_valid_phone, validate_email, validate_phone
-from core.errors import BizError, TT_COMMON_40903, bad_request
+from db import get_cursor
 from modules.audit.service import record as audit_record
+from modules.identity.context import IdentityContext
+from modules.identity.provider import ExternalIdentity
 
 
 def _generate_user_no(cur) -> str:
@@ -53,7 +52,7 @@ def _get_profile(cur, user_id: int) -> dict:
     return cur.fetchone()
 
 
-def _get_org_name(cur, org_id: Optional[int]) -> Optional[str]:
+def _get_org_name(cur, org_id: int | None) -> str | None:
     if not org_id:
         return None
     cur.execute("SELECT name FROM institution WHERE id=%s", (org_id,))
@@ -239,7 +238,7 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
     注册成功后直接签发会话（免登录），返回与 password_login_session 相同结构。
     手机号已注册时抛 TT_AUTH_40901。
     """
-    from core.errors import BizError, TT_AUTH_40901, TT_COMMON_40001
+    from core.errors import TT_AUTH_40901, TT_COMMON_40001, BizError
     from core.password import hash_password
 
     try:
@@ -454,18 +453,19 @@ def register_password_user(body: dict, request_id: str | None = None) -> dict:
 
 
 def refresh_session(refresh_token: str) -> dict:
-    from core.jwt_utils import decode_no_verify_exp
     import jwt as _jwt
+
+    from core.jwt_utils import decode_no_verify_exp
 
     try:
         payload = decode_no_verify_exp(refresh_token)
     except _jwt.InvalidTokenError:
-        from core.errors import BizError, TT_COMMON_40102
+        from core.errors import TT_COMMON_40102, BizError
         code, message, status = TT_COMMON_40102
         raise BizError(code, message, status)
 
     if payload.get("type") != "refresh":
-        from core.errors import BizError, TT_COMMON_40102
+        from core.errors import TT_COMMON_40102, BizError
         code, message, status = TT_COMMON_40102
         raise BizError(code, message, status)
 
@@ -486,7 +486,7 @@ def refresh_session(refresh_token: str) -> dict:
             (jti,),
         )
         if cur.rowcount == 0:
-            from core.errors import BizError, TT_COMMON_40102
+            from core.errors import TT_COMMON_40102, BizError
             code, message, status = TT_COMMON_40102
             raise BizError(code, message, status)
 
@@ -510,7 +510,7 @@ def refresh_session(refresh_token: str) -> dict:
                 "WHERE user_id=%s AND status='active'",
                 (user_id,),
             )
-            from core.errors import BizError, TT_AUTH_40106
+            from core.errors import TT_AUTH_40106, BizError
             code, message, status = TT_AUTH_40106
             raise BizError(code, message, status)
         user_no = row["user_no"] or ""
@@ -539,8 +539,9 @@ def refresh_session(refresh_token: str) -> dict:
 
 
 def logout_session(refresh_token: str) -> dict:
-    from core.jwt_utils import decode_no_verify_exp
     import jwt as _jwt
+
+    from core.jwt_utils import decode_no_verify_exp
 
     revoked = False
     try:

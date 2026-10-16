@@ -1,15 +1,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
 
 from config import (
-    settings,
+    MOCK_DISPLAY_NAME,
     MOCK_ISSUER,
     MOCK_SUBJECT,
-    MOCK_DISPLAY_NAME,
     MOCK_TICKET_PREFIX,
+    settings,
 )
-from core.errors import BizError, TT_AUTH_40103
+from core.errors import TT_AUTH_40103, BizError
 
 
 @dataclass
@@ -17,7 +16,7 @@ class ExternalIdentity:
     issuer: str
     tenant_id: str
     external_subject: str
-    display_name: Optional[str]
+    display_name: str | None
 
 
 class IdentityProvider(ABC):

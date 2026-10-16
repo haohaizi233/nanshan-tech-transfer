@@ -1,10 +1,11 @@
 """
 用户数据隔离测试 + 环境保护测试
 """
-import requests
+import os
 import subprocess
 import sys
-import os
+
+import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
 
@@ -42,7 +43,7 @@ u1_check = resp.json()["data"]
 print(f"[4] User-001 GET /me: displayName={u1_check['displayName']} (expected: 张三)")
 
 assert u1_check["displayName"] == "张三", f"FAIL: User-001 资料被篡改! expected=张三, actual={u1_check['displayName']}"
-print(f"    -> PASS: User-001 资料未被 User-002 修改影响")
+print("    -> PASS: User-001 资料未被 User-002 修改影响")
 
 # 5. User-002 查看自己的资料，应该是李四
 resp = requests.get(f"{BASE}/me",
@@ -51,7 +52,7 @@ u2_check = resp.json()["data"]
 print(f"[5] User-002 GET /me: displayName={u2_check['displayName']} (expected: 李四)")
 
 assert u2_check["displayName"] == "李四", f"FAIL: User-002 资料不对! expected=李四, actual={u2_check['displayName']}"
-print(f"    -> PASS: User-002 资料正确隔离")
+print("    -> PASS: User-002 资料正确隔离")
 
 # 6. User-001 无法用 User-002 的 token 访问（不同 userId）
 assert u1["userId"] != u2["userId"], "FAIL: 两个 Mock 身份映射到同一个 userId!"
@@ -86,13 +87,13 @@ stdout, stderr = proc.communicate(timeout=10)
 exit_code = proc.returncode
 
 stderr_text = stderr.decode("utf-8", errors="replace")
-print(f"\n[8] APP_ENV=staging, AUTH_PROVIDER=mock")
+print("\n[8] APP_ENV=staging, AUTH_PROVIDER=mock")
 print(f"    exit_code={exit_code}")
 print(f"    stderr={stderr_text.strip()[:200]}")
 
 assert exit_code != 0, "FAIL: staging 环境下 Mock 不应该启动成功!"
 assert "环境保护断言失败" in stderr_text or "FATAL" in stderr_text, "FAIL: 缺少 FATAL 错误信息"
-print(f"    -> PASS: staging 环境 Mock 启动被正确拒绝")
+print("    -> PASS: staging 环境 Mock 启动被正确拒绝")
 
 # 测试 production 环境
 env["APP_ENV"] = "production"
@@ -107,10 +108,10 @@ stdout2, stderr2 = proc2.communicate(timeout=10)
 exit_code2 = proc2.returncode
 stderr_text2 = stderr2.decode("utf-8", errors="replace")
 
-print(f"\n[9] APP_ENV=production, AUTH_PROVIDER=mock")
+print("\n[9] APP_ENV=production, AUTH_PROVIDER=mock")
 print(f"    exit_code={exit_code2}")
 assert exit_code2 != 0, "FAIL: production 环境下 Mock 不应该启动成功!"
-print(f"    -> PASS: production 环境 Mock 启动被正确拒绝")
+print("    -> PASS: production 环境 Mock 启动被正确拒绝")
 
 print("\n" + "=" * 60)
 print("ALL VERIFICATION TESTS PASSED")

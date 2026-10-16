@@ -7,8 +7,8 @@ requestId 通过 contextvar 传递：中间件写入 → 线程池中的同步�
 （anyio.to_thread 会复制当前上下文到工作线程）。
 """
 
-from contextvars import ContextVar
 import uuid
+from contextvars import ContextVar
 
 from fastapi.responses import JSONResponse
 

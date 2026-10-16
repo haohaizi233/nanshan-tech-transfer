@@ -6,13 +6,12 @@
 依赖：后端已启动（127.0.0.1:8787），004 迁移已执行，etl_demands.py 已导入演示数据
 """
 import atexit
-import json
 import re
-import time
 
 import psycopg2
 import psycopg2.extras
 import requests
+
 from config import settings
 
 BASE = settings.API_BASE.rstrip("/") + settings.API_PREFIX
@@ -195,10 +194,9 @@ detail_name = resp.json()["data"]
 name_demand_id = detail_name["id"]
 check("orgName已落库回显", detail_name.get("orgName") == "测试组织-科技转化", f"got {detail_name.get('orgName')}")
 check("orgIntro文本不会写入认证机构", detail_name.get("orgIntro") is None)
-with psycopg2.connect(**DB) as association_conn:
-    with association_conn.cursor() as association_cur:
-        association_cur.execute("SELECT org_id, org_name_snapshot FROM demand WHERE id=%s", (name_demand_id,))
-        check("orgName仅保存展示快照", association_cur.fetchone() == (None, "测试组织-科技转化"))
+with psycopg2.connect(**DB) as association_conn, association_conn.cursor() as association_cur:
+    association_cur.execute("SELECT org_id, org_name_snapshot FROM demand WHERE id=%s", (name_demand_id,))
+    check("orgName仅保存展示快照", association_cur.fetchone() == (None, "测试组织-科技转化"))
 check("categoryName复用既有分类", detail_name.get("categoryName") == "智能制造")
 
 resp = requests.post(f"{BASE}/demands", headers=headers_a, json={

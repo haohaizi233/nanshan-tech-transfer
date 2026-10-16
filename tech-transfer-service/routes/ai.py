@@ -7,8 +7,8 @@ POST /ai/evaluation-tasks、GET /ai/evaluation-tasks/{taskId}（异步任务）�
 """
 import json
 import logging
-import time
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -16,16 +16,18 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from config import settings
-from core.response import success, get_request_id
+from core.errors import TT_COMMON_42901, BizError, ai_provider_failed, ai_unavailable, bad_request
+from core.idempotency import cache_response as cache_idem_response
+from core.idempotency import idempotent_create
 from core.middleware import identity
-from core.errors import BizError, TT_COMMON_42901, ai_provider_failed, ai_unavailable, bad_request
-from core.idempotency import idempotent_create, cache_response as cache_idem_response
 from core.rate_limit import check_user_rate
 from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
+from core.response import get_request_id, success
+from modules.ai.chat_store import append_turn, clear_messages, list_messages
 from modules.ai.service import (
-    create_evaluation_task, get_evaluation_task,
+    create_evaluation_task,
+    get_evaluation_task,
 )
-from modules.ai.chat_store import append_message, append_turn, list_messages, clear_messages
 
 logger = logging.getLogger("nanshan.error")
 
@@ -366,8 +368,8 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
     if not settings.AI_AGENT_URL:
         raise ai_unavailable("AI 助手未配置")
 
+    from core.errors import TT_DMD_40301, TT_DMD_40401, BizError
     from db import get_cursor
-    from core.errors import BizError, TT_DMD_40401, TT_DMD_40301
 
     with get_cursor() as cur:
         cur.execute(
@@ -418,7 +420,7 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
             agent_message,
             cards=cards if cards else None,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("[ai/match] 聊天记录入库失败 user_id=%s", user["userId"])
 
     return success(

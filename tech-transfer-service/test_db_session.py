@@ -79,9 +79,8 @@ try:
     # [3] transaction() 成功提交
     # ════════════════════════════════════════════════════════
     print("[3] transaction() 成功提交")
-    with db.transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"INSERT INTO {_TX_TABLE}(v) VALUES ('committed')")
+    with db.transaction() as conn, conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {_TX_TABLE}(v) VALUES ('committed')")
     check("transaction 提交后可见", _count_rows("committed") == 1)
 
     # ════════════════════════════════════════════════════════
@@ -158,13 +157,12 @@ try:
 
     def _waiter():
         try:
-            with db.get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1 AS v")
-                    if cur.fetchone()["v"] != 1:
-                        waiter_errors.append("结果错乱")
+            with db.get_conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1 AS v")
+                if cur.fetchone()["v"] != 1:
+                    waiter_errors.append("结果错乱")
             acquired.set()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             waiter_errors.append(repr(e))
             acquired.set()
 
@@ -198,11 +196,10 @@ try:
     def _worker(i):
         try:
             for _ in range(5):
-                with db.get_conn() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT %s AS v", (i,))
-                        assert cur.fetchone()["v"] == i, "结果错乱"
-        except Exception as e:  # noqa: BLE001
+                with db.get_conn() as conn, conn.cursor() as cur:
+                    cur.execute("SELECT %s AS v", (i,))
+                    assert cur.fetchone()["v"] == i, "结果错乱"
+        except Exception as e:
             errors.append((i, repr(e)))
 
     threads = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]

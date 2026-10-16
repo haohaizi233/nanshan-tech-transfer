@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 import re
-import uuid
 import urllib.error
 import urllib.request
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,26 +23,26 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config import assert_environment, settings
-from core.response import set_request_id, get_request_id
 from core.exception_handlers import configure_logging, register_exception_handlers
+from core.response import get_request_id, set_request_id
 from db import close_pool, get_cursor, init_pool
-from routes.auth import router as auth_router
-from routes.me import router as me_router
 from routes.achievement import router as achievement_router
-from routes.demand import router as demand_router
-from routes.favorite import router as favorite_router
-from routes.cooperation import router as cooperation_router
-from routes.capital import router as capital_router
-from routes.institution import router as institution_router
-from routes.ai import router as ai_router
-from routes.search import router as search_router
-from routes.patent import router as patent_router
 from routes.admin import router as admin_router
 from routes.admin_ops import router as admin_ops_router
+from routes.ai import router as ai_router
+from routes.auth import router as auth_router
+from routes.capital import router as capital_router
+from routes.cooperation import router as cooperation_router
+from routes.demand import router as demand_router
+from routes.favorite import router as favorite_router
 from routes.file import router as file_router
-from routes.membership import router as membership_router
+from routes.institution import router as institution_router
 from routes.institution_registration import router as institution_registration_router
+from routes.me import router as me_router
+from routes.membership import router as membership_router
 from routes.notification import router as notification_router
+from routes.patent import router as patent_router
+from routes.search import router as search_router
 
 assert_environment()
 configure_logging()
@@ -272,13 +272,13 @@ def mini_program_h5(request: Request, full_path: str = ""):
 # ── 请求超时保护（M1：sync 路由保护，防止长阻塞耗尽线程池）────
 import asyncio
 
+
 @app.middleware("http")
 async def request_timeout_middleware(request: Request, call_next):
     max_seconds = getattr(settings, "MAX_REQUEST_SECONDS", 60.0)
     try:
         return await asyncio.wait_for(call_next(request), timeout=max_seconds)
-    except asyncio.TimeoutError:
-        from core.response import error as error_response
+    except TimeoutError:
         from core.errors import TT_COMMON_50301
         code, message, status = TT_COMMON_50301
         return JSONResponse(

@@ -1,8 +1,7 @@
 """已登录用户的专利检索历史。"""
 
-from db import get_cursor
 from core.errors import bad_request
-
+from db import get_cursor
 
 VALID_HISTORY_MODES = ("keyword", "assignee")
 HISTORY_LIMIT = 10

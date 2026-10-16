@@ -9,8 +9,8 @@ Architecture source: 04-backend-domain-design.md §4.9, 05-data-model-design.md 
 - 列表内嵌目标摘要；目标已下线（非 published）仍返回并标注，不静默丢失收藏
 - 新增收藏：公开内容、本人内容、或已接受对接的双方（确认后离开列表仍可收藏）
 """
-from db import get_cursor
 from core.errors import bad_request, favorite_not_found
+from db import get_cursor
 from modules.audit.service import record as audit_record
 from modules.cooperation.service import can_access_target, is_accepted_dock_party
 

@@ -11,7 +11,6 @@ Architecture source: 04-backend-domain-design.md §4.6, 05-data-model-design.md 
 import json
 import re
 
-from db import get_cursor
 from core.contact_validation import validate_email, validate_phone
 from core.errors import (
     bad_request,
@@ -21,6 +20,7 @@ from core.errors import (
     demand_not_found,
 )
 from core.masking import mask_contact
+from db import get_cursor
 from modules.audit.service import record as audit_record
 from modules.cooperation.service import can_access_target, has_accepted_intent, is_accepted_dock_party
 from modules.membership.service import assert_active_membership, resolve_content_organization

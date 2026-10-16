@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Quick smoke test for core modules."""
 import sys
+
 sys.path.insert(0, ".")
 
 # Test auth_cache
-from core.auth_cache import cached, invalidate_user, _cache, _lock
+from core.auth_cache import _cache, _lock, cached, invalidate_user
+
 with _lock:
     _cache.clear()
 
@@ -25,6 +27,7 @@ print("auth_cache: PASSED")
 
 # Test file_token
 from core.file_token import generate_file_token, verify_file_token
+
 token = generate_file_token(user_id=42, file_id=7, ttl_seconds=300)
 assert verify_file_token(token, file_id=7) == 42
 assert verify_file_token(token, file_id=99) is None
@@ -32,8 +35,9 @@ assert verify_file_token("", file_id=7) is None
 print("file_token: PASSED")
 
 # Test rate_limit (use check_user_rate which takes user_id directly)
-from core.rate_limit import check_user_rate, _check, _buckets, _bucket_lock
 from core.errors import BizError
+from core.rate_limit import _bucket_lock, _buckets, check_user_rate
+
 with _bucket_lock:
     _buckets.clear()
 for _ in range(3):

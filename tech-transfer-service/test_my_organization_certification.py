@@ -20,9 +20,7 @@ class CertificationCursor:
                 "status": "active",
                 "version": 3,
             }]
-        elif "FROM organization_membership_application a" in normalized:
-            self.rows = []
-        elif "FROM organization_application a" in normalized:
+        elif "FROM organization_membership_application a" in normalized or "FROM organization_application a" in normalized:
             self.rows = []
         else:
             raise AssertionError(f"unexpected query: {normalized}")

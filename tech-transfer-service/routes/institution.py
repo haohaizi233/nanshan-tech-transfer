@@ -6,13 +6,13 @@ P0-1：接管 legacy 三接口的数据源（institution 表），新路径按 k
 """
 from fastapi import APIRouter, Request
 
-from core.response import success
 from core.errors import bad_request
 from core.pagination import parse_page_args
+from core.response import success
 from modules.institution.service import (
     KINDS,
-    list_institutions,
     get_institution_detail,
+    list_institutions,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["institution"])

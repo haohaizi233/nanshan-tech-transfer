@@ -13,13 +13,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import pymysql
 import psycopg2
 import psycopg2.extras
+import pymysql
 
 from config import (
-    DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME,
-    CAPITAL_DB_HOST, CAPITAL_DB_PORT, CAPITAL_DB_USER, CAPITAL_DB_PASSWORD,
+    CAPITAL_DB_HOST,
+    CAPITAL_DB_PASSWORD,
+    CAPITAL_DB_PORT,
+    CAPITAL_DB_USER,
+    DB_HOST,
+    DB_NAME,
+    DB_PASSWORD,
+    DB_PORT,
+    DB_USER,
 )
 
 

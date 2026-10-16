@@ -10,7 +10,7 @@ tools/baseline 工具对 legacy_capital_baseline.json 做 diff 验证。
 切换后后端运行时不再依赖 MySQL。
 """
 
-from modules.institution.service import list_platform_rows, list_org_rows
+from modules.institution.service import list_org_rows, list_platform_rows
 
 
 def _map_type_key(platform_type: str) -> str:

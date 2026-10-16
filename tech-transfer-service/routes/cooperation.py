@@ -6,25 +6,25 @@ Architecture source: openapi.yaml paths /cooperations、/cooperations/{id}、
 """
 from fastapi import APIRouter, Depends, Request
 
-from core.response import success, get_request_id
-from core.middleware import identity
 from core.errors import bad_request
-from core.idempotency import idempotent_create, current_key, cache_response
+from core.idempotency import cache_response, current_key, idempotent_create
+from core.middleware import identity
 from core.request_schemas import (
     CooperationCompleteRequest,
     CooperationCreateRequest,
     ReasonVersionBody,
     VersionBody,
 )
+from core.response import get_request_id, success
 from modules.cooperation.service import (
-    create_intent,
-    get_intent_detail,
     accept_intent,
-    reject_intent,
-    confirm_intent,
     cancel_intent,
     complete_intent,
+    confirm_intent,
+    create_intent,
+    get_intent_detail,
     list_events,
+    reject_intent,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["cooperation"])

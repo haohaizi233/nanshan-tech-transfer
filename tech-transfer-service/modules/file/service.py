@@ -9,8 +9,8 @@ Note: Phase B will replace with proper upload/presign flow per OpenAPI.
 由路由层转成 HTTP 响应。
 """
 
-import logging
 import hashlib
+import logging
 import mimetypes
 import re
 import urllib.error

@@ -86,10 +86,9 @@ try:
     tid1 = _unique_id()
     sql_exc = None
     try:
-        with db.transaction() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"INSERT INTO {TABLE} (id, v) VALUES (%s, 'h1')", (tid1,))
-                cur.execute("SELECT 1/0")  # 服务端除零 → 事务进入 INERROR
+        with db.transaction() as conn, conn.cursor() as cur:
+            cur.execute(f"INSERT INTO {TABLE} (id, v) VALUES (%s, 'h1')", (tid1,))
+            cur.execute("SELECT 1/0")  # 服务端除零 → 事务进入 INERROR
         check("SELECT 1/0 应从 transaction() 抛出 psycopg2.Error", False, "未抛异常")
     except psycopg2.Error as e:
         sql_exc = e
@@ -104,9 +103,8 @@ try:
     print("[H2] INERROR 不污染下一连接：新 checkout SELECT 1 + 新事务提交")
     check("INERROR 后新 checkout SELECT 1 成功", _select_one())
     tid2 = _unique_id()
-    with db.transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"INSERT INTO {TABLE} (id, v) VALUES (%s, 'h2')", (tid2,))
+    with db.transaction() as conn, conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {TABLE} (id, v) VALUES (%s, 'h2')", (tid2,))
     check("INERROR 后新事务正常提交", _row_exists(tid2))
 
     # ════════════════════════════════════════════════════════
@@ -135,9 +133,8 @@ try:
     for i in range(CYCLES):
         try:
             # A. 成功事务
-            with db.transaction() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
+            with db.transaction() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1")
             # B. Python 异常 → rollback
             try:
                 with db.transaction() as conn:
@@ -148,16 +145,15 @@ try:
                 pass
             # C. SQL 错误 → rollback（真实 INERROR）
             try:
-                with db.transaction() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT 1")
-                        cur.execute("SELECT 1/0")
+                with db.transaction() as conn, conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.execute("SELECT 1/0")
             except psycopg2.Error:
                 pass
             # 每轮收尾：checkout → SELECT 1 → return
             if not _select_one():
                 stress_errors.append(f"cycle {i}: SELECT 1 返回异常值")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             stress_errors.append(f"cycle {i}: {e!r}")
     check(f"{CYCLES} 轮交替（{CYCLES * 4} 次借还）后池未耗尽且 SELECT 1 全部正常",
           not stress_errors, str(stress_errors[:3]))
@@ -189,7 +185,7 @@ try:
                 held[idx].set()
                 if not release.wait(timeout=60):
                     holder_errors.append(f"holder {idx}: 等待释放超时")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             holder_errors.append(f"holder {idx}: {e!r}")
             held[idx].set()
 
@@ -231,17 +227,16 @@ try:
 
     def _short_task(i):
         try:
-            with db.get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT %s AS worker_id", (i,))
-                    if cur.fetchone()["worker_id"] != i:
-                        return "polluted:结果错乱"
+            with db.get_conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT %s AS worker_id", (i,))
+                if cur.fetchone()["worker_id"] != i:
+                    return "polluted:结果错乱"
             return "ok"
         except psycopg2.OperationalError as e:
             if "exhausted" in str(e):
                 return "exhausted"  # 等待超时仍耗尽才失败；短任务通常能等到归还
             return f"polluted:{e!r}"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return f"polluted:{e!r}"
 
     with ThreadPoolExecutor(max_workers=16) as ex:
@@ -270,9 +265,8 @@ try:
     # 归还时 putconn 对 closed 连接直接丢弃，不回池
     check("坏连接归还后新 checkout SELECT 1 正常", _select_one())
     tid7 = _unique_id()
-    with db.transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"INSERT INTO {TABLE} (id, v) VALUES (%s, 'h7')", (tid7,))
+    with db.transaction() as conn, conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {TABLE} (id, v) VALUES (%s, 'h7')", (tid7,))
     check("坏连接归还后新事务正常提交", _row_exists(tid7))
 
     # ════════════════════════════════════════════════════════
@@ -286,7 +280,7 @@ try:
         try:
             db.init_pool()
             check("DB 不可达时 init_pool 不抛异常（降级空池）", True)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             check("DB 不可达时 init_pool 不抛异常（降级空池）", False, repr(e))
         try:
             with db.get_conn():
@@ -310,7 +304,7 @@ try:
         with outer.cursor() as cur:
             cur.execute("SELECT 1")  # 外层连接本身可用
         try:
-            with db.get_conn() as inner:  # noqa: F841
+            with db.get_conn() as inner:
                 nested_rejected = False
         except psycopg2.OperationalError as e:
             nested_rejected = True

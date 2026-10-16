@@ -13,7 +13,6 @@ from psycopg2.extras import Json, execute_values
 
 from db import get_cursor
 
-
 ORG_NAME = "恒程创新"
 PUBLISHER_USER_ID = 2  # 该机构登记申请人
 

@@ -42,3 +42,14 @@ Thumbs.db
 cache/
 outputs/
 logs/
+# 大文件排除
+*.pptx
+*.ppt
+*.pdf
+*.docx
+*.doc
+*.xlsx
+*.xls
+.pids/
+.runtime-media/
+各高校卡片收集/

@@ -13,8 +13,8 @@ import psycopg2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import settings  # noqa: E402
-from core.password import hash_password  # noqa: E402
+from config import settings
+from core.password import hash_password
 
 MIGRATION = Path(__file__).resolve().parent.parent / "migrations" / "pg" / "004_user_credential.sql"
 

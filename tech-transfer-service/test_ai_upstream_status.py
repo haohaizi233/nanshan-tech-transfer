@@ -89,6 +89,7 @@ check(
 
 print("\n[6] 响应头透出 llmStatus")
 from fastapi.responses import JSONResponse  # noqa: E402
+
 from core.exception_handlers import _attach_upstream_headers  # noqa: E402
 
 resp = JSONResponse(status_code=502, content={"code": "TT_AI_50201"})

@@ -1,5 +1,7 @@
 """Unit checks for CR fixes: org forge, self-accept, membership owner, offline submit."""
 
+from core.errors import BizError
+from modules.achievement.service import EDITABLE_STATUSES, TRANSITIONS
 from modules.admin.service import (
     _assert_admin_status_transition,
     _can_review_cooperation,
@@ -8,9 +10,7 @@ from modules.admin.service import (
     organization_content_scope,
     scope_org_ids,
 )
-from modules.achievement.service import EDITABLE_STATUSES, TRANSITIONS
 from modules.demand.service import _resolve_name_refs
-from core.errors import BizError
 
 
 def main():

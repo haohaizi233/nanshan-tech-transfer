@@ -28,7 +28,7 @@ import psycopg2
 import psycopg2.extras
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import settings  # noqa: E402
+from config import settings
 
 OWNER_USER_ID = 2                      # dev-user-002
 ORG_NAME = "中国科学院深圳先进技术研究院"

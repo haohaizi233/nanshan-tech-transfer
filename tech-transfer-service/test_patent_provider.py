@@ -21,7 +21,6 @@ from modules.patent.normalize import (
 )
 from modules.patent.service import get_patent, search_patents
 
-
 GOOGLE_HIT = {
     "pub_number": "CN108604342B",
     "title": "基于nfc进行数据传输的方法及移动设备",
@@ -101,7 +100,7 @@ def main():
     assert repair_broken_subscripts("高度范围在\n内，h\n1\n第一个是") == "高度范围在\n内，h₁\n第一个是"
     assert "w₁" in clean_multiline("差值大于前一个符号的宽w\n1\n。")
     assert repair_broken_subscripts("Figure\n1\nshows") == "Figure\n1\nshows"
-    assert "段落一\n段落二" == clean_multiline("段落一\n段落二")
+    assert clean_multiline("段落一\n段落二") == "段落一\n段落二"
 
     blocks = format_patent_content_blocks(
         "具体执行过程可以表示为：TSN(T\n1\n,T\n2\n,��,T\nK\n)=H(G(F(T\n1\n；W)))。其中，T\n1\n表示第一个视频分片。"

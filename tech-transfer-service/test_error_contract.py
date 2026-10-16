@@ -200,10 +200,11 @@ print("=" * 60)
 print("Part 2: 进程内异常注入（TestClient + monkeypatch，不留 debug 路由）")
 print("=" * 60)
 
-import app as app_module  # noqa: E402
-import routes.demand as demand_route  # noqa: E402
-import db as db_module  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+import app as app_module  # noqa: E402
+import db as db_module  # noqa: E402
+import routes.demand as demand_route  # noqa: E402
 from core.jwt_utils import sign_access_token  # noqa: E402
 
 client = TestClient(app_module.app, raise_server_exceptions=False)

@@ -2,8 +2,8 @@
 成果只读链路 API 测试
 覆盖：分页、详情、搜索、分类、权限、空数据、错误状态
 """
+
 import requests
-import json
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
 PASS = 0
@@ -25,7 +25,7 @@ resp = requests.post(f"{BASE}/auth/bootstrap",
     json={"hostCredential": "local-dev-ticket-test-user"}, timeout=10)
 token = resp.json()["data"]["accessToken"]
 headers = {"Authorization": f"Bearer {token}"}
-print(f"[0] Bootstrap OK, token acquired\n")
+print("[0] Bootstrap OK, token acquired\n")
 
 # ── 1. 成果列表 — 默认分页 ──────────────────────────────────
 resp = requests.get(f"{BASE}/achievements", headers=headers, timeout=10)

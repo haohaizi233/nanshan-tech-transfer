@@ -22,7 +22,6 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.errors import (
-    BizError,
     TT_COMMON_40001,
     TT_COMMON_40102,
     TT_COMMON_40301,
@@ -33,6 +32,7 @@ from core.errors import (
     TT_COMMON_42901,
     TT_COMMON_50001,
     TT_COMMON_50301,
+    BizError,
 )
 from core.response import error, get_request_id
 

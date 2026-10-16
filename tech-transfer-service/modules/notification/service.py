@@ -1,5 +1,5 @@
-from db import get_cursor
 from core.errors import bad_request
+from db import get_cursor
 from modules.audit.service import record as audit_record
 
 VALID_CATEGORIES = ('review', 'cooperation', 'organization', 'membership')

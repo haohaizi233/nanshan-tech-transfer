@@ -70,50 +70,49 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
         raise bad_request("intro 长度不能超过 5000")
 
     try:
-        with transaction() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
-                if cur.fetchone():
-                    raise conflict("该登录账号已存在")
-                cur.execute("SELECT 1 FROM institution WHERE name=%s", (name,))
-                if cur.fetchone():
-                    raise conflict("同名机构已存在")
+        with transaction() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
+            if cur.fetchone():
+                raise conflict("该登录账号已存在")
+            cur.execute("SELECT 1 FROM institution WHERE name=%s", (name,))
+            if cur.fetchone():
+                raise conflict("同名机构已存在")
 
-                user_id, user_no = create_password_account(
-                    cur, username, password,
-                    display_name=contact_name, phone=contact_phone, email=email,
-                )
-                cur.execute(
-                    """
+            user_id, user_no = create_password_account(
+                cur, username, password,
+                display_name=contact_name, phone=contact_phone, email=email,
+            )
+            cur.execute(
+                """
                     INSERT INTO organization_application
                         (applicant_user_id, requested_name, requested_type, credit_code,
                          region, contact_name, contact_phone, contact_email, proof_material)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, status, version
                     """,
-                    (user_id, name, kind, credit_code, region,
-                     contact_name, contact_phone, email, intro),
-                )
-                application = cur.fetchone()
-                audit_record(
-                    "user.registration.submit", "app_user",
-                    resource_id=user_id, actor_user_id=user_id, actor_user_no=user_no,
-                    details={"username": username, "via": "institution_registration"},
-                    request_id=request_id, cur=cur,
-                )
-                audit_record(
-                    "institution_registration.submit", "organization_application",
-                    resource_id=application["id"], actor_user_id=user_id,
-                    actor_user_no=user_no,
-                    details={"name": name, "kind": kind},
-                    request_id=request_id, cur=cur,
-                )
-                return {
-                    "applicationId": application["id"],
-                    "status": application["status"],
-                    "version": application["version"],
-                    "username": username,
-                }
+                (user_id, name, kind, credit_code, region,
+                 contact_name, contact_phone, email, intro),
+            )
+            application = cur.fetchone()
+            audit_record(
+                "user.registration.submit", "app_user",
+                resource_id=user_id, actor_user_id=user_id, actor_user_no=user_no,
+                details={"username": username, "via": "institution_registration"},
+                request_id=request_id, cur=cur,
+            )
+            audit_record(
+                "institution_registration.submit", "organization_application",
+                resource_id=application["id"], actor_user_id=user_id,
+                actor_user_no=user_no,
+                details={"name": name, "kind": kind},
+                request_id=request_id, cur=cur,
+            )
+            return {
+                "applicationId": application["id"],
+                "status": application["status"],
+                "version": application["version"],
+                "username": username,
+            }
     except psycopg2.IntegrityError as exc:
         if exc.pgcode == "23505":
             raise conflict("该登录账号已存在") from exc

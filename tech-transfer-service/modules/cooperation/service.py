@@ -22,8 +22,6 @@ Architecture source: 04-backend-domain-design.md §4.8, 05-data-model-design.md 
 """
 import json
 
-from db import get_cursor
-from core.masking import mask_contact
 from core.errors import (
     bad_request,
     conflict,
@@ -33,6 +31,8 @@ from core.errors import (
     coop_forbidden,
     coop_not_found,
 )
+from core.masking import mask_contact
+from db import get_cursor
 from modules.audit.service import record as audit_record
 from modules.notification.service import emit_notification
 

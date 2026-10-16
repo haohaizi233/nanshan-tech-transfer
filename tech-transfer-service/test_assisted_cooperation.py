@@ -17,7 +17,6 @@
  12. admin submit 对有归属用户的内容=400（边界）
 依赖：后端已启动（127.0.0.1:8787），005 种子已执行（dev-user-001 = admin）
 """
-import json
 
 import psycopg2
 import psycopg2.extras

@@ -13,6 +13,7 @@ from core.middleware import identity
 from core.pagination import parse_page_args
 from core.request_schemas import PatentSearchHistoryRequest
 from core.response import success
+from modules.patent.history import clear_history, list_history, record_history
 from modules.patent.service import (
     get_patent,
     get_patent_pdf_pages_meta,
@@ -20,7 +21,6 @@ from modules.patent.service import (
     render_patent_pdf_page,
     search_patents,
 )
-from modules.patent.history import clear_history, list_history, record_history
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["patents"])
 

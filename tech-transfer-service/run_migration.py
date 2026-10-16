@@ -8,7 +8,7 @@ import sys
 
 import pymysql
 
-from config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+from config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 
 
 def run_migration(filename: str):

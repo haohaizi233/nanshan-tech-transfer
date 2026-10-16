@@ -1,9 +1,9 @@
 from psycopg2.extras import Json
 
+from core.contact_validation import validate_email, validate_phone
+from core.errors import TT_COMMON_40902, BizError, bad_request
 from db import get_cursor
 from modules.identity.service import build_user_response
-from core.contact_validation import validate_email, validate_phone
-from core.errors import BizError, TT_COMMON_40902, bad_request
 
 
 def get_my_profile(user_id: int) -> dict:

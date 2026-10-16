@@ -10,7 +10,6 @@ from pathlib import Path
 from config import settings
 from core.errors import BizError, bad_request
 from db import get_cursor
-from modules.audit.service import record as audit_record
 from modules.achievement.extract import (
     FIELD_ALIASES,
     LINK_ALIASES,
@@ -19,9 +18,8 @@ from modules.achievement.extract import (
     harvest_fields_from_text,
     looks_like_title,
     parse_labeled_line,
-    split_names,
 )
-
+from modules.audit.service import record as audit_record
 
 _IMAGE_MIME_BY_EXTENSION = {
     "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
@@ -777,7 +775,7 @@ def clear_import_batches(actor: dict) -> dict:
 
 def publish_import_item(batch_id: int, item_id: int, actor: dict, overrides: dict | None = None, request_id=None) -> dict:
     """一步完成：确认暂存条目 → 提交审核 → 审核通过发布。仅限管理员一键发布。"""
-    from modules.admin.service import submit_achievement_admin, review_achievement
+    from modules.admin.service import review_achievement, submit_achievement_admin
 
     confirmed = confirm_import_item(batch_id, item_id, actor, overrides, request_id)
     ach_id = confirmed["achievementId"]

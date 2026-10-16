@@ -1,6 +1,7 @@
-import jwt
 import time
 import uuid
+
+import jwt
 
 from config import settings
 

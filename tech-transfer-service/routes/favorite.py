@@ -5,8 +5,8 @@ Architecture source: openapi.yaml paths /favorites/{targetType}/{targetId}；06-
 """
 from fastapi import APIRouter, Depends
 
-from core.response import success, get_request_id
 from core.middleware import identity
+from core.response import get_request_id, success
 from modules.favorite.service import add_favorite, remove_favorite
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["favorite"])

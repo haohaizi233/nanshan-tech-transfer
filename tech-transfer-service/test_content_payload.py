@@ -3,14 +3,19 @@ import base64
 import unittest
 from io import BytesIO
 from pathlib import Path
-import re
 from tempfile import TemporaryDirectory
 
 from PIL import Image
 
 from core.errors import BizError, bad_request
 from modules.achievement.content import parse_content_payload, supports_internal_patent_lookup
-from modules.achievement.importer import _classify_page, _media_payload_from_uploads, _normalize_page, extract_document_records, upload_candidate_media
+from modules.achievement.importer import (
+    _classify_page,
+    _media_payload_from_uploads,
+    _normalize_page,
+    extract_document_records,
+    upload_candidate_media,
+)
 from modules.file.service import _image_dimensions, _validate_upload, _write_thumbnail
 
 

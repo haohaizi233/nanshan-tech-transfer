@@ -107,11 +107,11 @@ for path, item in sorted(spec["paths"].items()):
             ok = st < 500
             expect = "HTTP < 500"
         else:
-            ok = st < 500 and st in WRITE_OK or st == 200 or st == 201
+            ok = (st < 500 and st in WRITE_OK) or st == 200 or st == 201
             expect = f"HTTP<500 且业务可预期（200/201/{sorted(WRITE_OK)}），实际 {st}"
         check(f"{m.upper():6} {path}", ok, f"{st} {resp.get('message', '')[:80]}（预期 {expect}）")
 
-print(f"\n[4] CORS 预检（模拟 H5 dev server http://localhost:5173）")
+print("\n[4] CORS 预检（模拟 H5 dev server http://localhost:5173）")
 st, _ = request("OPTIONS", "/api/tech-transfer/v1/achievements",
                 headers={
                     "Origin": "http://localhost:5173",

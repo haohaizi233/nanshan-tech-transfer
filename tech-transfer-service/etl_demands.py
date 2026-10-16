@@ -99,41 +99,40 @@ def get_or_create(cur, table, code, name):
 
 def main():
     # 整批原子写入：任一条失败全部回滚，不留半批演示数据
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            for demo in DEMO_DEMANDS:
+    with transaction() as conn, conn.cursor() as cur:
+        for demo in DEMO_DEMANDS:
+            cur.execute(
+                "SELECT id FROM demand WHERE title=%s AND owner_user_id=%s",
+                (demo["title"], DEMO_OWNER_USER_ID),
+            )
+            if cur.fetchone():
+                print(f"skip (exists): {demo['title']}")
+                continue
+
+            # organization get-or-create
+            cur.execute("SELECT id FROM organization WHERE org_name=%s", (demo["company"],))
+            org_row = cur.fetchone()
+            if org_row:
+                org_id = org_row["id"]
+            else:
                 cur.execute(
-                    "SELECT id FROM demand WHERE title=%s AND owner_user_id=%s",
-                    (demo["title"], DEMO_OWNER_USER_ID),
+                    "INSERT INTO organization (org_name, intro, region) VALUES (%s, %s, %s) RETURNING id",
+                    (demo["company"], demo["companyIntro"], demo["location"]),
                 )
-                if cur.fetchone():
-                    print(f"skip (exists): {demo['title']}")
-                    continue
+                org_id = cur.fetchone()["id"]
 
-                # organization get-or-create
-                cur.execute("SELECT id FROM organization WHERE org_name=%s", (demo["company"],))
-                org_row = cur.fetchone()
-                if org_row:
-                    org_id = org_row["id"]
-                else:
-                    cur.execute(
-                        "INSERT INTO organization (org_name, intro, region) VALUES (%s, %s, %s) RETURNING id",
-                        (demo["company"], demo["companyIntro"], demo["location"]),
-                    )
-                    org_id = cur.fetchone()["id"]
+            # category / tag（industry 首段=分类，次段=标签）
+            industry_parts = [p.strip() for p in demo["industry"].split("·")]
+            category_id = get_or_create(cur, "demand_category", industry_parts[0], industry_parts[0])
+            tag_ids = [get_or_create(cur, "demand_tag", t, t) for t in industry_parts[1:]]
 
-                # category / tag（industry 首段=分类，次段=标签）
-                industry_parts = [p.strip() for p in demo["industry"].split("·")]
-                category_id = get_or_create(cur, "demand_category", industry_parts[0], industry_parts[0])
-                tag_ids = [get_or_create(cur, "demand_tag", t, t) for t in industry_parts[1:]]
+            budget_min, budget_max, negotiable = parse_budget(demo["budget"])
+            coop_mode = json.dumps(
+                [p.strip() for p in demo["cooperationType"].split("/")], ensure_ascii=False
+            )
 
-                budget_min, budget_max, negotiable = parse_budget(demo["budget"])
-                coop_mode = json.dumps(
-                    [p.strip() for p in demo["cooperationType"].split("/")], ensure_ascii=False
-                )
-
-                cur.execute(
-                    """
+            cur.execute(
+                """
                     INSERT INTO demand
                         (owner_user_id, org_id, title, category_id, description, region,
                          coop_mode, budget_min_wan, budget_max_wan, budget_negotiable,
@@ -143,26 +142,26 @@ def main():
                             'published', NOW())
                     RETURNING id
                     """,
-                    (
-                        DEMO_OWNER_USER_ID, org_id, demo["title"], category_id,
-                        demo["demandDesc"], demo["location"], coop_mode,
-                        budget_min, budget_max, negotiable, demo["deadline"],
-                        demo["contactName"], demo["contactTitle"], demo["phone"],
-                        demo["email"], demo["wechat"],
-                    ),
-                )
-                demand_id = cur.fetchone()["id"]
-                for tag_id in tag_ids:
-                    cur.execute(
-                        "INSERT INTO demand_tag_relation (demand_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                        (demand_id, tag_id),
-                    )
-                print(f"inserted: {demo['title']} (id={demand_id}, org={demo['company']})")
-
-            cur.execute(
-                "SELECT COUNT(*) AS c FROM demand WHERE status='published' AND deleted_at IS NULL"
+                (
+                    DEMO_OWNER_USER_ID, org_id, demo["title"], category_id,
+                    demo["demandDesc"], demo["location"], coop_mode,
+                    budget_min, budget_max, negotiable, demo["deadline"],
+                    demo["contactName"], demo["contactTitle"], demo["phone"],
+                    demo["email"], demo["wechat"],
+                ),
             )
-            print("published demands:", cur.fetchone()["c"])
+            demand_id = cur.fetchone()["id"]
+            for tag_id in tag_ids:
+                cur.execute(
+                    "INSERT INTO demand_tag_relation (demand_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    (demand_id, tag_id),
+                )
+            print(f"inserted: {demo['title']} (id={demand_id}, org={demo['company']})")
+
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM demand WHERE status='published' AND deleted_at IS NULL"
+        )
+        print("published demands:", cur.fetchone()["c"])
 
 
 if __name__ == "__main__":

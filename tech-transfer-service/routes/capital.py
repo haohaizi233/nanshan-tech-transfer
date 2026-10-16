@@ -15,9 +15,9 @@ Phase B: 数据源迁移至 institution 表（/institutions 新路径由 institu
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core.response import success
 from core.pagination import parse_page_args
-from modules.capital.service import list_platforms, list_orgs
+from core.response import success
+from modules.capital.service import list_orgs, list_platforms
 
 router = APIRouter(tags=["capital"])
 

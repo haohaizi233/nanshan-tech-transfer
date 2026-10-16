@@ -6,10 +6,8 @@
 - core.rate_limit（滑动窗口限流 + 超限抛异常）
 """
 import time
-from unittest.mock import patch
 
 import pytest
-
 
 # ── auth_cache ──────────────────────────────────────────────
 
@@ -84,7 +82,7 @@ class TestAuthCache:
 
     def test_max_entries_eviction(self):
         """超过 _MAX_ENTRIES 时淘汰旧条目。"""
-        from core.auth_cache import cached, _MAX_ENTRIES, _cache, _lock
+        from core.auth_cache import _MAX_ENTRIES, _cache, _lock, cached
         for i in range(_MAX_ENTRIES + 100):
             cached(("overflow", i), lambda i=i: i)
         with _lock:
@@ -156,8 +154,8 @@ class TestRateLimit:
 
     def test_over_limit_raises(self):
         """超过限流阈值抛 BizError。"""
-        from core.rate_limit import check_user_rate
         from core.errors import BizError
+        from core.rate_limit import check_user_rate
         for _ in range(3):
             check_user_rate(1002, "test", limit=3, window_s=60)
         with pytest.raises(BizError):

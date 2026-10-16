@@ -11,12 +11,17 @@ Source: extracted from app.py inline code (Phase A)
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from core.errors import BizError, TT_FILE_40001, TT_FILE_40401, TT_FILE_50201
+from core.errors import TT_FILE_40001, TT_FILE_40401, TT_FILE_50201, BizError
 from core.file_token import generate_file_token, verify_file_token
 from core.middleware import identity, identity_from_access_token, optional_identity
 from core.response import success
 from modules.file.service import (
-    proxy_file, FileProxyError, create_uploaded_file, get_uploaded_file, get_uploaded_thumbnail, delete_uploaded_file,
+    FileProxyError,
+    create_uploaded_file,
+    delete_uploaded_file,
+    get_uploaded_file,
+    get_uploaded_thumbnail,
+    proxy_file,
 )
 
 router = APIRouter(tags=["file"])

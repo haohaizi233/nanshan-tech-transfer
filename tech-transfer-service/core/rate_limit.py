@@ -14,7 +14,7 @@ import threading
 import time
 from collections import defaultdict, deque
 
-from core.errors import BizError, TT_COMMON_42901
+from core.errors import TT_COMMON_42901, BizError
 
 _buckets: dict[str, deque] = defaultdict(deque)
 _bucket_lock = threading.Lock()

@@ -4,18 +4,18 @@ import sys
 import uuid
 from contextlib import contextmanager
 
-import db
+from pydantic import ValidationError
+
 import core.middleware as middleware
-from core.errors import BizError
+import db
 import modules.membership.service as membership_service
-from modules.membership.service import assert_active_membership, assert_org_admin_for
+from core.errors import BizError
 from modules.membership.schemas import (
     MembershipRejectionRequest,
     OrganizationApplicationRequest,
     VersionRequest,
 )
-from pydantic import ValidationError
-
+from modules.membership.service import assert_active_membership, assert_org_admin_for
 
 PASS = 0
 FAIL = 0
@@ -423,6 +423,7 @@ def check(name, ok, detail=""):
 def check_http_flows():
     """Real HTTP/auth/service/DB flows; fixtures are unique and cleaned by exact IDs."""
     from fastapi.testclient import TestClient
+
     from app import app
     from core.jwt_utils import sign_access_token
 
@@ -501,6 +502,7 @@ def check_http_flows():
             # Audit storage is the injected failure boundary; the real transaction
             # must roll back both the application review and new membership.
             from unittest.mock import patch
+
             import psycopg2
             with patch.object(membership_service, "audit_record", side_effect=psycopg2.DataError("test audit failure")):
                 call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1}, status=500)
@@ -596,6 +598,7 @@ def check_http_flows():
 def check_profile_and_content_associations():
     """Exercise text/identity separation and content authorization against real DB rows."""
     from fastapi.testclient import TestClient
+
     from app import app
     from core.jwt_utils import sign_access_token
 
@@ -744,7 +747,7 @@ def main():
         check(f"table {table_name} exists", table_name in existing_tables)
     check(
         "organization_membership has required columns",
-        MEMBERSHIP_COLUMNS <= membership_columns,
+        membership_columns >= MEMBERSHIP_COLUMNS,
         f"missing: {sorted(MEMBERSHIP_COLUMNS - membership_columns)}",
     )
     check_active_membership_rules()

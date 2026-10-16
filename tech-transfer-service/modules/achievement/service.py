@@ -10,25 +10,25 @@ Architecture source: 04-backend-domain-design.md §4.5, 05-data-model-design.md 
 """
 import json
 
-from db import get_cursor
-from modules.membership.service import assert_active_membership, resolve_content_organization
 from core.contact_validation import validate_email, validate_phone
 from core.errors import (
-    bad_request,
-    conflict,
     achievement_conflict,
     achievement_forbidden,
     achievement_not_found,
+    bad_request,
+    conflict,
 )
 from core.masking import mask_contact
-from modules.audit.service import record as audit_record
-from modules.cooperation.service import can_access_target, has_accepted_intent, is_accepted_dock_party
+from db import get_cursor
+from modules.achievement.content import load_content, parse_content_payload, sync_content
 from modules.achievement.maturity import (
     MATURITY_LABELS,
     MATURITY_LEVELS,
     resolve_maturity_desc,
 )
-from modules.achievement.content import parse_content_payload, sync_content, load_content
+from modules.audit.service import record as audit_record
+from modules.cooperation.service import can_access_target, has_accepted_intent, is_accepted_dock_party
+from modules.membership.service import assert_active_membership, resolve_content_organization
 
 PRICING_MODES = ("negotiable", "license", "transfer", "cooperation", "other")
 
@@ -465,7 +465,7 @@ def _parse_upsert_body(body: dict, partial: bool):
                 raise bad_request(f"{key} 必须是整数")
 
     if "ownerUserId" in body:
-        print(f"[achievement] WARNING: request body contains ownerUserId (ignored)")
+        print("[achievement] WARNING: request body contains ownerUserId (ignored)")
     inventor_refs = body.get("inventorRefs")
     if inventor_refs is not None:
         if not isinstance(inventor_refs, list):

@@ -265,31 +265,30 @@ def list_all_certification_applications(admin: dict, status, page: int, page_siz
 
 
 def cancel_membership_application(user: dict, application_id: int, version: int, request_id=None) -> dict:
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM organization_membership_application WHERE id = %s AND user_id = %s FOR UPDATE",
-                (application_id, user["userId"]),
-            )
-            if not cur.fetchone():
-                raise not_found("成员申请不存在")
-            cur.execute(
-                """UPDATE organization_membership_application
+    with transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM organization_membership_application WHERE id = %s AND user_id = %s FOR UPDATE",
+            (application_id, user["userId"]),
+        )
+        if not cur.fetchone():
+            raise not_found("成员申请不存在")
+        cur.execute(
+            """UPDATE organization_membership_application
                    SET status = 'cancelled', version = version + 1
                    WHERE id = %s AND user_id = %s AND version = %s AND status = 'pending'
                    RETURNING id, user_id, org_id, status, version""",
-                (application_id, user["userId"], version),
-            )
-            cancelled = cur.fetchone()
-            if not cancelled:
-                raise conflict("申请状态或版本已变更")
-            audit_record(
-                "organization_membership_application.cancel", "membership_application", application_id,
-                user["userId"], user.get("userNo", ""),
-                {"orgId": cancelled["org_id"], "userId": cancelled["user_id"], "from": "pending", "to": "cancelled"},
-                request_id=request_id, cur=cur,
-            )
-            return _map_application(cancelled)
+            (application_id, user["userId"], version),
+        )
+        cancelled = cur.fetchone()
+        if not cancelled:
+            raise conflict("申请状态或版本已变更")
+        audit_record(
+            "organization_membership_application.cancel", "membership_application", application_id,
+            user["userId"], user.get("userNo", ""),
+            {"orgId": cancelled["org_id"], "userId": cancelled["user_id"], "from": "pending", "to": "cancelled"},
+            request_id=request_id, cur=cur,
+        )
+        return _map_application(cancelled)
 
 
 def active_membership_org_ids(user_id: int) -> set[int]:
@@ -386,53 +385,52 @@ def apply_membership(user: dict, body: dict) -> dict:
     user_id = int(user["userId"])
     org_id = int(body["orgId"])
     try:
-        with transaction() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM institution WHERE id = %s AND status = 'active'",
-                    (org_id,),
-                )
-                if not cur.fetchone():
-                    raise not_found("机构不存在或未启用")
-                cur.execute(
-                    """
+        with transaction() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM institution WHERE id = %s AND status = 'active'",
+                (org_id,),
+            )
+            if not cur.fetchone():
+                raise not_found("机构不存在或未启用")
+            cur.execute(
+                """
                     SELECT 1 FROM organization_membership
                     WHERE user_id = %s AND org_id = %s AND status = 'active'
                     """,
-                    (user_id, org_id),
-                )
-                if cur.fetchone():
-                    raise conflict("已是该机构的有效成员")
-                cur.execute(
-                    """
+                (user_id, org_id),
+            )
+            if cur.fetchone():
+                raise conflict("已是该机构的有效成员")
+            cur.execute(
+                """
                     SELECT 1 FROM organization_membership_application
                     WHERE user_id = %s AND org_id = %s AND status = 'pending'
                     """,
-                    (user_id, org_id),
-                )
-                if cur.fetchone():
-                    raise conflict("已有待审核的成员申请")
-                cur.execute(
-                    """
+                (user_id, org_id),
+            )
+            if cur.fetchone():
+                raise conflict("已有待审核的成员申请")
+            cur.execute(
+                """
                     INSERT INTO organization_membership_application
                         (user_id, org_id, real_name, department, title, work_email,
                          proof_material, apply_note)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, user_id, org_id, status, version
                     """,
-                    (
-                        user_id, org_id, body.get("realName"), body.get("department"),
-                        body.get("title"), body.get("workEmail"),
-                        body.get("proofMaterial"), body.get("applyNote"),
-                    ),
-                )
-                application = cur.fetchone()
-                audit_record(
-                    "membership.apply", "organization_membership_application", application["id"],
-                    user_id, user.get("userNo", ""),
-                    {"orgId": org_id, "userId": user_id}, cur=cur,
-                )
-                return _map_application(application)
+                (
+                    user_id, org_id, body.get("realName"), body.get("department"),
+                    body.get("title"), body.get("workEmail"),
+                    body.get("proofMaterial"), body.get("applyNote"),
+                ),
+            )
+            application = cur.fetchone()
+            audit_record(
+                "membership.apply", "organization_membership_application", application["id"],
+                user_id, user.get("userNo", ""),
+                {"orgId": org_id, "userId": user_id}, cur=cur,
+            )
+            return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的成员申请")
 
@@ -504,22 +502,21 @@ def _activate_membership(cur, user_id: int, org_id: int, role: str, actor_id: in
 def approve_membership_application(admin: dict, application_id: int, version: int,
                                    request_id=None) -> dict:
     affected_user_id = None
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT id, user_id, org_id, department, title
                 FROM organization_membership_application WHERE id = %s
                 FOR UPDATE
                 """,
-                (application_id,),
-            )
-            application = cur.fetchone()
-            if not application:
-                raise not_found("成员申请不存在")
-            assert_org_admin_for(cur, admin, application["org_id"])
-            cur.execute(
-                """
+            (application_id,),
+        )
+        application = cur.fetchone()
+        if not application:
+            raise not_found("成员申请不存在")
+        assert_org_admin_for(cur, admin, application["org_id"])
+        cur.execute(
+            """
                 UPDATE organization_membership_application
                 SET status = 'approved', reviewed_by_user_id = %s,
                     reviewed_at = CURRENT_TIMESTAMP, review_reason = NULL,
@@ -527,25 +524,25 @@ def approve_membership_application(admin: dict, application_id: int, version: in
                 WHERE id = %s AND version = %s AND status = 'pending'
                 RETURNING id, user_id, org_id, status, version
                 """,
-                (admin["userId"], application_id, version),
-            )
-            reviewed = cur.fetchone()
-            if not reviewed:
-                raise conflict("申请状态或版本已变更")
-            affected_user_id = application["user_id"]
-            membership = _activate_membership(
-                cur, application["user_id"], application["org_id"], "member",
-                int(admin["userId"]), application.get("department"), application.get("title"),
-            )
-            audit_record(
-                "organization_membership_application.approve", "membership_application",
-                application_id, admin["userId"], admin.get("userNo", ""),
-                {"orgId": application["org_id"], "userId": application["user_id"],
-                 "membershipId": membership["id"], "from": "pending", "to": "approved"},
-                request_id=request_id, cur=cur,
-            )
-            result = _map_application(reviewed)
-            result["membership"] = _map_membership(membership)
+            (admin["userId"], application_id, version),
+        )
+        reviewed = cur.fetchone()
+        if not reviewed:
+            raise conflict("申请状态或版本已变更")
+        affected_user_id = application["user_id"]
+        membership = _activate_membership(
+            cur, application["user_id"], application["org_id"], "member",
+            int(admin["userId"]), application.get("department"), application.get("title"),
+        )
+        audit_record(
+            "organization_membership_application.approve", "membership_application",
+            application_id, admin["userId"], admin.get("userNo", ""),
+            {"orgId": application["org_id"], "userId": application["user_id"],
+             "membershipId": membership["id"], "from": "pending", "to": "approved"},
+            request_id=request_id, cur=cur,
+        )
+        result = _map_application(reviewed)
+        result["membership"] = _map_membership(membership)
     # D7: 角色/状态变更后立即失效鉴权缓存
     auth_cache.invalidate_user(affected_user_id)
     return result
@@ -556,18 +553,17 @@ def reject_membership_application(admin: dict, application_id: int, version: int
     reason = (reason or "").strip()
     if not reason:
         raise bad_request("审核驳回必须填写原因")
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, user_id, org_id FROM organization_membership_application WHERE id = %s FOR UPDATE",
-                (application_id,),
-            )
-            application = cur.fetchone()
-            if not application:
-                raise not_found("成员申请不存在")
-            assert_org_admin_for(cur, admin, application["org_id"])
-            cur.execute(
-                """
+    with transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, user_id, org_id FROM organization_membership_application WHERE id = %s FOR UPDATE",
+            (application_id,),
+        )
+        application = cur.fetchone()
+        if not application:
+            raise not_found("成员申请不存在")
+        assert_org_admin_for(cur, admin, application["org_id"])
+        cur.execute(
+            """
                 UPDATE organization_membership_application
                 SET status = 'rejected', reviewed_by_user_id = %s,
                     reviewed_at = CURRENT_TIMESTAMP, review_reason = %s,
@@ -575,19 +571,19 @@ def reject_membership_application(admin: dict, application_id: int, version: int
                 WHERE id = %s AND version = %s AND status = 'pending'
                 RETURNING id, user_id, org_id, status, version
                 """,
-                (admin["userId"], reason, application_id, version),
-            )
-            reviewed = cur.fetchone()
-            if not reviewed:
-                raise conflict("申请状态或版本已变更")
-            audit_record(
-                "organization_membership_application.reject", "membership_application",
-                application_id, admin["userId"], admin.get("userNo", ""),
-                {"orgId": application["org_id"], "userId": application["user_id"],
-                 "from": "pending", "to": "rejected", "reason": reason},
-                request_id=request_id, cur=cur,
-            )
-            return _map_application(reviewed)
+            (admin["userId"], reason, application_id, version),
+        )
+        reviewed = cur.fetchone()
+        if not reviewed:
+            raise conflict("申请状态或版本已变更")
+        audit_record(
+            "organization_membership_application.reject", "membership_application",
+            application_id, admin["userId"], admin.get("userNo", ""),
+            {"orgId": application["org_id"], "userId": application["user_id"],
+             "from": "pending", "to": "rejected", "reason": reason},
+            request_id=request_id, cur=cur,
+        )
+        return _map_application(reviewed)
 
 def revoke_membership(admin: dict, membership_id: int, version: int, reason: str,
                       request_id=None) -> dict:
@@ -595,18 +591,17 @@ def revoke_membership(admin: dict, membership_id: int, version: int, reason: str
     reason = (reason or "").strip()
     if not reason:
         raise bad_request("撤销成员必须填写原因")
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, user_id, org_id, role FROM organization_membership WHERE id = %s FOR UPDATE",
-                (membership_id,),
-            )
-            membership = cur.fetchone()
-            if not membership:
-                raise not_found("成员身份不存在")
-            assert_org_admin_for(cur, admin, membership["org_id"])
-            cur.execute(
-                """
+    with transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, user_id, org_id, role FROM organization_membership WHERE id = %s FOR UPDATE",
+            (membership_id,),
+        )
+        membership = cur.fetchone()
+        if not membership:
+            raise not_found("成员身份不存在")
+        assert_org_admin_for(cur, admin, membership["org_id"])
+        cur.execute(
+            """
                 UPDATE organization_membership
                 SET status = 'revoked', revoked_by_user_id = %s,
                     revoked_at = CURRENT_TIMESTAMP, revoke_reason = %s,
@@ -615,73 +610,72 @@ def revoke_membership(admin: dict, membership_id: int, version: int, reason: str
                   AND status = 'active' AND role = 'member'
                 RETURNING id, user_id, org_id, role, status, version
                 """,
-                (admin["userId"], reason, membership_id, version),
-            )
-            revoked = cur.fetchone()
-            if not revoked:
-                raise conflict("仅可撤销当前有效的普通成员，或版本已变更")
-            audit_record(
-                "organization_membership.revoke", "organization_membership", membership_id,
-                admin["userId"], admin.get("userNo", ""),
-                {"orgId": membership["org_id"], "userId": membership["user_id"],
-                 "role": "member", "from": "active", "to": "revoked", "reason": reason},
-                request_id=request_id, cur=cur,
-            )
-            return _map_membership(revoked)
+            (admin["userId"], reason, membership_id, version),
+        )
+        revoked = cur.fetchone()
+        if not revoked:
+            raise conflict("仅可撤销当前有效的普通成员，或版本已变更")
+        audit_record(
+            "organization_membership.revoke", "organization_membership", membership_id,
+            admin["userId"], admin.get("userNo", ""),
+            {"orgId": membership["org_id"], "userId": membership["user_id"],
+             "role": "member", "from": "active", "to": "revoked", "reason": reason},
+            request_id=request_id, cur=cur,
+        )
+        return _map_membership(revoked)
 
 
 def apply_organization_admin(user: dict, body: dict) -> dict:
     user_id = int(user["userId"])
     org_id = int(body["orgId"])
     try:
-        with transaction() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM institution WHERE id = %s AND status = 'active'",
-                    (org_id,),
-                )
-                if not cur.fetchone():
-                    raise not_found("机构不存在或未启用")
-                cur.execute(
-                    """
+        with transaction() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM institution WHERE id = %s AND status = 'active'",
+                (org_id,),
+            )
+            if not cur.fetchone():
+                raise not_found("机构不存在或未启用")
+            cur.execute(
+                """
                     SELECT 1 FROM organization_membership
                     WHERE user_id = %s AND org_id = %s
                       AND role = 'admin' AND status = 'active'
                     """,
-                    (user_id, org_id),
-                )
-                if cur.fetchone():
-                    raise conflict("已是该机构管理员")
-                cur.execute(
-                    """
+                (user_id, org_id),
+            )
+            if cur.fetchone():
+                raise conflict("已是该机构管理员")
+            cur.execute(
+                """
                     SELECT 1 FROM organization_admin_application
                     WHERE user_id = %s AND org_id = %s AND status = 'pending'
                     """,
-                    (user_id, org_id),
-                )
-                if cur.fetchone():
-                    raise conflict("已有待审核的机构管理员申请")
-                cur.execute(
-                    """
+                (user_id, org_id),
+            )
+            if cur.fetchone():
+                raise conflict("已有待审核的机构管理员申请")
+            cur.execute(
+                """
                     INSERT INTO organization_admin_application
                         (user_id, org_id, real_name, department, title, work_email,
                          proof_material, reason)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, user_id, org_id, status, version
                     """,
-                    (
-                        user_id, org_id, body.get("realName"), body.get("department"),
-                        body.get("title"), body.get("workEmail"),
-                        body.get("proofMaterial"), body.get("reason"),
-                    ),
-                )
-                application = cur.fetchone()
-                audit_record(
-                    "membership.apply_org_admin", "organization_admin_application", application["id"],
-                    user_id, user.get("userNo", ""),
-                    {"orgId": org_id, "userId": user_id}, cur=cur,
-                )
-                return _map_application(application)
+                (
+                    user_id, org_id, body.get("realName"), body.get("department"),
+                    body.get("title"), body.get("workEmail"),
+                    body.get("proofMaterial"), body.get("reason"),
+                ),
+            )
+            application = cur.fetchone()
+            audit_record(
+                "membership.apply_org_admin", "organization_admin_application", application["id"],
+                user_id, user.get("userNo", ""),
+                {"orgId": org_id, "userId": user_id}, cur=cur,
+            )
+            return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的机构管理员申请")
 
@@ -689,21 +683,20 @@ def apply_organization_admin(user: dict, body: dict) -> dict:
 def approve_organization_admin_application(admin: dict, application_id: int, version: int,
                                            request_id=None) -> dict:
     affected_user_id = None
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            _assert_system_admin(cur, admin)
-            cur.execute(
-                """
+    with transaction() as conn, conn.cursor() as cur:
+        _assert_system_admin(cur, admin)
+        cur.execute(
+            """
                 SELECT id, user_id, org_id, department, title
                 FROM organization_admin_application WHERE id = %s FOR UPDATE
                 """,
-                (application_id,),
-            )
-            application = cur.fetchone()
-            if not application:
-                raise not_found("机构管理员申请不存在")
-            cur.execute(
-                """
+            (application_id,),
+        )
+        application = cur.fetchone()
+        if not application:
+            raise not_found("机构管理员申请不存在")
+        cur.execute(
+            """
                 UPDATE organization_admin_application
                 SET status = 'approved', reviewed_by_user_id = %s,
                     reviewed_at = CURRENT_TIMESTAMP, review_reason = NULL,
@@ -711,25 +704,25 @@ def approve_organization_admin_application(admin: dict, application_id: int, ver
                 WHERE id = %s AND version = %s AND status = 'pending'
                 RETURNING id, user_id, org_id, status, version
                 """,
-                (admin["userId"], application_id, version),
-            )
-            reviewed = cur.fetchone()
-            if not reviewed:
-                raise conflict("申请状态或版本已变更")
-            affected_user_id = application["user_id"]
-            membership = _activate_membership(
-                cur, application["user_id"], application["org_id"], "admin",
-                int(admin["userId"]), application.get("department"), application.get("title"),
-            )
-            audit_record(
-                "organization_admin_application.approve", "organization_admin_application",
-                application_id, admin["userId"], admin.get("userNo", ""),
-                {"orgId": application["org_id"], "userId": application["user_id"],
-                 "membershipId": membership["id"], "from": "pending", "to": "approved"},
-                request_id=request_id, cur=cur,
-            )
-            result = _map_application(reviewed)
-            result["membership"] = _map_membership(membership)
+            (admin["userId"], application_id, version),
+        )
+        reviewed = cur.fetchone()
+        if not reviewed:
+            raise conflict("申请状态或版本已变更")
+        affected_user_id = application["user_id"]
+        membership = _activate_membership(
+            cur, application["user_id"], application["org_id"], "admin",
+            int(admin["userId"]), application.get("department"), application.get("title"),
+        )
+        audit_record(
+            "organization_admin_application.approve", "organization_admin_application",
+            application_id, admin["userId"], admin.get("userNo", ""),
+            {"orgId": application["org_id"], "userId": application["user_id"],
+             "membershipId": membership["id"], "from": "pending", "to": "approved"},
+            request_id=request_id, cur=cur,
+        )
+        result = _map_application(reviewed)
+        result["membership"] = _map_membership(membership)
     # D7: 角色/状态变更后立即失效鉴权缓存
     auth_cache.invalidate_user(affected_user_id)
     return result
@@ -746,11 +739,10 @@ def reject_organization_admin_application(admin: dict, application_id: int, vers
 def grant_organization_admin(admin: dict, membership_id: int, version: int,
                              request_id=None) -> dict:
     affected_user_id = None
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            _assert_system_admin(cur, admin)
-            cur.execute(
-                """
+    with transaction() as conn, conn.cursor() as cur:
+        _assert_system_admin(cur, admin)
+        cur.execute(
+            """
                 UPDATE organization_membership
                 SET role = 'admin', verified_by_user_id = %s,
                     verified_at = CURRENT_TIMESTAMP, version = version + 1
@@ -758,19 +750,19 @@ def grant_organization_admin(admin: dict, membership_id: int, version: int,
                   AND status = 'active' AND role = 'member'
                 RETURNING id, user_id, org_id, role, status, version
                 """,
-                (admin["userId"], membership_id, version),
-            )
-            granted = cur.fetchone()
-            if not granted:
-                raise conflict("仅可授予当前有效普通成员管理员权限，或版本已变更")
-            affected_user_id = granted["user_id"]
-            audit_record(
-                "organization_admin.grant", "organization_membership", membership_id,
-                admin["userId"], admin.get("userNo", ""),
-                {"orgId": granted["org_id"], "userId": granted["user_id"],
-                 "from": "member", "to": "admin"}, request_id=request_id, cur=cur,
-            )
-            result = _map_membership(granted)
+            (admin["userId"], membership_id, version),
+        )
+        granted = cur.fetchone()
+        if not granted:
+            raise conflict("仅可授予当前有效普通成员管理员权限，或版本已变更")
+        affected_user_id = granted["user_id"]
+        audit_record(
+            "organization_admin.grant", "organization_membership", membership_id,
+            admin["userId"], admin.get("userNo", ""),
+            {"orgId": granted["org_id"], "userId": granted["user_id"],
+             "from": "member", "to": "admin"}, request_id=request_id, cur=cur,
+        )
+        result = _map_membership(granted)
     # D7: 角色变更后立即失效鉴权缓存
     auth_cache.invalidate_user(affected_user_id)
     return result
@@ -782,11 +774,10 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
     if not reason:
         raise bad_request("撤销机构管理员必须填写原因")
     affected_user_id = None
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            _assert_system_admin(cur, admin)
-            cur.execute(
-                """
+    with transaction() as conn, conn.cursor() as cur:
+        _assert_system_admin(cur, admin)
+        cur.execute(
+            """
                 UPDATE organization_membership
                 SET status = 'revoked', revoked_by_user_id = %s,
                     revoked_at = CURRENT_TIMESTAMP, revoke_reason = %s,
@@ -795,20 +786,20 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
                   AND status = 'active' AND role = 'admin'
                 RETURNING id, user_id, org_id, role, status, version
                 """,
-                (admin["userId"], reason, membership_id, version),
-            )
-            revoked = cur.fetchone()
-            if not revoked:
-                raise conflict("仅可撤销当前有效管理员身份，或版本已变更")
-            affected_user_id = revoked["user_id"]
-            audit_record(
-                "organization_admin.revoke", "organization_membership", membership_id,
-                admin["userId"], admin.get("userNo", ""),
-                {"orgId": revoked["org_id"], "userId": revoked["user_id"],
-                 "role": "admin", "from": "active", "to": "revoked", "reason": reason},
-                request_id=request_id, cur=cur,
-            )
-            result = _map_membership(revoked)
+            (admin["userId"], reason, membership_id, version),
+        )
+        revoked = cur.fetchone()
+        if not revoked:
+            raise conflict("仅可撤销当前有效管理员身份，或版本已变更")
+        affected_user_id = revoked["user_id"]
+        audit_record(
+            "organization_admin.revoke", "organization_membership", membership_id,
+            admin["userId"], admin.get("userNo", ""),
+            {"orgId": revoked["org_id"], "userId": revoked["user_id"],
+             "role": "admin", "from": "active", "to": "revoked", "reason": reason},
+            request_id=request_id, cur=cur,
+        )
+        result = _map_membership(revoked)
     # D7: 角色变更后立即失效鉴权缓存
     auth_cache.invalidate_user(affected_user_id)
     return result
@@ -817,25 +808,24 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
 def apply_organization(user: dict, body: dict) -> dict:
     user_id = int(user["userId"])
     try:
-        with transaction() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
+        with transaction() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
                     SELECT 1 FROM organization_application
                     WHERE applicant_user_id = %s AND status = 'pending'
                     """,
-                    (user_id,),
-                )
-                if cur.fetchone():
-                    raise conflict("已有待审核的机构入驻申请")
-                requested_name = body["requestedName"].strip()
-                cur.execute("SELECT 1 FROM institution WHERE name = %s", (requested_name,))
-                if cur.fetchone():
-                    raise conflict("同名机构已存在，请改为申请加入该机构")
-                contact_phone = validate_phone(body.get("contactPhone"), required=True, field_name="联系电话")
-                contact_email = validate_email(body.get("contactEmail"), required=False, field_name="联系邮箱")
-                cur.execute(
-                    """
+                (user_id,),
+            )
+            if cur.fetchone():
+                raise conflict("已有待审核的机构入驻申请")
+            requested_name = body["requestedName"].strip()
+            cur.execute("SELECT 1 FROM institution WHERE name = %s", (requested_name,))
+            if cur.fetchone():
+                raise conflict("同名机构已存在，请改为申请加入该机构")
+            contact_phone = validate_phone(body.get("contactPhone"), required=True, field_name="联系电话")
+            contact_email = validate_email(body.get("contactEmail"), required=False, field_name="联系邮箱")
+            cur.execute(
+                """
                     INSERT INTO organization_application
                         (applicant_user_id, requested_name, requested_type, credit_code,
                          website, region, address, contact_name, contact_phone,
@@ -843,20 +833,20 @@ def apply_organization(user: dict, body: dict) -> dict:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, applicant_user_id, status, version
                     """,
-                    (
-                        user_id, requested_name, body.get("requestedType"),
-                        body.get("creditCode"), body.get("website"), body.get("region"),
-                        body.get("address"), body.get("contactName"), contact_phone,
-                        contact_email, body.get("proofMaterial"),
-                    ),
-                )
-                application = cur.fetchone()
-                audit_record(
-                    "membership.apply_org", "organization_application", application["id"],
-                    user_id, user.get("userNo", ""),
-                    {"orgId": None, "userId": user_id, "requestedName": requested_name}, cur=cur,
-                )
-                return _map_application(application)
+                (
+                    user_id, requested_name, body.get("requestedType"),
+                    body.get("creditCode"), body.get("website"), body.get("region"),
+                    body.get("address"), body.get("contactName"), contact_phone,
+                    contact_email, body.get("proofMaterial"),
+                ),
+            )
+            application = cur.fetchone()
+            audit_record(
+                "membership.apply_org", "organization_application", application["id"],
+                user_id, user.get("userNo", ""),
+                {"orgId": None, "userId": user_id, "requestedName": requested_name}, cur=cur,
+            )
+            return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的机构入驻申请")
 
@@ -864,22 +854,21 @@ def apply_organization(user: dict, body: dict) -> dict:
 def approve_organization_application(admin: dict, application_id: int, version: int,
                                      request_id=None) -> dict:
     try:
-        with transaction() as conn:
-            with conn.cursor() as cur:
-                _assert_system_admin(cur, admin)
-                cur.execute(
-                    """
+        with transaction() as conn, conn.cursor() as cur:
+            _assert_system_admin(cur, admin)
+            cur.execute(
+                """
                     SELECT id, applicant_user_id, requested_name, requested_type,
                            region, credit_code
                     FROM organization_application WHERE id = %s FOR UPDATE
                     """,
-                    (application_id,),
-                )
-                application = cur.fetchone()
-                if not application:
-                    raise not_found("机构入驻申请不存在")
-                cur.execute(
-                    """
+                (application_id,),
+            )
+            application = cur.fetchone()
+            if not application:
+                raise not_found("机构入驻申请不存在")
+            cur.execute(
+                """
                     UPDATE organization_application
                     SET status = 'approved', reviewed_by_user_id = %s,
                         reviewed_at = CURRENT_TIMESTAMP, review_reason = NULL,
@@ -887,22 +876,22 @@ def approve_organization_application(admin: dict, application_id: int, version: 
                     WHERE id = %s AND version = %s AND status = 'pending'
                     RETURNING id, applicant_user_id, status, version
                     """,
-                    (admin["userId"], application_id, version),
-                )
-                reviewed = cur.fetchone()
-                if not reviewed:
-                    raise conflict("申请状态或版本已变更")
-                cur.execute(
-                    "SELECT 1 FROM institution WHERE name = %s",
-                    (application["requested_name"],),
-                )
-                if cur.fetchone():
-                    raise conflict("同名机构已存在")
-                kind = (application.get("requested_type") or "").strip().lower()
-                if kind not in ("university", "institute", "enterprise", "service", "invest", "other"):
-                    kind = "enterprise"
-                cur.execute(
-                    """
+                (admin["userId"], application_id, version),
+            )
+            reviewed = cur.fetchone()
+            if not reviewed:
+                raise conflict("申请状态或版本已变更")
+            cur.execute(
+                "SELECT 1 FROM institution WHERE name = %s",
+                (application["requested_name"],),
+            )
+            if cur.fetchone():
+                raise conflict("同名机构已存在")
+            kind = (application.get("requested_type") or "").strip().lower()
+            if kind not in ("university", "institute", "enterprise", "service", "invest", "other"):
+                kind = "enterprise"
+            cur.execute(
+                """
                     INSERT INTO institution
                         (kind, name, region, credit_code, status, user_type, source_site,
                          registration_status, registered_by_user_id, registration_applied_at)
@@ -910,25 +899,25 @@ def approve_organization_application(admin: dict, application_id: int, version: 
                             'approved', %s, CURRENT_TIMESTAMP)
                     RETURNING id
                     """,
-                    (kind, application["requested_name"], application.get("region"),
-                     application.get("credit_code"), kind,
-                     application["applicant_user_id"]),
-                )
-                org_id = cur.fetchone()["id"]
-                membership = _activate_membership(
-                    cur, application["applicant_user_id"], org_id, "admin", int(admin["userId"]),
-                )
-                audit_record(
-                    "organization_application.approve", "organization_application", application_id,
-                    admin["userId"], admin.get("userNo", ""),
-                    {"orgId": org_id, "userId": application["applicant_user_id"],
-                     "membershipId": membership["id"], "from": "pending", "to": "approved"},
-                    request_id=request_id, cur=cur,
-                )
-                result = _map_application(reviewed)
-                result["orgId"] = org_id
-                result["membership"] = _map_membership(membership)
-                return result
+                (kind, application["requested_name"], application.get("region"),
+                 application.get("credit_code"), kind,
+                 application["applicant_user_id"]),
+            )
+            org_id = cur.fetchone()["id"]
+            membership = _activate_membership(
+                cur, application["applicant_user_id"], org_id, "admin", int(admin["userId"]),
+            )
+            audit_record(
+                "organization_application.approve", "organization_application", application_id,
+                admin["userId"], admin.get("userNo", ""),
+                {"orgId": org_id, "userId": application["applicant_user_id"],
+                 "membershipId": membership["id"], "from": "pending", "to": "approved"},
+                request_id=request_id, cur=cur,
+            )
+            result = _map_application(reviewed)
+            result["orgId"] = org_id
+            result["membership"] = _map_membership(membership)
+            return result
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "同名有效机构已存在")
 
@@ -951,18 +940,17 @@ def _reject_system_application(admin: dict, table: str, application_id: int, ver
         raise ValueError("unsupported application table")
     user_column = "user_id" if table == "organization_admin_application" else "applicant_user_id"
     org_column = ", org_id" if table == "organization_admin_application" else ""
-    with transaction() as conn:
-        with conn.cursor() as cur:
-            _assert_system_admin(cur, admin)
-            cur.execute(
-                f"SELECT id, {user_column}{org_column} FROM {table} WHERE id = %s FOR UPDATE",
-                (application_id,),
-            )
-            application = cur.fetchone()
-            if not application:
-                raise not_found(missing_message)
-            cur.execute(
-                f"""
+    with transaction() as conn, conn.cursor() as cur:
+        _assert_system_admin(cur, admin)
+        cur.execute(
+            f"SELECT id, {user_column}{org_column} FROM {table} WHERE id = %s FOR UPDATE",
+            (application_id,),
+        )
+        application = cur.fetchone()
+        if not application:
+            raise not_found(missing_message)
+        cur.execute(
+            f"""
                 UPDATE {table}
                 SET status = 'rejected', reviewed_by_user_id = %s,
                     reviewed_at = CURRENT_TIMESTAMP, review_reason = %s,
@@ -970,21 +958,21 @@ def _reject_system_application(admin: dict, table: str, application_id: int, ver
                 WHERE id = %s AND version = %s AND status = 'pending'
                 RETURNING id, {user_column}{org_column}, status, version
                 """,
-                (admin["userId"], reason, application_id, version),
-            )
-            reviewed = cur.fetchone()
-            if not reviewed:
-                raise conflict("申请状态或版本已变更")
-            details = {
-                "userId": application[user_column],
-                "from": "pending",
-                "to": "rejected",
-                "reason": reason,
-            }
-            if table == "organization_admin_application":
-                details["orgId"] = application["org_id"]
-            audit_record(
-                action, table, application_id, admin["userId"], admin.get("userNo", ""),
-                details, request_id=request_id, cur=cur,
-            )
-            return _map_application(reviewed)
+            (admin["userId"], reason, application_id, version),
+        )
+        reviewed = cur.fetchone()
+        if not reviewed:
+            raise conflict("申请状态或版本已变更")
+        details = {
+            "userId": application[user_column],
+            "from": "pending",
+            "to": "rejected",
+            "reason": reason,
+        }
+        if table == "organization_admin_application":
+            details["orgId"] = application["org_id"]
+        audit_record(
+            action, table, application_id, admin["userId"], admin.get("userNo", ""),
+            details, request_id=request_id, cur=cur,
+        )
+        return _map_application(reviewed)

@@ -12,43 +12,47 @@ Architecture source: 04-backend-domain-design.md §5.4, 06-api-design.md §15 ad
 """
 import json
 
-from db import get_cursor
 from core.contact_validation import validate_contact_way
 from core.errors import (
+    TT_ACH_40901,
+    TT_ADMIN_40001,
+    TT_DMD_40401,
+    TT_DMD_40901,
     BizError,
+    achievement_not_found,
     bad_request,
     conflict,
-    forbidden,
     coop_conflict,
     coop_forbidden,
     coop_not_found,
-    TT_ACH_40901,
-    TT_DMD_40401,
-    TT_DMD_40901,
-    TT_ADMIN_40001,
+    demand_not_found,
+    forbidden,
 )
-from modules.audit.service import record as audit_record
-from modules.notification.service import emit_notification
-
-from core.errors import achievement_not_found
+from db import get_cursor
+from modules.achievement.content import load_content, sync_content
 from modules.achievement.service import (
     _parse_upsert_body,
-    _validate_refs,
     _sync_inventors,
+    _validate_refs,
 )
-from modules.achievement.content import load_content, sync_content
-
-from core.errors import demand_not_found
+from modules.audit.service import record as audit_record
+from modules.cooperation.service import (
+    _release_target_slot,
+    _reserve_target_slot,
+)
 from modules.demand.service import (
     _parse_upsert_body as _parse_demand_upsert_body,
+)
+from modules.demand.service import (
     _resolve_name_refs as _resolve_demand_name_refs,
+)
+from modules.demand.service import (
     _sync_tags as _sync_demand_tags,
+)
+from modules.demand.service import (
     _validate_refs as _validate_demand_refs,
 )
-from modules.cooperation.service import (
-    _reserve_target_slot,
-    _release_target_slot,
-)
+from modules.notification.service import emit_notification
 
 
 def _page_args(args) -> tuple[int, int]:
@@ -515,7 +519,11 @@ def _dmd_queue_item(r):
 # ═════════════════════════════════════════════════════════════
 
 from core.errors import (
-    TT_INST_40001, TT_INST_40401, TT_INST_40901, TT_COOP_40401, not_found,
+    TT_COOP_40401,
+    TT_INST_40001,
+    TT_INST_40401,
+    TT_INST_40901,
+    not_found,
 )
 
 INST_KINDS = (

@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -8,7 +7,7 @@ class IdentityContext:
     issuer: str
     externalSubject: str
     tenantId: str
-    displayName: Optional[str] = None
+    displayName: str | None = None
     roles: list[str] = field(default_factory=lambda: ["user"])
 
     def to_dict(self):

@@ -6,25 +6,25 @@ Architecture source: openapi.yaml paths /achievements, /achievements/{id},
 """
 from fastapi import APIRouter, Depends, Request
 
-from core.response import success, get_request_id
-from core.middleware import identity, optional_identity
 from core.errors import bad_request
-from core.idempotency import idempotent_create, current_key, cache_response
+from core.idempotency import cache_response, current_key, idempotent_create
+from core.middleware import identity, optional_identity
 from core.request_schemas import (
     AchievementCreateRequest,
     AchievementOfflineRequest,
     AchievementUpdateRequest,
     VersionBody,
 )
+from core.response import get_request_id, success
 from modules.achievement.service import (
-    list_achievements,
+    create_achievement,
     get_achievement_detail,
+    list_achievements,
     list_categories,
     list_industries,
-    create_achievement,
-    update_achievement,
-    submit_achievement,
     offline_achievement,
+    submit_achievement,
+    update_achievement,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["achievement"])

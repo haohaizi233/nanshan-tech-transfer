@@ -6,7 +6,6 @@ admin 路由 —— 管理审核组（06-api-design.md §15）
 """
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
-from core.response import success, get_request_id
 from core.middleware import admin_identity, backend_identity
 from core.request_schemas import (
     AchievementCreateRequest,
@@ -17,35 +16,36 @@ from core.request_schemas import (
     ReviewRejectRequest,
     VersionBody,
 )
-from modules.admin.service import (
-    achievements_review_queue,
-    demands_review_queue,
-    review_achievement,
-    review_demand,
-    list_audit_logs,
-    list_achievements_admin,
-    get_achievement_admin,
-    list_demands_admin,
-    get_demand_admin,
-    create_achievement_admin,
-    update_achievement_admin,
-    create_demand_admin,
-    update_demand_admin,
-    submit_achievement_admin,
-    submit_demand_admin,
-    list_demand_categories_admin,
-    list_content_organizations_admin,
-    claim_unassigned_content,
-    soft_delete_achievement_admin,
-    soft_delete_demand_admin,
-)
+from core.response import get_request_id, success
 from modules.achievement.importer import (
-    list_import_batches,
-    get_import_batch,
-    confirm_import_item,
     clear_import_batches,
+    confirm_import_item,
+    get_import_batch,
+    list_import_batches,
     publish_import_item,
     stage_uploaded_documents,
+)
+from modules.admin.service import (
+    achievements_review_queue,
+    claim_unassigned_content,
+    create_achievement_admin,
+    create_demand_admin,
+    demands_review_queue,
+    get_achievement_admin,
+    get_demand_admin,
+    list_achievements_admin,
+    list_audit_logs,
+    list_content_organizations_admin,
+    list_demand_categories_admin,
+    list_demands_admin,
+    review_achievement,
+    review_demand,
+    soft_delete_achievement_admin,
+    soft_delete_demand_admin,
+    submit_achievement_admin,
+    submit_demand_admin,
+    update_achievement_admin,
+    update_demand_admin,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["admin"])

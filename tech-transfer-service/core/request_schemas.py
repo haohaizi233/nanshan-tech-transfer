@@ -4,7 +4,7 @@
 extra=allow 保证未列出的字段仍会原样传给现有 json_body 逻辑。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,9 +21,9 @@ class VersionBody(RequestBody):
 
 
 class ReasonVersionBody(VersionBody):
-    reason: Optional[str] = Field(None, description="原因说明")
-    reasonCode: Optional[str] = None
-    reasonNote: Optional[str] = None
+    reason: str | None = Field(None, description="原因说明")
+    reasonCode: str | None = None
+    reasonNote: str | None = None
 
 
 # ── auth ────────────────────────────────────────────────────
@@ -35,17 +35,17 @@ class LoginRequest(RequestBody):
             "example": {"username": "admin", "password": "Admin@2026"},
         },
     )
-    username: Optional[str] = Field(None, description="后台登录账号")
-    phone: Optional[str] = Field(None, description="小程序手机号")
-    password: Optional[str] = Field(None, description="密码")
+    username: str | None = Field(None, description="后台登录账号")
+    phone: str | None = Field(None, description="小程序手机号")
+    password: str | None = Field(None, description="密码")
 
 
 class RegisterRequest(RequestBody):
-    username: Optional[str] = Field(None, description="后台用户名注册")
-    phone: Optional[str] = Field(None, description="小程序手机号注册")
+    username: str | None = Field(None, description="后台用户名注册")
+    phone: str | None = Field(None, description="小程序手机号注册")
     password: str = Field(..., min_length=1, description="密码")
-    displayName: Optional[str] = None
-    email: Optional[str] = None
+    displayName: str | None = None
+    email: str | None = None
 
 
 class BootstrapRequest(RequestBody):
@@ -60,15 +60,15 @@ class RefreshTokenRequest(RequestBody):
 
 class ProfileUpdateRequest(RequestBody):
     version: int = Field(..., ge=1)
-    displayName: Optional[str] = None
-    userType: Optional[str] = Field(None, description="enterprise_staff/researcher/investor/service_org/other")
-    subjectType: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    wechat: Optional[str] = None
-    companyText: Optional[str] = None
-    orgTitle: Optional[str] = None
-    businessCapabilities: Optional[list[str]] = None
+    displayName: str | None = None
+    userType: str | None = Field(None, description="enterprise_staff/researcher/investor/service_org/other")
+    subjectType: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    wechat: str | None = None
+    companyText: str | None = None
+    orgTitle: str | None = None
+    businessCapabilities: list[str] | None = None
 
 
 class ChangePasswordRequest(RequestBody):
@@ -80,55 +80,55 @@ class ChangePasswordRequest(RequestBody):
 
 class InventorRef(RequestBody):
     name: str
-    orgName: Optional[str] = None
-    personType: Optional[str] = None
-    sortOrder: Optional[int] = None
-    department: Optional[str] = None
-    title: Optional[str] = None
-    bio: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    homepageUrl: Optional[str] = None
-    avatarFileId: Optional[int] = None
+    orgName: str | None = None
+    personType: str | None = None
+    sortOrder: int | None = None
+    department: str | None = None
+    title: str | None = None
+    bio: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    homepageUrl: str | None = None
+    avatarFileId: int | None = None
 
 
 class MediaItem(RequestBody):
     fileId: int
-    role: Optional[str] = None
-    caption: Optional[str] = None
-    sortOrder: Optional[int] = None
+    role: str | None = None
+    caption: str | None = None
+    sortOrder: int | None = None
 
 
 class AchievementWriteRequest(RequestBody):
-    title: Optional[str] = None
-    titleEn: Optional[str] = None
-    version: Optional[int] = Field(None, ge=1)
-    maturityLevel: Optional[str] = Field(None, description="01_idea ~ 06_mass_done")
-    pricingMode: Optional[str] = None
-    techIntro: Optional[str] = None
-    techRoute: Optional[str] = None
-    maturityDesc: Optional[str] = None
-    sourceOrgName: Optional[str] = None
-    achievementKind: Optional[str] = None
-    applicationFields: Optional[list[str]] = None
-    innovationPoints: Optional[list[str]] = None
-    priceMinWan: Optional[float] = None
-    priceMaxWan: Optional[float] = None
-    categoryId: Optional[int] = None
-    orgId: Optional[int] = None
-    ownerUserId: Optional[int] = None
-    saveAction: Optional[str] = Field(None, description="draft/submit/publish")
-    contactName: Optional[str] = None
-    contactTitle: Optional[str] = None
-    contactPhone: Optional[str] = None
-    contactEmail: Optional[str] = None
-    contactWechat: Optional[str] = None
-    inventorRefs: Optional[list[InventorRef]] = None
-    sections: Optional[list[dict[str, Any]]] = None
-    patents: Optional[list[dict[str, Any]]] = None
-    links: Optional[list[dict[str, Any]]] = None
-    media: Optional[list[MediaItem]] = None
-    industryIds: Optional[list[int]] = None
+    title: str | None = None
+    titleEn: str | None = None
+    version: int | None = Field(None, ge=1)
+    maturityLevel: str | None = Field(None, description="01_idea ~ 06_mass_done")
+    pricingMode: str | None = None
+    techIntro: str | None = None
+    techRoute: str | None = None
+    maturityDesc: str | None = None
+    sourceOrgName: str | None = None
+    achievementKind: str | None = None
+    applicationFields: list[str] | None = None
+    innovationPoints: list[str] | None = None
+    priceMinWan: float | None = None
+    priceMaxWan: float | None = None
+    categoryId: int | None = None
+    orgId: int | None = None
+    ownerUserId: int | None = None
+    saveAction: str | None = Field(None, description="draft/submit/publish")
+    contactName: str | None = None
+    contactTitle: str | None = None
+    contactPhone: str | None = None
+    contactEmail: str | None = None
+    contactWechat: str | None = None
+    inventorRefs: list[InventorRef] | None = None
+    sections: list[dict[str, Any]] | None = None
+    patents: list[dict[str, Any]] | None = None
+    links: list[dict[str, Any]] | None = None
+    media: list[MediaItem] | None = None
+    industryIds: list[int] | None = None
 
 
 class AchievementCreateRequest(AchievementWriteRequest):
@@ -140,35 +140,35 @@ class AchievementUpdateRequest(AchievementWriteRequest):
 
 
 class AchievementOfflineRequest(VersionBody):
-    reason: Optional[str] = None
-    reasonCode: Optional[str] = None
+    reason: str | None = None
+    reasonCode: str | None = None
 
 
 class DemandWriteRequest(RequestBody):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    version: Optional[int] = Field(None, ge=1)
-    region: Optional[str] = None
-    deadlineDesc: Optional[str] = None
-    contactName: Optional[str] = None
-    contactTitle: Optional[str] = None
-    contactPhone: Optional[str] = None
-    contactEmail: Optional[str] = None
-    contactWechat: Optional[str] = None
-    coopMode: Optional[list[str]] = None
-    budgetMinWan: Optional[float] = None
-    budgetMaxWan: Optional[float] = None
-    budgetNegotiable: Optional[bool] = None
-    expectDeadline: Optional[str] = Field(None, description="YYYY-MM-DD")
-    categoryId: Optional[int] = None
-    categoryName: Optional[str] = None
-    orgId: Optional[int] = None
-    orgName: Optional[str] = None
-    orgIntro: Optional[str] = None
-    ownerUserId: Optional[int] = None
-    saveAction: Optional[str] = None
-    tags: Optional[list[str]] = None
-    attachments: Optional[list[MediaItem]] = None
+    title: str | None = None
+    description: str | None = None
+    version: int | None = Field(None, ge=1)
+    region: str | None = None
+    deadlineDesc: str | None = None
+    contactName: str | None = None
+    contactTitle: str | None = None
+    contactPhone: str | None = None
+    contactEmail: str | None = None
+    contactWechat: str | None = None
+    coopMode: list[str] | None = None
+    budgetMinWan: float | None = None
+    budgetMaxWan: float | None = None
+    budgetNegotiable: bool | None = None
+    expectDeadline: str | None = Field(None, description="YYYY-MM-DD")
+    categoryId: int | None = None
+    categoryName: str | None = None
+    orgId: int | None = None
+    orgName: str | None = None
+    orgIntro: str | None = None
+    ownerUserId: int | None = None
+    saveAction: str | None = None
+    tags: list[str] | None = None
+    attachments: list[MediaItem] | None = None
 
 
 class DemandCreateRequest(DemandWriteRequest):
@@ -185,14 +185,14 @@ class DemandUpdateRequest(DemandWriteRequest):
 class CooperationCreateRequest(RequestBody):
     targetType: str = Field(..., description="achievement 或 demand")
     targetId: int = Field(..., ge=1)
-    intentType: Optional[str] = None
-    message: Optional[str] = None
+    intentType: str | None = None
+    message: str | None = None
     contactShareConsent: bool = Field(..., description="必须为 true")
 
 
 class CooperationCompleteRequest(VersionBody):
-    remark: Optional[str] = None
-    outcome: Optional[str] = None
+    remark: str | None = None
+    outcome: str | None = None
 
 
 # ── institution registration ────────────────────────────────
@@ -204,16 +204,16 @@ class InstitutionRegistrationRequest(RequestBody):
     contactPhone: str
     username: str
     password: str
-    region: Optional[str] = None
-    creditCode: Optional[str] = None
-    email: Optional[str] = None
-    intro: Optional[str] = None
+    region: str | None = None
+    creditCode: str | None = None
+    email: str | None = None
+    intro: str | None = None
 
 
 # ── notification / ai / patent ──────────────────────────────
 
 class NotificationReadRequest(RequestBody):
-    category: Optional[str] = Field(None, description="按分类标记已读，如 cooperation")
+    category: str | None = Field(None, description="按分类标记已读，如 cooperation")
 
 
 class EvaluationTaskRequest(RequestBody):
@@ -240,7 +240,7 @@ class ReviewRejectRequest(VersionBody):
 
 
 class InstitutionRejectRequest(RequestBody):
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class InstitutionImportRequest(RequestBody):
@@ -249,13 +249,13 @@ class InstitutionImportRequest(RequestBody):
 
 class AssistStatusRequest(RequestBody):
     assistStatus: str = Field(..., description="queued/contacting/waiting_reply/target_agreed/target_rejected/unreachable")
-    note: Optional[str] = None
-    nextFollowupAt: Optional[str] = None
+    note: str | None = None
+    nextFollowupAt: str | None = None
 
 
 class AssistTransitionRequest(VersionBody):
     action: str = Field(..., description="accept/reject/confirm/cancel/complete")
-    reason: Optional[str] = None
-    confirmationNote: Optional[str] = None
-    remark: Optional[str] = None
-    outcome: Optional[str] = None
+    reason: str | None = None
+    confirmationNote: str | None = None
+    remark: str | None = None
+    outcome: str | None = None

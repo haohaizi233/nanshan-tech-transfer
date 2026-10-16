@@ -11,7 +11,7 @@ import urllib.request
 from collections.abc import Callable, Iterator
 
 from config import settings
-from core.errors import BizError, TT_COMMON_42901, patent_provider_failed, patent_unavailable
+from core.errors import TT_COMMON_42901, BizError, patent_provider_failed, patent_unavailable
 
 logger = logging.getLogger("nanshan.error")
 

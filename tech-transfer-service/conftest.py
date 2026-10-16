@@ -11,8 +11,8 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 import jwt
+import pytest
 
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.dirname(__file__))

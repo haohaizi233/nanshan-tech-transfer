@@ -4,8 +4,9 @@
 """
 import json
 import random
-import pymysql
 from datetime import datetime, timedelta
+
+import pymysql
 
 random.seed(42)
 

@@ -1,23 +1,23 @@
 ﻿from fastapi import APIRouter, Request
 
-from core.response import success, get_request_id
+from core.errors import TT_AUTH_40105, TT_COMMON_40102, BizError, bootstrap_credential_invalid
+from core.rate_limit import check_ip_rate, check_register_rate
 from core.request_schemas import (
     BootstrapRequest,
     LoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
 )
-from core.errors import bootstrap_credential_invalid, BizError, TT_AUTH_40105, TT_COMMON_40102
-from core.rate_limit import check_ip_rate, check_login_rate, check_register_rate
+from core.response import get_request_id, success
 from modules.identity.provider import get_identity_provider
 from modules.identity.service import (
     bootstrap_session,
     login_phone_session,
-    password_login_session,
-    register_user,
-    refresh_session,
     logout_session,
+    password_login_session,
+    refresh_session,
     register_password_user,
+    register_user,
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
@@ -34,7 +34,7 @@ def login(body: LoginRequest, request: Request):
         raise BizError(code, "请输入账号和密码", status)
 
     # D8: IP 维度限流在认证前（防暴力破解扫描）；账号维度仅计失败
-    from core.rate_limit import _client_ip, _check
+    from core.rate_limit import _check, _client_ip
     ip = _client_ip(request)
     _check(f"login:ip:{ip}", limit=20, window_s=60)
 

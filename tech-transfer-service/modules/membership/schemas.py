@@ -1,6 +1,5 @@
 """Validated request bodies for organization membership workflows."""
 
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -31,12 +30,12 @@ class RevocationRequest(RejectionRequest):
 
 class MembershipApplicationRequest(_Request):
     orgId: int = Field(..., ge=1)
-    realName: Optional[str] = Field(None, max_length=64)
-    department: Optional[str] = Field(None, max_length=128)
-    title: Optional[str] = Field(None, max_length=128)
-    workEmail: Optional[str] = Field(None, max_length=128)
-    proofMaterial: Optional[str] = Field(None, max_length=10_000)
-    applyNote: Optional[str] = Field(None, max_length=2000)
+    realName: str | None = Field(None, max_length=64)
+    department: str | None = Field(None, max_length=128)
+    title: str | None = Field(None, max_length=128)
+    workEmail: str | None = Field(None, max_length=128)
+    proofMaterial: str | None = Field(None, max_length=10_000)
+    applyNote: str | None = Field(None, max_length=2000)
 
 
 class MembershipReviewRequest(VersionRequest):
@@ -53,12 +52,12 @@ class MembershipRevocationRequest(RevocationRequest):
 
 class OrganizationAdminApplicationRequest(_Request):
     orgId: int = Field(..., ge=1)
-    realName: Optional[str] = Field(None, max_length=64)
-    department: Optional[str] = Field(None, max_length=128)
-    title: Optional[str] = Field(None, max_length=128)
-    workEmail: Optional[str] = Field(None, max_length=128)
-    proofMaterial: Optional[str] = Field(None, max_length=10_000)
-    reason: Optional[str] = Field(None, max_length=2000)
+    realName: str | None = Field(None, max_length=64)
+    department: str | None = Field(None, max_length=128)
+    title: str | None = Field(None, max_length=128)
+    workEmail: str | None = Field(None, max_length=128)
+    proofMaterial: str | None = Field(None, max_length=10_000)
+    reason: str | None = Field(None, max_length=2000)
 
 
 class OrganizationAdminReviewRequest(VersionRequest):
@@ -79,15 +78,15 @@ class OrganizationAdminRevocationRequest(RevocationRequest):
 
 class OrganizationApplicationRequest(_Request):
     requestedName: str = Field(..., min_length=1, max_length=128)
-    requestedType: Optional[str] = Field(None, max_length=32)
-    creditCode: Optional[str] = Field(None, max_length=64)
-    website: Optional[str] = Field(None, max_length=256)
-    region: Optional[str] = Field(None, max_length=64)
-    address: Optional[str] = Field(None, max_length=256)
-    contactName: Optional[str] = Field(None, max_length=64)
-    contactPhone: Optional[str] = Field(None, max_length=32)
-    contactEmail: Optional[str] = Field(None, max_length=128)
-    proofMaterial: Optional[str] = Field(None, max_length=10_000)
+    requestedType: str | None = Field(None, max_length=32)
+    creditCode: str | None = Field(None, max_length=64)
+    website: str | None = Field(None, max_length=256)
+    region: str | None = Field(None, max_length=64)
+    address: str | None = Field(None, max_length=256)
+    contactName: str | None = Field(None, max_length=64)
+    contactPhone: str | None = Field(None, max_length=32)
+    contactEmail: str | None = Field(None, max_length=128)
+    proofMaterial: str | None = Field(None, max_length=10_000)
 
     @field_validator("requestedName")
     @classmethod

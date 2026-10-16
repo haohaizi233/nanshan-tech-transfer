@@ -7,10 +7,10 @@ Phase B 收口：接管原挂于 achievement 路由的 type=achievement 单类�
 
 from fastapi import APIRouter, Depends, Request
 
-from core.response import success
 from core.errors import bad_request
-from core.pagination import parse_page_args
 from core.middleware import identity
+from core.pagination import parse_page_args
+from core.response import success
 from modules.search.service import search
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["search"])

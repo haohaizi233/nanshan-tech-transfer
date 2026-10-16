@@ -16,7 +16,6 @@
 定位 user_id 后删除），否则首轮"注册返回200"会因重复注册失败。
 """
 
-import json
 import sys
 import uuid
 

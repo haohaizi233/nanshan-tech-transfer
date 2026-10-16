@@ -9,10 +9,10 @@ DB 往返降为偶发一次；角色/状态写路径通过 auth_cache.invalidate
 """
 
 import jwt
-from fastapi import Depends, Request
+from fastapi import Request
 
 from core import auth_cache
-from core.errors import BizError, TT_COMMON_40101, TT_COMMON_40102
+from core.errors import TT_COMMON_40101, TT_COMMON_40102, BizError
 from core.jwt_utils import decode_token
 
 
