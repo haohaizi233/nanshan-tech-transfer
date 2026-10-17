@@ -202,6 +202,8 @@ export async function registerAccount(phone, password) {
 	if (!phoneCheck.ok) return { ok: false, message: phoneCheck.message }
 	if (pwd.length < 6) return { ok: false, message: '密码至少6位' }
 	try {
+		// 注册新账号前清理旧会话缓存，避免旧账号残留
+		clearAllTtCacheKeys()
 		await authRegister(p, pwd)
 		pushHistoryPhone(p)
 		return { ok: true }
@@ -221,6 +223,8 @@ export async function loginAccount(phone, password) {
 	if (!phoneCheck.ok) return { ok: false, message: phoneCheck.message }
 	if (!pwd) return { ok: false, message: '请输入密码' }
 	try {
+		// 切换账号前清理旧会话缓存，避免旧账号 token/数据残留串到新登录态
+		clearAllTtCacheKeys()
 		await authLogin(p, pwd)
 		pushHistoryPhone(p)
 		return { ok: true, needProfile: !isProfileComplete(getUserProfile()) }

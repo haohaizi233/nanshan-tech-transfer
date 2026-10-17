@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import math
 import re
+import xml.etree.ElementTree as ET
 
 from opencc import OpenCC
 
@@ -26,8 +27,16 @@ _DROP_KEYS = {
 }
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_MATHML_CONTAINER_RE = re.compile(
+    r"<(maths|math)\b[^>]*>(.*?)</\1\s*>", re.IGNORECASE | re.DOTALL
+)
 _SEMANTIC_TAG_RE = re.compile(r"<(sub|sup)\b[^>]*>(.*?)</\1\s*>", re.IGNORECASE | re.DOTALL)
 _MARKER_RE = re.compile(r"\ue000(0|1)\|(.*?)\ue001", re.DOTALL)
+# 上游把谷歌专利页的 <math> 按 mi/mo/mn 逐节点展平，分式/根号结构随之丢失，
+# 只留下 MathML 里的不可见运算符与方向控制符。这些字符不占宽度，
+# 只含它们的行会在页面上渲染成空白段落（正文公式区“一点没显示”的直接原因）。
+_INVISIBLE_TIMES_RE = re.compile("[\u2062\u2063]")
+_INVISIBLE_MATH_RE = re.compile("[\u2061\u2064\u200b-\u200f\u2028\u2029\ufeff\u00ad]")
 # 上游把角标拆成独立行：h\n1 → h₁，ρ\ns → ρₛ，k\n∞ → k<sub>∞</sub>。
 # 变量限定为拉丁/希腊单字母，避免把 Figure\n1 等普通文字误判成角标。
 _BROKEN_SUB_RE = re.compile(
@@ -48,18 +57,50 @@ _DISPLAY_MATH_RE = re.compile(
 )
 _INLINE_MATH_RE = re.compile(r"(?<!\\)\$(?!\$)(.+?)(?<!\\)\$|\\\((.+?)\\\)")
 _TEX_GROUP_RE = re.compile(r"\\(frac|dfrac|tfrac)\{((?:[^{}]|\{[^{}]*\})*)\}\{((?:[^{}]|\{[^{}]*\})*)\}")
-_TEX_SQRT_RE = re.compile(r"\\sqrt\{([^{}]*)\}")
+_TEX_SQRT_RE = re.compile(r"\\sqrt(?:\[([^\]]+)\])?\{([^{}]*)\}")
+_TEX_SUBSUP_RE = re.compile(r"([A-Za-zΑ-ωϐϑϕϖ0-9∑∏∫])_\{([^{}]+)\}\^\{([^{}]+)\}")
+_TEX_SUPSUB_RE = re.compile(r"([A-Za-zΑ-ωϐϑϕϖ0-9∑∏∫])\^\{([^{}]+)\}_\{([^{}]+)\}")
+_FLATTENED_SINR_RE = re.compile(
+    r"SINR\s*=\s*Signal[\s\u2062]*level\s*Interference\s*\+[\s\u2062]*Noise[\s\u2062]*level",
+    re.IGNORECASE,
+)
+_FLATTENED_SINR_ZH_RE = re.compile(r"SINR\s*=\s*信号电平\s*干扰\s*\+\s*噪声电平", re.I)
 _TEX_SCRIPT_RE = re.compile(r"([A-Za-zΑ-ωϐϑϕϖ0-9∑∏∫])([_^])(?:\{([^{}]+)\}|([^\s{}]))")
+# x_i^2 这类连续脚本必须一次吃掉，否则先替换下标后上标就失去可匹配的底数。
+_TEX_SCRIPT_CHAIN_RE = re.compile(
+    r"([A-Za-zΑ-ωϐϑϕϖ0-9∑∏∫])((?:(?:_\{[^{}]*\}|\^\{[^{}]*\}|[_^][^\s{}]))+)"
+)
+_TEX_SCRIPT_PART_RE = re.compile(r"([_^])(?:\{([^{}]*)\}|([^\s{}]))")
 _TEX_LIMITS_RE = re.compile(r"([∑∏∫])_\{([^{}]+)\}\^\{([^{}]+)\}")
+_TEX_ENV_RE = re.compile(r"\\(?:begin|end)\{[^{}]*\}")
+_TEX_SPACING_RE = re.compile(r"\\[,;:!> ]")
 _TEX_SIMPLE_COMMAND_RE = re.compile(r"\\([A-Za-z]+)")
 _TEX_SYMBOLS = {
-    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "theta": "θ",
-    "lambda": "λ", "mu": "μ", "pi": "π", "rho": "ρ", "sigma": "σ", "phi": "φ", "omega": "ω",
-    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Pi": "Π", "Sigma": "Σ", "Phi": "Φ", "Omega": "Ω",
-    "sum": "∑", "prod": "∏", "int": "∫", "infty": "∞", "partial": "∂", "nabla": "∇",
-    "times": "×", "cdot": "·", "pm": "±", "le": "≤", "leq": "≤", "ge": "≥", "geq": "≥",
-    "neq": "≠", "approx": "≈", "rightarrow": "→", "leftarrow": "←", "to": "→", "degree": "°",
-    "quad": " ", "qquad": "  ", "left": "", "right": "", "mathrm": "", "text": "", "operatorname": "",
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "varepsilon": "ε",
+    "theta": "θ", "vartheta": "ϑ", "lambda": "λ", "mu": "μ", "pi": "π", "rho": "ρ", "sigma": "σ",
+    "phi": "φ", "varphi": "φ", "omega": "ω", "xi": "ξ", "eta": "η", "zeta": "ζ", "kappa": "κ",
+    "nu": "ν", "tau": "τ", "chi": "χ", "psi": "ψ",
+    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Pi": "Π", "Sigma": "Σ",
+    "Phi": "Φ", "Omega": "Ω", "Psi": "Ψ", "Xi": "Ξ",
+    "sum": "∑", "prod": "∏", "int": "∫", "iint": "∬", "oint": "∮", "infty": "∞",
+    "partial": "∂", "nabla": "∇", "prime": "′", "circ": "∘",
+    "times": "×", "cdot": "·", "div": "÷", "pm": "±", "mp": "∓", "ast": "∗",
+    "le": "≤", "leq": "≤", "ge": "≥", "geq": "≥", "neq": "≠", "ne": "≠",
+    "approx": "≈", "equiv": "≡", "sim": "∼", "simeq": "≃", "propto": "∝",
+    "ll": "≪", "gg": "≫", "lll": "⋘", "ggg": "⋙",
+    "rightarrow": "→", "leftarrow": "←", "to": "→", "gets": "←",
+    "leftrightarrow": "↔", "Rightarrow": "⇒", "Leftarrow": "⇐", "Leftrightarrow": "⇔",
+    "in": "∈", "notin": "∉", "ni": "∋", "subset": "⊂", "supset": "⊃",
+    "subseteq": "⊆", "supseteq": "⊇", "cup": "∪", "cap": "∩", "emptyset": "∅",
+    "forall": "∀", "exists": "∃", "neg": "¬", "wedge": "∧", "vee": "∨",
+    "angle": "∠", "perp": "⊥", "parallel": "∥", "degree": "°", "ell": "ℓ",
+    "cdots": "⋯", "ldots": "…", "dots": "…", "vdots": "⋮", "ddots": "⋱",
+    "langle": "⟨", "rangle": "⟩", "lfloor": "⌊", "rfloor": "⌋", "lceil": "⌈", "rceil": "⌉",
+    "quad": " ", "qquad": "  ", "left": "", "right": "", "mathrm": "", "mathit": "",
+    "mathbf": "", "mathsf": "", "mathtt": "", "mathcal": "", "mathbb": "", "boldsymbol": "",
+    "text": "", "textrm": "", "textbf": "", "operatorname": "", "limits": "", "nolimits": "",
+    "overline": "", "underline": "", "hat": "", "bar": "", "vec": "", "dot": "", "ddot": "",
+    "displaystyle": "", "textstyle": "", "scriptstyle": "",
 }
 _SOURCE_URL_RE = re.compile(
     r"https?://[^\s\"'<>]*(?:googleapis|googleusercontent|patents\.google|patentimages\.storage|google\.com/patent)[^\s\"'<>]*",
@@ -129,10 +170,16 @@ def _clean_multiline_rich(value) -> str:
     if value is None:
         return ""
     text = html.unescape(str(value))
+    text = _INVISIBLE_TIMES_RE.sub(" ", text)
+    text = _INVISIBLE_MATH_RE.sub("", text)
     text = _preserve_semantic_tags(text)
     text = _HTML_TAG_RE.sub("", text)
     text = _SOURCE_URL_RE.sub("", text)
-    lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    lines = [
+        line.rstrip()
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        if line.strip()
+    ]
     text = repair_broken_superscripts("\n".join(lines).strip())
     text = repair_broken_subscripts(text)
     text = _FORMULA_BREAK_RE.sub("", text)
@@ -145,34 +192,131 @@ def clean_multiline(value) -> str:
     return _strip_markers(_clean_multiline_rich(value))
 
 
-def _tex_to_text(value: str) -> str:
+def _preprocess_tex(value: str) -> str:
+    """统一处理 TeX 换行、环境、间距与对齐符，避免它们残留在页面上。"""
     text = value.strip().replace("\\\\", "；")
+    text = _TEX_ENV_RE.sub("", text)
+    text = _TEX_SPACING_RE.sub(" ", text)
+    return text.replace("&", "")
+
+def _tex_to_text(value: str) -> str:
+    text = _preprocess_tex(value)
     for _ in range(4):
         text = _TEX_GROUP_RE.sub(lambda match: f"({match.group(2)})/({match.group(3)})", text)
-        text = _TEX_SQRT_RE.sub(lambda match: f"√({match.group(1)})", text)
+        text = _TEX_SQRT_RE.sub(
+            lambda match: f"{match.group(1) or ''}√({match.group(2)})", text
+        )
     text = _TEX_SIMPLE_COMMAND_RE.sub(lambda match: _TEX_SYMBOLS.get(match.group(1), match.group(1)), text)
     return text.replace("{", "").replace("}", "")
 
+def _render_script_chain(match: re.Match) -> str:
+    """把 x_i^2 这类连续脚本逐个转成 sub/sup，而不是只转第一段。"""
+    parts: list[str] = []
+    for part in _TEX_SCRIPT_PART_RE.finditer(match.group(2)):
+        tag = "sup" if part.group(1) == "^" else "sub"
+        body = part.group(2) if part.group(2) is not None else part.group(3)
+        parts.append(f"<{tag}>{_tex_to_html(body, escaped=True)}</{tag}>")
+    return match.group(1) + "".join(parts)
 
-def _tex_to_html(value: str) -> str:
+def _tex_to_html(value: str, *, escaped: bool = False) -> str:
     """把常见 TeX 转成小程序 rich-text 可识别的安全 HTML，而非把 TeX 原样塞给页面。"""
     # 先转义上游原文，再插入本函数生成的受控标签，避免公式内容成为 HTML 注入点。
-    text = html.escape(value.strip().replace("\\\\", "；"))
+    # 递归渲染分式/根号内部时必须传 escaped=True，否则 &amp; 会被二次转义成 &amp;amp;。
+    text = value.strip() if escaped else html.escape(_preprocess_tex(value))
     for _ in range(4):
         text = _TEX_GROUP_RE.sub(
             lambda match: '<span style="display:inline-block;text-align:center;vertical-align:middle;line-height:1.1">'
-            f'<span style="display:block;border-bottom:1px solid #475569">{_tex_to_html(match.group(2))}</span>'
-            f'<span style="display:block">{_tex_to_html(match.group(3))}</span></span>',
+            f'<span style="display:block;border-bottom:1px solid #475569">{_tex_to_html(match.group(2), escaped=True)}</span>'
+            f'<span style="display:block">{_tex_to_html(match.group(3), escaped=True)}</span></span>',
             text,
         )
-        text = _TEX_SQRT_RE.sub(lambda match: f"√<span style=\"text-decoration:overline\">{_tex_to_html(match.group(1))}</span>", text)
+        text = _TEX_SQRT_RE.sub(
+            lambda match: (
+                f"{('<sup>' + _tex_to_html(match.group(1), escaped=True) + '</sup>') if match.group(1) else ''}"
+                f"√<span style=\"text-decoration:overline\">{_tex_to_html(match.group(2), escaped=True)}</span>"
+            ),
+            text,
+        )
     text = _TEX_SIMPLE_COMMAND_RE.sub(lambda match: _TEX_SYMBOLS.get(match.group(1), match.group(1)), text)
-    text = _TEX_LIMITS_RE.sub(lambda match: f"{match.group(1)}<sub>{match.group(2)}</sub><sup>{match.group(3)}</sup>", text)
-    text = _TEX_SCRIPT_RE.sub(
-        lambda match: f"{match.group(1)}<{'sup' if match.group(2) == '^' else 'sub'}>{match.group(3) or match.group(4)}</{'sup' if match.group(2) == '^' else 'sub'}>",
+    text = _TEX_SUBSUP_RE.sub(
+        lambda match: f"{match.group(1)}<sub>{_tex_to_html(match.group(2), escaped=True)}</sub><sup>{_tex_to_html(match.group(3), escaped=True)}</sup>",
         text,
     )
+    text = _TEX_SUPSUB_RE.sub(
+        lambda match: f"{match.group(1)}<sup>{_tex_to_html(match.group(2), escaped=True)}</sup><sub>{_tex_to_html(match.group(3), escaped=True)}</sub>",
+        text,
+    )
+    text = _TEX_LIMITS_RE.sub(lambda match: f"{match.group(1)}<sub>{match.group(2)}</sub><sup>{match.group(3)}</sup>", text)
+    text = _TEX_SCRIPT_CHAIN_RE.sub(_render_script_chain, text)
     return text.replace("{", "").replace("}", "")
+
+def _mathml_node_to_tex(node: ET.Element) -> str:
+    """Convert common MathML presentation nodes to the TeX supported by our renderer."""
+    tag = node.tag.rsplit("}", 1)[-1].lower()
+    children = list(node)
+    if tag in {"mi", "mn", "mtext"}:
+        return "".join(node.itertext()).strip()
+    if tag == "mo":
+        operator = "".join(node.itertext()).strip()
+        return {"⁢": " ", "⁡": "", "−": "-", "⁢⁢": " "}.get(operator, operator)
+    parts = [_mathml_node_to_tex(child) for child in children]
+    if tag == "mfrac" and len(parts) >= 2:
+        return f"\\frac{{{parts[0]}}}{{{parts[1]}}}"
+    if tag == "msqrt" and parts:
+        return f"\\sqrt{{{''.join(parts)}}}"
+    if tag == "mroot" and len(parts) >= 2:
+        return f"\\sqrt[{parts[1]}]{{{parts[0]}}}"
+    if tag == "msub" and len(parts) >= 2:
+        return f"{parts[0]}_{{{parts[1]}}}"
+    if tag == "msup" and len(parts) >= 2:
+        return f"{parts[0]}^{{{parts[1]}}}"
+    if tag == "msubsup" and len(parts) >= 3:
+        return f"{parts[0]}_{{{parts[1]}}}^{{{parts[2]}}}"
+    if tag in {"math", "maths", "mrow", "mstyle", "semantics", "mpadded", "mphantom"}:
+        return "".join(parts)
+    if tag == "mspace":
+        return " "
+    return "".join(parts) if parts else "".join(node.itertext()).strip()
+
+
+def _mathml_to_tex(fragment: str) -> str:
+    """Parse a MathML fragment; return an empty string when upstream markup is malformed."""
+    math_match = re.search(r"<math\b[^>]*>(.*?)</math\s*>", fragment, re.I | re.S)
+    inner = math_match.group(1) if math_match else fragment
+    # MathML from patent HTML is XML-like but may contain HTML named entities.
+    inner = html.unescape(inner).replace("&nbsp;", " ")
+    try:
+        root = ET.fromstring(f"<math>{inner}</math>")
+    except ET.ParseError:
+        return ""
+    return _mathml_node_to_tex(root).strip()
+
+
+def _replace_mathml(value) -> str:
+    """Preserve MathML formula structure before general HTML tags are removed."""
+    if value is None:
+        return ""
+    text = html.unescape(str(value))
+    text = _INVISIBLE_TIMES_RE.sub(" ", text)
+    text = _INVISIBLE_MATH_RE.sub("", text)
+
+    def replace(match: re.Match) -> str:
+        source = match.group(0)
+        tex = _mathml_to_tex(source)
+        if not tex:
+            # A malformed formula should remain readable as text, not disappear.
+            return _HTML_TAG_RE.sub("", html.unescape(source))
+        return f"\n$${tex}$$\n"
+
+    text = _MATHML_CONTAINER_RE.sub(replace, text)
+    # Google Patents' plain-text export linearizes this common fraction and
+    # leaves invisible multiplication operators (U+2062) between words.
+    text = _FLATTENED_SINR_RE.sub(
+        r"$$SINR=\\frac{Signal level}{Interference+Noise level}$$", text
+    )
+    return _FLATTENED_SINR_ZH_RE.sub(
+        "$$SINR=\\frac{信号电平}{干扰+噪声电平}$$", text
+    )
 
 
 def _inline_html(text: str) -> str:
@@ -197,6 +341,7 @@ def _markers_to_html(text: str) -> str:
 def _paragraph_blocks(text: str) -> list[dict[str, str]]:
     blocks: list[dict[str, str]] = []
     for line in _coalesce_math_lines(text):
+        line = line.strip()
         if not line:
             continue
         # 未带 Markdown/LaTeX 边界的公式可能嵌在中文语句中；不猜测边界，避免只把尾半截单独渲染。
@@ -204,24 +349,65 @@ def _paragraph_blocks(text: str) -> list[dict[str, str]]:
         blocks.append(_rich_block(block_type, _strip_markers(line), _inline_html(line)))
     return blocks
 
-
 def _contains_cjk(text: str) -> bool:
     return bool(_CJK_RE.search(text))
 
+_PROSE_WORDS = frozenset({
+    "the", "of", "in", "and", "to", "for", "with", "by", "on", "at", "from",
+    "a", "an", "or", "as", "that", "which", "is", "are", "was", "were", "be",
+    "this", "these", "those", "it", "its", "their", "can", "may", "not", "but",
+})
+_ENGLISH_WORD_RE = re.compile(r"[A-Za-z]{2,}")
+_FORMULA_SIGNS_RE = re.compile(r"[=＝≈≠≤≥<>∑∏∫√∈⊂⊆∪∩∂∇]")
+_FORMULA_ARITHMETIC_RE = re.compile(r"[+＋\-−×÷*/]")
+_MATH_OPERATORS_RE = re.compile(r"[=＝+\-×÷*/∑∏∫σδελφρμ]")
+
+def _looks_like_prose(text: str) -> bool:
+    """英文正文常含连字符或斜杠，不能仅凭运算符就判成公式。"""
+    words = _ENGLISH_WORD_RE.findall(text)
+    if not words:
+        return False
+    if len(words) >= 8:
+        return True
+    return sum(1 for word in words if word.lower() in _PROSE_WORDS) >= 3
 
 def _is_math_fragment(text: str) -> bool:
     if not text or _contains_cjk(text) or len(text) > 100:
         return False
     return bool(re.search(r"[=＝+\-×÷*/^_∑∏∫σδελφρμ]|^[A-Za-zΑ-ωϐϑϕϖ][A-Za-z0-9′′']*$|^\([0-9.\-]+\)$", text))
 
-
 def _is_formula_expression(text: str) -> bool:
-    return not _contains_cjk(text) and bool(re.search(r"[=＝+\-×÷*/∑∏∫]", text))
+    stripped = text.strip()
+    if not stripped or _contains_cjk(stripped) or len(stripped) > 200:
+        return False
+    if _FORMULA_SIGNS_RE.search(stripped):
+        return True
+    if not _FORMULA_ARITHMETIC_RE.search(stripped):
+        return False
+    return len(stripped) <= 60 and not _looks_like_prose(stripped)
 
+def _join_math_run(parts: list[str]) -> str:
+    """合并被上游拆行的公式；相邻字母片段之间补空格，运算符保持紧凑。"""
+    merged = ""
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if not merged:
+            merged = part
+            continue
+        prev, nxt = merged[-1], part[0]
+        if nxt in "=＝≈≠≤≥<>∈" or prev in "=＝≈≠≤≥<>∈":
+            merged += " " + part
+        elif prev.isalnum() and nxt.isalnum():
+            merged += " " + part
+        else:
+            merged += part
+    return merged
 
 def _coalesce_math_lines(text: str) -> list[str]:
     """只合并连续的数学短行，保留普通中文段落的换行边界。"""
-    lines = _coalesce_wrapped_parenthetical_lines(text)
+    lines = _join_inline_fragments(_coalesce_wrapped_parenthetical_lines(text))
     merged: list[str] = []
     index = 0
     while index < len(lines):
@@ -235,13 +421,66 @@ def _coalesce_math_lines(text: str) -> list[str]:
         while next_index < len(lines) and _is_math_fragment(lines[next_index]):
             run.append(lines[next_index])
             next_index += 1
-        if len(run) > 1 and any(re.search(r"[=＝+\-×÷*/∑∏∫σδελφρμ]", part) for part in run):
-            merged.append("".join(run))
+        if len(run) > 1 and any(_MATH_OPERATORS_RE.search(part) for part in run):
+            merged.append(_join_math_run(run))
         else:
             merged.extend(run)
         index = next_index
     return merged
 
+_INLINE_TAIL_WORDS = frozenset({
+    "the", "of", "in", "and", "to", "for", "with", "by", "on", "at", "from",
+    "a", "an", "or", "as", "that", "which", "is", "are", "its", "their",
+})
+_FRAGMENT_HEAD_RE = re.compile(r"^[,.;:)\]%]")
+_FRAGMENT_NUMBER_RE = re.compile(r"^\d{1,4}$")
+_FRAGMENT_NUMBER_HEAD_RE = re.compile(r"^\d{1,4}(?=[,.;:])")
+_LOWERCASE_PHRASE_RE = re.compile(r"^[a-z][a-z\s\-]*[a-z]$")
+_OPEN_TAIL_CHARS = "(（[［{"
+
+def _should_join_fragment(prev: str, line: str) -> bool:
+    if not prev or not line:
+        return False
+    if _FRAGMENT_HEAD_RE.match(line):
+        return True
+    if prev[-1] in _OPEN_TAIL_CHARS:
+        return True
+    if _FRAGMENT_NUMBER_RE.match(line) and (prev[-1].isalnum() or prev[-1] in "）)]】”\"'"):
+        return True
+    if _FRAGMENT_NUMBER_HEAD_RE.match(line) and (prev[-1].isalpha() or prev[-1] in "）)]】”\"'"):
+        return True
+    if prev[-1] in ".。！？!?；;：:":
+        return False
+    tail = prev.rsplit(" ", 1)[-1].strip().lower()
+    if tail in _INLINE_TAIL_WORDS and not _CJK_RE.search(line):
+        return True
+    # 上游把 <figure-callout>/<b> 标注拆成独立行时，下一行通常是全小写英文短语。
+    return (
+        not _CJK_RE.search(prev)
+        and not _CJK_RE.search(line)
+        and len(line) <= 40
+        and bool(_LOWERCASE_PHRASE_RE.match(line))
+        and (prev[-1].isalnum() or prev[-1] in "）)]】”\"'")
+    )
+
+def _join_fragment_text(prev: str, line: str) -> str:
+    if _FRAGMENT_HEAD_RE.match(line) or prev[-1] in _OPEN_TAIL_CHARS:
+        return prev + line
+    if _FRAGMENT_NUMBER_RE.match(line):
+        return prev + line if _CJK_RE.search(prev[-1:]) else prev + " " + line
+    if _FRAGMENT_NUMBER_HEAD_RE.match(line):
+        return prev + line if _CJK_RE.search(prev[-1:]) else prev + " " + line
+    return prev + " " + line
+
+def _join_inline_fragments(lines: list[str]) -> list[str]:
+    """把上游拆到独立行的行内标注与角标拼回整段，避免正文被切成一词一段。"""
+    merged: list[str] = []
+    for line in lines:
+        if merged and _should_join_fragment(merged[-1], line):
+            merged[-1] = _join_fragment_text(merged[-1], line)
+        else:
+            merged.append(line)
+    return merged
 
 def _coalesce_wrapped_parenthetical_lines(text: str) -> list[str]:
     """合并上游在未闭合括号内插入的软换行，避免学名被渲染成独立段落。"""
@@ -267,7 +506,6 @@ def _coalesce_wrapped_parenthetical_lines(text: str) -> list[str]:
         merged.append(pending)
     return merged
 
-
 def _rich_block(block_type: str, text: str, rendered_html: str, **extra) -> dict[str, str]:
     block = {"type": block_type, "text": text, **extra}
     # 为旧客户端维持仅含 type/text 的简单块结构；有真实富文本语义时才附加 html。
@@ -278,7 +516,7 @@ def _rich_block(block_type: str, text: str, rendered_html: str, **extra) -> dict
 
 def format_patent_content_blocks(value) -> list[dict[str, str]]:
     """识别专利正文的段落、TeX/Markdown 公式、代码及上游断裂的上下标。"""
-    text = _clean_multiline_rich(value)
+    text = _clean_multiline_rich(_replace_mathml(value))
     blocks: list[dict[str, str]] = []
     cursor = 0
     for fence in _FENCED_BLOCK_RE.finditer(text):

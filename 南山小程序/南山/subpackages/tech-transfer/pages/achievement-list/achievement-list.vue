@@ -464,10 +464,14 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8rpx;
   margin-bottom: 12rpx;
 }
 
 .meta-source {
+  flex: 1;
+  min-width: 0;
   font-size: 26rpx;
   color: #555;
 }

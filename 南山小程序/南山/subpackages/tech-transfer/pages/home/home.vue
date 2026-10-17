@@ -28,13 +28,13 @@
 
 		<!-- 3. 快捷入口 -->
 		<view class="action-row">
-			<view class="action-card" @click="onPostDemand">
-				<image class="action-icon" src="/static/icons/mine/demand.png" mode="aspectFit"></image>
-				<text class="action-label">我要发需求</text>
-			</view>
 			<view class="action-card" @click="onPostResult">
 				<image class="action-icon" src="/static/icons/mine/result.png" mode="aspectFit"></image>
 				<text class="action-label">我要发成果</text>
+			</view>
+			<view class="action-card" @click="onPostDemand">
+				<image class="action-icon" src="/static/icons/mine/demand.png" mode="aspectFit"></image>
+				<text class="action-label">我要发需求</text>
 			</view>
 		</view>
 
@@ -208,8 +208,8 @@
 			return {
 				activeTab: 0,
 				tabs: [
-					{ key: 'demand', name: '需求' },
 					{ key: 'result', name: '成果' },
+					{ key: 'demand', name: '需求' },
 					{ key: 'search', name: '检索' },
 					{ key: 'capital', name: '资本对接' }
 				],
@@ -275,8 +275,10 @@
 				try {
 					const profile = getUserProfile()
 					const caps = (profile && profile.businessCapabilities) || []
-					if (caps.indexOf('seek_technology') >= 0) {
-						this.activeTab = 1
+					const targetKey = caps.indexOf('seek_technology') >= 0 ? 'result' : 'demand'
+					const index = this.tabs.findIndex(tab => tab.key === targetKey)
+					if (index >= 0) {
+						this.activeTab = index
 					}
 				} catch (e) {
 					// 画像仅影响默认 Tab，读取异常时保持默认
@@ -645,10 +647,13 @@
 		display: flex;
 		flex-direction: row;
 		align-items: center;
+		gap: 8rpx;
 		margin: -8rpx 0 20rpx;
 	}
 
 	.card-sub-row .card-sub {
+		flex: 1;
+		min-width: 0;
 		margin: 0;
 	}
 
@@ -656,6 +661,9 @@
 		display: flex;
 		flex-direction: row;
 		align-items: center;
+		flex-wrap: wrap;
+		gap: 8rpx;
+		min-width: 0;
 	}
 
 	.star-btn {

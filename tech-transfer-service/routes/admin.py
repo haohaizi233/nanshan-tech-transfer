@@ -28,6 +28,7 @@ from modules.achievement.importer import (
 from modules.admin.service import (
     achievements_review_queue,
     claim_unassigned_content,
+    close_demand_admin,
     create_achievement_admin,
     create_demand_admin,
     demands_review_queue,
@@ -38,6 +39,7 @@ from modules.admin.service import (
     list_content_organizations_admin,
     list_demand_categories_admin,
     list_demands_admin,
+    offline_achievement_admin,
     review_achievement,
     review_demand,
     soft_delete_achievement_admin,
@@ -210,6 +212,13 @@ def admin_ach_reject(ach_id: int, body: ReviewRejectRequest, admin: dict = Depen
     payload["_action"] = "reject"
     return success(review_achievement(admin, ach_id, payload, request_id=get_request_id()))
 
+@router.post("/admin/achievements/{ach_id}/offline", summary="管理员下架已发布成果（published → offline）")
+def admin_ach_offline(ach_id: int, body: VersionBody, scope: dict = Depends(backend_identity)):
+    return success(
+        offline_achievement_admin(scope, ach_id, body.as_dict(), request_id=get_request_id()),
+        "成果已下架",
+    )
+
 
 @router.delete("/admin/achievements/{ach_id}", summary="管理员软删除成果（deleted_at=NOW）")
 def admin_achievement_delete(
@@ -303,6 +312,13 @@ def admin_dmd_reject(demand_id: int, body: ReviewRejectRequest, admin: dict = De
     payload = body.as_dict()
     payload["_action"] = "reject"
     return success(review_demand(admin, demand_id, payload, request_id=get_request_id()))
+
+@router.post("/admin/demands/{demand_id}/close", summary="管理员关闭已发布/对接中的需求")
+def admin_dmd_close(demand_id: int, body: VersionBody, scope: dict = Depends(backend_identity)):
+    return success(
+        close_demand_admin(scope, demand_id, body.as_dict(), request_id=get_request_id()),
+        "需求已关闭",
+    )
 
 
 @router.delete("/admin/demands/{demand_id}", summary="管理员软删除需求（deleted_at=NOW）")

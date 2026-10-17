@@ -19,9 +19,12 @@ function readUniSystemInfo() {
 
 function isWeixinMiniProgram(systemInfo) {
   if (!systemInfo) return false
-  if (systemInfo.uniPlatform === 'mp-weixin') return true
-  if (typeof wx !== 'undefined') return true
-  return false
+  // uni-app 在 H5 下同样注入 wx 全局别名，只看 typeof wx 会把本地 H5
+  // 误判成小程序并把请求打到公网 HTTPS，因此先按 uniPlatform 判定平台。
+  if (systemInfo.uniPlatform) return systemInfo.uniPlatform === 'mp-weixin'
+  // uniPlatform 缺失时沿用旧探测，但浏览器里一律不算小程序。
+  if (typeof window !== 'undefined') return false
+  return typeof wx !== 'undefined'
 }
 
 /**

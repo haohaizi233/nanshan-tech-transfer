@@ -903,6 +903,7 @@
 	}
 
 	.meta-value {
+		min-width: 0;
 		font-size: 26rpx;
 		color: #555555;
 		font-weight: 400;
@@ -913,6 +914,7 @@
 		flex-direction: row;
 		align-items: center;
 		flex-wrap: wrap;
+		gap: 8rpx;
 	}
 
 	.meta-em {

@@ -374,6 +374,123 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
     return {"status": to_status}
 
 
+# ── 下架 / 关闭（管理端对已发布内容做下线，机构范围与列表一致）──
+
+ACHIEVEMENT_OFFLINE_REASON_CODES = (
+    "cooperated", "expired", "superseded", "duplicate", "no_longer_available", "other",
+)
+DEMAND_CLOSE_REASON_CODES = (
+    "fulfilled", "budget_changed", "timeline_changed", "duplicate", "no_longer_needed", "other",
+)
+
+def offline_achievement_admin(scope: dict, ach_id: int, body: dict, request_id=None) -> dict:
+    """POST /admin/achievements/{id}/offline —— 管理端下架已发布成果（published → offline）。"""
+    version = (body or {}).get("version")
+    if version is None:
+        raise bad_request("必须携带 version（乐观锁）")
+    reason_code = (body or {}).get("reasonCode") or None
+    if reason_code and reason_code not in ACHIEVEMENT_OFFLINE_REASON_CODES:
+        raise bad_request("reasonCode 不合法")
+    reason = str((body or {}).get("reason") or "").strip()[:500] or None
+
+    with get_cursor(commit=True) as cur:
+        where = ["id = %s", "deleted_at IS NULL"]
+        params = [ach_id]
+        append_content_scope(where, params, scope, "achievement")
+        cur.execute(
+            f"SELECT status, owner_user_id FROM achievement WHERE {' AND '.join(where)}",
+            params,
+        )
+        row = cur.fetchone()
+        if not row:
+            raise achievement_not_found()
+        if row["status"] != "published":
+            code, message, http_status = TT_ACH_40901
+            raise BizError(code, f"当前状态 {row['status']} 不允许下架（要求 published）", http_status)
+
+        cur.execute(
+            """
+            UPDATE achievement
+            SET status = 'offline', version = version + 1,
+                offline_reason_code = COALESCE(%s, offline_reason_code),
+                offline_reason_note = COALESCE(%s, offline_reason_note)
+            WHERE id = %s AND version = %s
+            """,
+            (reason_code, reason, ach_id, version),
+        )
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+
+        if row.get("owner_user_id"):
+            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
+                event_type="achievement.offline", source_type="achievement", source_id=ach_id,
+                title="成果已被下架", body=reason,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
+
+        audit_record(
+            "achievement.offline", "achievement", resource_id=ach_id,
+            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            details={"from": "published", "to": "offline", "reason": reason, "reasonCode": reason_code},
+            request_id=request_id, cur=cur,
+        )
+
+    return {"status": "offline"}
+
+def close_demand_admin(scope: dict, demand_id: int, body: dict, request_id=None) -> dict:
+    """POST /admin/demands/{id}/close —— 管理端关闭已发布/对接中的需求。"""
+    version = (body or {}).get("version")
+    if version is None:
+        raise bad_request("必须携带 version（乐观锁）")
+    reason_code = (body or {}).get("reasonCode") or None
+    reason_note = None
+    if reason_code:
+        if reason_code not in DEMAND_CLOSE_REASON_CODES:
+            raise bad_request("reasonCode 不合法")
+        reason_note = str((body or {}).get("reasonNote") or "").strip()[:500] or None
+
+    with get_cursor(commit=True) as cur:
+        where = ["id = %s", "deleted_at IS NULL"]
+        params = [demand_id]
+        append_content_scope(where, params, scope, "demand")
+        cur.execute(
+            f"SELECT status, owner_user_id FROM demand WHERE {' AND '.join(where)}",
+            params,
+        )
+        row = cur.fetchone()
+        if not row:
+            raise demand_not_found()
+        if row["status"] not in ("published", "matched"):
+            code, message, http_status = TT_DMD_40901
+            raise BizError(code, f"当前状态 {row['status']} 不允许关闭（要求 published/matched）", http_status)
+
+        cur.execute(
+            """
+            UPDATE demand
+            SET status = 'closed', version = version + 1,
+                closure_reason_code = COALESCE(%s, closure_reason_code),
+                closure_reason_note = COALESCE(%s, closure_reason_note)
+            WHERE id = %s AND version = %s
+            """,
+            (reason_code, reason_note, demand_id, version),
+        )
+        if cur.rowcount == 0:
+            raise conflict("version 不匹配，请刷新后重试（乐观锁）")
+
+        if row.get("owner_user_id"):
+            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
+                event_type="demand.close", source_type="demand", source_id=demand_id,
+                title="需求已被关闭", body=reason_note,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
+
+        audit_record(
+            "demand.close", "demand", resource_id=demand_id,
+            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            details={"from": row["status"], "to": "closed", "reasonCode": reason_code, "reasonNote": reason_note},
+            request_id=request_id, cur=cur,
+        )
+
+    return {"status": "closed"}
+
 # ── 软删除（admin 删除走 UPDATE deleted_at，保留行用于追溯；列表已过滤 deleted_at IS NULL）──
 
 def soft_delete_achievement_admin(scope: dict, ach_id: int, request_id=None) -> dict:

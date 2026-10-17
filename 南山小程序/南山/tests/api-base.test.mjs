@@ -135,3 +135,74 @@ test('WeChat mini program uses the public HTTPS API on a real phone', () => {
     'https://inanshan.sjhcip.com',
   )
 })
+
+// uni-app 在 H5 运行时也会注入 wx 全局别名，只看 typeof wx 会把本地 H5
+// 误判成小程序，把请求打到公网 HTTPS。以 uniPlatform 为准判定平台。
+test('local H5 stays local even though uni-app injects a wx alias on H5', () => {
+  const hadWx = 'wx' in globalThis
+  const prevWx = globalThis.wx
+  globalThis.wx = { getSystemInfoSync: () => ({ uniPlatform: 'web' }) }
+  try {
+    assert.equal(
+      resolveH5ApiBase({
+        appEnv: 'local',
+        localApiBase: 'http://127.0.0.1:8787',
+        weixinApiBase: 'https://inanshan.sjhcip.com',
+        pageLocation: new URL('http://127.0.0.1:5173/h5/#/subpackages/tech-transfer/pages/home/home'),
+        systemInfo: { uniPlatform: 'web', platform: 'windows' },
+      }),
+      'http://127.0.0.1:8787',
+    )
+  } finally {
+    if (hadWx) globalThis.wx = prevWx
+    else delete globalThis.wx
+  }
+})
+
+test('mini-program without uniPlatform still resolves through the wx probe', () => {
+  const hadWx = 'wx' in globalThis
+  const prevWx = globalThis.wx
+  globalThis.wx = {}
+  try {
+    // 小程序运行时没有 window；Node 测试进程同样没有，正好走该回退分支。
+    assert.equal(
+      resolveH5ApiBase({
+        appEnv: 'local',
+        localApiBase: 'http://127.0.0.1:8787',
+        weixinApiBase: 'https://inanshan.sjhcip.com',
+        pageLocation: null,
+        systemInfo: { platform: 'ios' },
+      }),
+      'https://inanshan.sjhcip.com',
+    )
+  } finally {
+    if (hadWx) globalThis.wx = prevWx
+    else delete globalThis.wx
+  }
+})
+
+test('a wx alias without uniPlatform does not hijack the H5 page in a browser', () => {
+  const hadWx = 'wx' in globalThis
+  const hadWindow = 'window' in globalThis
+  const prevWx = globalThis.wx
+  const prevWindow = globalThis.window
+  globalThis.wx = {}
+  globalThis.window = {}
+  try {
+    assert.equal(
+      resolveH5ApiBase({
+        appEnv: 'local',
+        localApiBase: 'http://127.0.0.1:8787',
+        weixinApiBase: 'https://inanshan.sjhcip.com',
+        pageLocation: new URL('http://127.0.0.1:5173/h5/#/pages/home/home'),
+        systemInfo: null,
+      }),
+      'http://127.0.0.1:8787',
+    )
+  } finally {
+    if (hadWx) globalThis.wx = prevWx
+    else delete globalThis.wx
+    if (hadWindow) globalThis.window = prevWindow
+    else delete globalThis.window
+  }
+})

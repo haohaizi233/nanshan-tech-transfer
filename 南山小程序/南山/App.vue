@@ -79,6 +79,8 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		flex-shrink: 0;
+		white-space: nowrap;
 		margin-left: 8rpx;
 		padding: 0 10rpx;
 		height: 32rpx;

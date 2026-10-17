@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import { resolveContentFormActions } from '../../utils/contentFormActions.js'
-import { confirmDialog } from '../../utils/appDialog.js'
+import { confirmDialog, alertDialog } from '../../utils/appDialog.js'
 import { validatePhone } from '../../utils/contactValidation.js'
 import { useAuthStore } from '../../stores/auth.js'
 
@@ -229,6 +229,23 @@ const claimOrganization = async item => {
     fetchList()
   } catch (err) { loadError.value = err.message || '归属机构失败' }
 }
+
+const closeDemand = async item => {
+  const ok = await confirmDialog({
+    title: '关闭需求',
+    message: '确认关闭该需求？关闭后将不再对外展示。',
+    confirmText: '确认关闭',
+    tone: 'danger',
+  })
+  if (!ok) return
+  try {
+    await api(`/admin/demands/${item.id}/close`, { method: 'POST', body: { version: item.version } })
+    fetchList()
+  } catch (err) {
+    await alertDialog({ title: '关闭失败', message: err.message || '请稍后重试' })
+  }
+}
+
 const saveDemand = async (saveAction = null) => {
   const actions = formActions.value
   if (saveAction === 'draft' && !actions.canSaveDraft) { formError.value = '当前状态不能保存为草稿'; return }
@@ -418,6 +435,10 @@ const submitReject = async () => {
                     <span>|</span>
                   </template>
                   <button @click="openDetail(item)">查看</button>
+                  <template v-if="item.status === 'published' || item.status === 'matched'">
+                    <span>|</span>
+                    <button class="close-btn" @click="closeDemand(item)">关闭</button>
+                  </template>
                   <template v-if="isPlatformAdmin && item.status === 'pending_review'">
                     <span>|</span>
                     <button @click="openAudit(item)">审核</button>

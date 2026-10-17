@@ -785,6 +785,25 @@ const downloadAchievement = item => {
   URL.revokeObjectURL(url)
 }
 
+const offlineAchievement = async item => {
+  const ok = await confirmDialog({
+    title: '下架成果',
+    message: '确认下架该成果？下架后将不再对外展示。',
+    confirmText: '确认下架',
+    tone: 'danger',
+  })
+  if (!ok) return
+  try {
+    await api(`/admin/achievements/${item.id}/offline`, {
+      method: 'POST',
+      body: { version: item.version },
+    })
+    fetchList()
+  } catch (err) {
+    await alertDialog({ title: '下架失败', message: err.message || '请稍后重试' })
+  }
+}
+
 const openFilePicker = () => {
   if (importingDocs.value) return
   fileInput.value?.click()
@@ -1185,6 +1204,16 @@ onMounted(() => {
                       "
                     >
                       下载
+                    </button>
+
+                    <span v-if="item.status === 'published'">|</span>
+
+                    <button
+                      v-if="item.status === 'published'"
+                      type="button"
+                      @click="offlineAchievement(item)"
+                    >
+                      下架
                     </button>
 
                   </div>

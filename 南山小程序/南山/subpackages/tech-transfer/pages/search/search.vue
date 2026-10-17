@@ -69,12 +69,12 @@
 					</view>
 					<view v-if="item.metaLine || item.orgCertified" class="meta-row-inline">
 						<text v-if="item.metaLine" class="meta">{{ item.metaLine }}</text>
-					<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
-						<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit" lazy-load></image>
-						<text>认证</text>
+						<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+							<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit" lazy-load></image>
+							<text>认证</text>
+						</view>
 					</view>
-				</view>
-				<text class="desc">{{ item.demandDesc }}</text>
+					<text class="desc">{{ item.demandDesc }}</text>
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn" size="mini" @click.stop="openDetail('demand', item.id)">我要对接</button>
 					</view>
@@ -528,12 +528,16 @@
 		display: flex;
 		flex-direction: row;
 		align-items: center;
+		flex-wrap: wrap;
+		gap: 8rpx;
 		margin-bottom: 12rpx;
 	}
 
 	.meta-row-inline .meta {
+		flex: 1;
+		min-width: 0;
 		margin-bottom: 0;
-		margin-right: 8rpx;
+		margin-right: 0;
 	}
 
 	.desc {

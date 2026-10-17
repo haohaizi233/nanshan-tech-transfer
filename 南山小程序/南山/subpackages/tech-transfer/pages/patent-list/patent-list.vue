@@ -48,24 +48,33 @@
     </view>
 
     <view class="list-wrap">
-      <view v-if="!searched" class="state-box">
-        <text class="state-text">输入关键词检索专利</text>
-        <text class="state-sub">可按名称/公开号综合检索，或按申请人精确查找</text>
+      <view v-if="!searched" class="state-box empty-state">
+        <image
+          class="state-illustration"
+          src="/static/images/patent/patent-search-guide.png"
+          mode="widthFix"
+        />
       </view>
 
-      <view v-else-if="loading && list.length === 0" class="state-box">
-        <text class="state-text">检索中...</text>
+      <view v-else-if="loading && list.length === 0" class="state-box empty-state state-plain">
+        <view class="loading-ring"></view>
+        <text class="state-title">正在检索专利</text>
+        <text class="state-sub">正在从专利库中查找匹配结果…</text>
       </view>
 
-      <view v-else-if="error && list.length === 0" class="state-box">
-        <text class="state-text">检索暂不可用</text>
+      <view v-else-if="error && list.length === 0" class="state-box empty-state state-plain">
+        <view class="error-badge">!</view>
+        <text class="state-title">检索暂不可用</text>
         <text class="state-sub">{{ error }}</text>
-        <button class="retry-btn" size="mini" @click="loadList(true)">重试</button>
+        <button class="retry-btn" size="mini" @click="loadList(true)">重新检索</button>
       </view>
 
-      <view v-else-if="!loading && list.length === 0" class="state-box">
-        <text class="state-text">未找到相关专利</text>
-        <text class="state-sub">试试更换关键词，或改用「按申请人」</text>
+      <view v-else-if="!loading && list.length === 0" class="state-box empty-state">
+        <image
+          class="state-illustration"
+          src="/static/images/patent/patent-search-empty.png"
+          mode="widthFix"
+        />
       </view>
 
       <view v-else>
@@ -428,22 +437,84 @@ export default {
   border-radius: 16rpx;
 }
 
-.state-text {
-  font-size: 30rpx;
-  color: #666;
+.empty-state {
+  padding: 24rpx 16rpx 20rpx;
+  border-radius: 24rpx;
+  /* 底色取自设计图背景 #F5F8FD，图片透明区与卡片完全同色，接缝不可见 */
+  background-color: #f5f8fd;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(61, 139, 253, 0.07) 0, rgba(61, 139, 253, 0.07) 2rpx, transparent 2rpx, transparent 40rpx),
+    repeating-linear-gradient(90deg, rgba(61, 139, 253, 0.07) 0, rgba(61, 139, 253, 0.07) 2rpx, transparent 2rpx, transparent 40rpx);
 }
 
-.state-sub {
-  font-size: 24rpx;
-  color: #bbb;
-  margin-top: 12rpx;
+.state-plain {
+  padding: 80rpx 40rpx;
+}
+
+.state-title {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #1f2a3d;
+  letter-spacing: 1rpx;
+  margin-top: 8rpx;
   text-align: center;
 }
 
+.state-sub {
+  display: block;
+  font-size: 25rpx;
+  color: #8b96a8;
+  margin-top: 14rpx;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 空状态插画：直接使用设计图，白底已抠透明，融入卡片网格背景 */
+.state-illustration {
+  display: block;
+  width: 86%;
+  margin: 0 auto;
+}
+
+/* 加载与错误 */
+.loading-ring {
+  width: 64rpx;
+  height: 64rpx;
+  box-sizing: border-box;
+  border: 6rpx solid #dbe9fd;
+  border-top-color: #3d8bfd;
+  border-radius: 50%;
+  margin-bottom: 24rpx;
+  animation: patent-spin 0.9s linear infinite;
+}
+
+@keyframes patent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error-badge {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 50%;
+  background: #fff3f3;
+  color: #e5645c;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 76rpx;
+  text-align: center;
+  margin-bottom: 20rpx;
+}
+
 .retry-btn {
-  margin-top: 24rpx;
-  background: #2b73f8 !important;
+  margin-top: 28rpx;
+  padding: 0 40rpx !important;
+  border-radius: 32rpx !important;
+  background: #3d8bfd !important;
   color: #fff !important;
+  font-size: 26rpx !important;
 }
 
 .card {
