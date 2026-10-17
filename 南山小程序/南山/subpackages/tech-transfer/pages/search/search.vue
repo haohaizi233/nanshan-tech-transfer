@@ -124,8 +124,17 @@
 	import { getAchievements, searchAchievements } from '../../api/achievement.js'
 	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
 	import { getDemands, toDemandCard } from '../../api/demand.js'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/search/search',
+			groups: [
+				{ name: 'query', dataClass: 'list', fields: ['keyword', 'searchType', 'pageSize'] },
+				{ name: 'demands', dataClass: 'list', fields: ['demandList', 'demandTotal', 'demandPage', 'demandKeyword'] },
+				{ name: 'results', dataClass: 'list', fields: ['resultList', 'resultTotal', 'resultPage', 'resultKeyword'] },
+			],
+		})],
 		data() {
 			return {
 				keyword: '',
@@ -138,6 +147,8 @@
 				resultTotal: 0,
 				demandPage: 1,
 				resultPage: 1,
+				demandKeyword: null,
+				resultKeyword: null,
 				loading: false,
 				pageSize: 50
 			}
@@ -167,9 +178,9 @@
 		},
 		onShow() {
 			this.loadHistory()
-			if (this.searchType === 0) {
+			if (this.searchType === 0 && this.shouldRevalidatePageState('demands')) {
 				this.loadDemands(this.keyword, true)
-			} else {
+			} else if (this.searchType !== 0 && this.shouldRevalidatePageState('results')) {
 				this.loadResults(this.keyword, true)
 			}
 		},
@@ -188,9 +199,9 @@
 			switchType(type) {
 				this.searchType = type
 				if (type === 0) {
-					this.loadDemands(this.keyword, true)
+				if (this.shouldRevalidatePageState('demands')) this.loadDemands(this.keyword, true)
 				} else {
-					this.loadResults(this.keyword, true)
+				if (this.shouldRevalidatePageState('results')) this.loadResults(this.keyword, true)
 				}
 			},
 			mapDemand(item) {
@@ -205,10 +216,15 @@
 				if (this.loading) return
 				if (!reset && this.demandList.length >= this.demandTotal) return
 				this.loading = true
+				const query = (keyword || '').trim()
+				if (reset && this.demandKeyword !== query) {
+					this.demandList = []
+					this.demandTotal = 0
+				}
 				const page = reset ? 1 : this.demandPage + 1
 				try {
 					const data = await getDemands({
-						keyword: keyword || '',
+						keyword: query,
 						page,
 						pageSize: this.pageSize
 					})
@@ -216,12 +232,10 @@
 					this.demandTotal = Number(data.total) || 0
 					this.demandPage = page
 					this.demandList = reset ? rows : this.demandList.concat(rows)
+					this.demandKeyword = query
+					this.markPageStateFresh('demands')
 				} catch (e) {
 					console.error('[search] loadDemands failed:', e)
-					if (reset) {
-						this.demandList = []
-						this.demandTotal = 0
-					}
 				} finally {
 					this.loading = false
 				}
@@ -230,9 +244,13 @@
 				if (this.loading) return
 				if (!reset && this.resultList.length >= this.resultTotal) return
 				this.loading = true
+				const kw = (keyword || '').trim()
+				if (reset && this.resultKeyword !== kw) {
+					this.resultList = []
+					this.resultTotal = 0
+				}
 				const page = reset ? 1 : this.resultPage + 1
 				try {
-					const kw = (keyword || '').trim()
 					const data = kw
 						? await searchAchievements({ keyword: kw, page, pageSize: this.pageSize })
 						: await getAchievements({ page, pageSize: this.pageSize })
@@ -240,12 +258,10 @@
 					this.resultTotal = Number(data.total) || 0
 					this.resultPage = page
 					this.resultList = reset ? rows : this.resultList.concat(rows)
+					this.resultKeyword = kw
+					this.markPageStateFresh('results')
 				} catch (e) {
 					console.error('[search] loadResults failed:', e)
-					if (reset) {
-						this.resultList = []
-						this.resultTotal = 0
-					}
 				} finally {
 					this.loading = false
 				}

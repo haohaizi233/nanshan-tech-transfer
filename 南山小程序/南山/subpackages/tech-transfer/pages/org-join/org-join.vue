@@ -82,6 +82,7 @@
 	import { validateEmail } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	const KIND_LABELS = {
 		platform: '平台载体',
@@ -93,6 +94,14 @@
 	}
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/org-join/org-join',
+			groups: [
+				{ name: 'draft', dataClass: 'draft', fields: ['form'] },
+				{ name: 'search', dataClass: 'list', fields: ['keyword', 'searched', 'candidates', 'selectedOrg'] },
+				{ name: 'certification', dataClass: 'detail', fields: ['certification'] },
+			],
+		})],
 		data() {
 			return {
 				keyword: '',
@@ -117,7 +126,7 @@
 				safeBackWithToast('请先登录', 800)
 				return
 			}
-			this.loadCertification()
+			if (this.shouldRevalidatePageState('certification')) this.loadCertification()
 		},
 		computed: {
 			certificationHint() {
@@ -130,6 +139,7 @@
 			async loadCertification() {
 				try {
 					this.certification = await getMyOrganizationCertification()
+					this.markPageStateFresh('certification')
 				} catch (e) {
 					uni.showToast({ title: (e && e.message) || '认证状态加载失败', icon: 'none' })
 				}
@@ -138,7 +148,14 @@
 				return KIND_LABELS[kind] || '机构'
 			},
 			onKeywordInput(e) {
-				this.keyword = e.detail.value
+				const next = e.detail.value
+				if (next !== this.keyword) {
+					this.keyword = next
+					this.candidates = []
+					this.selectedOrg = null
+					this.searched = false
+					this.invalidatePageState('search')
+				}
 			},
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
@@ -154,8 +171,8 @@
 				try {
 					const data = await searchInstitutions(kw, 1, 20)
 					this.candidates = data.list || []
+					this.markPageStateFresh('search')
 				} catch (e) {
-					this.candidates = []
 					uni.showToast({ title: (e && e.message) || '搜索失败', icon: 'none' })
 				} finally {
 					this.loading = false
@@ -198,6 +215,8 @@
 						proofMaterial: (this.form.proofMaterial || '').trim() || undefined,
 						applyNote: (this.form.applyNote || '').trim() || undefined
 					})
+					this.clearPageState('draft')
+					this.invalidatePageState('certification')
 					uni.hideLoading()
 				uni.showToast({ title: '已提交，等待机构管理员审核', icon: 'none', duration: 2000 })
 				safeBackWithToast('', 1200)

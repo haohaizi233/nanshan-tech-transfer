@@ -119,13 +119,19 @@ import {
 } from '../../api/patent.js'
 import { getCurrentUser } from '../../api/client.js'
 import HostBridge from '../../../../host/host-bridge.js'
+import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 export default {
+  mixins: [createPageStateMixin({
+    route: 'pages/patent-list/patent-list',
+    groups: [{ name: 'list', dataClass: 'list', fields: ['keyword', 'mode', 'list', 'listQuery', 'page', 'pageSize', 'total', 'hasMore', 'searched', 'historyExpanded'] }],
+  })],
   data() {
     return {
       keyword: '',
       mode: 'keyword',
       list: [],
+      listQuery: '',
       page: 1,
       pageSize: 10,
       total: 0,
@@ -139,6 +145,10 @@ export default {
   },
   onLoad() {
     this.loadHistory()
+    if (this.searched && this.shouldRevalidatePageState('list')) this.loadList(true)
+  },
+  onShow() {
+    if (this.searched && this.shouldRevalidatePageState('list')) this.loadList(true)
   },
   onReachBottom() {
     if (this.searched && this.hasMore && !this.loading) {
@@ -239,10 +249,11 @@ export default {
       this.loading = true
       this.error = ''
       this.searched = true
+      const query = JSON.stringify([this.mode, kw])
       if (reset) {
         this.page = 1
         this.hasMore = true
-        this.list = []
+        if (this.listQuery !== query) this.list = []
       }
       try {
         const params = { page: this.page, pageSize: this.pageSize }
@@ -252,9 +263,11 @@ export default {
         const rows = data.list || []
         this.total = data.total || 0
         this.list = reset ? rows : this.list.concat(rows)
+        this.listQuery = query
         const totalPages = data.totalPages || 0
         this.hasMore = this.page < totalPages && rows.length > 0
         if (this.hasMore) this.page += 1
+        this.markPageStateFresh('list')
       } catch (e) {
         if (isPatentLoginRequired(e)) {
           this.error = '登录状态已失效，请登录后继续检索。'
@@ -262,7 +275,6 @@ export default {
         } else {
           this.error = (e && e.message) || '检索失败'
         }
-        if (reset) this.list = []
       } finally {
         this.loading = false
         uni.stopPullDownRefresh()

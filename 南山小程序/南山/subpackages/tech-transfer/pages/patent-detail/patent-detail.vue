@@ -144,6 +144,7 @@
 import { getPatentDetail, getPatentTypeLabel, isPatentLoginRequired } from '../../api/patent.js'
 import PdfPreviewOverlay from '../../components/pdf-preview-overlay.vue'
 import HostBridge from '../../../../host/host-bridge.js'
+import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 import { buildPatentDetailSeed, mergePatentDetail } from '../../utils/patent-detail-state.mjs'
 import {
   PATENT_DETAIL_NAV_ITEMS,
@@ -151,6 +152,10 @@ import {
 } from '../../utils/patent-detail-navigation.mjs'
 
 export default {
+  mixins: [createPageStateMixin({
+    route: 'pages/patent-detail/patent-detail',
+    groups: [{ name: 'detail', dataClass: 'detail', fields: ['publicationNo', 'detail', 'activeSection'] }],
+  })],
   components: { PdfPreviewOverlay },
   data() {
     return {
@@ -179,8 +184,11 @@ export default {
       this.error = '缺少专利公开号'
       return
     }
-    this.detail = seed
-    this.loadDetail()
+    if (!this.hasRestoredPageState('detail')) this.detail = seed
+    if (this.shouldRevalidatePageState('detail')) this.loadDetail()
+  },
+  onShow() {
+    if (this.shouldRevalidatePageState('detail')) this.loadDetail()
   },
   methods: {
     typeLabel(type) {
@@ -197,6 +205,7 @@ export default {
         const remote = await getPatentDetail(this.publicationNo, (this.detail && this.detail.language) || '')
         this.detail = mergePatentDetail(this.detail || {}, remote)
         uni.setNavigationBarTitle({ title: this.detail.publicationNo || '专利详情' })
+        this.markPageStateFresh('detail')
       } catch (e) {
         if (isPatentLoginRequired(e)) {
           this.error = '专利详情需要登录，请先登录或注册后查看。'

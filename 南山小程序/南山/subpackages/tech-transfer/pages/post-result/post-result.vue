@@ -178,6 +178,7 @@
 	import { uploadContentFile } from '../../api/file.js'
 	import PublishPreview from '../../components/publish-preview.vue'
 	import { mediaDisplayUrl } from '../../api/media-url.mjs'
+	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
 	const MATURITY_OPTIONS = [
 		{ value: '', label: '未填写' },
@@ -219,6 +220,14 @@
 	}
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/post-result/post-result',
+			groups: [
+				{ name: 'draft', dataClass: 'draft', fields: ['form'] },
+				{ name: 'dictionary', dataClass: 'dictionary', fields: ['categories', 'industries'] },
+				{ name: 'organizations', dataClass: 'detail', fields: ['organizations'] },
+			],
+		})],
 		components: { PublishPreview },
 		data() {
 			return {
@@ -307,13 +316,14 @@
 		onLoad() {
 			const saved = restorePublishDraft('achievement')
 			if (saved) this.form = { ...this.form, ...saved }
-			this.loadCategories()
-			this.loadIndustries()
+			if (this.shouldRevalidatePageState('dictionary')) this.loadDictionary()
 			this.prefillFromProfile()
-			if (isLoggedIn()) this.loadOrganizations()
+			if (isLoggedIn() && this.shouldRevalidatePageState('organizations')) this.loadOrganizations()
 		},
 		onShow() {
 			if (isLoggedIn() && !this.form.contactPhone) this.prefillFromProfile()
+			if (this.shouldRevalidatePageState('dictionary')) this.loadDictionary()
+			if (isLoggedIn() && this.shouldRevalidatePageState('organizations')) this.loadOrganizations()
 		},
 		methods: {
 			prefillFromProfile() {
@@ -332,8 +342,9 @@
 					this.organizations = data.memberships || []
 					if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId
 					this.syncCertifiedCompany()
+					this.markPageStateFresh('organizations')
 				} catch (e) {
-					this.organizations = []
+					console.error('[post-result] loadOrganizations failed:', e)
 				}
 			},
 			syncCertifiedCompany() {
@@ -355,8 +366,15 @@
 				const opt = PRICING_OPTIONS[Number(e.detail.value)]
 				if (opt) this.form.pricingMode = opt.value
 			},
-			async loadCategories() { try { this.categories = await getAchievementCategories() || [] } catch (e) { console.error('[post-result] loadCategories failed:', e) } },
-			async loadIndustries() { try { this.industries = await getAchievementIndustries() || [] } catch (e) { this.industries = [] } },
+			async loadCategories() { try { this.categories = await getAchievementCategories() || []; return true } catch (e) { console.error('[post-result] loadCategories failed:', e); return false } },
+			async loadIndustries() { try { this.industries = await getAchievementIndustries() || []; return true } catch (e) { console.error('[post-result] loadIndustries failed:', e); return false } },
+			async loadDictionary() {
+				if (this._dictionaryRequest) return this._dictionaryRequest
+				this._dictionaryRequest = Promise.all([this.loadCategories(), this.loadIndustries()])
+					.then((loaded) => { if (loaded.every(Boolean)) this.markPageStateFresh('dictionary'); return loaded.every(Boolean) })
+					.finally(() => { this._dictionaryRequest = null })
+				return this._dictionaryRequest
+			},
 			onAchievementKindChange(e) { const item = ACHIEVEMENT_KIND_OPTIONS[Number(e.detail.value)]; if (item) this.form.achievementKind = item.value },
 			onCategoryChange(e) { const item = this.categories[Number(e.detail.value)]; if (item) this.form.categoryId = item.id },
 			onIndustryChange(e) { this.form.industryIds = (e.detail.value || []).map((value) => Number(value)).filter((value) => value > 0) },
@@ -524,6 +542,13 @@
 			try {
 				const created = await createAchievement(this.buildBody())
 				clearPublishDraft('achievement')
+				this.clearPageState('draft')
+				invalidatePageStateKeys([
+					'pages/home/home:list', 'pages/achievement-list/achievement-list:list',
+					'pages/my-list/my-list:list', 'pages/search/search:results',
+					'pages/dock-detail/dock-detail:detail*',
+					'pages/achievement-detail/achievement-detail:detail*',
+				])
 				// 提交审核：draft → pending_review（提交后即可发起 AI 评估）
 				await submitAchievement(created.id, created.version)
 				this.submittedId = created.id

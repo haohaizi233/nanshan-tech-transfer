@@ -77,6 +77,7 @@
 	import { createEvaluationTask } from '../../api/ai.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
+		import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 	import {
 		getMyFavorites,
 		removeFavorite,
@@ -89,6 +90,10 @@
 	} from '../../api/interaction.js'
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/my-list/my-list',
+			groups: [{ name: 'list', dataClass: 'list', fields: ['pageType', 'publicationTab', 'intentTab', 'intentAutoSwitched', 'needLogin', 'list', 'listContext'] }],
+		})],
 		data() {
 			return {
 			aiEnabled: AI_FEATURE_ENABLED,
@@ -97,7 +102,8 @@
 			intentTab: 0,
 			intentAutoSwitched: false,
 			needLogin: false,
-			list: []
+			list: [],
+			listContext: '',
 			}
 		},
 		computed: {
@@ -143,6 +149,8 @@
 			// 深链入口（分享链接）直达时，若无任何会话令牌则拦截为登录提示，避免渲染空壳/接口 401 闪烁
 			if (!HostBridge.getStorage('tt_access_token')) {
 				this.needLogin = true
+				this.list = []
+				this.clearPageState('list')
 				uni.setNavigationBarTitle({ title: '请登录' })
 				return
 			}
@@ -161,9 +169,12 @@
 		},
 		onShow() {
 			if (this.needLogin) return
-			this.loadList()
+			if (this.shouldRevalidatePageState('list')) this.loadList()
 		},
 		methods: {
+			currentListContext() {
+				return JSON.stringify([this.pageType, this.publicationTab, this.intentTab])
+			},
 			goLogin() {
 				HostBridge.navigate('pages/mine/mine')
 			},
@@ -222,6 +233,8 @@
 				})
 			},
 			async loadList() {
+				const context = this.currentListContext()
+				if (this.listContext !== context) this.list = []
 			if (this.pageType === 'demand') {
 					try {
 						this.list = await this.loadPublicationList(getMyDemands, (item) => {
@@ -239,9 +252,10 @@
 								_statusHint: card.statusHint
 							}
 						})
+						this.listContext = this.currentListContext()
+						this.markPageStateFresh('list')
 					} catch (e) {
 						console.error('[my-list] loadMyDemands failed:', e)
-						this.list = []
 					}
 					return
 				}
@@ -263,9 +277,10 @@
 								_evalLoading: false
 							}
 						})
+						this.listContext = this.currentListContext()
+						this.markPageStateFresh('list')
 					} catch (e) {
 						console.error('[my-list] loadMyAchievements failed:', e)
-						this.list = []
 					}
 					return
 				}
@@ -285,9 +300,10 @@
 								this.list = this.mapIntentionRows(other.list || [])
 							}
 						}
+						this.listContext = this.currentListContext()
+						this.markPageStateFresh('list')
 					} catch (e) {
 						console.error('[my-list] loadCooperations failed:', e)
-						this.list = []
 					}
 					return
 				}
@@ -327,9 +343,10 @@
 					;(favDemand.list || []).forEach((fav) => push(fav, 'demand'))
 					;(favResult.list || []).forEach((fav) => push(fav, 'result'))
 					this.list = rows
+					this.listContext = this.currentListContext()
+					this.markPageStateFresh('list')
 				} catch (e) {
 					console.error('[my-list] loadFavorites failed:', e)
-					this.list = []
 				}
 			},
 			onOpen(item) {

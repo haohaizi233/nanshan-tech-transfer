@@ -291,6 +291,7 @@
 	import { isImageMedia, mediaDisplayUrl, splitDemandAttachments } from '../../api/media-url.mjs'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
+	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 	import {
 		addFavorite,
 		removeFavorite,
@@ -319,6 +320,10 @@
 	}
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/dock-detail/dock-detail',
+			groups: [{ name: 'detail', dataClass: 'detail', fields: ['detail'] }],
+		})],
 	data() {
 		return {
 			type: 'demand',
@@ -501,10 +506,11 @@
 				const data = await getDemandDetail(id)
 				this.detail = toDemandCard(data)
 				this.loadError = ''
+				this.markPageStateFresh('detail')
 			} catch (e) {
 				console.error('[dock-detail] loadDemand failed:', e)
 				this.loadError = (e && e.message) || '加载失败，请稍后重试'
-				safeBackWithToast(this.loadError, 1200)
+				if (!this.detail) safeBackWithToast(this.loadError, 1200)
 			}
 		},
 		async loadResultDetail(id) {
@@ -518,10 +524,11 @@
 				if (!data) throw new Error('未找到对应信息')
 				this.detail = { ...toAchievementDockCard(data), titleEn: data.titleEn, sections: data.sections || [], patents: data.patents || [], links: data.links || [], media: data.media || [], inventors: data.inventors || [] }
 				this.loadError = ''
+				this.markPageStateFresh('detail')
 			} catch (e) {
 				console.error('[dock-detail] loadResult failed:', e)
 				this.loadError = (e && e.message) || '加载失败，请稍后重试'
-				safeBackWithToast(this.loadError, 1200)
+				if (!this.detail) safeBackWithToast(this.loadError, 1200)
 			}
 		},
 		onRetryLoad() {
@@ -560,10 +567,12 @@
 				if (!targetId || this.intentRefreshing) return
 				this.intentRefreshing = true
 				try {
-					if (this.type === 'demand') {
-						await this.loadDemandDetail(targetId)
-					} else {
-						await this.loadResultDetail(targetId)
+					if (!this.detail || this.shouldRevalidatePageState('detail')) {
+						if (this.type === 'demand') {
+							await this.loadDemandDetail(targetId)
+						} else {
+							await this.loadResultDetail(targetId)
+						}
 					}
 					await this.loadIntent(targetId)
 				} finally {
@@ -631,9 +640,15 @@
 					if (op === 'offline') {
 						if (this.type === 'demand') {
 							await closeDemand(this.detail.id, this.detail.version)
+							invalidatePageStateKeys(['pages/home/home:list', 'pages/my-list/my-list:list', 'pages/search/search:demands'])
 							await this.loadDemandDetail(this.detail.id)
 						} else {
 							await offlineAchievement(this.detail.id, this.detail.version)
+							invalidatePageStateKeys([
+								'pages/home/home:list', 'pages/achievement-list/achievement-list:list',
+								'pages/my-list/my-list:list', 'pages/search/search:results',
+								'pages/achievement-detail/achievement-detail:detail*',
+							])
 							await this.loadResultDetail(this.detail.id)
 						}
 						uni.showToast({ title: '已下架', icon: 'success' })
@@ -649,6 +664,7 @@
 						next = await completeCooperation(intentId, version)
 					}
 					if (next) {
+						invalidatePageStateKeys(['pages/mine/mine:dashboard', 'pages/my-list/my-list:list'])
 						this.intention = next
 						this.intentId = String(next.id)
 						await this.refreshDockState(this.detail.id)
@@ -740,6 +756,7 @@
 					} else {
 						await removeFavorite(this.type, this.detail.id)
 					}
+					invalidatePageStateKeys(['pages/mine/mine:dashboard', 'pages/my-list/my-list:list'])
 					uni.showToast({ title: next ? '已收藏' : '已取消收藏', icon: 'none' })
 				} catch (e) {
 					this.favorited = !next
@@ -751,6 +768,7 @@
 				if (!this.intention) return
 				try {
 					const next = await cancelCooperation(this.intention.id, this.intention.version, '发起方取消对接')
+					invalidatePageStateKeys(['pages/mine/mine:dashboard', 'pages/my-list/my-list:list'])
 					this.intention = next
 					this.intentId = String(next.id)
 					await this.refreshDockState(this.detail.id)
@@ -793,6 +811,7 @@
 						intentType: this.selectedIntentType,
 						message: message || '希望就「' + this.detail.title + '」与您对接，盼回复。'
 					})
+					invalidatePageStateKeys(['pages/mine/mine:dashboard', 'pages/my-list/my-list:list'])
 					this.intention = intention
 					this.intentId = String(intention.id)
 					this.intentDialogVisible = false

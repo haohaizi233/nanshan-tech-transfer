@@ -299,11 +299,22 @@
 	} from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	export default {
 		components: {
 			AppTabbar,
 		},
+		mixins: [createPageStateMixin({
+			route: 'pages/mine/mine',
+			groups: [{
+				name: 'dashboard', dataClass: 'list', fields: [
+					'viewMode', 'editing', 'profile', 'form', 'memberships', 'certification',
+					'myDemandCount', 'myDemandPendingCount', 'myResultCount', 'myResultPendingCount',
+					'favoriteDemandCount', 'favoriteResultCount', 'intentionPendingCount', 'intentionSuccessCount'
+				]
+			}],
+		})],
 		data() {
 			const cachedCertification = getCachedOrganizationCertification()
 			const initialCertification = cachedCertification && cachedCertification.certification
@@ -406,26 +417,30 @@
 			} else {
 				this.viewMode = 'auth'
 			}
+				if (isLoggedIn() && !this.shouldRevalidatePageState('dashboard')) return
 
-				await this.loadMyPublicationCounts()
-				await this.loadInteractionCounts()
-				await this.loadMemberships()
+				const loaded = await Promise.all([
+					this.loadMyPublicationCounts(),
+					this.loadInteractionCounts(),
+					this.loadMemberships(),
+				])
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
 				}
+				if (loaded.every(Boolean)) this.markPageStateFresh('dashboard')
 			},
 			async loadMemberships() {
 				if (!isLoggedIn()) {
 					this.memberships = []
 					this.certification = { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
-					return
+					return true
 				}
 				const cachedCertification = getCachedOrganizationCertification()
 				if (cachedCertification) {
 					this.certification = cachedCertification.certification
 					this.memberships = cachedCertification.certification.memberships || []
-					if (isOrganizationCertificationCacheFresh(cachedCertification)) return
+					if (isOrganizationCertificationCacheFresh(cachedCertification)) return true
 				}
 				try {
 					const [user, certification] = await Promise.all([
@@ -436,8 +451,10 @@
 					this.memberships = certification.memberships
 					cacheOrganizationCertification(certification)
 					this.profile = getUserProfile()
+					return true
 				} catch (e) {
 					console.error('[mine] loadMemberships failed:', e)
+					return false
 				}
 			},
 			async loadMyPublicationCounts() {
@@ -446,7 +463,7 @@
 					this.myDemandPendingCount = 0
 					this.myResultCount = 0
 					this.myResultPendingCount = 0
-					return
+					return true
 				}
 				try {
 					const [demands, pendingDemands, achievements, pendingAchievements] = await Promise.all([
@@ -459,12 +476,10 @@
 					this.myDemandPendingCount = pendingDemands.total || 0
 					this.myResultCount = achievements.total || 0
 					this.myResultPendingCount = pendingAchievements.total || 0
+					return true
 				} catch (e) {
 					console.error('[mine] loadMyPublicationCounts failed:', e)
-					this.myDemandCount = 0
-					this.myDemandPendingCount = 0
-					this.myResultCount = 0
-					this.myResultPendingCount = 0
+					return false
 				}
 			},
 			async loadInteractionCounts() {
@@ -473,7 +488,7 @@
 					this.favoriteResultCount = 0
 					this.intentionPendingCount = 0
 					this.intentionSuccessCount = 0
-					return
+					return true
 				}
 				try {
 					const [favDemand, favResult, pending, accepted, confirmed, completed] = await Promise.all([
@@ -488,8 +503,10 @@
 					this.favoriteResultCount = favResult.total || 0
 					this.intentionPendingCount = (pending.total || 0) + (accepted.total || 0)
 					this.intentionSuccessCount = (confirmed.total || 0) + (completed.total || 0)
+					return true
 				} catch (e) {
 					console.error('[mine] loadInteractionCounts failed:', e)
+					return false
 				}
 			},
 			toggleAuthMode() {

@@ -109,6 +109,7 @@
         import PublishPreview from '../../components/publish-preview.vue'
 	import { isImageMedia, mediaDisplayUrl } from '../../api/media-url.mjs'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
+	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
 	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
 	function parseBudgetText(text) {
@@ -163,6 +164,13 @@
 	}
 
         export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/post-demand/post-demand',
+			groups: [
+				{ name: 'draft', dataClass: 'draft', fields: ['form'] },
+				{ name: 'organizations', dataClass: 'dictionary', fields: ['organizations'] },
+			],
+		})],
 			components: { PublishPreview },
 		data() {
 			return {
@@ -209,10 +217,11 @@
 			const saved = restorePublishDraft('demand')
 			if (saved) this.form = { ...this.form, ...saved }
 			this.prefillFromProfile()
-			if (isLoggedIn()) this.loadOrganizations()
+			if (isLoggedIn() && this.shouldRevalidatePageState('organizations')) this.loadOrganizations()
 		},
 		onShow() {
 			if (isLoggedIn() && !this.form.phone) this.prefillFromProfile()
+			if (isLoggedIn() && this.shouldRevalidatePageState('organizations')) this.loadOrganizations()
 		},
 		methods: {
 			prefillFromProfile() {
@@ -232,8 +241,9 @@
 					this.organizations = data.memberships || []
 					if (this.organizations.length && !this.form.orgId) this.form.orgId = this.organizations[0].orgId
 					this.syncCertifiedCompany()
+					this.markPageStateFresh('organizations')
 				} catch (e) {
-					this.organizations = []
+					console.error('[post-demand] loadOrganizations failed:', e)
 				}
 			},
 			syncCertifiedCompany() {
@@ -361,6 +371,12 @@
 					// 创建（draft）→ 提交审核（pending_review）
 					const detail = await createDemand(buildPayload(data))
 					clearPublishDraft('demand')
+					this.clearPageState('draft')
+					invalidatePageStateKeys([
+						'pages/home/home:list', 'pages/my-list/my-list:list',
+						'pages/search/search:demands',
+						'pages/dock-detail/dock-detail:detail*',
+					])
 					let submitted = false
 					try {
 						await submitDemand(detail.id, detail.version)

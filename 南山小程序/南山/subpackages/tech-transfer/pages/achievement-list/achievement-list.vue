@@ -128,6 +128,7 @@
 import { getAchievements, getAchievementCategories, getAchievementIndustries } from '../../api/achievement.js'
 import { mediaDisplayUrl } from '../../api/media-url.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
+import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 const MATURITY_LABELS = {
   '01_idea': '概念阶段',
@@ -145,6 +146,13 @@ const PRICING_LABELS = {
 }
 
 export default {
+  mixins: [createPageStateMixin({
+    route: 'pages/achievement-list/achievement-list',
+    groups: [
+      { name: 'list', dataClass: 'list', fields: ['keyword', 'activeCategory', 'activeIndustryId', 'list', 'listQuery', 'page', 'pageSize', 'total', 'hasMore', 'coverErrored'] },
+      { name: 'dictionary', dataClass: 'dictionary', fields: ['categories', 'industries'] },
+    ],
+  })],
   data() {
     return {
       keyword: '',
@@ -153,6 +161,7 @@ export default {
       categories: [],
       industries: [],
       list: [],
+      listQuery: '',
       page: 1,
       pageSize: 10,
       total: 0,
@@ -162,10 +171,13 @@ export default {
       coverErrored: {},
     }
   },
-  onLoad() {
-    this.loadCategories()
-    this.loadIndustries()
-    this.loadList(true)
+  async onLoad() {
+    if (this.shouldRevalidatePageState('dictionary')) await this.loadDictionary()
+    if (this.shouldRevalidatePageState('list')) this.loadList(true)
+  },
+  async onShow() {
+    if (this.shouldRevalidatePageState('dictionary')) this.loadDictionary()
+    if (this.shouldRevalidatePageState('list')) this.loadList(true)
   },
   onReachBottom() {
     if (this.hasMore && !this.loading) {
@@ -176,29 +188,50 @@ export default {
     this.loadList(true)
   },
   methods: {
+    async loadDictionary() {
+      if (this._dictionaryRequest) return this._dictionaryRequest
+      this._dictionaryRequest = Promise.all([this.loadCategories(), this.loadIndustries()])
+        .then((loaded) => {
+          if (loaded.every(Boolean)) this.markPageStateFresh('dictionary')
+          return loaded.every(Boolean)
+        })
+        .finally(() => { this._dictionaryRequest = null })
+      return this._dictionaryRequest
+    },
     async loadCategories() {
       try {
         const cats = await getAchievementCategories()
         this.categories = cats || []
+        return true
       } catch (e) {
         console.error('[achievement-list] loadCategories failed:', e)
+        return false
       }
     },
     async loadIndustries() {
       try {
         this.industries = (await getAchievementIndustries()) || []
+        return true
       } catch (e) {
         console.error('[achievement-list] loadIndustries failed:', e)
-        this.industries = []
+        return false
       }
+    },
+    currentListQuery() {
+      return JSON.stringify([this.keyword, this.activeCategory, this.activeIndustryId])
     },
     async loadList(reset) {
       if (this.loading) return
       this.loading = true
       this.error = ''
+      const query = this.currentListQuery()
       if (reset) {
         this.page = 1
         this.hasMore = true
+        if (this.listQuery !== query) {
+          this.list = []
+          this.total = 0
+        }
       }
       try {
         const data = await getAchievements({
@@ -214,11 +247,13 @@ export default {
         } else {
           this.list = this.list.concat(items)
         }
+        this.listQuery = query
         this.total = data.total || 0
         this.hasMore = this.list.length < this.total
         if (this.hasMore) {
           this.page++
         }
+        this.markPageStateFresh('list')
       } catch (e) {
         console.error('[achievement-list] loadList failed:', e)
         this.error = e.message || '请求失败'

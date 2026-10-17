@@ -50,11 +50,13 @@ test('publication validation leaves an inline reason instead of appearing to ign
   }
 })
 
-test('drafts are deep-cloned and login plus profile completion resume the saved publishing route', () => {
+test('drafts are safely cloned, scoped, expire, and login plus profile completion resume the saved route', () => {
   const draft = read('../subpackages/tech-transfer/api/publish-draft.mjs')
   const mine = read('../subpackages/tech-transfer/pages/mine/mine.vue')
-  assert.match(draft, /JSON\.parse\(JSON\.stringify\(form \|\| \{\}\)\)/)
-  assert.match(draft, /JSON\.parse\(JSON\.stringify\(value\.form\)\)/)
+  assert.match(draft, /cloneSafe\(form \|\| \{\}\)/)
+  assert.match(draft, /cloneSafe\(entry\.form\)/)
+  assert.match(draft, /MAX_AGE_MS = 24 \* 60 \* 60 \* 1000/)
+  assert.match(draft, /user:\$\{String\(resolved\)\}/)
   assert.match(mine, /resumePublishDraftAfterLogin/)
   assert.match(mine, /if \(!res\.needProfile\) this\.resumePublishDraftAfterLogin\(\)/)
   assert.match(mine, /await this\.refresh\(\)\s*\n\s*this\.resumePublishDraftAfterLogin\(\)/)

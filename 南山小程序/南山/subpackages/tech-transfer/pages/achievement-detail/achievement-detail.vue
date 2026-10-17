@@ -156,6 +156,7 @@
 import { getAchievementDetail } from '../../api/achievement.js'
 import { formatMaturityLabel } from '../../api/achievement-dock-card.mjs'
 import { mediaDisplayUrl } from '../../api/media-url.mjs'
+import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
 import { safeNavigateBack } from '../../utils/nav.mjs'
 
@@ -167,6 +168,10 @@ const PRICING_MODE_LABELS = {
 }
 
 export default {
+  mixins: [createPageStateMixin({
+    route: 'pages/achievement-detail/achievement-detail',
+    groups: [{ name: 'detail', dataClass: 'detail', fields: ['achId', 'detail'] }],
+  })],
   data() {
     return {
       achId: null,
@@ -219,7 +224,10 @@ export default {
   },
   onLoad(options) {
     this.achId = parseInt(options.id, 10)
-    this.loadDetail()
+    if (this.shouldRevalidatePageState('detail')) this.loadDetail()
+  },
+  onShow() {
+    if (this.shouldRevalidatePageState('detail')) this.loadDetail()
   },
   methods: {
     async loadDetail() {
@@ -233,9 +241,11 @@ export default {
       try {
         const data = await getAchievementDetail(this.achId)
         this.detail = data
+        this.markPageStateFresh('detail')
       } catch (e) {
         console.error('[achievement-detail] loadDetail failed:', e)
-        this.error = e.message || '请求失败'
+        if (!this.detail) this.error = e.message || '请求失败'
+        else uni.showToast({ title: '网络异常，暂显示已缓存详情', icon: 'none' })
       } finally {
         this.loading = false
       }

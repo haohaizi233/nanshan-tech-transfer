@@ -62,8 +62,13 @@
 <script>
 	import { getPatentById, buildPatentFeeDetail } from '../../api/patent-fee.js'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/fee-detail/fee-detail',
+			groups: [{ name: 'detail', dataClass: 'detail', fields: ['detail'] }],
+		})],
 		data() {
 			return {
 				detail: null
@@ -71,12 +76,17 @@
 		},
 		onLoad(options) {
 			const id = options.id || ''
+			if (this.detail) {
+				uni.setNavigationBarTitle({ title: '年费详情' })
+				return
+			}
 			const patent = getPatentById(id)
 			if (!patent) {
 				safeBackWithToast('未找到该专利', 1200)
 				return
 			}
 			this.detail = buildPatentFeeDetail(patent)
+			this.markPageStateFresh('detail')
 			uni.setNavigationBarTitle({ title: '年费详情' })
 		}
 	}

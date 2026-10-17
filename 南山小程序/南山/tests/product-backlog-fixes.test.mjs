@@ -66,12 +66,11 @@ test('membership applications list uses GET on the caller-owned endpoint', () =>
   assert.match(source, /apiRequest\('GET', '\/me\/organization-membership-applications'/)
 })
 
-test('mine page loads publication, interaction, and membership counts sequentially', () => {
+test('mine page refreshes dashboard data concurrently and caches only a complete refresh', () => {
   const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
   assert.match(source, /async refresh\(\)/)
-  assert.match(source, /await this\.loadMyPublicationCounts\(\)/)
-  assert.match(source, /await this\.loadInteractionCounts\(\)/)
-  assert.match(source, /await this\.loadMemberships\(\)/)
+  assert.match(source, /const loaded = await Promise\.all\(\[[\s\S]*?this\.loadMyPublicationCounts\(\)[\s\S]*?this\.loadInteractionCounts\(\)[\s\S]*?this\.loadMemberships\(\)[\s\S]*?\]\)/)
+  assert.match(source, /if \(loaded\.every\(Boolean\)\) this\.markPageStateFresh\('dashboard'\)/)
 })
 
 test('dock detail consumes server-approved counterpart contacts and safely refreshes active cooperation', () => {

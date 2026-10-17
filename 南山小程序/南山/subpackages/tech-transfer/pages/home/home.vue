@@ -199,8 +199,13 @@
 	import { addFavorite, removeFavorite, getFavoriteIdSet } from '../../api/interaction.js'
 	import { retryRequest } from '../../api/request-retry.js'
 	import { getScannedHttpUrl } from '../../utils/scanned-url.mjs'
+	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/home/home',
+			groups: [{ name: 'list', dataClass: 'list', fields: ['activeTab', 'demandList', 'resultList'] }],
+		})],
 		components: {
 			AppTabbar,
 		},
@@ -257,14 +262,14 @@
 			}
 		},
 		onLoad() {
-			this.applyPersonaTab()
+			if (!this.hasRestoredPageState('list')) this.applyPersonaTab()
 		},
 		onShow() {
-			this.refreshList()
+			if (this.shouldRevalidatePageState('list')) this.refreshList()
 		},
 		async onPullDownRefresh() {
 			try {
-				await this.refreshList(this.currentTabKey)
+				await this.refreshList('all')
 			} finally {
 				uni.stopPullDownRefresh()
 			}
@@ -289,8 +294,9 @@
 				const shouldRefreshResult = target !== 'demand'
 				// 收藏状态（后端 API，失败时列表仍正常展示，只是不带收藏标记）
 				const hasSession = Boolean(getCurrentUser())
-				let favDemandIds = new Set()
-				let favResultIds = new Set()
+				let favDemandIds = new Set(this.demandList.filter((item) => item.favorited).map((item) => String(item.id)))
+				let favResultIds = new Set(this.resultList.filter((item) => item.favorited).map((item) => String(item.id)))
+				let refreshSucceeded = true
 				if (hasSession) {
 					try {
 						const sets = await Promise.all([
@@ -318,7 +324,7 @@
 					})
 				} catch (e) {
 					console.error('[index] loadDemands failed:', e)
-					this.demandList = []
+					refreshSucceeded = false
 				}
 
 				// 成果列表（真实 API）
@@ -329,8 +335,9 @@
 					)
 				} catch (e) {
 					console.error('[index] loadAchievements failed:', e)
-					this.resultList = []
+					refreshSucceeded = false
 				}
+				if (refreshSucceeded) this.markPageStateFresh('list')
 			},
 			switchTab(index) {
 				const tab = this.tabs[index]
@@ -401,6 +408,7 @@
 					} else {
 						await removeFavorite(type, item.id)
 					}
+					invalidatePageStateKeys(['pages/mine/mine:dashboard', 'pages/my-list/my-list:list'])
 					uni.showToast({ title: next ? '已收藏' : '已取消收藏', icon: 'none' })
 				} catch (e) {
 					item.favorited = !next

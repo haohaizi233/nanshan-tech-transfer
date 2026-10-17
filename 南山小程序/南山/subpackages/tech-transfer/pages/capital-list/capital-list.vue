@@ -131,8 +131,13 @@
 		fetchOrgList,
 		getPlatformTypeLabel
 	} from '../../api/capital.js'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/capital-list/capital-list',
+			groups: [{ name: 'list', dataClass: 'list', fields: ['moduleKey', 'moduleName', 'moduleDesc', 'pending', 'list', 'keyword', 'page', 'pageSize', 'total', 'totalPages'] }],
+		})],
 		data() {
 			return {
 				moduleKey: '',
@@ -174,7 +179,10 @@
 				this.pending = !!mod.pending
 				uni.setNavigationBarTitle({ title: mod.name })
 			}
-			this.loadData()
+			if (this.shouldRevalidatePageState('list')) this.loadData()
+		},
+		onShow() {
+			if (this.shouldRevalidatePageState('list')) this.loadData()
 		},
 		methods: {
 			typeLabel(type) {
@@ -214,6 +222,7 @@
 				this.loadError = ''
 				if (this.pending) {
 					this.list = []
+					this.markPageStateFresh('list')
 					return
 				}
 				if (this.isPlatform || this.isOrgModule) {
@@ -227,17 +236,16 @@
 						this.pageSize = res.pageSize || this.pageSize
 						this.totalPages = res.totalPages || 0
 						this.page = res.page || this.page
+						this.markPageStateFresh('list')
 					} catch (e) {
 						this.loadError = (e && e.message) || '加载失败'
-						this.list = []
-						this.total = 0
-						this.totalPages = 0
 					} finally {
 						this.loading = false
 					}
 					return
 				}
 				this.list = listCapitalItems(this.moduleKey)
+				this.markPageStateFresh('list')
 			},
 			onCall(phone) {
 				if (!phone) return

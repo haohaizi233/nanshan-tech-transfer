@@ -122,6 +122,7 @@
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	const SCORE_DIMENSIONS = [
 		{ key: 'techFeature', label: '技术特点' },
@@ -141,6 +142,10 @@
 		components: {
 			AiGeneratedMark
 		},
+		mixins: [createPageStateMixin({
+			route: 'pages/ai-eval-detail/ai-eval-detail',
+			groups: [{ name: 'task', dataClass: 'detail', fields: ['task'] }],
+		})],
 		data() {
 			return {
 				aiEnabled: AI_FEATURE_ENABLED,
@@ -199,13 +204,15 @@
 			return
 		}
 			this.taskId = taskId
-			this.fetchTask()
+			if (this.shouldRevalidatePageState('task')) this.fetchTask()
+			else if (this.task && !isTerminalStatus(this.task.status)) this.startPolling()
 		},
 		onShow() {
 			if (!this.aiEnabled) return
 			// 页面回前台：任务未终态且轮询已停（如轮询出错）时恢复
 			if (this.taskId && this.task && !isTerminalStatus(this.task.status) && !this.timer) {
-				this.fetchTask()
+				if (this.shouldRevalidatePageState('task')) this.fetchTask()
+				else this.startPolling()
 			}
 		},
 		onHide() {
@@ -222,12 +229,14 @@
 				try {
 					const task = await getEvaluationTask(this.taskId)
 					this.task = task
+					this.markPageStateFresh('task')
 					if (!isTerminalStatus(task.status)) {
 						this.startPolling()
 					}
 				} catch (e) {
 					console.error('[ai-eval-detail] getEvaluationTask failed:', e)
-					this.loadError = (e && e.message) || '网络异常，请稍后重试'
+				if (!this.task) this.loadError = (e && e.message) || '网络异常，请稍后重试'
+				else uni.showToast({ title: '网络异常，暂显示已缓存结果', icon: 'none' })
 				} finally {
 					this.loading = false
 				}
@@ -241,6 +250,7 @@
 						const task = await getEvaluationTask(taskId)
 						if (task && task.taskId === taskId) {
 							this.task = task
+							this.markPageStateFresh('task')
 						}
 						if (!this.task || isTerminalStatus(this.task.status) || Date.now() - this.pollStartedAt > POLL_MAX_MS) {
 							this.stopPolling()
@@ -265,6 +275,7 @@
 					const task = await createEvaluationTask(this.achievementId)
 					this.taskId = task.taskId
 					this.task = task
+					this.markPageStateFresh('task')
 					if (!isTerminalStatus(task.status)) {
 						this.startPolling()
 					}

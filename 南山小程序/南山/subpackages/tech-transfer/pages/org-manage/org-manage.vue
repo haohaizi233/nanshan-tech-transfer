@@ -94,8 +94,13 @@
 	} from '../../api/membership.js'
 	import { isLoggedIn } from '../../api/user.js'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
+	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/org-manage/org-manage',
+			groups: [{ name: 'list', dataClass: 'list', fields: ['adminOrgs', 'currentOrgId', 'tab', 'members', 'applications', 'pendingCount'] }],
+		})],
 		data() {
 			return {
 				loadingOrgs: true,
@@ -129,10 +134,13 @@
 						(m) => m.role === 'admin' && m.status === 'active'
 					)
 					this.adminOrgs = adminOrgs
-					if (!this.currentOrgId && adminOrgs.length) {
-						this.currentOrgId = adminOrgs[0].orgId
+					if (!adminOrgs.some((item) => Number(item.orgId) === Number(this.currentOrgId))) {
+						this.currentOrgId = adminOrgs.length ? adminOrgs[0].orgId : 0
+						this.members = []
+						this.applications = []
+						this.invalidatePageState('list')
 					}
-					if (this.currentOrgId) this.loadList()
+					if (this.currentOrgId && this.shouldRevalidatePageState('list')) this.loadList()
 				} catch (e) {
 					uni.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
 				} finally {
@@ -142,11 +150,16 @@
 			switchOrg(orgId) {
 				if (this.currentOrgId === orgId) return
 				this.currentOrgId = orgId
+				this.members = []
+				this.applications = []
+				this.pendingCount = 0
+				this.invalidatePageState('list')
 				this.loadList()
 			},
 			switchTab(tab) {
 				if (this.tab === tab) return
 				this.tab = tab
+				this.invalidatePageState('list')
 				this.loadList()
 			},
 			async loadList() {
@@ -161,6 +174,7 @@
 						this.applications = data.list || []
 						this.pendingCount = data.total || 0
 					}
+					this.markPageStateFresh('list')
 				} catch (e) {
 					uni.showToast({ title: (e && e.message) || '加载失败', icon: 'none', duration: 2500 })
 					if (e && (e.code === 'TT_ADMIN_40301' || e.message === '非机构管理员')) {

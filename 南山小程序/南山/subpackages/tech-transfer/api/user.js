@@ -22,6 +22,8 @@ import { apiRequest } from './client.js'
 import HostBridge from '../../../host/host-bridge.js'
 import { validateEmail, validatePhone } from './contact-validation.mjs'
 import { clearCachedOrganizationCertification } from './membership.js'
+import { clearPageStateScope, cancelAllPageStateWrites } from './page-state-cache.mjs'
+import { clearPublishDraft } from './publish-draft.mjs'
 
 const HISTORY_PHONES_KEY = 'ns_user_history_phones'
 
@@ -290,6 +292,8 @@ export async function logout() {
 		console.error('[user] logout 失败:', e)
 	} finally {
 		clearCachedOrganizationCertification(user && user.userId)
+		if (user && user.userId) clearPageStateScope(user.userId)
+		clearPublishDraft(undefined, { scope: user && user.userId })
 		// 兜底：枚举清除所有 tt_* 鉴权 / 会话相关缓存（R2-60），
 		// 避免旧账号残留 key（如其他 userId 的机构认证快照、未来新增 tt_ 会话字段）串到下一个登录态。
 		// 仅保留 tt_feature_flags（宿主级运行时开关，与账号无关）。
@@ -300,6 +304,7 @@ export async function logout() {
 /** 枚举 uni storage 中所有 tt_ 前缀的 key 并删除，但保留 tt_feature_flags。 */
 export function clearAllTtCacheKeys() {
 	try {
+		cancelAllPageStateWrites()
 		// eslint-disable-next-line no-undef
 		const info = (typeof uni !== 'undefined' && uni.getStorageInfoSync) ? uni.getStorageInfoSync() : null
 		const keys = (info && Array.isArray(info.keys)) ? info.keys : []

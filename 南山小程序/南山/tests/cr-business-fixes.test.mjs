@@ -25,8 +25,9 @@ test('org-apply keeps type picker computeds alongside certification hint', () =>
   assert.match(orgApply, /certificationHint\(\)/)
 })
 
-test('org-manage refreshes members after returning to the page', () => {
-  assert.match(orgManage, /if \(this\.currentOrgId\) this\.loadList\(\)/)
+test('org-manage restores cached members and refreshes them when stale or switched', () => {
+  assert.match(orgManage, /this\.currentOrgId && this\.shouldRevalidatePageState\('list'\)\) this\.loadList\(\)/)
+  assert.match(orgManage, /this\.invalidatePageState\('list'\)/)
 })
 
 test('my-list keeps demand reject hints and does not mark matched favorites offline', () => {
