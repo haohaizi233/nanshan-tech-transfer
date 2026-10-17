@@ -8,10 +8,28 @@ const TURN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/
 const SENSITIVE_KEY = /(token|authorization|password|passwd|secret|credential)/i
 const LOCAL_FILE_KEY = /(?:temp|tmp|local).*(?:path|file)|(?:path|file).*(?:temp|tmp|local)/i
 
+function createLocalStorageAdapter() {
+  if (typeof localStorage === 'undefined') return null
+  return {
+    getStorageSync: (key) => {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : '' } catch { return '' }
+    },
+    setStorageSync: (key, value) => {
+      try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+    },
+    removeStorageSync: (key) => {
+      try { localStorage.removeItem(key) } catch {}
+    }
+  }
+}
+
 function storageApi(storage) {
-  if (storage && typeof storage.getStorageSync === 'function') return storage
-  if (typeof uni !== 'undefined' && uni && typeof uni.getStorageSync === 'function') return uni
-  return null
+  // 必须同时有 get 和 set 才可用
+  const hasFullStorage = (obj) => obj && typeof obj.getStorageSync === 'function' && typeof obj.setStorageSync === 'function'
+  if (hasFullStorage(storage)) return storage
+  if (typeof uni !== 'undefined' && hasFullStorage(uni)) return uni
+  // H5降级：uni.getStorageSync不存在或是不完整时使用localStorage
+  return createLocalStorageAdapter()
 }
 
 function normalizeScope(scope, storage) {
@@ -100,7 +118,11 @@ export function beginTurn(turn, storage, scope) {
   const message = String(turn?.message || '').trim()
   if (!TURN_ID_PATTERN.test(turnId) || !message) return false
   const existing = readEntry(storage, resolvedScope)
-  if (!existing.ok || existing.turn) return false
+  if (!existing.ok) return false
+  if (existing.turn) {
+    // 用户主动发新消息 = 放弃旧turn，直接覆盖
+    removeQuietly(storageApi(storage), keyFor(resolvedScope))
+  }
   const safeTurn = {
     turnId,
     message,

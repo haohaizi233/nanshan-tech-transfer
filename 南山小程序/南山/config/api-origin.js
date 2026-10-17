@@ -1,8 +1,8 @@
 const PRODUCTION_ENVS = ['staging', 'production']
 const TUNNEL_H5_PORT = '8077'
-const TUNNEL_API_PORT = '8076'
+const TUNNEL_API_PORT = '8025'
 const LOCAL_API_PORT = '8787'
-const SAME_ORIGIN_PORTS = new Set(['', '80', '443'])
+const SAME_ORIGIN_PORTS = new Set(['', '80', '443', '8025'])
 const LOCALHOST_HOSTNAMES = ['localhost', '127.0.0.1', '::1', '[::1]']
 const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
 
@@ -40,7 +40,7 @@ export function resolveH5ApiBase({
   pageLocation = globalThis.location,
   systemInfo,
 } = {}) {
-  if (PRODUCTION_ENVS.includes(appEnv)) return ''
+  // if (PRODUCTION_ENVS.includes(appEnv)) return ''
 
   if (pageLocation && pageLocation.hostname) {
     const protocol = pageLocation.protocol === 'https:' ? 'https:' : 'http:'
