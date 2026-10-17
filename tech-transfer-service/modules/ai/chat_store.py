@@ -17,6 +17,135 @@ from db import get_cursor
 _VALID_ROLES = ('user', 'assistant')
 
 
+def _turn_view(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    def format_time(value):
+        return value.isoformat() if value else None
+    return {
+        'turnId': row['turn_id'],
+        'status': row['status'],
+        'reply': row.get('reply'),
+        'cards': row.get('cards'),
+        'errorMessage': row.get('error_message'),
+        'errorCode': row.get('error_code'),
+        'errorStatus': row.get('error_status'),
+        'createdAt': format_time(row.get('created_at')),
+        'updatedAt': format_time(row.get('updated_at')),
+    }
+
+
+def start_turn(user_id: int, turn_id: str, user_message: str) -> tuple[dict, bool]:
+    """Create a running turn once, or return the existing per-user turn."""
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            '''INSERT INTO ai_chat_turn (user_id, turn_id, status, user_message)
+               VALUES (%s, %s, 'running', %s)
+               ON CONFLICT (user_id, turn_id) DO NOTHING
+               RETURNING turn_id, status, reply, cards, error_message, error_code,
+                         error_status, created_at, updated_at''',
+            (user_id, turn_id, user_message),
+        )
+        row = cur.fetchone()
+        created = row is not None
+        if row is None:
+            cur.execute(
+                '''SELECT turn_id, status, reply, cards, error_message, error_code,
+                          error_status, created_at, updated_at
+                   FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s''',
+                (user_id, turn_id),
+            )
+            row = cur.fetchone()
+    if row is None:
+        raise RuntimeError('AI chat turn disappeared after insert conflict')
+    return _turn_view(row), created
+
+
+def get_turn(user_id: int, turn_id: str) -> dict | None:
+    """Read a turn only inside the authenticated user's namespace."""
+    with get_cursor() as cur:
+        cur.execute(
+            '''SELECT turn_id, status, reply, cards, error_message, error_code,
+                      error_status, created_at, updated_at
+               FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s''',
+            (user_id, turn_id),
+        )
+        row = cur.fetchone()
+    return _turn_view(row)
+
+
+def _insert_turn_messages(cur, user_id: int, user_message: str, assistant_message: str, cards=None):
+    cards_json = Json(cards) if cards is not None else None
+    cur.execute(
+        '''INSERT INTO ai_chat_message (user_id, role, content, cards)
+           VALUES (%s, 'user', %s, NULL)''',
+        (user_id, user_message),
+    )
+    cur.execute(
+        '''INSERT INTO ai_chat_message (user_id, role, content, cards)
+           VALUES (%s, 'assistant', %s, %s)''',
+        (user_id, assistant_message or '', cards_json),
+    )
+
+
+def complete_turn(user_id: int, turn_id: str, user_message: str, reply: str, cards=None) -> dict | None:
+    """Atomically finish a running turn and persist its user/assistant message pair."""
+    cards_json = Json(cards) if cards is not None else None
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            '''UPDATE ai_chat_turn
+               SET status = 'succeeded', reply = %s, cards = %s,
+                   error_message = NULL, error_code = NULL, error_status = NULL,
+                   updated_at = now(), completed_at = now()
+               WHERE user_id = %s AND turn_id = %s AND status = 'running'
+               RETURNING turn_id, status, reply, cards, error_message, error_code,
+                         error_status, created_at, updated_at''',
+            (reply or '', cards_json, user_id, turn_id),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            _insert_turn_messages(cur, user_id, user_message, reply or '', cards)
+        else:
+            cur.execute(
+                '''SELECT turn_id, status, reply, cards, error_message, error_code,
+                          error_status, created_at, updated_at
+                   FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s''',
+                (user_id, turn_id),
+            )
+            row = cur.fetchone()
+    return _turn_view(row)
+
+
+def fail_turn(
+    user_id: int, turn_id: str, user_message: str, error_message: str,
+    error_code: str, error_status: int,
+) -> dict | None:
+    """Atomically persist a failed turn and its visible user/assistant message pair."""
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            '''UPDATE ai_chat_turn
+               SET status = 'failed', reply = %s, error_message = %s,
+                   error_code = %s, error_status = %s,
+                   updated_at = now(), completed_at = now()
+               WHERE user_id = %s AND turn_id = %s AND status = 'running'
+               RETURNING turn_id, status, reply, cards, error_message, error_code,
+                         error_status, created_at, updated_at''',
+            (error_message or '', error_message or '', error_code, error_status, user_id, turn_id),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            _insert_turn_messages(cur, user_id, user_message, error_message or '')
+        else:
+            cur.execute(
+                '''SELECT turn_id, status, reply, cards, error_message, error_code,
+                          error_status, created_at, updated_at
+                   FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s''',
+                (user_id, turn_id),
+            )
+            row = cur.fetchone()
+    return _turn_view(row)
+
+
 def append_turn(user_id: int, user_message: str, assistant_message: str, cards=None) -> None:
     """原子写入一轮对话（user + assistant），避免只落一半。"""
     cards_json = Json(cards) if cards is not None else None
@@ -79,7 +208,8 @@ def list_messages(user_id: int, limit: int = 100) -> list[dict]:
 
 
 def clear_messages(user_id: int) -> int:
-    """清空当前用户的全部聊天记录，返回删除条数。"""
+    """清空当前用户的聊天记录和轮次状态，返回删除的消息条数。"""
     with get_cursor(commit=True) as cur:
+        cur.execute('DELETE FROM ai_chat_turn WHERE user_id = %s', (user_id,))
         cur.execute('DELETE FROM ai_chat_message WHERE user_id = %s', (user_id,))
         return cur.rowcount

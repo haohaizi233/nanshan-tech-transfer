@@ -222,6 +222,13 @@ class EvaluationTaskRequest(RequestBody):
 
 class AiChatRequest(RequestBody):
     message: str = Field(..., min_length=1)
+    turnId: str | None = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+        description="客户端生成的幂等问答轮次 ID",
+    )
 
 
 class AiMatchRequest(RequestBody):

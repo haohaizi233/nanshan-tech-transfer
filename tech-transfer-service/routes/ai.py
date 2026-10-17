@@ -23,7 +23,10 @@ from core.middleware import identity
 from core.rate_limit import check_user_rate
 from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from core.response import get_request_id, success
-from modules.ai.chat_store import append_turn, clear_messages, list_messages
+from modules.ai.chat_store import (
+    append_turn, clear_messages, complete_turn, fail_turn, get_turn as get_chat_turn,
+    list_messages, start_turn,
+)
 from modules.ai.service import (
     create_evaluation_task,
     get_evaluation_task,
@@ -275,23 +278,57 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
     message = body.as_dict().get("message")
     if not isinstance(message, str) or not message.strip():
         raise bad_request("message 不能为空")
-    if not settings.AI_AGENT_URL:
-        raise ai_unavailable("AI 助手未配置")
     user_message = message.strip()
+    turn_id = body.as_dict().get("turnId")
+    if turn_id:
+        turn, is_new = start_turn(user["userId"], turn_id, user_message)
+        if not is_new:
+            if turn["status"] == "succeeded":
+                return success(
+                    {"success": True, "message": turn.get("reply") or "", "data": turn.get("cards") or []},
+                    turn.get("reply") or "ok",
+                )
+            if turn["status"] == "failed":
+                raise BizError(
+                    turn.get("errorCode") or "TT_AI_50301",
+                    turn.get("errorMessage") or "AI 助手暂时不可用，请稍后重试",
+                    turn.get("errorStatus") or 503,
+                )
+            return JSONResponse(
+                status_code=202,
+                content=success({"turnId": turn_id, "status": "running"}, "AI 回答仍在生成中"),
+            )
+    if not settings.AI_AGENT_URL:
+        exc = ai_unavailable("AI 助手未配置")
+        if turn_id:
+            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status)
+        raise exc
     try:
         result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
     except BizError as exc:
-        if exc.http_status in (502, 503, 429):
+        if turn_id:
+            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status)
+        elif exc.http_status in (502, 503, 429):
             _persist_failed_turn(user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试")
         raise
-    # 入库：用户提问 + 助手回复（含卡片快照）
-    try:
-        agent_message = (result or {}).get("message") or ""
-        data = (result or {}).get("data")
-        cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
-        append_turn(user["userId"], user_message, agent_message, cards=cards)
     except Exception:
-        logger.exception("[ai/chat] 聊天记录入库失败 user_id=%s", user["userId"])
+        if turn_id:
+            fail_turn(
+                user["userId"], turn_id, user_message,
+                "AI 助手暂时不可用，请稍后重试", "TT_COMMON_50001", 500,
+            )
+        raise
+    # 入库：用户提问 + 助手回复（含卡片快照）
+    agent_message = (result or {}).get("message") or ""
+    data = (result or {}).get("data")
+    cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
+    if turn_id:
+        complete_turn(user["userId"], turn_id, user_message, agent_message, cards=cards)
+    else:
+        try:
+            append_turn(user["userId"], user_message, agent_message, cards=cards)
+        except Exception:
+            logger.exception("[ai/chat] 聊天记录入库失败 user_id=%s", user["userId"])
     return success(result, result.get("message") or "ok")
 
 
@@ -440,6 +477,16 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
 def ai_chat_messages_list(user: dict = Depends(identity)):
     messages = list_messages(user["userId"])
     return success({"messages": messages}, "ok")
+
+
+@router.get("/ai/chat/turns/{turn_id}")
+def ai_chat_turn_detail(turn_id: str, user: dict = Depends(identity)):
+    turn = get_chat_turn(user["userId"], turn_id)
+    if turn is None:
+        from core.errors import TT_AI_40401
+        code, message, status = TT_AI_40401
+        raise BizError(code, "AI 问答轮次不存在", status)
+    return success(turn, "ok")
 
 
 @router.delete("/ai/chat/messages")
