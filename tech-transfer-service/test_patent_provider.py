@@ -131,6 +131,13 @@ def main():
     assert "<sup>2</sup>" in display_delimiters[0]["html"]
     assert "∑<sub>i=1</sub><sup>n</sup>" in display_delimiters[1]["html"]
 
+    chinese_sinr = format_patent_content_blocks("SINR=信号电平 干扰+噪声电平")
+    assert chinese_sinr[0]["type"] == "formula"
+    assert "信号电平" in chinese_sinr[0]["text"]
+    assert "干扰+噪声电平" in chinese_sinr[0]["text"]
+    assert "<span" in chinese_sinr[0]["html"]
+    assert "\f" not in chinese_sinr[0]["text"]
+
     flattened_formula = format_patent_content_blocks(
         "资源量约为1013×10\n12\nm\n3\n。\n\nσ′\nij\n＝λεδ\nij\n+2Gε\nij\n(2.2-2)"
     )

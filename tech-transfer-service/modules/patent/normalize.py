@@ -314,8 +314,11 @@ def _replace_mathml(value) -> str:
     text = _FLATTENED_SINR_RE.sub(
         r"$$SINR=\\frac{Signal level}{Interference+Noise level}$$", text
     )
+    # Use a callable replacement so ``re.sub`` does not interpret ``\f`` in
+    # ``\frac`` as a form-feed escape (the English branch above uses a raw
+    # replacement string for the same reason).
     return _FLATTENED_SINR_ZH_RE.sub(
-        "$$SINR=\\frac{信号电平}{干扰+噪声电平}$$", text
+        lambda _match: "$$SINR=\\frac{信号电平}{干扰+噪声电平}$$", text
     )
 
 
@@ -398,9 +401,14 @@ def _join_math_run(parts: list[str]) -> str:
             continue
         prev, nxt = merged[-1], part[0]
         if nxt in "=＝≈≠≤≥<>∈" or prev in "=＝≈≠≤≥<>∈":
-            merged += " " + part
+            merged += part
         elif prev.isalnum() and nxt.isalnum():
-            merged += " " + part
+            # A Greek variable followed by an OCR-separated subscript (e.g.
+            # ε + ij) belongs together when the suffix is subscript-capable.
+            if re.fullmatch(r"[Α-ωϐϑϕϖ]", prev) and all(char.translate(_SUB_LETTERS) != char for char in part):
+                merged += part
+            else:
+                merged += " " + part
         else:
             merged += part
     return merged
@@ -465,6 +473,11 @@ def _should_join_fragment(prev: str, line: str) -> bool:
 
 def _join_fragment_text(prev: str, line: str) -> str:
     if _FRAGMENT_HEAD_RE.match(line) or prev[-1] in _OPEN_TAIL_CHARS:
+        return prev + line
+    if (
+        re.fullmatch(r"[Α-ωϐϑϕϖ]", prev[-1])
+        and all(char.translate(_SUB_LETTERS) != char for char in line)
+    ):
         return prev + line
     if _FRAGMENT_NUMBER_RE.match(line):
         return prev + line if _CJK_RE.search(prev[-1:]) else prev + " " + line
