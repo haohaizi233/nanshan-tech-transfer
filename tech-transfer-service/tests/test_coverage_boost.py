@@ -523,6 +523,28 @@ class TestAdminInstitutionCrud:
         result = _normalize_import_item({"name": "测试机构", "kind": "enterprise"})
         assert isinstance(result, dict)
 
+    @patch("modules.admin.service.audit_record")
+    @patch("modules.admin.service.get_cursor")
+    def test_import_institutions_returns_canonical_rows_for_row_refresh(self, mock_gc, _mock_audit):
+        cur = MagicMock()
+        cur.fetchone.side_effect = [None, {"id": 42}]
+        mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
+        mock_gc.return_value.__exit__ = MagicMock(return_value=False)
+        from modules.admin.service import import_institutions
+
+        result = import_institutions(
+            {"userId": 1, "userNo": "U001"},
+            {"items": [{"kind": "service", "name": "测试服务机构", "region": "深圳"}]},
+        )
+        assert result["list"] == [{
+            "kind": "service", "name": "测试服务机构", "region": "深圳", "intro": "",
+            "label": "", "unit": "", "functionText": "", "contact": "", "phone": "",
+            "platformTypeKey": "other", "platformType": "", "sortOrder": 0, "sourcePk": None,
+            "status": "active", "serialNo": None, "sourceStatus": None, "orderNum": None,
+            "sourceSite": "", "sourceApi": "", "fetchedAt": None, "logoFileId": "",
+            "detailInfo": "", "userType": "", "id": 42, "action": "create",
+        }]
+
 
 class TestAdminReviewAdvanced:
     @patch("modules.admin.service.get_cursor")

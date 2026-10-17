@@ -10,6 +10,7 @@ import { api } from '../../api/client'
 import { alertDialog, confirmDialog, promptDialog } from '../../utils/appDialog.js'
 import { useAbortable } from '../../api/useAbortable'
 import { useAuthStore } from '../../stores/auth.js'
+import { reconcileAdminRow } from '../../utils/adminRowRefresh.js'
 
 const { run: runApi } = useAbortable()
 const authStore = useAuthStore()
@@ -107,6 +108,22 @@ async function loadList() {
   }
 }
 
+async function applyUserRow(updated) {
+  const result = reconcileAdminRow(rows.value, updated, {
+    filters: applied,
+    keywordFields: ['userNo', 'displayName', 'orgName'],
+    exactFields: ['status'],
+    page: currentPage.value,
+    pageSize: pageSize.value,
+    idField: 'userId',
+  })
+  rows.value = result.rows
+  total.value = Math.max(0, total.value + result.totalDelta)
+  totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  if (currentPage.value > 1 && rows.value.length === 0 && total.value > 0) await loadList()
+}
+
 onMounted(loadList)
 
 const search = () => {
@@ -156,8 +173,9 @@ const closeModal = () => {
 const reloadDetail = async () => {
   const id = currentUser.value?.userId
   if (!id) return
-  currentUser.value = await api(`/admin/users/${id}`)
-  loadList()
+  const updated = await api(`/admin/users/${id}`)
+  currentUser.value = updated
+  await applyUserRow(updated)
 }
 
 const grantAdmin = async m => {

@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../../api/client'
 import { confirmDialog, promptDialog } from '../../utils/appDialog.js'
+import { reconcileAdminRow } from '../../utils/adminRowRefresh.js'
 
 const TABS = [
   { value: 'all', label: '全部' },
@@ -148,6 +149,23 @@ async function loadList() {
   }
 }
 
+async function applyReviewRow(item, status, response = {}) {
+  const updated = { ...item, ...(response && typeof response === 'object' ? response : {}), status }
+  const result = reconcileAdminRow(rows.value, updated, {
+    filters: applied,
+    exactFields: ['status'],
+    keywordFields: [],
+    page: currentPage.value,
+    pageSize: pageSize.value,
+    idField: 'id',
+  })
+  rows.value = result.rows
+  total.value = Math.max(0, total.value + result.totalDelta)
+  totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  if (currentPage.value > 1 && rows.value.length === 0 && total.value > 0) await loadList()
+}
+
 onMounted(() => {
   const requestedTab = String(route.query.tab || '')
   if (TABS.some(item => item.value === requestedTab)) activeTab.value = requestedTab
@@ -222,12 +240,12 @@ const approve = async item => {
   actionError.value = ''
   try {
     const path = actionApi(item, 'approve')
-    await api(path, {
+    const result = await api(path, {
       method: 'POST',
       body: { version: item.version }
     })
     closeDetail()
-    loadList()
+    await applyReviewRow(item, 'approved', result)
   } catch (err) {
     actionError.value = err.message || '操作失败'
   } finally {
@@ -252,12 +270,12 @@ const reject = async item => {
   actionError.value = ''
   try {
     const path = actionApi(item, 'reject')
-    await api(path, {
+    const result = await api(path, {
       method: 'POST',
       body: { version: item.version, reason: trimmed }
     })
     closeDetail()
-    loadList()
+    await applyReviewRow(item, 'rejected', result)
   } catch (err) {
     actionError.value = err.message || '操作失败'
   } finally {

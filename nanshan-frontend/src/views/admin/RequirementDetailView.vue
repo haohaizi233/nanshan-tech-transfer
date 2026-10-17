@@ -76,7 +76,7 @@ const approve = async () => {
       method: 'POST',
       body: { version: detail.value.version }
     })
-    fetchDetail()
+    await fetchDetail()
   } catch (err) {
     actionError.value = err.message || '操作失败'
   } finally {
@@ -109,7 +109,7 @@ const submitReject = async () => {
       body: { version: detail.value.version, reason: rejectReason.value.trim() }
     })
     rejectVisible.value = false
-    fetchDetail()
+    await fetchDetail()
   } catch (err) {
     actionError.value = err.message || '操作失败'
   } finally {

@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../../api/client'
 import { confirmDialog, alertDialog } from '../../utils/appDialog.js'
 import { validateContactWay } from '../../utils/contactValidation.js'
+import { reconcileAdminRow, removeAdminRow } from '../../utils/adminRowRefresh.js'
 
 const MODULES = [
   { key: 'poc', label: '概念验证中心', kind: 'platform', type: 'poc' },
@@ -88,6 +89,56 @@ async function loadList() {
   }
 }
 
+function applyCapitalRow(updated, { created = false } = {}) {
+  const result = reconcileAdminRow(rows.value, updated, {
+    filters: {
+      keyword: applied.keyword,
+      status: applied.status,
+      kind: current.value.kind,
+      platformTypeKey: current.value.type,
+    },
+    keywordFields: ['name', 'intro', 'label', 'unit'],
+    exactFields: ['kind', 'platformTypeKey', 'status'],
+    page: currentPage.value,
+    pageSize: pageSize.value,
+    created,
+  })
+  rows.value = result.rows
+  total.value = Math.max(0, total.value + result.totalDelta)
+  totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  return currentPage.value > 1 && rows.value.length === 0 && total.value > 0
+}
+
+async function refreshCapitalRow(id, options = {}) {
+  try {
+    const updated = options.updated?.id
+      ? options.updated
+      : { ...await api(`/admin/institutions/${id}`), ...(options.updated || {}) }
+    if (applyCapitalRow(updated, options)) await loadList()
+  } catch (err) {
+    if (err.status === 404) {
+      const existed = rows.value.some(row => String(row.id) === String(id))
+      rows.value = removeAdminRow(rows.value, id)
+      if (existed) total.value = Math.max(0, total.value - 1)
+      totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+      if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+      if (currentPage.value > 1 && rows.value.length === 0 && total.value > 0) await loadList()
+      return
+    }
+    actionError.value = `记录已保存，但列表行刷新失败：${err.message || '请稍后重试'}`
+  }
+}
+
+async function removeCapitalRow(id) {
+  const existed = rows.value.some(row => String(row.id) === String(id))
+  rows.value = removeAdminRow(rows.value, id)
+  if (existed) total.value = Math.max(0, total.value - 1)
+  totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  if (currentPage.value > 1 && rows.value.length === 0 && total.value > 0) await loadList()
+}
+
 onMounted(loadList)
 
 const switchModule = key => {
@@ -169,19 +220,21 @@ const save = async () => {
       body.phone = validateContactWay(form.phone, { required: false, label: '联系方式' }).value
       body.functionText = form.functionText.trim()
     }
-    if (modalMode.value === 'create') {
+    const created = modalMode.value === 'create'
+    let saved
+    if (created) {
       body.kind = current.value.kind
       if (current.value.type) {
         body.platformTypeKey = current.value.type
         body.platformType = current.value.label
       }
-      await api('/admin/institutions', { method: 'POST', body })
-      currentPage.value = 1
+      saved = await api('/admin/institutions', { method: 'POST', body })
     } else {
       await api(`/admin/institutions/${currentItem.value.id}`, { method: 'PATCH', body })
+      saved = { id: currentItem.value.id }
     }
     closeModal()
-    loadList()
+    await refreshCapitalRow(saved.id, { created })
   } catch (err) {
     modalError.value = err.message || '保存失败'
   } finally {
@@ -202,8 +255,8 @@ const toggleStatus = async item => {
     })
     if (!ok) return
     actionError.value = ''
-    await api(`/admin/institutions/${item.id}/${goingOnline ? 'online' : 'offline'}`, { method: 'POST' })
-    await loadList()
+    const updated = await api(`/admin/institutions/${item.id}/${goingOnline ? 'online' : 'offline'}`, { method: 'POST' })
+    await refreshCapitalRow(item.id, { updated })
   } catch (err) {
     actionError.value = err.message || '操作失败'
   } finally {
@@ -224,10 +277,7 @@ const removeItem = async item => {
     if (!ok) return
     actionError.value = ''
     await api(`/admin/institutions/${item.id}`, { method: 'DELETE' })
-    if (rows.value.length <= 1 && currentPage.value > 1) {
-      currentPage.value -= 1
-    }
-    await loadList()
+    await removeCapitalRow(item.id)
   } catch (err) {
     actionError.value = err.message || '删除失败'
   } finally {
@@ -297,11 +347,13 @@ const importFile = async event => {
       return
     }
     const data = await api('/admin/institutions/import', { method: 'POST', body: { items } })
+    for (const row of data.list || []) {
+      await refreshCapitalRow(row.id, { updated: row, created: row.action === 'create' })
+    }
     await alertDialog({
       title: '导入完成',
       message: `新增 ${data.created || 0} 条，更新 ${data.updated || 0} 条。`,
     })
-    loadList()
   } catch (err) {
     actionError.value = err.message || '导入失败'
   } finally {

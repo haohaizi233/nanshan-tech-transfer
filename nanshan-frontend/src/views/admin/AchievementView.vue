@@ -28,6 +28,7 @@ import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
 import { extractAchievementFields, mergeExtractedFields } from '../../utils/extractAchievementFields.js'
 import { useAbortable } from '../../api/useAbortable'
 import { useAuthStore } from '../../stores/auth.js'
+import { reconcileAdminRow, removeAdminRow } from '../../utils/adminRowRefresh.js'
 
 const { run: runApi } = useAbortable()
 
@@ -183,6 +184,40 @@ const fetchList = async () => {
   }
 }
 
+const applyAchievementRow = (updated, { created = false } = {}) => {
+  const result = reconcileAdminRow(achievements.value, updated, {
+    filters: appliedFilters,
+    keywordFields: ['title', 'sourceOrgName'],
+    page: currentPage.value,
+    pageSize: pageSize.value,
+    created,
+  })
+  achievements.value = result.rows
+  total.value = Math.max(0, total.value + result.totalDelta)
+  totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  return currentPage.value > 1 && achievements.value.length === 0 && total.value > 0
+}
+
+const refreshAchievementRow = async (id, options = {}) => {
+  try {
+    const updated = await api(`/admin/achievements/${id}`)
+    Object.assign(updated, options.fields || {})
+    if (applyAchievementRow(updated, options)) await fetchList()
+  } catch (err) {
+    if (err.status === 404) {
+      const existed = achievements.value.some(row => String(row.id) === String(id))
+      achievements.value = removeAdminRow(achievements.value, id)
+      if (existed) total.value = Math.max(0, total.value - 1)
+      totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+      if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+      if (currentPage.value > 1 && achievements.value.length === 0 && total.value > 0) await fetchList()
+      return
+    }
+    loadError.value = `记录已保存，但列表行刷新失败：${err.message || '请稍后重试'}`
+  }
+}
+
 const fetchCategories = async () => {
   try {
     const data = await api('/achievements/categories', { guestOn401: true })
@@ -320,7 +355,7 @@ const claimOrganization = async item => {
     await api(`/admin/achievements/${item.id}/claim-organization`, {
       method: 'POST', body: { version: item.version },
     })
-    fetchList()
+    await refreshAchievementRow(item.id, { fields: { pendingOrgAssignment: false } })
   } catch (err) {
     loadError.value = err.message || '归属机构失败'
   }
@@ -631,15 +666,17 @@ const saveAchievement = async (saveAction = null) => {
           sortOrder: index,
         }))
     }
-    if (formMode.value === 'create') {
-      await api('/admin/achievements', { method: 'POST', body })
-      currentPage.value = 1
+    const created = formMode.value === 'create'
+    let saved
+    if (created) {
+      saved = await api('/admin/achievements', { method: 'POST', body })
     } else {
       body.version = achievementForm.version
       await api(`/admin/achievements/${editingId.value}`, { method: 'PATCH', body })
+      saved = { id: editingId.value }
     }
     formVisible.value = false
-    fetchList()
+    await refreshAchievementRow(saved.id, { created })
   } catch (err) {
     formError.value = err.message || '保存成果失败'
   } finally {
@@ -715,7 +752,7 @@ const handleApprove = async () => {
 
     modalVisible.value = false
 
-    fetchList()
+    await refreshAchievementRow(auditItem.value.id)
   } catch (err) {
     auditError.value = err.message || '操作失败，请稍后重试'
   } finally {
@@ -748,7 +785,7 @@ const handleReject = async () => {
 
     modalVisible.value = false
 
-    fetchList()
+    await refreshAchievementRow(auditItem.value.id)
   } catch (err) {
     auditError.value = err.message || '操作失败，请稍后重试'
   } finally {
@@ -798,7 +835,7 @@ const offlineAchievement = async item => {
       method: 'POST',
       body: { version: item.version },
     })
-    fetchList()
+    await refreshAchievementRow(item.id)
   } catch (err) {
     await alertDialog({ title: '下架失败', message: err.message || '请稍后重试' })
   }

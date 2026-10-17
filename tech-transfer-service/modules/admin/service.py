@@ -1342,7 +1342,9 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
                 row_id = cur.fetchone()["id"]
                 created += 1
                 action = "create"
-            results.append({"id": row_id, "name": item["name"], "kind": item["kind"], "action": action})
+            # Include the canonical row so the admin UI can reconcile only the
+            # affected rows after an import instead of refetching the table.
+            results.append({**item, "id": row_id, "action": action})
         audit_record(
             "institution.import", "institution", resource_id=None,
             actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),

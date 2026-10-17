@@ -65,6 +65,26 @@ const previewSections = computed(() => activeNormalized.value.sections || [])
 const previewPatents = computed(() => activeNormalized.value.patents || [])
 const previewLinks = computed(() => activeNormalized.value.links || [])
 
+function upsertBatchSummary(batch) {
+  if (!batch?.id) return
+  const summary = {
+    id: batch.id,
+    sourceFilename: batch.sourceFilename,
+    sourceOrgName: batch.sourceOrgName,
+    status: batch.status,
+    totalCount: batch.totalCount,
+    successCount: batch.successCount,
+    failedCount: batch.failedCount,
+    createdAt: batch.createdAt,
+    completedAt: batch.completedAt,
+  }
+  const exists = batches.value.some(item => String(item.id) === String(batch.id))
+  const next = exists
+    ? batches.value.map(item => String(item.id) === String(batch.id) ? { ...item, ...summary } : item)
+    : [...batches.value, summary]
+  batches.value = next.sort((left, right) => Number(right.id) - Number(left.id)).slice(0, 50)
+}
+
 async function loadCandidateImage(image) {
   const fileId = Number(image?.fileId)
   if (!fileId || candidateImageUrls.value[fileId] || inflightImageIds.has(fileId)) return
@@ -130,6 +150,7 @@ async function selectBatch(batch) {
   activeItemIndex.value = 0
   try {
     selectedBatch.value = await api(`/admin/achievement-imports/${batch.id}`)
+    upsertBatchSummary(selectedBatch.value)
     loadItemImages(selectedBatch.value.items?.[0])
   } catch (error) {
     await alertDialog({ title: '加载失败', message: error.message || '导入详情加载失败' })
@@ -153,8 +174,8 @@ async function clearStaging() {
     await api('/admin/achievement-imports/clear', { method: 'POST', body: {} })
     revokeCandidateUrls() // 清空暂存后撤销所有 blob URL
     selectedBatch.value = null
+    batches.value = []
     activeItemIndex.value = 0
-    await loadBatches()
   } catch (error) {
     await alertDialog({ title: '清空失败', message: error.message || '请刷新后重试' })
   } finally {
@@ -205,10 +226,16 @@ async function runImportFlow(files) {
       title: '导入完成',
       message: summarizeAchievementImport(data),
     })
-    await loadBatches()
+    const summaries = await Promise.all((data.list || []).map(item => api(`/admin/achievement-imports/${item.batchId}`)))
+    summaries.forEach(upsertBatchSummary)
     const nextId = data.batchId || data.list?.[0]?.batchId
-    const next = batches.value.find(item => item.id === nextId) || batches.value[0]
-    if (next) await selectBatch(next)
+    const next = summaries.find(item => String(item.id) === String(nextId)) || summaries[0]
+    if (next) {
+      revokeCandidateUrls()
+      selectedBatch.value = next
+      activeItemIndex.value = 0
+      loadItemImages(next.items?.[0])
+    }
   } catch (error) {
     await alertDialog({
       title: error.code === 'NO_IMPORT_FILES' ? '未找到可导入文件' : '导入失败',
@@ -231,7 +258,7 @@ async function publishItem(item) {
   publishingId.value = item.id
   try {
     await api(`/admin/achievement-imports/${selectedBatch.value.id}/items/${item.id}/publish`, { method: 'POST', body: {} })
-    await Promise.all([selectBatch(selectedBatch.value), loadBatches()])
+    await selectBatch(selectedBatch.value)
   } catch (error) {
     await alertDialog({ title: '发布失败', message: error.message || '请刷新后重试' })
   } finally {

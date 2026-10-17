@@ -6,6 +6,7 @@ import { resolveContentFormActions } from '../../utils/contentFormActions.js'
 import { confirmDialog, alertDialog } from '../../utils/appDialog.js'
 import { validatePhone } from '../../utils/contactValidation.js'
 import { useAuthStore } from '../../stores/auth.js'
+import { reconcileAdminRow, removeAdminRow } from '../../utils/adminRowRefresh.js'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -72,6 +73,38 @@ const fetchList = async () => {
     loadError.value = err.message || '加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+const applyDemandRow = (updated, { created = false } = {}) => {
+  const result = reconcileAdminRow(tableData.value, updated, {
+    filters: appliedFilters,
+    keywordFields: ['title', 'orgName'],
+    page: currentPage.value,
+    pageSize: pageSize.value,
+    created,
+  })
+  tableData.value = result.rows
+  total.value = Math.max(0, total.value + result.totalDelta)
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  return currentPage.value > 1 && tableData.value.length === 0 && total.value > 0
+}
+
+const refreshDemandRow = async (id, options = {}) => {
+  try {
+    const updated = await api(`/admin/demands/${id}`)
+    Object.assign(updated, options.fields || {})
+    if (applyDemandRow(updated, options)) await fetchList()
+  } catch (err) {
+    if (err.status === 404) {
+      const existed = tableData.value.some(row => String(row.id) === String(id))
+      tableData.value = removeAdminRow(tableData.value, id)
+      if (existed) total.value = Math.max(0, total.value - 1)
+      if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+      if (currentPage.value > 1 && tableData.value.length === 0 && total.value > 0) await fetchList()
+      return
+    }
+    loadError.value = `记录已保存，但列表行刷新失败：${err.message || '请稍后重试'}`
   }
 }
 
@@ -226,7 +259,7 @@ const claimOrganization = async item => {
   if (!ok) return
   try {
     await api(`/admin/demands/${item.id}/claim-organization`, { method: 'POST', body: { version: item.version } })
-    fetchList()
+    await refreshDemandRow(item.id, { fields: { pendingOrgAssignment: false } })
   } catch (err) { loadError.value = err.message || '归属机构失败' }
 }
 
@@ -240,7 +273,7 @@ const closeDemand = async item => {
   if (!ok) return
   try {
     await api(`/admin/demands/${item.id}/close`, { method: 'POST', body: { version: item.version } })
-    fetchList()
+    await refreshDemandRow(item.id)
   } catch (err) {
     await alertDialog({ title: '关闭失败', message: err.message || '请稍后重试' })
   }
@@ -272,8 +305,17 @@ const saveDemand = async (saveAction = null) => {
     if (demandForm.tagsText.trim()) body.tags = splitText(demandForm.tagsText)
     if (demandForm.budgetMinWan !== '') body.budgetMinWan = Number(demandForm.budgetMinWan)
     if (demandForm.budgetMaxWan !== '') body.budgetMaxWan = Number(demandForm.budgetMaxWan)
-    if (formMode.value === 'create') { await api('/admin/demands', { method: 'POST', body }); currentPage.value = 1 } else { body.version = demandForm.version; await api(`/admin/demands/${editingId.value}`, { method: 'PATCH', body }) }
-    formVisible.value = false; fetchList()
+    const created = formMode.value === 'create'
+    let saved
+    if (created) {
+      saved = await api('/admin/demands', { method: 'POST', body })
+    } else {
+      body.version = demandForm.version
+      await api(`/admin/demands/${editingId.value}`, { method: 'PATCH', body })
+      saved = { id: editingId.value }
+    }
+    formVisible.value = false
+    await refreshDemandRow(saved.id, { created })
   } catch (err) { formError.value = err.message || '保存需求失败' } finally { formSaving.value = false }
 }
 
@@ -299,7 +341,7 @@ const submitApprove = async () => {
       body: { version: auditItem.value.version }
     })
     auditVisible.value = false
-    fetchList()
+    await refreshDemandRow(auditItem.value.id)
   } catch (err) {
     auditError.value = err.message || '操作失败'
   } finally {
@@ -321,7 +363,7 @@ const submitReject = async () => {
       body: { version: auditItem.value.version, reason: auditReason.value.trim() }
     })
     auditVisible.value = false
-    fetchList()
+    await refreshDemandRow(auditItem.value.id)
   } catch (err) {
     auditError.value = err.message || '操作失败'
   } finally {

@@ -9,6 +9,7 @@ import {
 import { api } from '../../api/client'
 import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
 import { validateContactWay } from '../../utils/contactValidation.js'
+import { reconcileAdminRow, removeAdminRow } from '../../utils/adminRowRefresh.js'
 
 const KIND_OPTIONS = [
   { value: 'platform', label: '平台' },
@@ -165,6 +166,52 @@ async function loadList() {
   }
 }
 
+const applyInstitutionRow = (updated, { created = false } = {}) => {
+  const result = reconcileAdminRow(rows.value, updated, {
+    filters: applied,
+    keywordFields: ['name', 'intro', 'label', 'unit'],
+    exactFields: ['kind', 'status'],
+    page: currentPage.value,
+    pageSize: pageSize.value,
+    created,
+  })
+  rows.value = result.rows
+  total.value = Math.max(0, total.value + result.totalDelta)
+  totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  return currentPage.value > 1 && rows.value.length === 0 && total.value > 0
+}
+
+const refreshInstitutionRow = async (id, options = {}) => {
+  try {
+    const updated = options.updated?.id
+      ? options.updated
+      : { ...await api(`/admin/institutions/${id}`), ...(options.updated || {}) }
+    if (applyInstitutionRow(updated, options)) await loadList()
+  } catch (err) {
+    if (err.status === 404) {
+      const existed = rows.value.some(row => String(row.id) === String(id))
+      rows.value = removeAdminRow(rows.value, id)
+      if (existed) total.value = Math.max(0, total.value - 1)
+      totalPages.value = Math.max(1, Math.ceil(total.value / pageSize.value))
+      if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+      if (currentPage.value > 1 && rows.value.length === 0 && total.value > 0) await loadList()
+      return
+    }
+    actionError.value = `记录已保存，但列表行刷新失败：${err.message || '请稍后重试'}`
+  }
+}
+
+const applyRegistrationRow = (item, status, rejectReason = '') => {
+  if (registrationStatus.value === 'pending') {
+    registrationRows.value = removeAdminRow(registrationRows.value, item.id)
+  } else {
+    registrationRows.value = registrationRows.value.map(row => String(row.id) === String(item.id)
+      ? { ...row, registrationStatus: status, rejectReason }
+      : row)
+  }
+}
+
 onMounted(loadList)
 
 const handleSearch = () => {
@@ -226,9 +273,9 @@ const approveRegistration = async item => {
   reviewingRegistrationId.value = item.id
   registrationError.value = ''
   try {
-    await api(`/admin/institution-registrations/${item.id}/approve`, { method: 'POST' })
-    await loadRegistrations()
-    loadList()
+    const result = await api(`/admin/institution-registrations/${item.id}/approve`, { method: 'POST' })
+    applyRegistrationRow(item, 'approved')
+    if (result.orgId) await refreshInstitutionRow(result.orgId, { created: true })
   } catch (err) {
     registrationError.value = err.message || '审核通过失败'
   } finally {
@@ -250,12 +297,12 @@ const rejectRegistration = async () => {
   reviewingRegistrationId.value = rejectTarget.value.id
   registrationError.value = ''
   try {
-    await api(`/admin/institution-registrations/${rejectTarget.value.id}/reject`, {
+    const rejected = rejectTarget.value
+    await api(`/admin/institution-registrations/${rejected.id}/reject`, {
       method: 'POST', body: { reason: rejectReason.value.trim() }
     })
+    applyRegistrationRow(rejected, 'rejected', rejectReason.value.trim())
     rejectTarget.value = null
-    await loadRegistrations()
-    loadList()
   } catch (err) {
     registrationError.value = err.message || '驳回申请失败'
   } finally {
@@ -362,16 +409,18 @@ const save = async () => {
       }
     }
 
-    if (modalMode.value === 'create') {
+    const created = modalMode.value === 'create'
+    let saved
+    if (created) {
       body.kind = form.kind
-      await api('/admin/institutions', { method: 'POST', body })
-      currentPage.value = 1
+      saved = await api('/admin/institutions', { method: 'POST', body })
     } else {
       await api(`/admin/institutions/${currentItem.value.id}`, { method: 'PATCH', body })
+      saved = { id: currentItem.value.id }
     }
 
     closeModal()
-    loadList()
+    await refreshInstitutionRow(saved.id, { created })
   } catch (err) {
     modalError.value = err.message || '保存失败'
   } finally {
@@ -393,8 +442,8 @@ const toggleStatus = async item => {
 
   actionError.value = ''
   try {
-    await api(`/admin/institutions/${item.id}/${goingOnline ? 'online' : 'offline'}`, { method: 'POST' })
-    loadList()
+    const updated = await api(`/admin/institutions/${item.id}/${goingOnline ? 'online' : 'offline'}`, { method: 'POST' })
+    await refreshInstitutionRow(item.id, { updated })
   } catch (err) {
     actionError.value = err.message || '操作失败'
   }
