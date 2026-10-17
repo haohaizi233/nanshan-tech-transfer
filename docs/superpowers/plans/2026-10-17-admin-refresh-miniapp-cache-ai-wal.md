@@ -142,8 +142,8 @@
 **Files:**
 - Review all files above, migration order, local configuration diffs and current branch state.
 
-- [ ] **Step 1: Run the agreed frontend, mini-app and backend verification commands** after all three implementation commits.
-- [ ] **Step 2: Review the full diff** for accidental environment files, stale-cache leaks, migration omissions and unchanged filters/pagination behavior.
+- [x] **Step 1: Run the agreed frontend, mini-app and backend verification commands** after all three implementation commits.
+- [x] **Step 2: Review the full diff** for accidental environment files, stale-cache leaks, migration omissions and unchanged filters/pagination behavior.
 - [ ] **Step 3: Push the implementation commits and approved design/plan commits** to `origin/master` in the task's separate batches.
 - [ ] **Step 4: Confirm remote branch commit IDs** and report each pushed batch.
 

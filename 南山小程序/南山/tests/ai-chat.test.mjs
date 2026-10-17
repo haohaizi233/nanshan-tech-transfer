@@ -92,6 +92,21 @@ test('ai-match composer stays editable while generating and queues follow-ups lo
   assert.ok(saved >= 0 && rendered > saved, 'persist the terminal result before rendering it')
 })
 
+test('AI page drops an in-flight local turn when the server reports cleared history', () => {
+  const source = readFileSync(
+    new URL('../subpackages/tech-transfer/pages/ai-match/ai-match.vue', import.meta.url),
+    'utf8',
+  )
+  const start = source.indexOf('async runAgentChat(text)')
+  const end = source.indexOf('openCard(card)', start)
+  const runAgentChat = start >= 0 && end > start ? source.slice(start, end) : ''
+  assert.match(runAgentChat, /e\.details\?\.reason === 'chat_history_cleared'/)
+  assert.match(runAgentChat, /acknowledgeTurn\(turnId, uni, this\._scope\)/)
+  assert.match(runAgentChat, /this\.pendingQueue = \[\]/)
+  assert.match(runAgentChat, /await this\.loadHistory\(\)/)
+  assert.match(runAgentChat, /this\.finishTurn\(\)/)
+})
+
 test('AI chat API sends a turn ID and exposes the authenticated status lookup', () => {
   const source = readFileSync(
     new URL('../subpackages/tech-transfer/api/ai.js', import.meta.url),

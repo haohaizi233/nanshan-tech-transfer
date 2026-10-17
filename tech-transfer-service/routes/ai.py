@@ -16,7 +16,14 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from config import settings
-from core.errors import TT_COMMON_42901, BizError, ai_provider_failed, ai_unavailable, bad_request
+from core.errors import (
+    TT_COMMON_42901,
+    BizError,
+    ai_provider_failed,
+    ai_unavailable,
+    bad_request,
+    conflict,
+)
 from core.idempotency import cache_response as cache_idem_response
 from core.idempotency import idempotent_create
 from core.middleware import identity
@@ -323,7 +330,19 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
     data = (result or {}).get("data")
     cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
     if turn_id:
-        complete_turn(user["userId"], turn_id, user_message, agent_message, cards=cards)
+        completed_turn = complete_turn(
+            user["userId"], turn_id, user_message, agent_message, cards=cards
+        )
+        if completed_turn is None:
+            raise conflict(
+                "聊天记录已清空，本次回答未保存",
+                {"reason": "chat_history_cleared", "turnId": turn_id},
+            )
+        if completed_turn.get("status") != "succeeded":
+            raise conflict(
+                "本次回答状态已变化，请刷新聊天记录",
+                {"reason": "turn_state_changed", "turnId": turn_id},
+            )
     else:
         try:
             append_turn(user["userId"], user_message, agent_message, cards=cards)

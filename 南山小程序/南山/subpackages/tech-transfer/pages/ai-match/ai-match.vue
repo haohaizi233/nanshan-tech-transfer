@@ -655,6 +655,13 @@
 					}
 				} catch (e) {
 					if (!this._alive || this._scope !== getPageStateScope(uni)) return
+					if (e.details?.reason === 'chat_history_cleared') {
+						acknowledgeTurn(turnId, uni, this._scope)
+						this.pendingQueue = []
+						this.finishTurn()
+						await this.loadHistory()
+						return
+					}
 					const pollResult = await this.waitForTurnStatus(turnId, text)
 					if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
 				} finally {

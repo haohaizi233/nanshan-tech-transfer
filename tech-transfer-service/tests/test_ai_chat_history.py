@@ -202,6 +202,30 @@ class TestAiChatTurnRoutes:
     @patch("routes.ai.check_user_rate")
     @patch("routes.ai.start_turn")
     @patch("routes.ai._forward_to_agent")
+    @patch("routes.ai.complete_turn")
+    def test_cleared_turn_during_generation_does_not_return_unpersisted_answer(
+        self, complete_turn, forward, start_turn, _rate
+    ):
+        from core.errors import BizError
+        from core.request_schemas import AiChatRequest
+        from routes.ai import ai_chat
+
+        with patch("routes.ai.settings.AI_AGENT_URL", "http://agent"):
+            start_turn.return_value = ({"turnId": "turn-123", "status": "running"}, True)
+            forward.return_value = {"success": True, "message": "Found it", "data": []}
+            complete_turn.return_value = None
+
+            with pytest.raises(BizError) as exc_info:
+                ai_chat(AiChatRequest(message="hello", turnId="turn-123"), {"userId": 7})
+
+        assert exc_info.value.http_status == 409
+        assert exc_info.value.code == "TT_COMMON_40902"
+        assert exc_info.value.details == {"reason": "chat_history_cleared", "turnId": "turn-123"}
+        complete_turn.assert_called_once()
+
+    @patch("routes.ai.check_user_rate")
+    @patch("routes.ai.start_turn")
+    @patch("routes.ai._forward_to_agent")
     @patch("routes.ai.fail_turn")
     def test_upstream_failure_is_saved_and_not_retried_for_same_turn(
         self, fail_turn, forward, start_turn, _rate
