@@ -3,6 +3,8 @@
  * 当前回复结束后自动发出下一条；排队过多时折叠预览。
  */
 
+import { getPageStateScope } from './page-state-cache.mjs'
+
 export const QUEUE_STORAGE_KEY = 'tt_ai_chat_send_queue'
 export const MAX_QUEUE_SIZE = 20
 export const QUEUE_PREVIEW_COUNT = 2
@@ -31,8 +33,16 @@ export function normalizeQueueState(raw) {
     version: 1,
     queue,
     inflight: String(src.inflight || '').trim(),
+    inflightTurnId: String(src.inflightTurnId || '').trim(),
     draft: String(src.draft || ''),
   }
+}
+
+export function getQueueStorageKey(scope = 'anonymous') {
+  const normalized = scope === null || scope === undefined || scope === '' ? 'anonymous' : String(scope)
+  return normalized === 'anonymous'
+    ? QUEUE_STORAGE_KEY
+    : `${QUEUE_STORAGE_KEY}:${encodeURIComponent(normalized)}`
 }
 
 function storageApi(storage) {
@@ -41,23 +51,41 @@ function storageApi(storage) {
   return null
 }
 
-export function loadQueueState(storage) {
+export function loadQueueState(storage, scope) {
   const api = storageApi(storage)
   if (!api) return normalizeQueueState(null)
   try {
-    return normalizeQueueState(api.getStorageSync(QUEUE_STORAGE_KEY))
+    const resolvedScope = scope === undefined ? getPageStateScope(api) : scope
+    return normalizeQueueState(api.getStorageSync(getQueueStorageKey(resolvedScope)))
   } catch (e) {
     return normalizeQueueState(null)
   }
 }
 
-export function saveQueueState(state, storage) {
+export function saveQueueState(state, storage, scope) {
   const next = normalizeQueueState(state)
   const api = storageApi(storage)
   if (api && typeof api.setStorageSync === 'function') {
-    api.setStorageSync(QUEUE_STORAGE_KEY, next)
+    const resolvedScope = scope === undefined ? getPageStateScope(api) : scope
+    try {
+      api.setStorageSync(getQueueStorageKey(resolvedScope), next)
+    } catch {
+      // The WAL is the source of truth for an active turn; queue loss is recoverable.
+    }
   }
   return next
+}
+
+export function clearQueueState(storage, scope) {
+  const api = storageApi(storage)
+  if (!api || typeof api.removeStorageSync !== 'function') return false
+  const resolvedScope = scope === undefined ? getPageStateScope(api) : scope
+  try {
+    api.removeStorageSync(getQueueStorageKey(resolvedScope))
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function enqueueMessage(queue, text, max = MAX_QUEUE_SIZE) {

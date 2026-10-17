@@ -129,13 +129,13 @@
 - WAL exposes `beginTurn`, `saveTurnResult`, `loadActiveTurn`, `acknowledgeTurn`, and `clearTurns`, namespaced by authenticated user and turnId.
 - `chatWithAgent(message, turnId)` sends the same `turnId`; `getChatTurn(turnId)` queries server state.
 
-- [ ] **Step 1: Write failing WAL tests** for write-before-send state, completion recovery, acknowledgement, account scoping, malformed data and storage failure.
-- [ ] **Step 2: Run focused Node tests** and confirm expected failures.
-- [ ] **Step 3: Implement the WAL utility** and send queue integration without changing FIFO behavior.
-- [ ] **Step 4: Update AI page lifecycle** to restore cached conversation immediately, reconcile active turn by ID, poll running turns, store completed result before rendering, and never resend an unresolved turn automatically.
-- [ ] **Step 5: Test navigation/reload recovery paths** including a finished server turn, ongoing turn, failed turn, duplicate request and cleared history.
-- [ ] **Step 6: Run focused AI tests and mini-app syntax/build checks**; confirm one user/assistant pair per turn.
-- [ ] **Step 7: Commit** as `fix: recover AI chat turns across page switches`.
+- [x] **Step 1: Write failing WAL tests** for write-before-send state, completion recovery, acknowledgement, account scoping, malformed data and storage failure.
+- [x] **Step 2: Run focused Node tests** and confirm expected failures.
+- [x] **Step 3: Implement the WAL utility** and send queue integration without changing FIFO behavior.
+- [x] **Step 4: Update AI page lifecycle** to restore cached conversation immediately, reconcile active turn by ID, poll running turns, store completed result before rendering, and never resend an unresolved turn automatically.
+- [x] **Step 5: Test navigation/reload recovery paths** including a finished server turn, ongoing turn, failed turn, duplicate request and cleared history.
+- [x] **Step 6: Run focused AI tests and mini-app syntax/build checks**; confirm one user/assistant pair per turn.
+- [x] **Step 7: Commit** as `fix: recover AI chat turns across page switches`.
 
 ### Task 5: Integration review and remote push
 

@@ -11,6 +11,8 @@
  */
 
 import { apiRequest } from './client.js'
+import { clearQueueState } from './ai-chat-queue.mjs'
+import { clearTurns } from './ai-chat-wal.mjs'
 import { AI_FEATURE_ENABLED } from '../../../config/feature-flags.js'
 
 /** 任务处于未终态时前端轮询参数 */
@@ -72,11 +74,18 @@ export async function getEvaluationTask(taskId) {
  * 与 AI 助手对话：自然语言查询科技成果 / 技术需求。
  * 后端转发到 nanshan-ai-agent，返回 {success, intent, message, data:[卡片]}。
  * 卡片 card_type: 'achievement' | 'demand'。
+ * @param {string} turnId 客户端在发送前持久化的幂等轮次 ID
  * @returns {Promise<{success:boolean, intent:string, message:string, data:Array}>}
  */
-export async function chatWithAgent(message) {
+export async function chatWithAgent(message, turnId) {
   assertAiRuntimeEnabled()
-  return apiRequest('POST', '/ai/chat', null, { message }, { timeout: AI_CHAT_TIMEOUT_MS })
+  return apiRequest('POST', '/ai/chat', null, { message, turnId: turnId || undefined }, { timeout: AI_CHAT_TIMEOUT_MS })
+}
+
+/** 查询指定 AI 对话轮次，供页面切换或请求超时后的 WAL 恢复使用。 */
+export async function getChatTurn(turnId) {
+  assertAiRuntimeEnabled()
+  return apiRequest('GET', `/ai/chat/turns/${encodeURIComponent(String(turnId || ''))}`)
 }
 
 // ── 聊天记录持久化（切页/重登后历史不丢）─────────────────────
@@ -96,5 +105,8 @@ export async function getChatHistory() {
  */
 export async function clearChatHistory() {
   assertAiRuntimeEnabled()
-  return apiRequest('DELETE', '/ai/chat/messages')
+  const result = await apiRequest('DELETE', '/ai/chat/messages')
+  clearTurns()
+  clearQueueState()
+  return result
 }

@@ -200,7 +200,8 @@
 	import {
 		chatWithAgent,
 		matchDemand,
-		getChatHistory
+		getChatHistory,
+		getChatTurn
 	} from '../../api/ai.js'
 	import {
 		createWelcomeMessage,
@@ -227,6 +228,13 @@
 		removeQueueItem,
 		saveQueueState
 	} from '../../api/ai-chat-queue.mjs'
+	import {
+		acknowledgeTurn,
+		beginTurn,
+		loadActiveTurn,
+		saveTurnResult
+	} from '../../api/ai-chat-wal.mjs'
+	import { getPageStateScope } from '../../api/page-state-cache.mjs'
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
@@ -235,6 +243,10 @@
 	const SUBPACKAGE_ROOT = '/subpackages/tech-transfer/'
 
 	const ACTIVE_STATUSES = ['published', 'matched']
+
+	function createTurnId() {
+		return 'ai_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 12)
+	}
 
 	function waitMs(ms) {
 		return new Promise((resolve) => setTimeout(resolve, ms))
@@ -255,6 +267,8 @@
 			scrollIntoView: '',
 			pendingQueue: [],
 			inflightText: '',
+			inflightTurnId: '',
+			recoveringTurn: false,
 			queueExpanded: false,
 			historyExpanded: false,
 			waitingDemandPick: false,
@@ -275,6 +289,7 @@
 			return this.typing ? '排队' : '发送'
 		},
 		composerHint() {
+			if (this.recoveringTurn) return '正在确认上一条问答结果；后续消息会排队，不会重复发送'
 			if (this.typing) return '正在生成中，发送后会排队，结束后自动发出'
 			if (this.pendingQueue.length) return '还有排队消息，当前回复结束后会自动发送'
 			return '回答由人工智能生成，请注意甄别'
@@ -295,34 +310,69 @@
 	},
 	onLoad() {
 		this._alive = true
+		this._visible = true
+		this._scope = getPageStateScope(uni)
+		this._sessionReady = false
+		this._requestInFlight = false
+		this._recovering = false
+		this._recoveryTimer = null
 		if (!this.aiEnabled) {
 			uni.setNavigationBarTitle({ title: '南山科转通' })
 			return
 		}
 		this.resumeSession()
 	},
+	onShow() {
+		if (!this.aiEnabled || !this._alive) return
+		this._visible = true
+		const currentScope = getPageStateScope(uni)
+		if (currentScope !== this._scope) {
+			this._scope = currentScope
+			this._sessionReady = false
+			this.messages = [createWelcomeMessage()]
+			this.pendingQueue = []
+			this.inflightText = ''
+			this.inflightTurnId = ''
+			this.inputText = ''
+			this.typing = false
+			this.recoveringTurn = false
+			this.waitingDemandPick = false
+			this.resumeSession()
+			return
+		}
+		if (!this._sessionReady || this._requestInFlight || this._recovering) return
+		const activeTurn = loadActiveTurn(uni, this._scope)
+		if (activeTurn) this.recoverActiveTurn(activeTurn)
+	},
 	onHide() {
+		this._visible = false
 		if (!this.aiEnabled) return
 		this.persistQueue()
 	},
 	onUnload() {
 		this._alive = false
+		this._visible = false
+		if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
 		if (!this.aiEnabled) return
 		this.persistQueue()
 	},
 	methods: {
 		persistQueue() {
+			if (this._scope !== getPageStateScope(uni)) return
 			saveQueueState({
 				queue: this.pendingQueue,
 				inflight: this.inflightText,
+				inflightTurnId: this.inflightTurnId,
 				draft: this.inputText,
-			}, uni)
+			}, uni, this._scope)
 		},
 		async loadHistory() {
 			// 从后端回放历史聊天（切页/重登后不丢）。欢迎语前置，历史卡片快照复用
 			// 现有 agent-cards 模板渲染，openCard 仍按 card.id 跳最新详情页。
+			const requestScope = this._scope
 			try {
 				const data = await getChatHistory()
+				if (requestScope !== this._scope || requestScope !== getPageStateScope(uni)) return false
 				const msgs = (data && data.messages) || []
 				const restored = msgs.map((m) => {
 					const cards = Array.isArray(m.cards) ? m.cards : null
@@ -334,9 +384,10 @@
 				})
 				this.messages = [createWelcomeMessage(), ...restored]
 				if (restored.length) this.scrollToBottom()
+				return true
 			} catch (e) {
-				// 历史拉取失败时保留欢迎语，不阻塞当前会话
-				this.messages = [createWelcomeMessage()]
+				// 历史拉取失败时保留页面与 WAL 中已有内容，不覆盖当前会话。
+				return false
 			}
 		},
 		ensureLocalUserMessage(text) {
@@ -345,45 +396,144 @@
 			this.messages.push(createMessage('user', text))
 			this.scrollToBottom()
 		},
-		async waitForInflightTurn(text) {
-			const deadline = Date.now() + INFLIGHT_WAIT_MS
-			while (this._alive && Date.now() < deadline) {
-				await waitMs(INFLIGHT_POLL_MS)
-				if (!this._alive) return 'left'
-				await this.loadHistory()
-				if (findInflightStatus(this.messages, text) === 'done') return 'done'
-				this.ensureLocalUserMessage(text)
+		async presentSavedTurn(turn) {
+			if (!turn || !['succeeded', 'failed'].includes(turn.status)) return false
+			if (!this._alive || this._scope !== getPageStateScope(uni)) return false
+			this.inflightText = turn.message
+			this.inflightTurnId = turn.turnId
+			await this.loadHistory()
+			if (!this._alive || this._scope !== getPageStateScope(uni)) return false
+			if (findInflightStatus(this.messages, turn.message) !== 'done') {
+				this.ensureLocalUserMessage(turn.message)
+				const result = turn.result || {}
+				this.pushMessage('assistant', result.content || 'AI 助手暂时不可用，请稍后重试。', {
+					type: result.type || 'text',
+					payload: result.payload || null,
+				})
 			}
-			return 'timeout'
+			acknowledgeTurn(turn.turnId, uni, this._scope)
+			this.finishTurn()
+			return true
+		},
+		async saveServerTurn(turn) {
+			if (!turn || !['succeeded', 'failed'].includes(turn.status)) return false
+			let result
+			if (turn.status === 'succeeded') {
+				result = formatAgentReply({
+					success: true,
+					message: turn.reply || '',
+					data: Array.isArray(turn.cards) ? turn.cards : [],
+				})
+			} else {
+				result = {
+					content: String(turn.errorMessage || turn.reply || 'AI 助手暂时不可用，请稍后重试。'),
+					type: 'text',
+					payload: null,
+				}
+			}
+			const saved = saveTurnResult(turn.turnId, result, turn.status, uni, this._scope)
+			if (!saved) return false
+			return this.presentSavedTurn(loadActiveTurn(uni, this._scope))
+		},
+		async waitForTurnStatus(turnId, message) {
+			const deadline = Date.now() + INFLIGHT_WAIT_MS
+			let nextPollAt = Date.now()
+			while (this._alive && Date.now() < deadline) {
+				if (!this._visible) return 'paused'
+				const delay = nextPollAt - Date.now()
+				if (delay > 0) await waitMs(delay)
+				if (!this._alive || this._scope !== getPageStateScope(uni)) return 'left'
+				if (!this._visible) return 'paused'
+				try {
+					const turn = await getChatTurn(turnId)
+					if (turn && ['succeeded', 'failed'].includes(turn.status)) {
+						this.inflightText = message
+						this.inflightTurnId = turnId
+						this.ensureLocalUserMessage(message)
+						if (await this.saveServerTurn(turn)) return 'done'
+					}
+				} catch (e) {
+					// A timeout/404 may race the original POST. Keep the WAL pending and never resend it.
+				}
+				nextPollAt = Date.now() + INFLIGHT_POLL_MS
+			}
+			return this._alive ? 'pending' : 'left'
+		},
+		scheduleTurnRecovery() {
+			if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
+			this._recoveryTimer = setTimeout(() => {
+				this._recoveryTimer = null
+				if (!this._alive || this._requestInFlight || this._recovering) return
+				const active = loadActiveTurn(uni, this._scope)
+				if (active) this.recoverActiveTurn(active)
+			}, INFLIGHT_POLL_MS * 3)
+		},
+		async recoverActiveTurn(turn) {
+			if (!turn || !this._alive || this._recovering) return
+			if (turn.status !== 'pending') {
+				await this.presentSavedTurn(turn)
+				return
+			}
+			this._recovering = true
+			this.recoveringTurn = true
+			this.typing = true
+			this.inflightText = turn.message
+			this.inflightTurnId = turn.turnId
+			this.ensureLocalUserMessage(turn.message)
+			this.persistQueue()
+			try {
+				const result = await this.waitForTurnStatus(turn.turnId, turn.message)
+				if (result === 'pending' && this._alive) this.scheduleTurnRecovery()
+			} finally {
+				this._recovering = false
+				const active = loadActiveTurn(uni, this._scope)
+				if (this._alive && active && active.turnId === turn.turnId && active.status === 'pending') {
+					this.typing = true
+					this.recoveringTurn = true
+				} else if (this._alive && !this.inflightTurnId) {
+					this.pumpQueue()
+				}
+			}
 		},
 		async resumeSession() {
-			const saved = loadQueueState(uni)
+			const saved = loadQueueState(uni, this._scope)
 			this.pendingQueue = saved.queue
 			if (saved.draft) this.inputText = saved.draft
 			this.inflightText = saved.inflight
+			this.inflightTurnId = saved.inflightTurnId
 			await this.loadHistory()
-			if (!this._alive) return
+			if (!this._alive || this._scope !== getPageStateScope(uni)) return
+			this._sessionReady = true
+			const activeTurn = loadActiveTurn(uni, this._scope)
+			if (activeTurn) {
+				this.inflightText = activeTurn.message
+				this.inflightTurnId = activeTurn.turnId
+				this.ensureLocalUserMessage(activeTurn.message)
+				if (activeTurn.status === 'pending') await this.recoverActiveTurn(activeTurn)
+				else await this.presentSavedTurn(activeTurn)
+				return
+			}
 			const status = findInflightStatus(this.messages, this.inflightText)
-			if (status === 'idle' || status === 'done') {
+			if (!this.inflightText || status === 'done') {
 				this.inflightText = ''
+				this.inflightTurnId = ''
 				this.persistQueue()
 				this.pumpQueue()
 				return
 			}
-			this.ensureLocalUserMessage(this.inflightText)
-			this.typing = true
-			const result = await this.waitForInflightTurn(this.inflightText)
-			if (!this._alive) return
-			this.typing = false
-			if (result === 'done') {
+			const interruptedText = this.inflightText
+			if (resolveSkillCommand(interruptedText)?.id === 'match') {
 				this.inflightText = ''
 				this.persistQueue()
-				this.pumpQueue()
+				this.dispatchUserText(interruptedText)
 				return
 			}
-			const text = this.inflightText
+			this.ensureLocalUserMessage(interruptedText)
+			this.pushMessage('assistant', '上一版本中断的问答没有可恢复的轮次记录。为避免重复请求，我没有自动重发；如需继续，请手动重新发送。')
 			this.inflightText = ''
-			this.dispatchUserText(text)
+			this.inflightTurnId = ''
+			this.persistQueue()
+			this.pumpQueue()
 		},
 		pumpQueue() {
 			if (!this._alive || this.typing || this.waitingDemandPick) return
@@ -398,10 +548,12 @@
 		},
 		finishTurn() {
 			this.typing = false
+			this.recoveringTurn = false
 			this.inflightText = ''
+			this.inflightTurnId = ''
 			this.persistQueue()
 			this.scrollToBottom()
-			if (this._alive) this.pumpQueue()
+			if (this._alive && !this._requestInFlight && !this._recovering) this.pumpQueue()
 		},
 		removeQueued(id) {
 			this.pendingQueue = removeQueueItem(this.pendingQueue, id)
@@ -450,15 +602,17 @@
 			},
 			dispatchUserText(text) {
 				this.waitingDemandPick = false
-				this.ensureLocalUserMessage(text)
-				this.inflightText = text
-				this.persistQueue()
 				const skill = resolveSkillCommand(text)
 				if (skill && skill.id === 'match') {
+					this.ensureLocalUserMessage(text)
+					this.inflightText = text
+					this.persistQueue()
 					this.runMatchSkill()
 					return
 				}
 				if (text.startsWith('/')) {
+					this.ensureLocalUserMessage(text)
+					this.inflightText = text
 					this.pushMessage('assistant', '未识别的技能。输入 / 查看可用技能，当前支持 /匹配。')
 					this.finishTurn()
 					return
@@ -466,25 +620,51 @@
 				this.runAgentChat(text)
 			},
 			async runAgentChat(text) {
-				this.typing = true
-				try {
-					const res = await chatWithAgent(text)
-					if (!this._alive) return
-					const reply = formatAgentReply(res)
-					this.pushMessage('assistant', reply.content, {
-						type: reply.type,
-						payload: reply.payload,
+				const turnId = createTurnId()
+				if (this._scope !== getPageStateScope(uni)) return
+				if (!beginTurn({ turnId, message: text }, uni, this._scope)) {
+					this.inputText = text
+					const active = loadActiveTurn(uni, this._scope)
+					uni.showToast({
+						title: active ? '上一条问答仍在恢复，当前问题未发送' : '本地暂存失败，问题未发送',
+						icon: 'none',
 					})
-					await this.loadHistory()
+					return
+				}
+				this.inflightText = text
+				this.inflightTurnId = turnId
+				this.ensureLocalUserMessage(text)
+				this.persistQueue()
+				this.typing = true
+				this.recoveringTurn = false
+				this._requestInFlight = true
+				try {
+					const res = await chatWithAgent(text, turnId)
+					if (!this._alive || this._scope !== getPageStateScope(uni)) return
+					if (res && res.status === 'running') {
+						const pollResult = await this.waitForTurnStatus(turnId, text)
+						if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
+						return
+					}
+					const reply = formatAgentReply(res)
+					if (saveTurnResult(turnId, reply, 'succeeded', uni, this._scope)) {
+						await this.presentSavedTurn(loadActiveTurn(uni, this._scope))
+					} else {
+						const pollResult = await this.waitForTurnStatus(turnId, text)
+						if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
+					}
 				} catch (e) {
-					if (!this._alive) return
-					const code = e && e.code
-					let msg = (e && e.message) || 'AI 助手暂时不可用，请稍后重试。'
-					if (code === 'AI_DISABLED') msg = '该功能即将开放'
-					this.pushMessage('assistant', msg)
-					// 失败时不拉历史：服务端可能尚未入库，loadHistory 会冲掉刚显示的问答
+					if (!this._alive || this._scope !== getPageStateScope(uni)) return
+					const pollResult = await this.waitForTurnStatus(turnId, text)
+					if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
 				} finally {
-					if (this._alive) this.finishTurn()
+					this._requestInFlight = false
+					if (this._alive && this.inflightTurnId === turnId) {
+						this.typing = true
+						this.recoveringTurn = true
+					} else if (this._alive && !this.inflightTurnId) {
+						this.pumpQueue()
+					}
 				}
 			},
 			openCard(card) {
