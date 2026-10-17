@@ -1,1 +1,0 @@
-function t(t){return new Promise(e=>setTimeout(e,t))}async function e(e,{attempts:a=3,baseDelayMs:r=300,sleep:n=t}={}){let s;for(let t=1;t<=a;t+=1)try{return await e()}catch(o){s=o,t<a&&await n(r*t)}throw s}export{e as r};
