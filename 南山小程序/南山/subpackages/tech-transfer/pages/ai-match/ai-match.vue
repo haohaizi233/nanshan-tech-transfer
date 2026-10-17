@@ -234,7 +234,7 @@
 		loadActiveTurn,
 		saveTurnResult
 	} from '../../api/ai-chat-wal.mjs'
-	import { getPageStateScope } from '../../api/page-state-cache.mjs'
+	import { getPageStateScope, createPageStateMixin } from '../../api/page-state-cache.mjs'
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
@@ -253,6 +253,10 @@
 	}
 
 	export default {
+		mixins: [createPageStateMixin({
+			route: 'pages/ai-match/ai-match',
+			groups: [{ name: 'chat', dataClass: 'draft', fields: ['messages', 'pendingQueue', 'inputText'] }]
+		})],
 		components: {
 			AppTabbar,
 			AiGeneratedMark
@@ -340,7 +344,36 @@
 			this.resumeSession()
 			return
 		}
-		if (!this._sessionReady || this._requestInFlight || this._recovering) return
+		if (this._recovering) return
+		if (this._requestInFlight) {
+			// 请求可能已中断（页面切走时fetch被abort），检查WAL中是否有未完成的turn
+			const activeTurn = loadActiveTurn(uni, this._scope)
+			if (activeTurn && activeTurn.status === 'pending') {
+				// 容灾：pending超过2分钟视为超时，强制清理
+				if (Date.now() - (activeTurn.createdAt || 0) > 2 * 60 * 1000) {
+					acknowledgeTurn(activeTurn.turnId, uni, this._scope)
+					this._requestInFlight = false
+					this.typing = false
+					this.recoveringTurn = false
+					this.inflightText = ''
+					this.inflightTurnId = ''
+					this.pushMessage('assistant', '上一条问答超时未返回，已自动清理。请重新发送。')
+					this.persistQueue()
+					this.pumpQueue()
+				} else {
+					this._requestInFlight = false
+					this.recoverActiveTurn(activeTurn)
+				}
+			} else if (!activeTurn) {
+				// WAL中没有turn，说明请求从未发出或已完成，重置状态
+				this._requestInFlight = false
+				this.typing = false
+				this.recoveringTurn = false
+				this.pumpQueue()
+			}
+			return
+		}
+		if (!this._sessionReady) return
 		const activeTurn = loadActiveTurn(uni, this._scope)
 		if (activeTurn) this.recoverActiveTurn(activeTurn)
 	},
@@ -488,6 +521,18 @@
 				this._recovering = false
 				const active = loadActiveTurn(uni, this._scope)
 				if (this._alive && active && active.turnId === turn.turnId && active.status === 'pending') {
+					// 容灾：pending超过2分钟视为超时，强制清理
+					if (Date.now() - (active.createdAt || 0) > 2 * 60 * 1000) {
+						acknowledgeTurn(active.turnId, uni, this._scope)
+						this.typing = false
+						this.recoveringTurn = false
+						this.inflightText = ''
+						this.inflightTurnId = ''
+						this.persistQueue()
+						this.pushMessage('assistant', '上一条问答超时未返回，已自动清理。请重新发送。')
+						this.pumpQueue()
+						return
+					}
 					this.typing = true
 					this.recoveringTurn = true
 				} else if (this._alive && !this.inflightTurnId) {
@@ -506,12 +551,18 @@
 			this._sessionReady = true
 			const activeTurn = loadActiveTurn(uni, this._scope)
 			if (activeTurn) {
-				this.inflightText = activeTurn.message
-				this.inflightTurnId = activeTurn.turnId
-				this.ensureLocalUserMessage(activeTurn.message)
-				if (activeTurn.status === 'pending') await this.recoverActiveTurn(activeTurn)
-				else await this.presentSavedTurn(activeTurn)
-				return
+				// 容灾：pending超过2分钟视为超时，强制清理
+				if (activeTurn.status === 'pending' && Date.now() - (activeTurn.createdAt || 0) > 2 * 60 * 1000) {
+					acknowledgeTurn(activeTurn.turnId, uni, this._scope)
+					this.pushMessage('assistant', '上一条问答超时未返回，已自动清理。请重新发送。')
+				} else {
+					this.inflightText = activeTurn.message
+					this.inflightTurnId = activeTurn.turnId
+					this.ensureLocalUserMessage(activeTurn.message)
+					if (activeTurn.status === 'pending') await this.recoverActiveTurn(activeTurn)
+					else await this.presentSavedTurn(activeTurn)
+					return
+				}
 			}
 			const status = findInflightStatus(this.messages, this.inflightText)
 			if (!this.inflightText || status === 'done') {

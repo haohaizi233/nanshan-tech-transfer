@@ -16,10 +16,26 @@ const TRANSIENT_PATH_KEY = /(?:temp|tmp|local).*(?:path|file)|(?:path|file).*(?:
 const pendingWrites = new Map()
 const pageMeta = new WeakMap()
 
+function createLocalStorageAdapter() {
+  if (typeof localStorage === 'undefined') return null
+  return {
+    getStorageSync: (key) => {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : '' } catch { return '' }
+    },
+    setStorageSync: (key, value) => {
+      try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+    },
+    removeStorageSync: (key) => {
+      try { localStorage.removeItem(key) } catch {}
+    }
+  }
+}
+
 function resolveStorage(storage) {
-  if (storage && typeof storage.getStorageSync === 'function') return storage
-  if (typeof uni !== 'undefined' && uni && typeof uni.getStorageSync === 'function') return uni
-  return null
+  const hasFullStorage = (obj) => obj && typeof obj.getStorageSync === 'function' && typeof obj.setStorageSync === 'function'
+  if (hasFullStorage(storage)) return storage
+  if (typeof uni !== 'undefined' && hasFullStorage(uni)) return uni
+  return createLocalStorageAdapter()
 }
 
 function normalizeScope(scope) {
