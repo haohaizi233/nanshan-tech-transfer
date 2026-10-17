@@ -2,6 +2,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
+import { ensureLocalEnv } from './scripts/ensure-local-env.mjs'
+
+// config/local.env.js 不入库，缺失时先按模板生成，避免拉代码后直接构建报模块找不到。
+ensureLocalEnv()
 
 // HBuilderX 工程入口在项目根：index.html → /main.js。
 // uni CLI 默认 UNI_INPUT_DIR=./src，插件只改写 src/main.js（注入 mount），

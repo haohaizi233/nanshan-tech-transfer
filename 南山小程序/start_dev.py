@@ -200,6 +200,19 @@ def skip(msg):
     print(f"  [SKIP] {msg}")
 
 
+def ensure_local_env():
+    """config/local.env.js 不入库；缺失时按模板生成，避免拉代码后前端直接构建失败。"""
+    target = FRONTEND_DIR / "config" / "local.env.js"
+    template = FRONTEND_DIR / "config" / "local.env.example.js"
+    if target.exists():
+        return
+    if not template.exists():
+        warn("缺少 config/local.env.example.js，无法生成 config/local.env.js")
+        return
+    target.write_bytes(template.read_bytes())
+    warn("已按 config/local.env.example.js 生成 config/local.env.js（本地文件，不入库）")
+
+
 # ── Runtime 模型 ─────────────────────────────────────────────
 class FrontendRuntime(str, Enum):
     WEIXIN = "weixin"
@@ -1743,6 +1756,8 @@ def main():
         pass
 
     args = parse_args()
+
+    ensure_local_env()
 
     if args.doctor:
         return 0 if run_doctor() else 1

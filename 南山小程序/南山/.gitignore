@@ -4,3 +4,5 @@ node_modules/
 src/
 .DS_Store
 .hbuilderx/
+# 本地环境配置：按 config/local.env.example.js 复制生成，不入库
+config/local.env.js

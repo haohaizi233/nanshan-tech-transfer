@@ -2,6 +2,8 @@
   "name": "nanshan-miniprogram-h5",
   "private": true,
   "scripts": {
+    "prepare": "node scripts/ensure-local-env.mjs",
+    "predev:h5": "node scripts/ensure-local-env.mjs",
     "dev:h5": "uni"
   },
   "dependencies": {

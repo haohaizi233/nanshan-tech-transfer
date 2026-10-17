@@ -120,6 +120,14 @@ python start_dev.py --strict
 
 HBuilderX CLI 检测顺序：环境变量 `HBX_CLI` > 默认路径 > `D:\HBuilderX` 扫描（取最新版本） > PATH。
 
+### 3.1 本地环境配置（`config/local.env.js`）
+
+`config/local.env.js` 存放本机的 `APP_ENV` / `HOST_MODE` / `AUTH_PROVIDER` / `API_BASE`，**不入库**（已在 `南山/.gitignore` 忽略）。仓库里入库的是模板 `config/local.env.example.js`。
+
+- 首次拉代码后无需手动创建：`npm run dev:h5`、vite 构建、`start_dev.py` 检测到文件缺失时会自动按模板生成；
+- 也可以手动复制：`cp config/local.env.example.js config/local.env.js`；
+- 模板默认是本地开发值（`APP_ENV=local`、`AUTH_PROVIDER=mock`）。**构建 staging / production 版本前必须先改成真实配置**，否则 mock 鉴权会被打进产物。
+
 ## 4. 微信小程序开发
 
 ```bash
