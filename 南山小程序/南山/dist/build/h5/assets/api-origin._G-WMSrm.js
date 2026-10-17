@@ -1,0 +1,1 @@
+import{r as a}from"./index-C284wXAK.js";function i(i={},r=globalThis.location){if("local"===i.hostMode)return a({appEnv:i.appEnv,localApiBase:i.apiBase,pageLocation:r});if(i.apiBase)return String(i.apiBase).replace(/\/$/,"");try{if(r&&r.origin)return r.origin}catch(o){}return""}export{i as r};
