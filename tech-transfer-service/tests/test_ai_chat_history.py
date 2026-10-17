@@ -101,6 +101,20 @@ class TestAiChatTurnStore:
         assert "ON CONFLICT" in cur.execute.call_args_list[0].args[0]
 
     @patch("modules.ai.chat_store.get_cursor")
+    def test_get_turn_query_is_scoped_by_user_and_turn_id(self, mock_get_cursor):
+        from modules.ai.chat_store import get_turn
+
+        cur = MagicMock()
+        cur.fetchone.return_value = _turn_row()
+        mock_get_cursor.return_value = _mock_cursor_context(cur)
+
+        result = get_turn(8, "turn-123")
+
+        assert result["turnId"] == "turn-123"
+        assert "WHERE user_id = %s AND turn_id = %s" in cur.execute.call_args.args[0]
+        assert cur.execute.call_args.args[1] == (8, "turn-123")
+
+    @patch("modules.ai.chat_store.get_cursor")
     def test_turn_result_and_message_pair_commit_atomically(self, mock_get_cursor):
         from modules.ai.chat_store import complete_turn
 
