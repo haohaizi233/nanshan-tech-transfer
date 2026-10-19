@@ -120,8 +120,9 @@ export function beginTurn(turn, storage, scope) {
   const existing = readEntry(storage, resolvedScope)
   if (!existing.ok) return false
   if (existing.turn) {
-    // 用户主动发新消息 = 放弃旧turn，直接覆盖
-    removeQuietly(storageApi(storage), keyFor(resolvedScope))
+    // 未确认的 turn 不允许被覆盖：覆盖会让恢复中的问答永久丢失，
+    // 正是 WAL 要防的场景。页面侧在 typing 期间会走排队，不会走到这里。
+    return false
   }
   const safeTurn = {
     turnId,
