@@ -1,8 +1,11 @@
 import json
 from typing import Any
 
+from app.config import settings
+
 from app.llm_client import chat_completion, extract_llm_json
 from app.runtime_budget import remaining_seconds
+from app.runtime_trace import trace_stage
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -74,6 +77,20 @@ def _short_text(
     return text[:max_length] + "..."
 
 
+def _bounded_value(value: Any, depth: int = 0) -> Any:
+    if isinstance(value, str):
+        return _short_text(value, 200)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if depth >= 3:
+        return None
+    if isinstance(value, list):
+        return [_bounded_value(item, depth + 1) for item in value[:4]]
+    if isinstance(value, dict):
+        return {str(key)[:80]: _bounded_value(item, depth + 1) for key, item in list(value.items())[:12]}
+    return _short_text(value, 200)
+
+
 def _achievement_for_llm(item: dict) -> dict:
     """
     只提供重排所需字段。
@@ -133,6 +150,7 @@ def _demand_for_llm(item: dict) -> dict:
     }
 
 
+@trace_stage("rerank")
 def rerank_results(
     intent: str,
     user_message: str,
@@ -153,6 +171,10 @@ def rerank_results(
     if len(candidates) <= 3:
         return candidates[:top_n]
 
+    remaining = remaining_seconds()
+    if remaining is not None and remaining < 1.0:
+        return candidates[:top_n]
+
     if intent == "search_achievement":
         llm_candidates = [
             _achievement_for_llm(item)
@@ -169,10 +191,18 @@ def rerank_results(
         return candidates[:top_n]
 
     user_content = {
-        "user_query": user_message,
+        "user_query": _short_text(user_message, 2000),
         "candidate_type": intent,
-        "candidates": llm_candidates,
+        "candidates": [],
     }
+    for item in llm_candidates:
+        bounded = _bounded_value(item)
+        user_content["candidates"].append(bounded)
+        if len(json.dumps(user_content, ensure_ascii=False, default=str)) > settings.AI_RERANK_MAX_CHARS:
+            user_content["candidates"].pop()
+            break
+    if len(user_content["candidates"]) <= 3:
+        return candidates[:top_n]
 
     try:
         parsed = _call_reranker(
@@ -193,16 +223,20 @@ def rerank_results(
         # 语义重排失败
         return candidates[:top_n]
 
+    sent_ids = {str(item["id"]) for item in user_content["candidates"]}
     candidate_map = {
         str(item["id"]): item
         for item in candidates
-        if item.get("id") is not None
+        if item.get("id") is not None and str(item["id"]) in sent_ids
     }
 
     selected_items = []
     used_ids = set()
 
     for ranking in rankings:
+
+        if not isinstance(ranking, dict):
+            continue
 
         item_id = str(
             ranking.get("id")

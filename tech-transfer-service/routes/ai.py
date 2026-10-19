@@ -28,7 +28,7 @@ from core.idempotency import cache_response as cache_idem_response
 from core.idempotency import idempotent_create
 from core.middleware import identity
 from core.rate_limit import check_user_rate
-from core.request_schemas import AiChatRequest, AiMatchRequest, EvaluationTaskRequest
+from core.request_schemas import AiCardViewCountsRequest, AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from core.response import get_request_id, success
 from modules.ai.chat_store import (
     append_turn, clear_messages, complete_turn, fail_turn, get_turn as get_chat_turn,
@@ -36,6 +36,7 @@ from modules.ai.chat_store import (
 )
 from modules.ai.service import (
     create_evaluation_task,
+    get_card_view_counts,
     get_evaluation_task,
 )
 
@@ -62,6 +63,11 @@ router = APIRouter(
     tags=["ai"],
     dependencies=[Depends(require_ai_enabled)],
 )
+
+
+@router.post("/ai/cards/view-counts")
+def card_view_counts(body: AiCardViewCountsRequest, user: dict = Depends(identity)):
+    return success({"list": get_card_view_counts([card.model_dump() for card in body.cards])})
 
 
 # ── 成果评估（异步任务）──────────────────────────────────────
@@ -204,7 +210,17 @@ def _raise_from_agent_network(exc: Exception) -> None:
     raise ai_unavailable("AI 助手暂时不可用，请稍后重试", details)
 
 
+def _wait_for_agent_retry(attempt: int, deadline: float) -> bool:
+    delay = _AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)]
+    if deadline - time.monotonic() <= delay + 0.1:
+        return False
+    time.sleep(delay)
+    return True
+
+
 def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
+    budget = max(0.1, min(float(settings.AI_AGENT_TIMEOUT), settings.MAX_REQUEST_SECONDS - 1.0))
+    deadline = time.monotonic() + budget
     payload_dict = {"message": message}
     # 透传当前用户 id，agent 检索时排除该用户自己的成果/需求，避免自我推荐。
     if exclude_user_id is not None:
@@ -213,18 +229,25 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
     req = urllib.request.Request(
         settings.AI_AGENT_URL,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "X-Request-Id": get_request_id() or ""},
         method="POST",
     )
     last_exc: Exception | None = None
     last_http: tuple[int, str] | None = None
     for attempt in range(_AGENT_RETRY_TIMES):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _raise_from_agent_network(TimeoutError("AI request budget exhausted"))
         try:
             # D6: 信号量 acquire 加超时，防止无限阻塞导致线程饥饿
-            if not _AI_CONCURRENCY.acquire(timeout=30.0):
+            if not _AI_CONCURRENCY.acquire(timeout=min(3.0, remaining)):
                 raise urllib.error.URLError("AI 并发繁忙，请稍后重试")
             try:
-                with urllib.request.urlopen(req, timeout=settings.AI_AGENT_TIMEOUT) as resp:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("AI request budget exhausted")
+                req.add_header("X-AI-Timeout-Seconds", str(max(0.001, remaining - 0.1)))
+                with urllib.request.urlopen(req, timeout=remaining) as resp:
                     body = resp.read()
             finally:
                 _AI_CONCURRENCY.release()
@@ -243,8 +266,7 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
             # 上层模型已经在 agent 内重试过；再转一圈只会把浏览器空等拉长。
             preview = _parse_agent_error_details(exc.code, body)
             retryable = exc.code in _AGENT_RETRY_STATUS and preview.get("layer") != "llm"
-            if retryable and attempt < _AGENT_RETRY_TIMES - 1:
-                time.sleep(_AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)])
+            if retryable and attempt < _AGENT_RETRY_TIMES - 1 and _wait_for_agent_retry(attempt, deadline):
                 continue
             _raise_from_agent_http(exc.code, body)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
@@ -253,8 +275,7 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
             retryable = isinstance(exc, (TimeoutError, OSError)) or (
                 isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError)
             )
-            if retryable and attempt < _AGENT_RETRY_TIMES - 1:
-                time.sleep(_AGENT_RETRY_BACKOFF[min(attempt, len(_AGENT_RETRY_BACKOFF) - 1)])
+            if retryable and attempt < _AGENT_RETRY_TIMES - 1 and _wait_for_agent_retry(attempt, deadline):
                 continue
             if isinstance(exc, ValueError):
                 raise ai_provider_failed(

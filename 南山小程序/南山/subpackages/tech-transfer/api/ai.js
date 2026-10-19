@@ -99,6 +99,11 @@ export async function getChatHistory() {
   return apiRequest('GET', '/ai/chat/messages')
 }
 
+export async function getCardViewCounts(cards) {
+  assertAiRuntimeEnabled()
+  return apiRequest('POST', '/ai/cards/view-counts', null, { cards }, { timeout: 10000 })
+}
+
 /**
  * 清空当前用户的 AI 聊天历史。
  * @returns {Promise<{deleted:number}>}

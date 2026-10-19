@@ -77,6 +77,7 @@
 								</view>
 								<text v-if="card.organization" class="agent-card__org">{{ card.organization }}</text>
 								<text v-if="card.description" class="agent-card__desc">{{ card.description }}</text>
+								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
 
 								<view v-if="card.card_type === 'achievement'" class="agent-card__meta">
 									<text v-if="card.maturity && card.maturity.label" class="meta-chip">成熟度：{{ card.maturity.label }}</text>
@@ -202,6 +203,7 @@
 		chatWithAgent,
 		matchDemand,
 		getChatHistory,
+		getCardViewCounts,
 		getChatTurn
 	} from '../../api/ai.js'
 	import {
@@ -270,6 +272,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			aiEnabled: AI_FEATURE_ENABLED,
 			messages: [createWelcomeMessage()],
 			suggestions: getChatSuggestions(),
+			cardViewCounts: {},
 			inputText: '',
 			typing: false,
 			scrollIntoView: '',
@@ -318,6 +321,11 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			return previewQueue(this.pendingQueue, this.queueExpanded)
 		}
 	},
+	watch: {
+		visibleMessages() {
+			this.refreshCardViewCounts()
+		}
+	},
 	onLoad() {
 		this._alive = true
 		this._visible = true
@@ -336,8 +344,10 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		if (!this.aiEnabled || !this._alive) return
 		this._visible = true
 		const currentScope = getPageStateScope(uni)
+		this.startCardStatsRefresh()
 		if (currentScope !== this._scope) {
 			this._scope = currentScope
+			this.cardViewCounts = {}
 			this._sessionReady = false
 			this.messages = [createWelcomeMessage()]
 			this.pendingQueue = []
@@ -392,17 +402,66 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	},
 	onHide() {
 		this._visible = false
+		this.stopCardStatsRefresh()
 		if (!this.aiEnabled) return
 		this.persistQueue()
 	},
 	onUnload() {
 		this._alive = false
 		this._visible = false
+		this.stopCardStatsRefresh()
 		if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
 		if (!this.aiEnabled) return
 		this.persistQueue()
 	},
 	methods: {
+		cardViewCount(card) {
+			const value = this.cardViewCounts[card.card_type + ':' + card.id] ?? card.viewCount
+			return Number.isSafeInteger(value) && value >= 0 ? value : '—'
+		},
+		startCardStatsRefresh() {
+			this.refreshCardViewCounts()
+			if (!this._cardStatsTimer) {
+				this._cardStatsTimer = setInterval(() => this.refreshCardViewCounts(), 15000)
+			}
+		},
+		stopCardStatsRefresh() {
+			if (this._cardStatsTimer) clearInterval(this._cardStatsTimer)
+			this._cardStatsTimer = null
+		},
+		async refreshCardViewCounts() {
+			const scope = this._scope
+			if (!this._alive || !this._visible || scope !== getPageStateScope(uni)) return
+			const targets = new Map()
+			for (const message of this.visibleMessages) {
+				for (const card of Array.isArray(message.payload?.cards) ? message.payload.cards : []) {
+					if (!card || typeof card !== 'object') continue
+					const id = Number(card.id)
+					if (!['achievement', 'demand'].includes(card.card_type) || !Number.isSafeInteger(id) || id <= 0) continue
+					const key = card.card_type + ':' + id
+					targets.set(key, { card_type: card.card_type, id })
+				}
+			}
+			if (!targets.size) return
+			const requestId = (this._cardStatsRequestId || 0) + 1
+			this._cardStatsRequestId = requestId
+			try {
+				const counts = {}
+				const cards = [...targets.values()]
+				for (let offset = 0; offset < cards.length; offset += 50) {
+					const batch = cards.slice(offset, offset + 50)
+					const batchKeys = new Set(batch.map(card => card.card_type + ':' + card.id))
+					const data = await getCardViewCounts(batch)
+					if (!this._alive || !this._visible || this._cardStatsRequestId !== requestId || scope !== this._scope || scope !== getPageStateScope(uni)) return
+					for (const item of data.list || []) {
+						const key = item.card_type + ':' + item.id
+						if (batchKeys.has(key) && Number.isSafeInteger(item.viewCount) && item.viewCount >= 0) counts[key] = item.viewCount
+					}
+				}
+				this.cardViewCounts = counts
+			} catch {
+			}
+		},
 		persistQueue() {
 			if (this._scope !== getPageStateScope(uni)) return
 			saveQueueState({
@@ -856,6 +915,12 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 </script>
 
 <style>
+	.agent-card__views {
+		display: block;
+		margin-top: 12rpx;
+		font-size: 22rpx;
+		color: #888888;
+	}
 	page {
 		height: 100%;
 		overflow: hidden;

@@ -4,7 +4,7 @@
 extra=allow 保证未列出的字段仍会原样传给现有 json_body 逻辑。
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -233,6 +233,15 @@ class AiChatRequest(RequestBody):
 
 class AiMatchRequest(RequestBody):
     demandId: int = Field(..., ge=1)
+
+
+class AiCardTarget(RequestBody):
+    card_type: Literal["achievement", "demand"]
+    id: int = Field(..., ge=1, strict=True)
+
+
+class AiCardViewCountsRequest(RequestBody):
+    cards: list[AiCardTarget] = Field(..., max_length=50)
 
 
 class PatentSearchHistoryRequest(RequestBody):

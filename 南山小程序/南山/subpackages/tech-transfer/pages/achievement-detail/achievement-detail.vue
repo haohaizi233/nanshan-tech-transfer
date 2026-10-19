@@ -228,7 +228,7 @@ export default {
   },
   onShow() {
     this.loading = !this.detail
-    if (!this.detail || this.shouldRevalidatePageState('detail')) return this.loadDetail()
+    return this.loadDetail()
   },
   methods: {
     async loadDetail() {

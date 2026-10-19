@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.database import get_db
+from app.runtime_trace import trace_stage
 from app.services.achievement_service import expand_keywords
 from app.services.query_utils import escape_like_term, normalize_search_terms
 
@@ -45,6 +46,7 @@ def _calculate_score(
     return score
 
 
+@trace_stage("retrieve_demands")
 def search_demands(
     keywords: list[str],
     organization: str | None = None,
@@ -219,6 +221,7 @@ def search_demands(
             contact_name,
             contact_phone,
             contact_email,
+            view_count,
             region,
             coop_mode,
             created_at

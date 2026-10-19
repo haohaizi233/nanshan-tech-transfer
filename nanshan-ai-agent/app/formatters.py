@@ -290,6 +290,7 @@ def format_achievement_card(
 
     return {
         "card_type": "achievement",
+        "viewCount": int(item.get("view_count") or 0),
 
         "id": item.get("id"),
 
@@ -336,6 +337,7 @@ def format_demand_card(
 
     return {
         "card_type": "demand",
+        "viewCount": int(item.get("view_count") or 0),
 
         "id": item.get("id"),
 

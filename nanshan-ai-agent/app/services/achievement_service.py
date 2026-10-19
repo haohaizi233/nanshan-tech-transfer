@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.database import get_db
+from app.runtime_trace import trace_stage
 from app.services.query_utils import escape_like_term, normalize_search_terms
 
 
@@ -152,6 +153,7 @@ def _calculate_score(
     return score
 
 
+@trace_stage("retrieve_achievements")
 def search_achievements(
     keywords: list[str],
     organization: str | None = None,
@@ -300,6 +302,7 @@ def search_achievements(
             contact_name,
             contact_phone,
             contact_email,
+            view_count,
             created_at
         FROM achievement
         WHERE {where_clause}

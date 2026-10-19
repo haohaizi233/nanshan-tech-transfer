@@ -1,6 +1,7 @@
 """
 L5: ai-agent 配置校验 — 启动时检查必填项，缺失时 fail-fast。
 """
+import math
 import os
 import sys
 from dotenv import load_dotenv
@@ -39,6 +40,7 @@ class Settings:
     DB_STATEMENT_TIMEOUT_MS = int(os.getenv("AI_DB_STATEMENT_TIMEOUT_MS", "5000"))
     AI_CHAT_TIMEOUT_SECONDS = float(os.getenv("AI_CHAT_TIMEOUT_SECONDS", "90"))
     AI_CHAT_MAX_CONCURRENCY = int(os.getenv("AI_CHAT_MAX_CONCURRENCY", "4"))
+    AI_RERANK_MAX_CHARS = int(os.getenv("AI_RERANK_MAX_CHARS", "24000"))
 
     # L5: 日志级别可配
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -65,6 +67,12 @@ class Settings:
             violations.append(f"AI_CHAT_MAX_CONCURRENCY 必须 >= 1，当前: {self.AI_CHAT_MAX_CONCURRENCY}")
         if self.DB_MAX_CONN < 1:
             violations.append(f"AI_DB_MAX_CONN 必须 >= 1，当前: {self.DB_MAX_CONN}")
+        if not 4000 <= self.AI_RERANK_MAX_CHARS <= 64000:
+            violations.append("AI_RERANK_MAX_CHARS 必须在 4000-64000 之间")
+        if not math.isfinite(self.AI_CHAT_TIMEOUT_SECONDS) or self.AI_CHAT_TIMEOUT_SECONDS <= 0:
+            violations.append("AI_CHAT_TIMEOUT_SECONDS 必须为有限正数")
+        if not math.isfinite(self.LLM_FALLBACK_BUDGET_SECONDS):
+            violations.append("LLM_FALLBACK_BUDGET_SECONDS 必须为有限数值")
         if self.LOG_LEVEL not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             violations.append(f"LOG_LEVEL 非法: {self.LOG_LEVEL}")
 

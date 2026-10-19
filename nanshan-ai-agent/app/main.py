@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import BoundedSemaphore
 
@@ -39,6 +41,7 @@ from app.formatters import (
 
 from app.reranker import rerank_results
 from app.runtime_budget import reset_deadline, set_deadline
+from app.runtime_trace import request_trace, trace_stage
 
 
 app = FastAPI(
@@ -95,6 +98,16 @@ def db_health():
         )
 
 
+def chat_timeout_seconds(value: str | None) -> float:
+    try:
+        requested = float(value)
+    except (ValueError, TypeError):
+        return settings.AI_CHAT_TIMEOUT_SECONDS
+    if math.isfinite(requested) and 0 < requested < settings.AI_CHAT_TIMEOUT_SECONDS:
+        return requested
+    return settings.AI_CHAT_TIMEOUT_SECONDS
+
+
 @app.post("/api/ai/chat", response_model=ChatResponse)
 async def ai_chat(body: ChatRequest, http_request: Request):
     if not _chat_slots.acquire(blocking=False):
@@ -102,19 +115,22 @@ async def ai_chat(body: ChatRequest, http_request: Request):
             status_code=503,
             detail={"message": "AI 请求繁忙，请稍后重试。", "reason": "overloaded"},
         )
-    # H4: 槽位由本协程的 finally 统一释放（恰好一次）。
-    # 不能依赖工作线程的 finally —— future.cancel() 在任务未启动时会直接取消任务，
-    # 线程体（含 finally）根本不执行，槽位会永久泄漏直到 BoundedSemaphore 溢出。
     try:
         loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(_chat_executor, _run_ai_chat, body)
-        deadline = loop.time() + settings.AI_CHAT_TIMEOUT_SECONDS
+        timeout_seconds = chat_timeout_seconds(http_request.headers.get("X-AI-Timeout-Seconds"))
+        deadline_at = time.monotonic() + timeout_seconds
+        worker = _chat_executor.submit(_run_ai_chat, body, http_request.headers.get("X-Request-Id"), deadline_at)
+    except BaseException:
+        _chat_slots.release()
+        raise
+    worker.add_done_callback(lambda completed: _chat_slots.release())
+    future = asyncio.wrap_future(worker, loop=loop)
+    future.add_done_callback(lambda completed: None if completed.cancelled() else completed.exception())
+    try:
+        deadline = loop.time() + timeout_seconds
         while not future.done():
             remaining = deadline - loop.time()
             if remaining <= 0:
-                # 线程池任务无法被真正中断：cancel() 只对尚未出队的任务生效，
-                # 已在跑的线程会继续到自然结束（线程池 max_workers 已兜底真实并发）。
-                # 无论 cancel 成败，槽位都在外层 finally 释放，不再泄漏。
                 future.cancel()
                 raise HTTPException(
                     status_code=504,
@@ -127,13 +143,16 @@ async def ai_chat(body: ChatRequest, http_request: Request):
             await asyncio.wait((future,), timeout=min(0.2, remaining))
         return await future
     finally:
-        _chat_slots.release()
+        if not worker.running() and not worker.done():
+            worker.cancel()
 
 
-def _run_ai_chat(body: ChatRequest):
-    deadline_token = set_deadline(settings.AI_CHAT_TIMEOUT_SECONDS)
+def _run_ai_chat(body: ChatRequest, request_id: str | None = None, deadline_at: float | None = None):
+    remaining = max(0.0, deadline_at - time.monotonic()) if deadline_at is not None else settings.AI_CHAT_TIMEOUT_SECONDS
+    deadline_token = set_deadline(remaining)
     try:
-        return _process_ai_chat(body)
+        with request_trace(request_id), trace_stage("request"):
+            return _process_ai_chat(body)
     finally:
         reset_deadline(deadline_token)
 

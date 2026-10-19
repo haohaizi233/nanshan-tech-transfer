@@ -56,7 +56,7 @@ test('reopening an AI achievement card renders its cached detail without getting
   const { component, storage } = loadPage('achievement-detail', {
     getAchievementDetail: async id => {
       reads++
-      return { id, title: 'AI 匹配成果' }
+      return { id, title: 'AI 匹配成果', viewCount: reads }
     },
   })
   const createInstance = () => {
@@ -81,7 +81,8 @@ test('reopening an AI achievement card renders its cached detail without getting
   await component.onShow.call(reopened)
   assert.equal(reopened.detail.title, 'AI 匹配成果')
   assert.equal(reopened.loading, false)
-  assert.equal(reads, 1)
+  assert.equal(reads, 2)
+  assert.equal(reopened.detail.viewCount, 2)
   assert.ok(storage.getStorageInfoSync().keys.length)
 })
 

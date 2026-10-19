@@ -10,6 +10,7 @@ import requests
 from app.config import settings
 from app.llm_log import enqueue_llm_log, parse_error_fields
 from app.runtime_budget import remaining_seconds
+from app.runtime_trace import current_trace_id, trace_stage
 
 
 class LLMError(Exception):
@@ -59,6 +60,15 @@ def _fallback_total_budget(timeout: float) -> float:
     if configured and configured > 0:
         return float(configured)
     return min(timeout * 2, timeout + 60)
+
+
+def _remaining_call_budget() -> float | None:
+    remaining = remaining_seconds()
+    deadline = getattr(_fallback_deadline_local, "value", None)
+    if deadline is not None:
+        provider_remaining = max(0.0, deadline - time.monotonic())
+        return min(remaining, provider_remaining) if remaining is not None else provider_remaining
+    return remaining
 
 
 def set_fallback_provider(url: str, key: str, model: str):
@@ -114,6 +124,7 @@ def _log_upstream_error(response, attempt: int) -> str:
     return snippet
 
 
+@trace_stage("llm")
 def chat_completion(
     messages: list[dict],
     max_tokens: int = 500,
@@ -156,6 +167,7 @@ def _chat_completion(
     """
     # D5: 记录本次「主 + 备」调用的墙钟总预算截止点（thread-local，避免并发竞态）
     deadline = time.monotonic() + _fallback_total_budget(timeout)
+    previous_deadline = getattr(_fallback_deadline_local, "value", None)
     _fallback_deadline_local.value = deadline
     try:
         return _call_llm(
@@ -165,9 +177,7 @@ def _chat_completion(
             messages, max_tokens, temperature, response_format, timeout,
         )
     except LLMError as primary_err:
-        # D14: 401（API Key 错误）不触发 fallback，直接抛出
-        # 配置错误应被立即发现，而非静默烧备用额度
-        if primary_err.status_code == 401:
+        if primary_err.status_code is not None and primary_err.status_code >= 400 and primary_err.status_code not in _RETRY_STATUS:
             raise
         if _FALLBACK_URL and _FALLBACK_KEY:
             # N5: 主 + 备 Provider 共享墙钟总超时预算，防止主 Provider 重试耗尽
@@ -188,6 +198,11 @@ def _chat_completion(
                 min(timeout, remaining),
             )
         raise
+    finally:
+        if previous_deadline is None:
+            del _fallback_deadline_local.value
+        else:
+            _fallback_deadline_local.value = previous_deadline
 
 
 def _call_llm(
@@ -237,7 +252,7 @@ def _call_llm(
     last_reason = "unreachable"
     for attempt in range(_RETRY_TIMES):
         response = None
-        remaining = remaining_seconds()
+        remaining = _remaining_call_budget()
         if remaining is not None and remaining <= 0:
             raise LLMError("AI 请求已超过总时限", reason="timeout")
         attempt_timeout = min(timeout, remaining) if remaining is not None else timeout
@@ -266,8 +281,7 @@ def _call_llm(
                     error_message=f"HTTP {response.status_code}",
                     body=last_upstream,
                 )
-            if response.status_code in _RETRY_STATUS and attempt < _RETRY_TIMES - 1:
-                _sleep_before_retry(attempt)
+            if response.status_code in _RETRY_STATUS and attempt < _RETRY_TIMES - 1 and _sleep_before_retry(attempt):
                 continue
             response.raise_for_status()
             break
@@ -428,7 +442,7 @@ def _safe_json(response):
 
 
 def _sleep_before_retry(attempt: int) -> bool:
-    remaining = remaining_seconds()
+    remaining = _remaining_call_budget()
     base = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
     delay = min(1.5, random.uniform(base * 0.6, base * 1.4))
     if remaining is not None:
@@ -454,6 +468,7 @@ def _write_call_log(
     extra_fields=None,
 ) -> None:
     event = {
+        "trace_id": current_trace_id(),
         "ok": ok,
         "model": input_payload.get("model"),
         "url": input_payload.get("url"),

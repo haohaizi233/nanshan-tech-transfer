@@ -43,6 +43,26 @@ SNAPSHOT_FIELDS_EVAL = (
 )
 
 
+def get_card_view_counts(cards: list[dict]) -> list[dict]:
+    results = []
+    with get_cursor() as cur:
+        for card_type, table in (("achievement", "achievement"), ("demand", "demand")):
+            ids = list(dict.fromkeys(card["id"] for card in cards if card["card_type"] == card_type))
+            if not ids:
+                continue
+            cur.execute(
+                f"SELECT id, view_count FROM {table} "
+                "WHERE id = ANY(%s) AND status = 'published' AND deleted_at IS NULL",
+                (ids,),
+            )
+            results.extend({
+                "card_type": card_type,
+                "id": row["id"],
+                "viewCount": int(row.get("view_count") or 0),
+            } for row in cur.fetchall())
+    return results
+
+
 def _check_user_rate(user_id: int):
     now = time.time()
     with _rate_lock:

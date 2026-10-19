@@ -8,7 +8,7 @@ import * as wal from '../subpackages/tech-transfer/api/ai-chat-wal.mjs'
 import * as pageState from '../subpackages/tech-transfer/api/page-state-cache.mjs'
 import { AI_FEATURE_ENABLED } from '../config/feature-flags.js'
 
-function createPage(storage = {}) {
+function createPage(storage = {}, overrides = {}) {
   const source = readFileSync(
     new URL('../subpackages/tech-transfer/pages/ai-match/ai-match.vue', import.meta.url),
     'utf8',
@@ -26,6 +26,7 @@ function createPage(storage = {}) {
       setStorageSync(key, value) { storage[key] = value },
     },
     async getChatHistory() { throw new Error('History service unavailable') },
+    ...overrides,
   }
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1]
     .replace(/^\s*import[\s\S]*?\sfrom\s+['"][^'"]+['"];?/gm, '')
@@ -76,4 +77,70 @@ test('new AI match page instances do not share drafts or queued messages', () =>
   assert.equal(second.inputText, '')
   assert.deepEqual(second.pendingQueue, [])
   assert.equal(component.computed.showSuggestions.call(second), true)
+})
+
+test('AI cards refresh every visible count in bounded batches without changing chat snapshots', async () => {
+  const batches = []
+  const { page } = createPage({}, {
+    getCardViewCounts: async cards => {
+      batches.push(cards)
+      return { list: cards.map(card => ({
+        ...card, viewCount: card.card_type === 'demand' ? 3 : 12,
+      })) }
+    },
+  })
+  page._alive = true
+  page._visible = true
+  page._scope = 'anonymous'
+  page.messages = [{ id: 'reply', payload: { cards: [
+    { card_type: 'achievement', id: 42 },
+    { card_type: 'achievement', id: 42 },
+    { card_type: 'demand', id: 42 },
+    ...Array.from({ length: 70 }, (_, index) => ({ card_type: 'achievement', id: index + 100 })),
+  ] } }]
+  const snapshot = JSON.stringify(page.messages)
+  await page.refreshCardViewCounts()
+  assert.deepEqual(batches.map(batch => batch.length), [50, 22])
+  assert.equal(page.cardViewCount({ card_type: 'achievement', id: 42 }), 12)
+  assert.equal(page.cardViewCount({ card_type: 'demand', id: 42 }), 3)
+  assert.equal(page.cardViewCount({ card_type: 'achievement', id: 169 }), 12)
+  assert.equal(JSON.stringify(page.messages), snapshot)
+})
+
+test('AI card count polling starts on return and stops when the page is hidden', async () => {
+  let polls = 0
+  let stops = 0
+  const { component, page } = createPage({}, {
+    setInterval: () => { polls++; return 1 },
+    clearInterval: () => { stops++ },
+  })
+  page._alive = true
+  page._scope = 'anonymous'
+  page._sessionReady = true
+  let refreshes = 0
+  page.refreshCardViewCounts = async () => { refreshes++ }
+  page.restoreScrollPosition = () => {}
+  component.onShow.call(page)
+  assert.equal(refreshes, 1)
+  assert.equal(polls, 1)
+  component.onHide.call(page)
+  assert.equal(stops, 1)
+})
+
+test('late AI card counts are ignored after switching accounts', async () => {
+  let resolveCounts
+  const storage = {}
+  const { page } = createPage(storage, {
+    getCardViewCounts: () => new Promise(resolve => { resolveCounts = resolve }),
+  })
+  page._alive = true
+  page._visible = true
+  page._scope = 'anonymous'
+  page.messages = [{ payload: { cards: [{ card_type: 'achievement', id: 42 }] } }]
+  const pending = page.refreshCardViewCounts()
+  storage.tt_auth_mode = 'account'
+  storage.tt_current_user = { userId: 8 }
+  resolveCounts({ list: [{ card_type: 'achievement', id: 42, viewCount: 99 }] })
+  await pending
+  assert.deepEqual(page.cardViewCounts, {})
 })

@@ -3,6 +3,7 @@ import re
 
 from app.llm_client import LLMError, chat_completion, extract_llm_json
 from app.schemas import RouteResult
+from app.runtime_trace import trace_stage
 
 _logger = logging.getLogger(__name__)
 
@@ -440,6 +441,7 @@ def _fallback_classify(user_message: str) -> RouteResult | None:
     )
 
 
+@trace_stage("route")
 def classify_intent(
     user_message: str,
 ) -> RouteResult:
