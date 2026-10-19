@@ -15,10 +15,12 @@ import {
 	authLogin,
 	authRegister,
 	authLogout,
+	authWechat,
 	getCurrentUser,
 	setCurrentUser
 } from './client.js'
 import { apiRequest } from './client.js'
+import { uploadContentFile } from './file.js'
 import HostBridge from '../../../host/host-bridge.js'
 import { validateEmail, validatePhone } from './contact-validation.mjs'
 import { clearCachedOrganizationCertification } from './membership.js'
@@ -136,6 +138,9 @@ export function getUserProfile() {
 	if (!user) return null
 	return {
 		avatar: user.avatar || '/static/logo.png',
+		avatarFileId: user.avatarFileId || null,
+		wechatBound: !!user.wechatBound,
+		passwordLoginEnabled: user.passwordLoginEnabled !== false,
 		nickname: user.displayName || '',
 		company: resolveCompanyName(user),
 		subjectType: user.subjectType || '',
@@ -239,6 +244,32 @@ export async function loginAccount(phone, password) {
  * 保存/更新个人资料（后端 PATCH /me/profile，乐观锁 version）
  * @returns {Promise<object|null>} 更新后的前端资料模型
  */
+export async function loginWithWechat(phoneCode, bind = false) {
+	try {
+		if (!bind) clearAllTtCacheKeys()
+		await authWechat(phoneCode, bind)
+		pushHistoryPhone(getSessionPhone())
+		return { ok: true, needProfile: needsProfile() }
+	} catch (error) {
+		return { ok: false, code: error.code, message: error.message || '微信登录失败' }
+	}
+}
+
+export async function getWechatLoginConfig() {
+	return apiRequest('GET', '/auth/wechat/config')
+}
+
+export async function setInitialPassword(password) {
+	const normalized = String(password || '').trim()
+	if (normalized.length < 8 || normalized.length > 128) throw new Error('密码长度须为8—128位')
+	const userId = getCurrentUser()?.userId
+	await apiRequest('POST', '/me/password', null, { currentPassword: '', newPassword: normalized })
+	if (getCurrentUser()?.userId !== userId) return
+	const user = await apiRequest('GET', '/me')
+	if (getCurrentUser()?.userId !== userId) return
+	setCurrentUser(user)
+}
+
 export async function saveUserProfile(profile) {
 	if (!isLoggedIn()) return null
 
@@ -274,7 +305,16 @@ export async function saveUserProfile(profile) {
 	}
 
 	try {
+		if (Number.isSafeInteger(profile.avatarFileId) && profile.avatarFileId > 0) {
+			body.avatarFileId = profile.avatarFileId
+		} else if (profile.avatar && profile.avatar !== '/static/logo.png' && profile.avatar !== current.avatar) {
+			const uploaded = await uploadContentFile(profile.avatar)
+			if (!Number.isSafeInteger(uploaded.id) || uploaded.id <= 0) throw new Error('头像上传结果无效')
+			body.avatarFileId = uploaded.id
+		}
+		if (getCurrentUser()?.userId !== current.userId) return null
 		const updated = await apiRequest('PATCH', '/me/profile', null, body)
+		if (getCurrentUser()?.userId !== current.userId) return null
 		setCurrentUser(updated)
 		return getUserProfile()
 	} catch (e) {

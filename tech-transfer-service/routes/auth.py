@@ -1,12 +1,17 @@
 ﻿from fastapi import APIRouter, Request
 
+from fastapi import Depends
+
 from core.errors import TT_AUTH_40105, TT_COMMON_40102, BizError, bootstrap_credential_invalid
+from core.middleware import identity
 from core.rate_limit import check_ip_rate, check_register_rate
 from core.request_schemas import (
     BootstrapRequest,
     LoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    WechatBindRequest,
+    WechatLoginRequest,
 )
 from core.response import get_request_id, success
 from modules.identity.provider import get_identity_provider
@@ -20,7 +25,26 @@ from modules.identity.service import (
     register_user,
 )
 
+from modules.identity.wechat import wechat_login_enabled, wechat_login_session
+
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
+
+
+@router.get("/wechat/config")
+def wechat_config():
+    return success({"enabled": wechat_login_enabled()})
+
+
+@router.post("/wechat/login")
+def wechat_login(body: WechatLoginRequest, request: Request):
+    check_ip_rate(request, "wechat_login", limit=10, window_s=60)
+    return success(wechat_login_session(body.loginCode, body.phoneCode))
+
+
+@router.post("/wechat/bind")
+def wechat_bind(body: WechatBindRequest, request: Request, user: dict = Depends(identity)):
+    check_ip_rate(request, "wechat_bind", limit=5, window_s=60)
+    return success(wechat_login_session(body.loginCode, body.phoneCode, bind_user_id=user["userId"]))
 
 
 @router.post("/login", summary="登录（小程序传 phone 手机号 / 后台传 username 账号）")

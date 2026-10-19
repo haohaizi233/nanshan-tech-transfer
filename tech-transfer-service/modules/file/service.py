@@ -273,8 +273,9 @@ def delete_uploaded_file(file_id: int, user_id: int) -> None:
         cur.execute(
             """SELECT EXISTS(SELECT 1 FROM achievement_media WHERE file_id=%s)
                       OR EXISTS(SELECT 1 FROM demand_attachment WHERE file_id=%s)
-                      OR EXISTS(SELECT 1 FROM inventor WHERE avatar_file_id=%s) AS linked""",
-            (file_id, file_id, file_id),
+                      OR EXISTS(SELECT 1 FROM inventor WHERE avatar_file_id=%s)
+                      OR EXISTS(SELECT 1 FROM user_profile WHERE avatar_file_id=%s) AS linked""",
+            (file_id, file_id, file_id, file_id),
         )
         if cur.fetchone()["linked"]:
             raise bad_request("文件已被内容引用，不能删除")

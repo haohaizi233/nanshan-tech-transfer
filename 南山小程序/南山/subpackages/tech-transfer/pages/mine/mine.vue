@@ -5,6 +5,14 @@
 			<view class="login-card">
 				<text class="login-title">{{ authMode === 'register' ? '注册账号' : '登录账号' }}</text>
 				<text class="login-desc">使用手机号注册登录，账号数据云端同步，小程序与 H5 通用</text>
+				<!-- #ifdef MP-WEIXIN -->
+				<view v-if="wechatLoginEnabled" class="wechat-login">
+					<button v-if="!wechatPhoneRequired" class="wechat-btn" :disabled="wechatBusy" @click="onWechatLogin">微信快捷登录</button>
+					<WechatPrivacyGate v-else-if="privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
+					<button v-else class="wechat-btn" open-type="getPhoneNumber" :disabled="wechatBusy" @getphonenumber="onWechatPhone">授权手机号并登录</button>
+					<text class="login-desc">首次需授权手机号；已有账号请先用原密码登录后绑定微信</text>
+				</view>
+				<!-- #endif -->
 
 				<view class="form-item">
 					<text class="label">手机号 <text class="required">*</text></text>
@@ -60,13 +68,16 @@
 				<text class="login-desc">账号 {{ authPhone }}，请完善资料后使用对接等功能</text>
 
 				<view class="avatar-block" @click="openAvatarSheet">
-					<image class="avatar" :src="form.avatar || '/static/logo.png'" mode="aspectFill"></image>
+					<image class="avatar" :src="avatarDisplayUrl(form.avatar)" mode="aspectFill"></image>
 				</view>
 
 				<view v-if="showAvatarSheet" class="sheet-mask" @click="closeAvatarSheet">
 					<view class="sheet-panel" @click.stop>
-						<button class="sheet-item sheet-btn" open-type="chooseAvatar" @chooseavatar="onWxAvatar">使用微信头像</button>
-						<view class="sheet-item" @click="onChooseAlbum">从相册选择</view>
+						<!-- #ifdef MP-WEIXIN -->
+						<WechatPrivacyGate v-if="privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
+						<button v-if="!privacyAuthorizationNeeded" class="sheet-item sheet-btn" open-type="chooseAvatar" @chooseavatar="onWxAvatar">使用微信头像</button>
+						<!-- #endif -->
+						<button v-if="!privacyAuthorizationNeeded" class="sheet-item sheet-btn" @click="onChooseAlbum">从相册选择</button>
 						<view class="sheet-cancel" @click="closeAvatarSheet">取消</view>
 					</view>
 				</view>
@@ -145,7 +156,7 @@
 		<view v-else class="logged-wrap">
 			<view class="profile-card">
 				<view class="profile-head">
-					<image class="avatar lg" :src="profile.avatar || '/static/logo.png'" mode="aspectFill"></image>
+					<image class="avatar lg" :src="avatarDisplayUrl(profile.avatar)" mode="aspectFill"></image>
 					<view class="profile-main">
 						<view class="name-row">
 							<text class="nickname">{{ profile.nickname }}</text>
@@ -260,6 +271,18 @@
 			</view>
 		</view>
 
+		<!-- #ifdef MP-WEIXIN -->
+		<view v-if="viewMode !== 'auth' && profile && wechatLoginEnabled" class="login-card account-settings">
+			<WechatPrivacyGate v-if="!profile.wechatBound && privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
+			<button v-else-if="!profile.wechatBound" class="wechat-btn" open-type="getPhoneNumber" :disabled="wechatBusy" @getphonenumber="onWechatPhone">授权登录手机号并绑定微信</button>
+			<text v-else class="login-desc">已绑定微信，下次可微信快捷登录</text>
+			<view v-if="profile.passwordLoginEnabled === false" class="form-item">
+				<text class="label">设置手机号登录密码（用于 H5 登录）</text>
+				<input class="input" password v-model="initialPassword" placeholder="设置8—128位密码" maxlength="128" />
+				<button class="ghost-btn" :disabled="passwordBusy" @click="onSetInitialPassword">保存登录密码</button>
+			</view>
+		</view>
+		<!-- #endif -->
 		<!-- 底部导航（分包业务壳统一 tab：首页 / AI匹配 / 我的） -->
 		<AppTabbar active="mine" />
 	</view>
@@ -267,6 +290,7 @@
 
 <script>
 	import AppTabbar from '../../components/app-tabbar.vue'
+	import WechatPrivacyGate from '../../components/wechat-privacy-gate.vue'
 	import {
 			getUserProfile,
 			isLoggedIn,
@@ -276,6 +300,9 @@
 			logout,
 			registerAccount,
 			loginAccount,
+			loginWithWechat,
+			getWechatLoginConfig,
+			setInitialPassword,
 			listCachedAccounts,
 			getSessionPhone,
 			SUBJECT_TYPE_OPTIONS,
@@ -298,12 +325,15 @@
 		searchInstitutions,
 	} from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
+	import { mediaDisplayUrl } from '../../api/media-url.mjs'
+	import { chooseAvatarImage } from '../../api/avatar-picker.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { createPageStateMixin, getPageStateScope } from '../../api/page-state-cache.mjs'
 
 	export default {
 		components: {
 			AppTabbar,
+			WechatPrivacyGate,
 		},
 		mixins: [createPageStateMixin({
 			route: 'pages/mine/mine',
@@ -323,6 +353,13 @@
 				authMode: 'login',
 				editing: false,
 				showAvatarSheet: false,
+				wechatLoginEnabled: false,
+				privacyAuthorizationNeeded: false,
+				privacyContractName: '',
+				wechatPhoneRequired: false,
+				wechatBusy: false,
+				initialPassword: '',
+				passwordBusy: false,
 				profile: null,
 				authPhone: '',
 				authForm: {
@@ -333,6 +370,7 @@
 				capabilityOptions: CAPABILITY_OPTIONS,
 				form: {
 					avatar: '/static/logo.png',
+					avatarFileId: null,
 					nickname: '',
 					company: '',
 					subjectType: '',
@@ -396,9 +434,90 @@
 			}
 		},
 		onShow() {
+			// #ifdef MP-WEIXIN
+			this.loadWechatConfig()
+			this.loadPrivacySetting()
+			// #endif
 			return this.refresh()
 		},
 		methods: {
+			loadPrivacySetting() {
+				// #ifdef MP-WEIXIN
+				if (typeof wx !== 'undefined' && typeof wx.getPrivacySetting === 'function') {
+					this.privacyAuthorizationNeeded = true
+					wx.getPrivacySetting({
+						success: result => {
+							this.privacyAuthorizationNeeded = !!result.needAuthorization
+							this.privacyContractName = result.privacyContractName || ''
+						},
+						fail: () => uni.showToast({ title: '微信隐私设置读取失败，请重新进入本页', icon: 'none' }),
+					})
+				}
+				// #endif
+			},
+			onPrivacyAuthorized() {
+				this.privacyAuthorizationNeeded = false
+			},
+			async loadWechatConfig() {
+				try {
+					const config = await getWechatLoginConfig()
+					this.wechatLoginEnabled = config.enabled === true
+				} catch {
+					this.wechatLoginEnabled = false
+				}
+			},
+			async onWechatLogin(phoneCode) {
+				if (this.wechatBusy) return
+				this.wechatBusy = true
+				const bind = isLoggedIn()
+				try {
+					const result = await loginWithWechat(typeof phoneCode === 'string' ? phoneCode : undefined, bind)
+					if (!result.ok) {
+						if (result.code === 'TT_AUTH_40902') this.wechatPhoneRequired = true
+						uni.showToast({ title: result.message || '微信登录失败', icon: 'none', duration: 3000 })
+						return
+					}
+					this.wechatPhoneRequired = false
+					this.authForm.password = ''
+					this.editing = false
+					uni.showToast({ title: bind ? '微信绑定成功' : '登录成功', icon: 'success' })
+					await this.refresh()
+					if (!result.needProfile) this.resumePublishDraftAfterLogin()
+				} finally {
+					this.wechatBusy = false
+				}
+			},
+			onWechatPhone(event) {
+				const code = event.detail && event.detail.code
+				if (!code) {
+					uni.showToast({ title: '未授权手机号，可使用手机号密码登录', icon: 'none' })
+					return
+				}
+				return this.onWechatLogin(code)
+			},
+			async onSetInitialPassword() {
+				if (this.passwordBusy) return
+				const password = this.initialPassword.trim()
+				if (password.length < 8 || password.length > 128) {
+					uni.showToast({ title: '密码长度须为8—128位', icon: 'none' })
+					return
+				}
+				this.passwordBusy = true
+				try {
+					await setInitialPassword(password)
+					this.initialPassword = ''
+					await this.refresh()
+					uni.showToast({ title: '登录密码已设置', icon: 'success' })
+				} catch (error) {
+					uni.showToast({ title: error.message || '设置失败', icon: 'none' })
+				} finally {
+					this.passwordBusy = false
+				}
+			},
+			avatarDisplayUrl(url) {
+				if (!url || url === '/static/logo.png') return '/static/logo.png'
+				return mediaDisplayUrl({ url }, HostBridge.getEnvironment() || {}, HostBridge.getStorage('tt_access_token') || '')
+			},
 			async refresh() {
 				const requestId = (this._dashboardRequestId || 0) + 1
 				this._dashboardRequestId = requestId
@@ -569,6 +688,7 @@
 			fillForm(profile) {
 				this.form = {
 					avatar: profile.avatar || '/static/logo.png',
+					avatarFileId: profile.avatarFileId || null,
 					nickname: profile.nickname || '',
 					company: this.isOrgCertified ? this.certifiedOrgName : (profile.company || ''),
 					subjectType: profile.subjectType || '',
@@ -623,7 +743,8 @@
 				const url = e.detail && e.detail.avatarUrl
 				if (url) {
 					this.form.avatar = url
-					uni.showToast({ title: '已使用微信头像', icon: 'none' })
+					this.form.avatarFileId = null
+					uni.showToast({ title: '头像已选择，请保存资料', icon: 'none' })
 				}
 				this.closeAvatarSheet()
 			},
@@ -633,17 +754,29 @@
 			closeAvatarSheet() {
 				this.showAvatarSheet = false
 			},
-			onChooseAlbum() {
+			async onChooseAlbum() {
+				const scope = getPageStateScope()
 				this.closeAvatarSheet()
-				uni.chooseImage({
-					count: 1,
-					sizeType: ['compressed'],
-					sourceType: ['album', 'camera'],
-					success: (res) => {
-						const path = res.tempFilePaths && res.tempFilePaths[0]
-						if (path) this.form.avatar = path
-					}
-				})
+				let picker = { chooseImage: options => uni.chooseImage(options) }
+				// #ifdef MP-WEIXIN
+				if (typeof wx !== 'undefined') picker = wx
+				// #endif
+				try {
+					const path = await chooseAvatarImage(picker)
+					if (scope !== getPageStateScope()) return
+					this.form.avatar = path
+					this.form.avatarFileId = null
+					uni.showToast({ title: '头像已选择，请保存资料', icon: 'none' })
+				} catch (error) {
+					if (error.cancelled || scope !== getPageStateScope()) return
+					uni.showModal({
+						title: '无法打开相册',
+						content: error.privacyRequired
+							? '微信隐私授权未完成。请检查小程序后台的用户隐私保护指引和相册选择声明，并重新编译体验版。'
+							: '请检查微信及系统相册权限后重试。错误信息：' + error.message.slice(0, 120),
+						showCancel: false,
+					})
+				}
 			},
 			onNicknameBlur(e) {
 				const val = (e.detail.value || '').trim()
@@ -725,6 +858,7 @@
 						await logout()
 						this.editing = false
 						this.authForm.password = ''
+						this.initialPassword = ''
 						this.form = {
 							avatar: '/static/logo.png',
 							nickname: '',
@@ -758,6 +892,16 @@
 </script>
 
 <style>
+	.wechat-login, .account-settings {
+		margin-top: 24rpx;
+		margin-bottom: 24rpx;
+	}
+	.wechat-btn {
+		background: #07c160;
+		color: #ffffff;
+		font-size: 28rpx;
+		margin-bottom: 16rpx;
+	}
 	.page {
 		min-height: 100vh;
 		background: #f5f6f8;
@@ -1005,8 +1149,8 @@
 
 	.sheet-mask {
 		position: fixed;
-		left: 0;
-		right: 0;
+		left: var(--window-left, 0px);
+		right: var(--window-right, 0px);
 		top: 0;
 		bottom: 0;
 		background: rgba(0, 0, 0, 0.45);

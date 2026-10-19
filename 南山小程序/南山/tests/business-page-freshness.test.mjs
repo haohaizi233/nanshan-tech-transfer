@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import * as cache from '../subpackages/tech-transfer/api/page-state-cache.mjs'
+import { chooseAvatarImage } from '../subpackages/tech-transfer/api/avatar-picker.mjs'
 import { toDemandCard } from '../subpackages/tech-transfer/api/demand.js'
 
 function loadPage(name, overrides = {}) {
@@ -22,6 +23,7 @@ function loadPage(name, overrides = {}) {
     createPageStateMixin: options => cache.createPageStateMixin({ ...options, storage, scope: () => '7' }),
     AI_FEATURE_ENABLED: true,
     AppTabbar: {},
+    WechatPrivacyGate: {},
     CAPABILITY_OPTIONS: [],
     getCapitalGroups: () => [],
     getCachedOrganizationCertification: () => null,
@@ -37,6 +39,7 @@ function loadPage(name, overrides = {}) {
     HostBridge: { getStorage: () => 'test-session' },
     uni: { stopPullDownRefresh() {} },
     toDemandCard,
+    chooseAvatarImage,
     ...overrides,
   }
   const source = readFileSync(new URL(`../subpackages/tech-transfer/pages/${name}/${name}.vue`, import.meta.url), 'utf8')
@@ -50,6 +53,40 @@ function loadPage(name, overrides = {}) {
   Object.assign(page, component.methods)
   return { component, page, storage }
 }
+
+test('WeChat album selection invokes the native media picker and replaces the temporary preview', async () => {
+  const { page } = loadPage('mine', {
+    wx: { chooseMedia: options => options.success({ tempFiles: [{ tempFilePath: 'wxfile://selected.png' }] }) },
+    uni: { showToast() {} },
+  })
+  page.form.avatarFileId = 19
+  await page.onChooseAlbum()
+  assert.equal(page.form.avatar, 'wxfile://selected.png')
+  assert.equal(page.form.avatarFileId, null)
+})
+
+test('WeChat privacy failures are shown instead of silently ignoring an album click', async () => {
+  const dialogs = []
+  const { page } = loadPage('mine', {
+    wx: { chooseMedia: options => options.fail({ errMsg: 'chooseMedia:fail privacy permission is not authorized' }) },
+    uni: { showModal: options => dialogs.push(options) },
+  })
+  await page.onChooseAlbum()
+  assert.equal(dialogs.length, 1)
+  assert.match(dialogs[0].content, /隐私/)
+  assert.equal(page.form.avatar, '/static/logo.png')
+})
+
+test('WeChat privacy settings gate native features until explicit agreement', () => {
+  const { page } = loadPage('mine', {
+    wx: { getPrivacySetting: options => options.success({ needAuthorization: true, privacyContractName: '用户隐私指引' }) },
+  })
+  page.loadPrivacySetting()
+  assert.equal(page.privacyAuthorizationNeeded, true)
+  assert.equal(page.privacyContractName, '用户隐私指引')
+  page.onPrivacyAuthorized()
+  assert.equal(page.privacyAuthorizationNeeded, false)
+})
 
 test('reopening an AI achievement card renders its cached detail without getting stuck loading', async () => {
   let reads = 0

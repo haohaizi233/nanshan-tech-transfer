@@ -24,6 +24,8 @@ const REFRESH_TOKEN_KEY = 'tt_refresh_token'
 const TOKEN_EXPIRES_KEY = 'tt_token_expires_at'
 const CURRENT_USER_KEY = 'tt_current_user'
 const AUTH_MODE_KEY = 'tt_auth_mode'
+const WECHAT_AUTO_KEY = 'tt_wechat_auto_login'
+let sessionEpoch = 0
 
 const DEV_ENVS = ['local', 'development', 'test']
 
@@ -47,6 +49,7 @@ function setStored(key, value) {
 
 function saveSession(data, mode) {
   if (!data) return
+  sessionEpoch++
   if (data.accessToken) setStored(ACCESS_TOKEN_KEY, data.accessToken)
   if (data.refreshToken) setStored(REFRESH_TOKEN_KEY, data.refreshToken)
   if (data.expiresIn) setStored(TOKEN_EXPIRES_KEY, Date.now() + data.expiresIn * 1000)
@@ -55,6 +58,7 @@ function saveSession(data, mode) {
 }
 
 function clearSession() {
+  sessionEpoch++
   setStored(ACCESS_TOKEN_KEY, '')
   setStored(REFRESH_TOKEN_KEY, '')
   setStored(TOKEN_EXPIRES_KEY, '')
@@ -88,11 +92,13 @@ export function setCurrentUser(user) {
 // 共享刷新 promise：并发 401 共享同一次 refresh，避免短时间内重复刷新
 // （与 admin 端 client.js refreshAccessToken 同一模式）。
 let _refreshing = null
+let _wechatRestoring = null
 
 async function doRefreshToken() {
 	const refreshToken = getRefreshToken()
 	if (!refreshToken) return null
 	if (!_refreshing) {
+		const epoch = sessionEpoch
 		_refreshing = (async () => {
 			try {
 				const res = await HostBridge.request({
@@ -100,6 +106,7 @@ async function doRefreshToken() {
 					path: '/auth/refresh',
 					body: { refreshToken },
 				})
+				if (epoch !== sessionEpoch) return null
 				if (res.code === 0 && res.data) {
 					saveSession(res.data)
 					return res.data.accessToken
@@ -107,7 +114,7 @@ async function doRefreshToken() {
 			} catch (e) {
 				// ignore
 			}
-			clearSession()
+			if (epoch === sessionEpoch) clearSession()
 			return null
 		})().finally(() => {
 			_refreshing = null
@@ -153,6 +160,20 @@ async function ensureSession() {
     const token = await doRefreshToken()
     if (token) return true
   }
+
+  // #ifdef MP-WEIXIN
+  if (getStored(WECHAT_AUTO_KEY)) {
+    try {
+      if (!_wechatRestoring) {
+        _wechatRestoring = authWechat().finally(() => { _wechatRestoring = null })
+      }
+      await _wechatRestoring
+      return true
+    } catch {
+      setStored(WECHAT_AUTO_KEY, '')
+    }
+  }
+  // #endif
 
   if (DEV_ENVS.indexOf(getAppEnv()) >= 0) {
     if (_bootstrapping) return _bootstrapPromise
@@ -215,8 +236,39 @@ export async function authLogin(phone, password) {
 }
 
 /** 退出登录（后端注销 + 清除本地缓存） */
+export async function authWechat(phoneCode, bind = false) {
+  if (bind) await ensureSession()
+  const epoch = sessionEpoch
+  const loginCode = await new Promise((resolve, reject) => {
+    if (typeof uni === 'undefined' || typeof uni.login !== 'function') {
+      reject(new Error('请在微信小程序中使用微信登录'))
+      return
+    }
+    uni.login({
+      provider: 'weixin',
+      success: result => result.code ? resolve(result.code) : reject(new Error('微信登录凭证获取失败')),
+      fail: () => reject(new Error('微信登录失败，请重试')),
+    })
+  })
+  if (epoch !== sessionEpoch) throw new Error('登录状态已变更，请重试')
+  const res = await HostBridge.request({
+    method: 'POST', path: bind ? '/auth/wechat/bind' : '/auth/wechat/login',
+    body: { loginCode, phoneCode: phoneCode || undefined },
+  })
+  if (epoch !== sessionEpoch) throw new Error('登录状态已变更，请重试')
+  if (res.code !== 0) {
+    const error = new Error(res.message || '微信登录失败')
+    error.code = res.code
+    throw error
+  }
+  saveSession(res.data, 'account')
+  setStored(WECHAT_AUTO_KEY, true)
+  return res.data
+}
+
 export async function authLogout() {
   const refreshToken = getRefreshToken()
+  setStored(WECHAT_AUTO_KEY, '')
   clearSession()
   if (refreshToken) {
     try {

@@ -56,10 +56,20 @@ class RefreshTokenRequest(RequestBody):
     refreshToken: str = Field(..., description="refreshToken")
 
 
+class WechatLoginRequest(RequestBody):
+    loginCode: str = Field(..., min_length=1, max_length=512)
+    phoneCode: str | None = Field(None, min_length=1, max_length=512)
+
+
+class WechatBindRequest(WechatLoginRequest):
+    phoneCode: str = Field(..., min_length=1, max_length=512)
+
+
 # ── me ──────────────────────────────────────────────────────
 
 class ProfileUpdateRequest(RequestBody):
     version: int = Field(..., ge=1)
+    avatarFileId: int | None = Field(None, ge=1, strict=True)
     displayName: str | None = None
     userType: str | None = Field(None, description="enterprise_staff/researcher/investor/service_org/other")
     subjectType: str | None = None
@@ -72,7 +82,7 @@ class ProfileUpdateRequest(RequestBody):
 
 
 class ChangePasswordRequest(RequestBody):
-    currentPassword: str = Field(..., description="当前密码")
+    currentPassword: str = Field("", description="当前密码；微信新账号首次设置时留空")
     newPassword: str = Field(..., description="新密码")
 
 

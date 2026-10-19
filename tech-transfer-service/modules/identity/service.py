@@ -43,7 +43,11 @@ def _get_profile(cur, user_id: int) -> dict:
         """
         SELECT up.user_id, up.display_name, up.user_type, up.phone, up.email,
                up.org_id, up.org_title, up.company_text, up.version,
-               up.subject_type, up.business_capabilities, up.wechat
+               up.subject_type, up.business_capabilities, up.wechat, up.avatar_file_id,
+               EXISTS(SELECT 1 FROM user_credential uc WHERE uc.user_id=up.user_id
+                      AND uc.password_configured) AS password_configured,
+               EXISTS(SELECT 1 FROM external_identity ei WHERE ei.user_id=up.user_id
+                      AND ei.issuer='wechat-mini' AND ei.unlinked_at IS NULL) AS wechat_bound
         FROM user_profile up
         WHERE up.user_id = %s
         """,
@@ -102,6 +106,11 @@ def build_user_response(cur, user_id: int) -> dict:
     return {
         "userId": user_id,
         "userNo": user["user_no"],
+        "avatarFileId": profile.get("avatar_file_id") if profile else None,
+        "avatar": (f"{settings.MEDIA_BASE_URL.rstrip('/')}/{profile['avatar_file_id']}"
+                   if profile and profile.get("avatar_file_id") else None),
+        "passwordLoginEnabled": profile.get("password_configured", True) if profile else True,
+        "wechatBound": profile.get("wechat_bound", False) if profile else False,
         "displayName": profile["display_name"] if profile else None,
         "userType": profile["user_type"] if profile else None,
         "subjectType": profile["subject_type"] if profile else None,
@@ -299,7 +308,7 @@ def register_user(phone: str, password: str, display_name: str = None) -> dict:
 
 
 _LOGIN_CRED_SQL = """
-    SELECT uc.user_id, uc.password_hash, uc.status AS cred_status,
+    SELECT uc.user_id, uc.password_hash, uc.password_configured, uc.status AS cred_status,
            au.status AS user_status
     FROM user_credential uc
     JOIN app_user au ON au.id = uc.user_id
@@ -315,7 +324,7 @@ def _verify_login_and_issue(cur, cred: dict | None, password: str) -> dict:
     """
     from core.errors import TT_AUTH_40105, TT_AUTH_40106
 
-    if cred is None or not verify_password(password, cred["password_hash"]):
+    if cred is None or not cred.get("password_configured", True) or not verify_password(password, cred["password_hash"]):
         code, message, status = TT_AUTH_40105
         raise BizError(code, message, status)
 
@@ -562,11 +571,9 @@ def logout_session(refresh_token: str) -> dict:
 
 
 def change_password(user_id: int, current_password: str, new_password: str) -> dict:
-    """Update the signed-in account password after verifying the current one."""
+    """Set a first password or update an existing password after verification."""
     current_password = current_password or ""
     new_password = new_password or ""
-    if not current_password:
-        raise bad_request("请填写当前密码")
     if len(new_password) < 8 or len(new_password) > 128:
         raise bad_request("新密码长度须为 8-128 位")
     if current_password == new_password:
@@ -574,16 +581,20 @@ def change_password(user_id: int, current_password: str, new_password: str) -> d
 
     with get_cursor(commit=True) as cur:
         cur.execute(
-            "SELECT password_hash FROM user_credential WHERE user_id=%s",
+            "SELECT password_hash, password_configured, status FROM user_credential WHERE user_id=%s FOR UPDATE",
             (user_id,),
         )
         cred = cur.fetchone()
         if not cred:
             raise bad_request("当前账号不支持密码登录")
-        if not verify_password(current_password, cred["password_hash"]):
+        if cred.get("status", "active") != "active":
+            raise bad_request("当前账号不可修改密码")
+        if cred.get("password_configured", True) and not current_password:
+            raise bad_request("请填写当前密码")
+        if cred.get("password_configured", True) and not verify_password(current_password, cred["password_hash"]):
             raise bad_request("当前密码不正确")
         cur.execute(
-            "UPDATE user_credential SET password_hash=%s WHERE user_id=%s",
+            "UPDATE user_credential SET password_hash=%s, password_configured=true WHERE user_id=%s",
             (hash_password(new_password), user_id),
         )
         audit_record(

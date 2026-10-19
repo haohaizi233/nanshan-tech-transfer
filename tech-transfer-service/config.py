@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # ── 宿主与身份（staging/production 禁止 local/mock）─────
     HOST_MODE: str = "local"
     AUTH_PROVIDER: str = "mock"
+    WECHAT_LOGIN_ENABLED: bool = False
+    WECHAT_APPID: str = ""
+    WECHAT_APP_SECRET: str = ""
 
     # ── 对外 API 地址（staging/production 必须为真实域名）───
     API_BASE: str = "http://127.0.0.1:8787"

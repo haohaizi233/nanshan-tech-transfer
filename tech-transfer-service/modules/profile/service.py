@@ -111,6 +111,12 @@ def update_my_profile(user_id: int, body: dict) -> dict:
         else:
             fields["business_capabilities"] = None
 
+    if "avatarFileId" in body:
+        avatar_id = body["avatarFileId"]
+        if avatar_id is not None and (type(avatar_id) is not int or avatar_id < 1):
+            raise bad_request("avatarFileId 必须为正整数")
+        fields["avatar_file_id"] = avatar_id
+
     if not fields:
         raise bad_request("没有可更新的字段")
 
@@ -126,6 +132,14 @@ def update_my_profile(user_id: int, body: dict) -> dict:
     )
 
     with get_cursor(commit=True) as cur:
+        if fields.get("avatar_file_id") is not None:
+            cur.execute(
+                "SELECT id FROM file_object WHERE id=%s AND created_by=%s "
+                "AND status='active' AND mime_type LIKE 'image/%%' FOR SHARE",
+                (fields["avatar_file_id"], user_id),
+            )
+            if not cur.fetchone():
+                raise bad_request("请选择自己上传的有效图片作为头像")
         cur.execute(sql, params)
         if cur.rowcount == 0:
             cur.execute(
