@@ -1,0 +1,43 @@
+{
+  "id": "nanshan-tech-transfer-env",
+  "name": "南山科转通 API测试",
+  "values": [
+    {
+      "key": "base_url",
+      "value": "http://43.138.138.200:8025",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "api_prefix",
+      "value": "/api/tech-transfer/v1",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "phone",
+      "value": "12345678902",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "password",
+      "value": "111111",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment"
+}
