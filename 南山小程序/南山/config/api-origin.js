@@ -40,7 +40,7 @@ export function resolveH5ApiBase({
   pageLocation = globalThis.location,
   systemInfo,
 } = {}) {
-  // if (PRODUCTION_ENVS.includes(appEnv)) return ''
+  if (PRODUCTION_ENVS.includes(appEnv)) return ''
 
   if (pageLocation && pageLocation.hostname) {
     const protocol = pageLocation.protocol === 'https:' ? 'https:' : 'http:'
