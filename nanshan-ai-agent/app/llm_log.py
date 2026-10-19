@@ -1,12 +1,22 @@
-"""大模型输入/输出落盘。
+"""大模型输入/输出落盘（脱敏摘要版）。
 
 - logs/llm-YYYY-MM-DD.jsonl  一行一条，给程序扫
 - logs/llm-YYYY-MM-DD.log    分段排版，给人读
 控制台同步打一份短摘要。
+
+日志留存与脱敏策略（P0-2 LLM 日志治理）：
+- 不落盘完整 prompt / output：input.messages 与模型原始输出仅在内存中用于解析，
+  落盘面（jsonl / 文本 / 控制台）只保留：
+    · 摘要预览（默认 ≤80 字，且经过 mask_pii 脱敏）
+    · sha256 摘要哈希 + 原文字符数（可用于排障比对，无法还原内容）
+    · 解析后 JSON 的顶层 key 列表 + intent 枚举（不含用户查询词等业务内容）
+- 手机号 / 邮箱等联系方式字段一律 mask_pii 脱敏后才允许进入任何日志面。
+- 留存期 _LOG_RETENTION_DAYS（30 天），到期自动清理；单文件 20MB × 3 份轮转。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -24,16 +34,54 @@ except ImportError:
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _lock = Lock()
 _BODY_LIMIT = 4000
-_RAW_PREVIEW = 1200
+_PREVIEW_LIMIT = 80
 _SYSTEM_PREVIEW = 80
-_log_queue = queue.Queue(maxsize=512)
+_ERROR_MESSAGE_LIMIT = 200
+_LOG_QUEUE_SIZE = 512
+_log_queue = queue.Queue(maxsize=_LOG_QUEUE_SIZE)
 _worker_lock = Lock()
 _worker_started = False
 _logger = logging.getLogger(__name__)
 _last_prune_day = None
-_LOG_RETENTION_DAYS = 14
+_LOG_RETENTION_DAYS = 30  # LLM 调用日志留存期（合规策略），到期自动清理
 _MAX_LOG_BYTES = 20 * 1024 * 1024
 _LOG_BACKUPS = 3
+
+# 联系方式脱敏：手机号保留前 3 后 4；邮箱保留首字符与域名。
+_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([\w-]+(?:\.[\w-]+)+)")
+
+
+def mask_pii(text) -> str:
+    """把手机号 / 邮箱等联系方式打码，供所有日志面统一使用。"""
+    if not text:
+        return ""
+    masked = _PHONE_RE.sub(lambda m: m.group(0)[:3] + "****" + m.group(0)[-4:], str(text))
+    masked = _EMAIL_RE.sub(r"\1***@\2", masked)
+    return masked
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+
+def _to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except TypeError:
+        return str(value)
+
+
+def _preview(text: str, limit: int = _PREVIEW_LIMIT) -> str:
+    """脱敏后的短摘要：只用于排障定位，不允许还原原始内容。"""
+    masked = mask_pii(_to_text(text)).strip()
+    if len(masked) <= limit:
+        return masked
+    return masked[:limit] + "…"
 
 
 def _trim(value, limit: int = _BODY_LIMIT):
@@ -42,14 +90,9 @@ def _trim(value, limit: int = _BODY_LIMIT):
     if isinstance(value, str):
         text = value
     else:
-        try:
-            text = json.dumps(value, ensure_ascii=False, default=str)
-        except TypeError:
-            text = str(value)
+        text = _to_text(value)
     if len(text) <= limit:
         return value if isinstance(value, (dict, list)) else text
-    if isinstance(value, str):
-        return text[:limit] + "…"
     return text[:limit] + "…"
 
 
@@ -74,6 +117,26 @@ def parse_error_fields(body: str) -> dict:
     if not fields:
         fields = {key: _trim(val, 400) for key, val in list(payload.items())[:12]}
     return fields
+
+
+def _redact_error(error) -> dict | None:
+    """失败原因落盘前脱敏 + 截断；不保留上游原始 body。"""
+    if not isinstance(error, dict):
+        return {"message": _preview(error, _ERROR_MESSAGE_LIMIT)} if error else None
+    redacted = {}
+    if error.get("type"):
+        redacted["type"] = str(error["type"])[:64]
+    if error.get("status") is not None:
+        redacted["status"] = error["status"]
+    if error.get("message"):
+        redacted["message"] = _preview(error["message"], _ERROR_MESSAGE_LIMIT)
+    fields = error.get("fields")
+    if isinstance(fields, dict) and fields:
+        redacted["fields"] = {
+            str(key)[:40]: _preview(val, _ERROR_MESSAGE_LIMIT)
+            for key, val in list(fields.items())[:12]
+        }
+    return redacted or None
 
 
 def _pretty(value) -> str:
@@ -156,6 +219,7 @@ def summarize_messages(messages) -> dict:
 
 
 def enrich_event(event: dict) -> dict:
+    """内存内解析：stage / 意图 / 用量。返回值只在进程内使用，不直接落盘。"""
     src = dict(event or {})
     messages = ((src.get("input") or {}) if isinstance(src.get("input"), dict) else {}).get("messages")
     summary = summarize_messages(messages)
@@ -177,8 +241,49 @@ def enrich_event(event: dict) -> dict:
     return src
 
 
+def redacted_view(src: dict) -> dict:
+    """把事件压缩为可落盘的脱敏摘要（预览 + 哈希 + 长度）。
+
+    兼容两种来源：
+    - 内存中的原始事件（含 user 全文 / output 全文 / output_json）；
+    - 已脱敏的 jsonl 记录（rebuild_readable_log 回放时直接透传摘要字段）。
+    """
+    src = src or {}
+    view: dict = {}
+
+    if src.get("user_preview") is not None or src.get("user_sha256") is not None:
+        for key in ("user_preview", "user_sha256", "user_chars"):
+            if src.get(key) is not None:
+                view[key] = src[key]
+    else:
+        user_text = _to_text(src.get("user")).strip()
+        view["user_chars"] = len(user_text)
+        if user_text:
+            view["user_sha256"] = _sha256(user_text)
+            view["user_preview"] = _preview(user_text)
+
+    if src.get("output_preview") is not None or src.get("output_sha256") is not None:
+        for key in ("output_preview", "output_sha256", "output_chars", "output_json_keys", "intent"):
+            if src.get(key) is not None:
+                view[key] = src[key]
+    else:
+        output_text = _to_text(src.get("output"))
+        view["output_chars"] = len(output_text)
+        if output_text:
+            view["output_sha256"] = _sha256(output_text)
+            view["output_preview"] = _preview(output_text)
+        parsed = src.get("output_json") if isinstance(src.get("output_json"), dict) else None
+        if parsed is not None:
+            view["output_json_keys"] = sorted(str(key) for key in parsed)[:20]
+            if parsed.get("intent"):
+                view["intent"] = str(parsed["intent"])[:64]
+
+    return {key: value for key, value in view.items() if value is not None}
+
+
 def format_llm_log_text(event: dict, include_raw: bool = True) -> str:
     rec = enrich_event(event)
+    view = redacted_view(rec)
     ok = rec.get("ok")
     status_label = "成功" if ok else "失败"
     usage_bits = []
@@ -198,48 +303,49 @@ def format_llm_log_text(event: dict, include_raw: bool = True) -> str:
     ]
     if usage_bits:
         header.append("    ".join(usage_bits))
-    lines = header + ["-" * 72, "用户", rec.get("user") or "（空）"]
+    lines = header + ["-" * 72, "用户（脱敏摘要）", view.get("user_preview") or "（空）"]
+    if view.get("user_sha256"):
+        lines.append(f"摘要 sha256={view['user_sha256'][:16]}…  共 {view.get('user_chars') or 0} 字")
     if rec.get("system_preview"):
         lines.extend([
             "",
             "系统提示",
             f"{rec['system_preview']}  （共 {rec.get('system_chars') or 0} 字）",
         ])
-    if rec.get("output_json") is not None:
-        lines.extend(["-" * 72, "模型解析", _pretty(rec["output_json"])])
-    elif rec.get("ok") and rec.get("output"):
-        lines.extend(["-" * 72, "模型输出", _pretty(rec["output"])])
+    if view.get("intent") or view.get("output_sha256"):
+        lines.append("-" * 72)
+        lines.append("模型输出（脱敏摘要）")
+        if view.get("intent"):
+            lines.append(f"intent={view['intent']}")
+        if view.get("output_json_keys"):
+            lines.append("解析字段 " + ", ".join(view["output_json_keys"]))
+        if include_raw and view.get("output_preview"):
+            lines.append(view["output_preview"])
+        if view.get("output_sha256"):
+            lines.append(
+                f"摘要 sha256={view['output_sha256'][:16]}…  共 {view.get('output_chars') or 0} 字"
+            )
     if not rec.get("ok"):
         error = rec.get("error") or {}
-        lines.extend([
-            "-" * 72,
-            f"失败原因 {rec.get('reason') or error.get('type') or '-'}",
-            _pretty(error) if error else (rec.get("reason") or "未知错误"),
-        ])
-    raw = rec.get("output") if isinstance(rec.get("output"), str) else ""
-    if include_raw and raw and rec.get("output_json") is not None:
-        preview = raw.strip()
-        if len(preview) > _RAW_PREVIEW:
-            preview = preview[:_RAW_PREVIEW] + "…"
-        if preview and preview != _pretty(rec["output_json"]):
-            lines.extend(["-" * 72, "原始输出（截断）", preview])
+        lines.append("-" * 72)
+        lines.append(f"失败原因 {rec.get('reason') or (error.get('type') if isinstance(error, dict) else None) or '-'}")
+        if error:
+            lines.append(_pretty(_redact_error(error) if isinstance(error, dict) else error))
+        else:
+            lines.append(rec.get("reason") or "未知错误")
     lines.append("=" * 72)
     return "\n".join(str(item) for item in lines) + "\n"
 
 
 def format_llm_console_line(event: dict) -> str:
     rec = enrich_event(event)
-    parsed = rec.get("output_json") if isinstance(rec.get("output_json"), dict) else {}
-    intent = parsed.get("intent") or ""
-    keywords = parsed.get("keywords")
+    view = redacted_view(rec)
     extras = []
-    if intent:
-        extras.append(f"intent={intent}")
-    if isinstance(keywords, list) and keywords:
-        extras.append("keywords=" + ",".join(str(item) for item in keywords[:6]))
+    if view.get("intent"):
+        extras.append(f"intent={view['intent']}")
     if rec.get("elapsed") is not None:
         extras.append(f"{rec['elapsed']}s")
-    user = rec.get("user") or ""
+    user = view.get("user_preview") or ""
     if len(user) > 40:
         user = user[:40] + "…"
     flag = "OK" if rec.get("ok") else "FAIL"
@@ -252,9 +358,7 @@ def format_llm_console_line(event: dict) -> str:
 
 def _compact_jsonl_record(event: dict) -> dict:
     rec = enrich_event(event)
-    output = rec.get("output")
-    if isinstance(output, str) and len(output) > _RAW_PREVIEW:
-        output = output[:_RAW_PREVIEW] + "…"
+    view = redacted_view(rec)
     record = {
         "ts": rec.get("ts"),
         "ok": rec.get("ok"),
@@ -264,16 +368,19 @@ def _compact_jsonl_record(event: dict) -> dict:
         "attempt": rec.get("attempt"),
         "attempts": rec.get("attempts"),
         "status": rec.get("status"),
-        "user": rec.get("user"),
         "system_preview": rec.get("system_preview"),
         "system_chars": rec.get("system_chars"),
-        "output_json": rec.get("output_json"),
-        "output": output,
+        "prompt_tokens": rec.get("prompt_tokens"),
+        "completion_tokens": rec.get("completion_tokens"),
+        "total_tokens": rec.get("total_tokens"),
         "usage": rec.get("usage"),
     }
+    record.update(view)
     if not rec.get("ok"):
         record["reason"] = rec.get("reason")
-        record["error"] = rec.get("error")
+        redacted = _redact_error(rec.get("error"))
+        if redacted:
+            record["error"] = redacted
     return {key: value for key, value in record.items() if value is not None}
 
 

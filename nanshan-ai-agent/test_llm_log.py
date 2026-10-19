@@ -43,10 +43,49 @@ class LlmLogFormatTest(unittest.TestCase):
         self.assertEqual(rec["output_json"]["keywords"], ["机器视觉"])
         text = format_llm_log_text(event)
         self.assertIn("找机器视觉相关的科技成果", text)
-        self.assertIn('"intent": "search_achievement"', text)
+        self.assertIn("search_achievement", text)
         self.assertIn("成功", text)
         console = format_llm_log_text(event, include_raw=False)
         self.assertNotIn("原始输出", console)
+
+    def test_persisted_record_is_redacted_summary_only(self):
+        """落盘记录只含脱敏摘要 + hash：完整 prompt/output 不进 jsonl。"""
+        from app.llm_log import _compact_jsonl_record
+
+        long_tail = "排障定位不应看到的长尾内容TAIL_MARKER"
+        event = {
+            "ts": "2026-09-21 17:00:00",
+            "ok": True,
+            "input": {
+                "messages": [
+                    {"role": "system", "content": "你是参数解析器。"},
+                    {
+                        "role": "user",
+                        "content": "我的手机号是13812345678，邮箱abc@example.com，帮我找成果" + "问" * 120 + long_tail,
+                    },
+                ]
+            },
+            "output": '{"intent": "search_achievement", "note": "' + "x" * 200 + '机密关键词END_OUTPUT_MARKER"}',
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+        }
+        record = _compact_jsonl_record(event)
+        dumped = json.dumps(record, ensure_ascii=False)
+        # 完整 prompt / output 不落盘：超长尾部被截断，只留摘要
+        self.assertNotIn("TAIL_MARKER", dumped)
+        self.assertNotIn("END_OUTPUT_MARKER", dumped)
+        self.assertNotIn("机密关键词", dumped)
+        self.assertNotIn("messages", dumped)
+        # 保留摘要 + hash
+        self.assertIn("user_sha256", record)
+        self.assertIn("output_sha256", record)
+        self.assertEqual(record["user_chars"], len(event["input"]["messages"][1]["content"]))
+        # 联系方式脱敏
+        self.assertNotIn("13812345678", dumped)
+        self.assertNotIn("abc@example.com", dumped)
+        self.assertIn("138****5678", dumped)
+        self.assertIn("a***@example.com", dumped)
+        # intent 保留（枚举值，不含用户内容）
+        self.assertEqual(record["intent"], "search_achievement")
 
     def test_rebuild_readable_log(self):
         records = [
