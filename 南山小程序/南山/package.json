@@ -4,13 +4,18 @@
   "scripts": {
     "prepare": "node scripts/ensure-local-env.mjs",
     "predev:h5": "node scripts/ensure-local-env.mjs",
-    "dev:h5": "uni"
+    "dev:h5": "uni",
+    "predev:mp-weixin": "node scripts/ensure-local-env.mjs",
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "build:h5": "uni build",
+    "build:mp-weixin": "uni build -p mp-weixin"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020620260917001",
     "@dcloudio/uni-app-plus": "3.0.0-5020620260917001",
     "@dcloudio/uni-components": "3.0.0-5020620260917001",
     "@dcloudio/uni-h5": "3.0.0-5020620260917001",
+    "@dcloudio/uni-mp-weixin": "3.0.0-5020620260917001",
     "vue": "^3.4.21"
   },
   "devDependencies": {
