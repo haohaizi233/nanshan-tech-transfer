@@ -121,8 +121,9 @@ async def ai_chat(body: ChatRequest, http_request: Request):
                     detail={"message": "AI 响应超时，请缩短问题后重试。", "reason": "timeout"},
                 )
             if await http_request.is_disconnected():
-                future.cancel()
-                return Response(status_code=499)
+                # 客户端断开 ≠ 取消生成：后台继续跑完并存储结果
+                # 前端重新连上后可以通过 turnId 查询结果
+                pass  # 不cancel，继续等待完成
             await asyncio.wait((future,), timeout=min(0.2, remaining))
         return await future
     finally:

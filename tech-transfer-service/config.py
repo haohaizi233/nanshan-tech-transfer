@@ -270,10 +270,11 @@ class Settings(BaseSettings):
     @property
     def cors_origin_regex(self) -> str | None:
         """local：放行本机/局域网 H5 dev server（5173）与 frp 隧道入口（8077）；
-        staging/production：无 regex，仅 CORS_ORIGINS 显式白名单。"""
+        staging/production：放行 Postman/Swagger/Apifox 等API测试工具。"""
         if self.is_local:
             return r"^https?://(localhost|127\.0\.0\.1|\d{1,3}(\.\d{1,3}){3}):(5173|8077)$"
-        return None
+        # 放行常见API测试工具的Origin（简化regex）
+        return r"^https?://.*\.(postman|swagger|apifox|hoppscotch)\.(com|io|app)(:\d+)?$"
 
     @property
     def file_cache_path(self) -> Path:
