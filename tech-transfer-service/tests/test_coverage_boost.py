@@ -139,7 +139,9 @@ class TestAdminDashboardFixed:
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import dashboard_todos
         result = dashboard_todos(10)
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "total" in result
+        assert result["list"] == []
 
     @patch("modules.admin.service.get_cursor")
     def test_dashboard_todos_with_items(self, mock_gc):
@@ -151,17 +153,21 @@ class TestAdminDashboardFixed:
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import dashboard_todos
         result = dashboard_todos(10)
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert result["total"] == 1
+        assert result["list"][0]["kind"] == "achievement"
 
     @patch("modules.admin.service.get_cursor")
     def test_dashboard_trend(self, mock_gc):
         cur = MagicMock()
-        cur.fetchall.return_value = [{"dt": "2026-01-01", "count": 5}]
+        cur.fetchall.return_value = [{"day": "01-01", "c": 5}]
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import dashboard_trend
         result = dashboard_trend(7)
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert result["days"] == 7
+        assert set(result) >= {"labels", "users", "achievements", "demands"}
 
     @patch("modules.admin.service.get_cursor")
     def test_dashboard_trend_30_days(self, mock_gc):
@@ -171,7 +177,8 @@ class TestAdminDashboardFixed:
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import dashboard_trend
         result = dashboard_trend(30)
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert result["days"] == 30
 
     @patch("modules.admin.service.dashboard_summary")
     def test_notification_summary_platform(self, mock_ds):
@@ -423,19 +430,21 @@ class TestAdminCrudAdminFixed:
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import soft_delete_achievement_admin
-        result = soft_delete_achievement_admin({"isPlatformAdmin": True}, 1)
+        result = soft_delete_achievement_admin({"isPlatformAdmin": True, "userId": 1, "userNo": "U001"}, 1)
         assert isinstance(result, dict)
+        assert result == {"id": 1, "deleted": True}
 
     @patch("modules.admin.service.get_cursor")
     def test_soft_delete_achievement_admin_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
+        cur.rowcount = 0
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import soft_delete_achievement_admin
         from core.errors import BizError
         with pytest.raises(BizError):
-            soft_delete_achievement_admin({"isPlatformAdmin": True}, 999)
+            soft_delete_achievement_admin({"isPlatformAdmin": True, "userId": 1, "userNo": "U001"}, 999)
 
     @patch("modules.admin.service.get_cursor")
     def test_soft_delete_demand_admin_success(self, mock_gc):
@@ -445,19 +454,20 @@ class TestAdminCrudAdminFixed:
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import soft_delete_demand_admin
-        result = soft_delete_demand_admin({"isPlatformAdmin": True}, 1)
+        result = soft_delete_demand_admin({"isPlatformAdmin": True, "userId": 1, "userNo": "U001"}, 1)
         assert isinstance(result, dict)
 
     @patch("modules.admin.service.get_cursor")
     def test_soft_delete_demand_admin_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
+        cur.rowcount = 0
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.admin.service import soft_delete_demand_admin
         from core.errors import BizError
         with pytest.raises(BizError):
-            soft_delete_demand_admin({"isPlatformAdmin": True}, 999)
+            soft_delete_demand_admin({"isPlatformAdmin": True, "userId": 1, "userNo": "U001"}, 999)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -520,7 +530,7 @@ class TestAdminInstitutionCrud:
 
     def test_normalize_import_item(self):
         from modules.admin.service import _normalize_import_item
-        result = _normalize_import_item({"name": "测试机构", "kind": "enterprise"})
+        result = _normalize_import_item({"name": "测试机构", "kind": "service"})
         assert isinstance(result, dict)
 
     @patch("modules.admin.service.audit_record")
@@ -616,6 +626,7 @@ class TestAdminContentHelpers:
         row = {
             "id": 1, "title": "需求", "category_name": None, "category_code": None,
             "source_org_name": None, "created_at": datetime(2026, 1, 1),
+            "updated_at": datetime(2026, 1, 2),
             "owner_user_id": 1, "submitter_name": "张三", "version": 1,
             "status": "pending_review",
         }
@@ -637,9 +648,10 @@ class TestAdminContentHelpers:
 class TestAdminCoopOrgVisibility:
     def test_coop_org_visibility_platform_admin(self):
         from modules.admin.service import _coop_org_visibility_sql
-        clause, params = _coop_org_visibility_sql({"isPlatformAdmin": True})
-        assert clause == "TRUE"
-        assert params == []
+        from core.errors import BizError
+        # 平台管理员不经该 SQL 限定（scope_org_ids 为空）；此助手仅用于机构管理员分桶
+        with pytest.raises(BizError):
+            _coop_org_visibility_sql({"isPlatformAdmin": True})
 
     def test_coop_org_visibility_org_admin(self):
         from modules.admin.service import _coop_org_visibility_sql
@@ -648,8 +660,9 @@ class TestAdminCoopOrgVisibility:
 
     def test_user_membership_scope_sql_platform(self):
         from modules.admin.service import _user_membership_scope_sql
-        clause, params = _user_membership_scope_sql({"isPlatformAdmin": True})
-        assert "1=1" in clause
+        from core.errors import BizError
+        with pytest.raises(BizError):
+            _user_membership_scope_sql({"isPlatformAdmin": True})
 
     def test_user_membership_scope_sql_org(self):
         from modules.admin.service import _user_membership_scope_sql
@@ -704,6 +717,7 @@ class TestAdminReviewQueuesWithData:
         cur.fetchall.return_value = [
             {"id": 1, "title": "需求", "category_name": None, "category_code": None,
              "source_org_name": None, "created_at": datetime(2026, 1, 1),
+             "updated_at": datetime(2026, 1, 2),
              "owner_user_id": 1, "submitter_name": "张三", "version": 1,
              "status": "pending_review"},
         ]
@@ -729,7 +743,8 @@ class TestIdentityBuildUserFixed:
             "subject_type": None, "business_capabilities": None, "wechat": None,
         }
         user_row = {"user_no": "U001", "status": "active"}
-        cur.fetchone.side_effect = [profile, user_row]
+        # 调用序：_get_profile → _get_roles(fetchall+org判定 fetchone) → app_user
+        cur.fetchone.side_effect = [profile, None, user_row]
         cur.fetchall.side_effect = [[{"role_code": "user"}], []]
         from modules.identity.service import build_user_response
         result = build_user_response(cur, 1)
@@ -744,6 +759,7 @@ class TestIdentityBuildUserFixed:
              "phone": "138", "email": "e", "org_id": None, "org_title": None,
              "company_text": None, "version": 1, "subject_type": None,
              "business_capabilities": None, "wechat": None},
+            None,
             None,
         ]
         cur.fetchall.return_value = [{"role_code": "user"}]
@@ -760,7 +776,7 @@ class TestIdentityBuildUserFixed:
             "business_capabilities": '["技术转让"]', "wechat": "wx123",
         }
         user_row = {"user_no": "U001", "status": "active"}
-        cur.fetchone.side_effect = [profile, user_row, {"name": "测试机构"}]
+        cur.fetchone.side_effect = [profile, None, user_row, {"name": "测试机构"}]
         cur.fetchall.side_effect = [[{"role_code": "admin"}], [{"id": 1, "org_id": 1, "org_name": "测试机构", "role": "admin", "status": "active", "version": 1}]]
         from modules.identity.service import build_user_response
         result = build_user_response(cur, 1)
@@ -772,34 +788,38 @@ class TestIdentityBuildUserFixed:
 class TestIdentityRegisterFixed:
     @patch("modules.identity.service.sign_refresh_token", return_value=("ref", "jti"))
     @patch("modules.identity.service.sign_access_token", return_value="tok")
-    @patch("modules.identity.service.hash_password", return_value="hashed")
+    @patch("core.password.hash_password", return_value="hashed")
     @patch("modules.identity.service.validate_phone", return_value="13800138000")
     @patch("modules.identity.service.get_cursor")
     def test_register_user_success(self, mock_gc, _vp, _hp, _sat, _srt):
         cur = MagicMock()
+        profile = {
+            "user_id": 1, "display_name": "13800138000", "user_type": None,
+            "phone": "13800138000", "email": None, "org_id": None,
+            "org_title": None, "company_text": None, "version": 1,
+            "subject_type": None, "business_capabilities": None, "wechat": None,
+        }
         cur.fetchone.side_effect = [
+            None,  # 手机号已注册检查：未注册
             {"m": 0},  # _generate_user_no
-            None,  # phone check
-            {"id": 1},  # INSERT app_user
-            {"user_id": 1, "display_name": "13800138000", "user_type": None,
-             "phone": "13800138000", "email": None, "org_id": None,
-             "org_title": None, "company_text": None, "version": 1,
-             "subject_type": None, "business_capabilities": None, "wechat": None},
-            {"user_no": "U001", "status": "active"},
-            None,  # org admin
-            None,  # org name
-            {"user_no": "U001", "status": "active"},  # _issue_session
+            {"id": 1},  # INSERT app_user RETURNING id
+            None,  # _get_roles 机构管理员判定
+            {"user_no": "U001", "status": "active"},  # _issue_session 查 app_user
+            profile,  # build_user_response → _get_profile
+            None,  # build_user_response → _get_roles 机构管理员判定
+            {"user_no": "U001", "status": "active"},  # build_user_response → app_user
         ]
         cur.fetchall.side_effect = [
             [{"role_code": "user"}],
-            [],
             [{"role_code": "user"}],
+            [],  # memberships
         ]
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.identity.service import register_user
         result = register_user("13800138000", "password123")
         assert "user" in result
+        assert result["isNewUser"] is True
 
 
 class TestIdentityLoginValidation:
@@ -824,16 +844,19 @@ class TestIdentityLoginValidation:
 
 class TestIdentityRefreshFixed:
     def test_refresh_session_invalid_token(self):
+        import jwt
+
         from modules.identity.service import refresh_session
         from core.errors import BizError
-        with patch("modules.identity.service.decode_no_verify_exp", side_effect=Exception("bad")):
+        # decode_no_verify_exp 在函数内从 core.jwt_utils 导入，mock 源模块
+        with patch("core.jwt_utils.decode_no_verify_exp", side_effect=jwt.InvalidTokenError("bad")):
             with pytest.raises(BizError):
                 refresh_session("bad_token")
 
     def test_refresh_session_wrong_type(self):
         from modules.identity.service import refresh_session
         from core.errors import BizError
-        with patch("modules.identity.service.decode_no_verify_exp", return_value={"sub": "1", "type": "access", "jti": "x"}):
+        with patch("core.jwt_utils.decode_no_verify_exp", return_value={"sub": "1", "type": "access", "jti": "x"}):
             with pytest.raises(BizError):
                 refresh_session("token")
 
@@ -961,6 +984,9 @@ class TestMembershipApplyFixed:
         conn.__enter__ = MagicMock(return_value=conn)
         conn.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value = cur
+        # `with transaction() as conn, conn.cursor() as cur` 会走 cur.__enter__
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
         mock_trans.return_value = conn
         cur.fetchone.side_effect = [
             {"id": 1},  # org exists
@@ -979,6 +1005,8 @@ class TestMembershipApplyFixed:
         conn.__enter__ = MagicMock(return_value=conn)
         conn.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value = cur
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
         mock_trans.return_value = conn
         cur.fetchone.return_value = None
         from modules.membership.service import apply_membership
@@ -993,6 +1021,8 @@ class TestMembershipApplyFixed:
         conn.__enter__ = MagicMock(return_value=conn)
         conn.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value = cur
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
         mock_trans.return_value = conn
         cur.fetchone.side_effect = [
             {"id": 1},  # org exists
@@ -1013,6 +1043,8 @@ class TestMembershipCancelFixed:
         conn.__enter__ = MagicMock(return_value=conn)
         conn.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value = cur
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
         mock_trans.return_value = conn
         cur.fetchone.side_effect = [
             {"id": 1},  # existence check
@@ -1029,6 +1061,8 @@ class TestMembershipCancelFixed:
         conn.__enter__ = MagicMock(return_value=conn)
         conn.__exit__ = MagicMock(return_value=False)
         conn.cursor.return_value = cur
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
         mock_trans.return_value = conn
         cur.fetchone.return_value = None
         from modules.membership.service import cancel_membership_application
@@ -1351,7 +1385,8 @@ class TestPatentHistoryFixed:
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.patent.history import list_history
         result = list_history(1, "keyword")
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert result["list"] == []
 
     @patch("modules.patent.history.get_cursor")
     def test_clear_history(self, mock_gc):
@@ -1361,17 +1396,18 @@ class TestPatentHistoryFixed:
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.patent.history import clear_history
         result = clear_history(1, "keyword")
-        assert result == 3
+        assert result == {"deleted": 3}
 
     @patch("modules.patent.history.get_cursor")
     def test_record_history(self, mock_gc):
         cur = MagicMock()
-        cur.fetchone.return_value = {"id": 1, "created_at": datetime.now()}
+        cur.fetchone.return_value = {"keyword": "AI", "search_mode": "keyword", "updated_at": datetime.now()}
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.patent.history import record_history
         result = record_history(1, "keyword", "AI")
         assert isinstance(result, dict)
+        assert result["keyword"] == "AI"
 
     def test_normalize_history_input(self):
         from modules.patent.history import normalize_history_input
@@ -1381,8 +1417,10 @@ class TestPatentHistoryFixed:
 
     def test_normalize_history_input_defaults(self):
         from modules.patent.history import normalize_history_input
-        mode, kw = normalize_history_input("", "")
-        assert mode == "keyword"
+        from core.errors import BizError
+        # 现实现：mode/keyword 均必填，非法入参直接 400
+        with pytest.raises(BizError):
+            normalize_history_input("", "")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1392,13 +1430,15 @@ class TestPatentHistoryFixed:
 class TestPatentProviderHelpers:
     def test_configured_false(self):
         with patch("modules.patent.provider.settings") as mock_settings:
-            mock_settings.PATENT_API_BASE = ""
+            mock_settings.PATENT_PROVIDER_BASE = ""
+            mock_settings.PATENT_PROVIDER_KEY = "test-key"
             from modules.patent.provider import _configured
             assert _configured() is False
 
     def test_configured_true(self):
         with patch("modules.patent.provider.settings") as mock_settings:
-            mock_settings.PATENT_API_BASE = "http://localhost:8080"
+            mock_settings.PATENT_PROVIDER_BASE = "http://localhost:8080"
+            mock_settings.PATENT_PROVIDER_KEY = "test-key"
             from modules.patent.provider import _configured
             assert _configured() is True
 
@@ -1413,7 +1453,8 @@ class TestPatentProviderHelpers:
     def test_safe_snippet_long(self):
         from modules.patent.provider import _safe_snippet
         result = _safe_snippet("x" * 500)
-        assert len(result) <= 300
+        assert result.endswith("…")
+        assert len(result) <= 301
 
     def test_network_reason_timeout(self):
         from modules.patent.provider import _network_reason
@@ -1429,27 +1470,28 @@ class TestPatentProviderHelpers:
 
     def test_auth_headers(self):
         with patch("modules.patent.provider.settings") as mock_settings:
-            mock_settings.PATENT_API_KEY = "test-key"
+            mock_settings.PATENT_PROVIDER_KEY = "test-key"
             from modules.patent.provider import _auth_headers
             h = _auth_headers()
             assert isinstance(h, dict)
 
     def test_auth_headers_no_key(self):
         with patch("modules.patent.provider.settings") as mock_settings:
-            mock_settings.PATENT_API_KEY = ""
+            mock_settings.PATENT_PROVIDER_KEY = ""
             from modules.patent.provider import _auth_headers
             h = _auth_headers()
             assert isinstance(h, dict)
 
     def test_provider_key(self):
         with patch("modules.patent.provider.settings") as mock_settings:
-            mock_settings.PATENT_API_KEY = "test-key"
+            mock_settings.PATENT_PROVIDER_KEY = "test-key"
             from modules.patent.provider import _provider_key
             assert _provider_key() == "test-key"
 
     def test_build_url(self):
         with patch("modules.patent.provider.settings") as mock_settings:
-            mock_settings.PATENT_API_BASE = "http://localhost:8080"
+            mock_settings.PATENT_PROVIDER_BASE = "http://localhost:8080"
+            mock_settings.PATENT_PROVIDER_KEY = "test-key"
             from modules.patent.provider import _build_url
             url = _build_url("/search", {"q": "AI"})
             assert "localhost" in url
@@ -1570,7 +1612,8 @@ class TestImporterHelpersFixed:
         from modules.achievement.importer import _normalize_page
         page = {"sourcePageOrSlide": "1", "text": "text content", "images": []}
         result = _normalize_page(page)
-        assert "pageType" in result
+        assert "normalized" in result
+        assert "errors" in result
 
     def test_safe_import_filename(self):
         from modules.achievement.importer import _safe_import_filename
@@ -1580,8 +1623,10 @@ class TestImporterHelpersFixed:
 
     def test_batch_dto(self):
         from modules.achievement.importer import _batch_dto
-        row = {"id": 1, "status": "staging", "original_filename": "test.pdf",
-               "item_count": 5, "created_at": datetime(2026, 1, 1)}
+        row = {"id": 1, "source_filename": "test.pdf", "source_org_name": "测试机构",
+               "status": "staging", "total_count": 5, "success_count": 3,
+               "failed_count": 2, "created_at": datetime(2026, 1, 1),
+               "completed_at": None}
         result = _batch_dto(row)
         assert result["id"] == 1
         assert result["status"] == "staging"
@@ -1627,7 +1672,7 @@ class TestImporterStageBatch:
     @patch("modules.achievement.importer.get_cursor")
     def test_list_import_batches_empty(self, mock_gc):
         cur = MagicMock()
-        cur.fetchone.return_value = {"c": 0}
+        cur.fetchone.return_value = {"total": 0}
         cur.fetchall.return_value = []
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
@@ -1718,7 +1763,8 @@ class TestCoreRateLimitFixed:
 class TestConfig:
     def test_settings_import(self):
         from config import settings
-        assert hasattr(settings, "DATABASE_URL")
+        assert hasattr(settings, "DB_HOST")
+        assert hasattr(settings, "JWT_SECRET")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1727,14 +1773,15 @@ class TestConfig:
 
 class TestAchievementExtract:
     def test_extract_patent_numbers(self):
-        from modules.achievement.extract import extract_patent_numbers
-        result = extract_patent_numbers("专利号：CN12345678A")
-        assert len(result) >= 1
+        from modules.achievement.extract import parse_labeled_line
+        label, content = parse_labeled_line("联系人：张三")
+        assert label is not None
+        assert content == "张三"
 
     def test_extract_patent_numbers_empty(self):
-        from modules.achievement.extract import extract_patent_numbers
-        result = extract_patent_numbers("")
-        assert result == []
+        from modules.achievement.extract import looks_like_title
+        assert looks_like_title("") is False
+        assert looks_like_title("新型材料技术") is True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1756,14 +1803,15 @@ class TestAchievementContent:
 
 class TestAchievementServiceHelpers:
     def test_validate_create_fields_missing_title(self):
-        from modules.achievement.service import _validate_create_fields
+        from modules.achievement.service import _parse_upsert_body
         from core.errors import BizError
         with pytest.raises(BizError):
-            _validate_create_fields({})
+            _parse_upsert_body({}, False)
 
     def test_validate_create_fields_valid(self):
-        from modules.achievement.service import _validate_create_fields
-        _validate_create_fields({"title": "测试成果"})
+        from modules.achievement.service import _parse_upsert_body
+        fields, _refs, _content = _parse_upsert_body({"title": "测试成果"}, False)
+        assert fields["title"] == "测试成果"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1772,10 +1820,10 @@ class TestAchievementServiceHelpers:
 
 class TestDemandServiceHelpers:
     def test_validate_create_fields_missing_title(self):
-        from modules.demand.service import _validate_create_fields
+        from modules.demand.service import _parse_upsert_body
         from core.errors import BizError
         with pytest.raises(BizError):
-            _validate_create_fields({})
+            _parse_upsert_body({}, False)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1784,10 +1832,10 @@ class TestDemandServiceHelpers:
 
 class TestCooperationServiceHelpers:
     def test_validate_intent_body_missing(self):
-        from modules.cooperation.service import _validate_intent_body
+        from modules.cooperation.service import _validate_target_type
         from core.errors import BizError
         with pytest.raises(BizError):
-            _validate_intent_body({})
+            _validate_target_type("")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1798,13 +1846,14 @@ class TestFavoriteServiceHelpers:
     @patch("modules.favorite.service.get_cursor")
     def test_list_favorites_empty(self, mock_gc):
         cur = MagicMock()
-        cur.fetchone.return_value = {"total": 0}
+        cur.fetchone.return_value = {"c": 0}
         cur.fetchall.return_value = []
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.favorite.service import list_favorites
-        result = list_favorites({"userId": 1}, "achievement", 1, 10)
+        from modules.favorite.service import list_my_favorites
+        result = list_my_favorites(1, {"targetType": "achievement", "page": "1", "pageSize": "10"})
         assert isinstance(result, dict)
+        assert result["total"] == 0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1813,16 +1862,18 @@ class TestFavoriteServiceHelpers:
 
 class TestFileServiceHelpers:
     def test_validate_file_type(self):
-        from modules.file.service import _validate_file_type
+        from modules.file.service import _validate_upload
         from core.errors import BizError
         with pytest.raises(BizError):
-            _validate_file_type("test.exe")
+            _validate_upload("test.exe", "application/octet-stream", b"data")
 
     def test_validate_file_size(self):
-        from modules.file.service import _validate_file_size
+        from modules.file.service import create_uploaded_file
         from core.errors import BizError
-        with pytest.raises(BizError):
-            _validate_file_size(100 * 1024 * 1024)  # 100MB
+        with patch("modules.file.service.settings") as mock_settings:
+            mock_settings.MAX_UPLOAD_BYTES = 10
+            with pytest.raises(BizError):
+                create_uploaded_file(1, "test.pdf", "application/pdf", b"x" * 11)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1830,15 +1881,14 @@ class TestFileServiceHelpers:
 # ══════════════════════════════════════════════════════════════
 
 class TestSearchServiceHelpers:
-    @patch("modules.search.service.get_cursor")
-    def test_search_all_empty(self, mock_gc):
-        cur = MagicMock()
-        cur.fetchall.return_value = []
-        mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
-        mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.search.service import search_all
-        result = search_all("test", 1, 10)
+    @patch("modules.search.service.list_demands", return_value={"total": 0, "list": []})
+    @patch("modules.search.service.list_achievements", return_value={"total": 0, "list": []})
+    def test_search_all_empty(self, _mock_ach, _mock_dmd):
+        from modules.search.service import search
+        result = search("test", "all", "", "", 1, 10, 1)
         assert isinstance(result, dict)
+        assert "achievements" in result
+        assert "demands" in result
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1854,7 +1904,7 @@ class TestNotificationServiceHelpers:
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
         from modules.notification.service import list_notifications
-        result = list_notifications(1, 1, 10)
+        result = list_notifications(1, {"page": "1", "pageSize": "10"})
         assert isinstance(result, dict)
 
 
@@ -1867,10 +1917,11 @@ class TestProfileServiceHelpers:
     def test_get_profile_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
+        cur.fetchall.return_value = []
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.profile.service import get_profile
-        result = get_profile(1)
+        from modules.profile.service import get_my_profile
+        result = get_my_profile(1)
         assert result is None
 
 
@@ -1893,15 +1944,14 @@ class TestAuditServiceHelpers:
 # ══════════════════════════════════════════════════════════════
 
 class TestOrganizationServiceHelpers:
-    @patch("modules.organization.service.get_cursor")
-    def test_get_organization_not_found(self, mock_gc):
-        cur = MagicMock()
-        cur.fetchone.return_value = None
-        mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
-        mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.organization.service import get_organization
-        result = get_organization(999)
-        assert result is None
+    def test_organization_service_is_compat_stub(self):
+        """机构能力已统一到 modules.institution.service；organization 仅保留兼容标记。"""
+        import modules.institution.service as institution_service
+        from modules.organization import service as legacy_org_service
+
+        assert legacy_org_service is not None
+        assert hasattr(institution_service, "get_institution_detail")
+        assert hasattr(institution_service, "list_institutions")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1920,16 +1970,12 @@ class TestIdentityProviderHelpers:
 # ══════════════════════════════════════════════════════════════
 
 class TestCapitalServiceHelpers:
-    @patch("modules.capital.service.get_cursor")
-    def test_list_capital_empty(self, mock_gc):
-        cur = MagicMock()
-        cur.fetchone.return_value = {"total": 0}
-        cur.fetchall.return_value = []
-        mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
-        mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.capital.service import list_capital
-        result = list_capital(1, 10)
+    @patch("modules.capital.service.list_platform_rows", return_value=(0, []))
+    def test_list_capital_empty(self, _mock_rows):
+        from modules.capital.service import list_platforms
+        result = list_platforms(1, 10, "", "")
         assert isinstance(result, dict)
+        assert result["total"] == 0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1937,16 +1983,12 @@ class TestCapitalServiceHelpers:
 # ══════════════════════════════════════════════════════════════
 
 class TestInventorServiceHelpers:
-    @patch("modules.inventor.service.get_cursor")
-    def test_list_inventors_empty(self, mock_gc):
-        cur = MagicMock()
-        cur.fetchone.return_value = {"total": 0}
-        cur.fetchall.return_value = []
-        mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
-        mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.inventor.service import list_inventors
-        result = list_inventors(1, 10)
-        assert isinstance(result, dict)
+    def test_inventor_service_stub_importable(self):
+        """modules/inventor/service.py 目前是占位实现（Phase B/C），保持可导入即可。"""
+        import importlib
+
+        module = importlib.import_module("modules.inventor.service")
+        assert module is not None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2026,7 +2068,7 @@ class TestCoreErrors:
         err = BizError("TEST", "test message", 400)
         assert err.code == "TEST"
         assert err.message == "test message"
-        assert err.status == 400
+        assert err.http_status == 400
 
     def test_not_found(self):
         from core.errors import not_found, BizError
@@ -2092,15 +2134,15 @@ class TestPatentServiceFixed:
     @patch("modules.patent.provider.info_raw")
     def test_get_patent_detail(self, mock_info):
         mock_info.return_value = {"title": "Patent 1", "number": "CN12345678A"}
-        from modules.patent.service import get_patent_detail
-        result = get_patent_detail("CN12345678A")
+        from modules.patent.service import get_patent
+        result = get_patent("CN12345678A")
         assert isinstance(result, dict)
 
     def test_get_patent_detail_no_number(self):
-        from modules.patent.service import get_patent_detail
+        from modules.patent.service import get_patent
         from core.errors import BizError
         with pytest.raises(BizError):
-            get_patent_detail("")
+            get_patent("")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2109,14 +2151,15 @@ class TestPatentServiceFixed:
 
 class TestPatentNormalize:
     def test_normalize_patent_number(self):
-        from modules.patent.normalize import normalize_patent_number
-        result = normalize_patent_number("CN 12345678 A")
-        assert isinstance(result, str)
+        from modules.patent.normalize import infer_patent_type, is_publication_no
+        assert is_publication_no("CN12345678A") is True
+        assert infer_patent_type("CN12345678A") == "invention"
+        assert infer_patent_type("CN2123456U") == "utility_model"
 
     def test_normalize_patent_number_empty(self):
-        from modules.patent.normalize import normalize_patent_number
-        result = normalize_patent_number("")
-        assert result == ""
+        from modules.patent.normalize import is_publication_no
+        assert is_publication_no("") is False
+        assert is_publication_no("not-a-publication-no") is False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2127,13 +2170,14 @@ class TestInstitutionServiceHelpers:
     @patch("modules.institution.service.get_cursor")
     def test_search_institutions_empty(self, mock_gc):
         cur = MagicMock()
-        cur.fetchone.return_value = {"total": 0}
+        cur.fetchone.return_value = {"c": 0}
         cur.fetchall.return_value = []
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.institution.service import search_institutions
-        result = search_institutions("", 1, 10)
+        from modules.institution.service import list_institutions
+        result = list_institutions(1, 10, "", "", "")
         assert isinstance(result, dict)
+        assert result["total"] == 0
 
     @patch("modules.institution.service.get_cursor")
     def test_get_institution_not_found(self, mock_gc):
@@ -2141,8 +2185,8 @@ class TestInstitutionServiceHelpers:
         cur.fetchone.return_value = None
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
         mock_gc.return_value.__exit__ = MagicMock(return_value=False)
-        from modules.institution.service import get_institution
-        result = get_institution(999)
+        from modules.institution.service import get_institution_detail
+        result = get_institution_detail(999)
         assert result is None
 
 
@@ -2152,10 +2196,12 @@ class TestInstitutionServiceHelpers:
 
 class TestCoreMiddleware:
     def test_request_context_middleware_init(self):
-        from core.middleware import RequestContextMiddleware
-        app = MagicMock()
-        middleware = RequestContextMiddleware(app)
-        assert middleware is not None
+        from core.middleware import _payload_to_actor, identity_from_access_token
+        actor = _payload_to_actor({"sub": "7", "userNo": "U007", "roles": ["user"]})
+        assert actor == {"userId": 7, "userNo": "U007", "roles": ["user"]}
+        # 空/非法 token 不做鉴权（公开文件可读），且不触达数据库
+        assert identity_from_access_token("") is None
+        assert identity_from_access_token("not-a-valid-token") is None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2164,11 +2210,12 @@ class TestCoreMiddleware:
 
 class TestCoreFileToken:
     def test_encode_decode(self):
-        from core.file_token import encode_file_token, decode_file_token
-        token = encode_file_token(1, "test.pdf")
+        from core.file_token import generate_file_token, verify_file_token
+        token = generate_file_token(1, 42)
         assert isinstance(token, str)
-        result = decode_file_token(token)
-        assert result is not None
+        assert verify_file_token(token, 42) == 1
+        assert verify_file_token(token, 43) is None  # 绑定 file_id
+        assert verify_file_token("bad-token", 42) is None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2177,10 +2224,10 @@ class TestCoreFileToken:
 
 class TestCoreRequestSchemas:
     def test_page_params(self):
-        from core.request_schemas import PageParams
-        p = PageParams(page=2, pageSize=20)
-        assert p.page == 2
-        assert p.pageSize == 20
+        from core.request_schemas import VersionBody
+        p = VersionBody(version=2)
+        assert p.version == 2
+        assert p.as_dict() == {"version": 2}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2189,9 +2236,10 @@ class TestCoreRequestSchemas:
 
 class TestMembershipSchemas:
     def test_membership_read(self):
-        from modules.membership.schemas import MembershipRead
-        m = MembershipRead(userId=1, orgId=1, role="member", status="active", version=1)
-        assert m.userId == 1
+        from modules.membership.schemas import MembershipApplicationRequest
+        m = MembershipApplicationRequest(orgId=1, realName="张三")
+        assert m.orgId == 1
+        assert m.realName == "张三"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2200,15 +2248,11 @@ class TestMembershipSchemas:
 
 class TestCoreExceptionHandlers:
     def test_biz_error_handler(self):
-        from core.exception_handlers import biz_error_handler
-        from core.errors import BizError
-        from starlette.requests import Request
-        from unittest.mock import AsyncMock
-        request = MagicMock(spec=Request)
-        exc = BizError("TEST", "test", 400)
-        # biz_error_handler is a function, test it returns proper response
-        result = biz_error_handler(request, exc)
-        assert result.status_code == 400
+        from fastapi import FastAPI
+        from core.exception_handlers import register_exception_handlers
+        app = FastAPI()
+        register_exception_handlers(app)
+        assert app.exception_handlers
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2217,9 +2261,13 @@ class TestCoreExceptionHandlers:
 
 class TestCoreAuthCache:
     def test_get_cached_user_miss(self):
-        from core.auth_cache import get_cached_user
-        result = get_cached_user(999999)
-        assert result is None
+        from core.auth_cache import cached, clear
+        clear()
+        # 未命中 → 调用 fn 并缓存（None 也缓存，防穿透）
+        assert cached(("user", 999999), lambda: None) is None
+        # 命中 → 不再调用 fn
+        assert cached(("user", 999999), lambda: "recomputed") is None
+        clear()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2228,8 +2276,13 @@ class TestCoreAuthCache:
 
 class TestCoreJwtUtils:
     def test_sign_and_verify(self):
-        from core.jwt_utils import sign_access_token, decode_no_verify_exp
-        token = sign_access_token({"sub": "1", "userNo": "U001", "type": "access"})
+        from core.jwt_utils import sign_access_token, sign_refresh_token, decode_no_verify_exp
+        token = sign_access_token(1, "U001", ["user"])
         assert isinstance(token, str)
         payload = decode_no_verify_exp(token)
         assert payload["sub"] == "1"
+        assert payload["userNo"] == "U001"
+        assert payload["type"] == "access"
+        refresh, jti = sign_refresh_token(1)
+        assert decode_no_verify_exp(refresh)["type"] == "refresh"
+        assert decode_no_verify_exp(refresh)["jti"] == jti
