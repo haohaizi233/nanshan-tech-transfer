@@ -224,10 +224,11 @@ export default {
   },
   onLoad(options) {
     this.achId = parseInt(options.id, 10)
-    if (this.shouldRevalidatePageState('detail')) this.loadDetail()
+    this.loading = !this.detail
   },
   onShow() {
-    if (this.shouldRevalidatePageState('detail')) this.loadDetail()
+    this.loading = !this.detail
+    if (!this.detail || this.shouldRevalidatePageState('detail')) return this.loadDetail()
   },
   methods: {
     async loadDetail() {
@@ -236,7 +237,7 @@ export default {
         this.error = '缺少成果 ID'
         return
       }
-      this.loading = true
+      this.loading = !this.detail
       this.error = ''
       try {
         const data = await getAchievementDetail(this.achId)
@@ -297,8 +298,8 @@ export default {
 
 .dock-bar {
   position: fixed;
-  left: 0;
-  right: 0;
+  left: var(--window-left, 0px);
+  right: var(--window-right, 0px);
   bottom: 0;
   background: #ffffff;
   border-top: 1rpx solid #e8ecf2;

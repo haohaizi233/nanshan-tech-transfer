@@ -51,6 +51,68 @@ function loadPage(name, overrides = {}) {
   return { component, page, storage }
 }
 
+test('reopening an AI achievement card renders its cached detail without getting stuck loading', async () => {
+  let reads = 0
+  const { component, storage } = loadPage('achievement-detail', {
+    getAchievementDetail: async id => {
+      reads++
+      return { id, title: 'AI 匹配成果' }
+    },
+  })
+  const createInstance = () => {
+    const instance = component.data()
+    instance.$data = instance
+    Object.assign(instance, component.mixins[0].methods, component.methods)
+    return instance
+  }
+  const first = createInstance()
+  const mixin = component.mixins[0]
+  mixin.onLoad.call(first, { id: '42' })
+  await component.onLoad.call(first, { id: '42' })
+  mixin.onShow.call(first)
+  await component.onShow.call(first)
+  assert.equal(first.loading, false)
+  mixin.onUnload.call(first)
+
+  const reopened = createInstance()
+  mixin.onLoad.call(reopened, { id: '42' })
+  await component.onLoad.call(reopened, { id: '42' })
+  mixin.onShow.call(reopened)
+  await component.onShow.call(reopened)
+  assert.equal(reopened.detail.title, 'AI 匹配成果')
+  assert.equal(reopened.loading, false)
+  assert.equal(reads, 1)
+  assert.ok(storage.getStorageInfoSync().keys.length)
+})
+
+test('opening a different AI achievement card does not reuse the previous detail', async () => {
+  const { component, page } = loadPage('achievement-detail', {
+    getAchievementDetail: async id => ({ id, title: `成果 ${id}` }),
+  })
+  component.mixins[0].onLoad.call(page, { id: '43' })
+  await component.onLoad.call(page, { id: '43' })
+  component.mixins[0].onShow.call(page)
+  await component.onShow.call(page)
+  assert.equal(page.detail.id, 43)
+  assert.equal(page.loading, false)
+})
+
+test('a cached achievement remains visible while its detail is being revalidated', async () => {
+  let resolveDetail
+  const { component, page } = loadPage('achievement-detail', {
+    getAchievementDetail: () => new Promise(resolve => { resolveDetail = resolve }),
+  })
+  component.mixins[0].onLoad.call(page, { id: '42' })
+  page.achId = 42
+  page.detail = { id: 42, title: '已缓存成果' }
+  const loading = page.loadDetail()
+  const hidesCachedDetail = page.loading
+  resolveDetail({ id: 42, title: '最新成果' })
+  await loading
+  assert.equal(hidesCachedDetail, false)
+  assert.equal(page.detail.title, '最新成果')
+})
+
 test('opening a recently cached favorite list fetches the new cards immediately', async () => {
   const { component, page } = loadPage('my-list', {
     getMyFavorites: async type => ({ list: type === 'demand' ? [{
