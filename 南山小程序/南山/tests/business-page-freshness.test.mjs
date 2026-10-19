@@ -21,6 +21,19 @@ function loadPage(name, overrides = {}) {
     invalidatePageStateKeys: keys => cache.invalidatePageStateKeys(keys, '7', storage),
     createPageStateMixin: options => cache.createPageStateMixin({ ...options, storage, scope: () => '7' }),
     AI_FEATURE_ENABLED: true,
+    AppTabbar: {},
+    CAPABILITY_OPTIONS: [],
+    getCapitalGroups: () => [],
+    getCachedOrganizationCertification: () => null,
+    listCachedAccounts: () => [],
+    getSessionPhone: () => '',
+    getUserProfile: () => null,
+    getCurrentUser: () => ({ userId: 7 }),
+    isLoggedIn: () => true,
+    isAuthenticated: () => true,
+    needsProfile: () => false,
+    ensureLoginForDock: () => true,
+    retryRequest: operation => operation(),
     HostBridge: { getStorage: () => 'test-session' },
     uni: { stopPullDownRefresh() {} },
     toDemandCard,
@@ -163,3 +176,128 @@ for (const change of ['filter', 'account']) {
     assert.deepEqual(page.list, [])
   })
 }
+
+test('returning to cached home cards updates canceled favorites for demands and achievements', async () => {
+  const { component, page } = loadPage('home', {
+    getFavoriteIdSet: async () => new Set(),
+  })
+  component.mixins[0].onLoad.call(page, {})
+  page.demandList = [{ id: 42, favorited: true }]
+  page.resultList = [{ id: 43, favorited: true }]
+  page.markPageStateFresh('list')
+  await component.onShow.call(page)
+  assert.equal(page.demandList[0].favorited, false)
+  assert.equal(page.resultList[0].favorited, false)
+})
+
+test('an older home favorite lookup cannot overwrite a local cancellation', async () => {
+  let resolveOlder
+  const { component, page } = loadPage('home', {
+    getFavoriteIdSet: type => type === 'demand'
+      ? new Promise(resolve => { resolveOlder = resolve })
+      : Promise.resolve(new Set()),
+    removeFavorite: async () => null,
+    uni: { showToast() {} },
+  })
+  component.mixins[0].onLoad.call(page, {})
+  page.demandList = [{ id: 42, favorited: true }]
+  page.markPageStateFresh('list')
+  const older = component.onShow.call(page)
+  await page.onToggleFavorite('demand', page.demandList[0])
+  assert.equal(typeof resolveOlder, 'function')
+  resolveOlder(new Set(['42']))
+  await older
+  assert.equal(page.demandList[0].favorited, false)
+})
+
+test('a home refresh during cancellation cannot reapply the pre-cancellation star', async () => {
+  let finishCancellation
+  const { component, page } = loadPage('home', {
+    getFavoriteIdSet: async () => new Set(['42']),
+    removeFavorite: () => new Promise(resolve => { finishCancellation = resolve }),
+    uni: { showToast() {} },
+  })
+  component.mixins[0].onLoad.call(page, {})
+  page.demandList = [{ id: 42, favorited: true }]
+  page.markPageStateFresh('list')
+  const cancellation = page.onToggleFavorite('demand', page.demandList[0])
+  await component.onShow.call(page)
+  finishCancellation()
+  await cancellation
+  assert.equal(page.demandList[0].favorited, false)
+})
+
+test('leaving home during cancellation does not persist a disabled favorite button', async () => {
+  let finishCancellation
+  let mutations = 0
+  const { component, page } = loadPage('home', {
+    getFavoriteIdSet: async () => new Set(),
+    removeFavorite: () => {
+      mutations++
+      return new Promise(resolve => { finishCancellation = resolve })
+    },
+    addFavorite: async () => { mutations++ },
+    uni: { showToast() {} },
+  })
+  const mixin = component.mixins[0]
+  mixin.onLoad.call(page, {})
+  page.demandList = [{ id: 42, favorited: true }]
+  page.markPageStateFresh('list')
+  const cancellation = page.onToggleFavorite('demand', page.demandList[0])
+  mixin.onHide.call(page)
+  finishCancellation()
+  await cancellation
+  mixin.onShow.call(page)
+  await component.onShow.call(page)
+  await page.onToggleFavorite('demand', page.demandList[0])
+  assert.equal(mutations, 2)
+  assert.equal(page.demandList[0].favorited, true)
+})
+
+test('returning to a fresh dashboard fetches current counts instead of waiting for TTL', async () => {
+  const { component, page } = loadPage('mine', {
+    getMyDemands: async () => ({ total: 3 }),
+    getMyAchievements: async () => ({ total: 4 }),
+    getMyFavorites: async () => ({ total: 2 }),
+    getMyCooperations: async () => ({ total: 0 }),
+  })
+  component.mixins[0].onLoad.call(page, {})
+  page.loadMemberships = async () => true
+  page.markPageStateFresh('dashboard')
+  await component.onShow.call(page)
+  assert.equal(page.favoriteDemandCount, 2)
+  assert.equal(page.myDemandCount, 3)
+  assert.equal(page.myResultCount, 4)
+})
+
+test('favorite preview counts update without waiting for cooperation requests', async () => {
+  let resolveCooperations
+  const cooperations = new Promise(resolve => { resolveCooperations = resolve })
+  const { page } = loadPage('mine', {
+    getMyFavorites: async () => ({ total: 0 }),
+    getMyCooperations: () => cooperations,
+  })
+  page.favoriteDemandCount = 5
+  const loading = page.loadInteractionCounts()
+  await new Promise(resolve => setImmediate(resolve))
+  const countBeforeCooperations = page.favoriteDemandCount
+  resolveCooperations({ total: 0 })
+  await loading
+  assert.equal(countBeforeCooperations, 0)
+})
+
+test('an older dashboard response cannot restore outdated preview counts', async () => {
+  let resolveOlder
+  let demandReads = 0
+  const { page } = loadPage('mine', {
+    getMyFavorites: type => type === 'demand' && ++demandReads === 1
+      ? new Promise(resolve => { resolveOlder = resolve })
+      : Promise.resolve({ total: 0 }),
+    getMyCooperations: async () => ({ total: 0 }),
+  })
+  const older = page.loadInteractionCounts()
+  await page.loadInteractionCounts()
+  resolveOlder({ total: 8 })
+  await older
+  assert.equal(page.favoriteDemandCount, 0)
+})

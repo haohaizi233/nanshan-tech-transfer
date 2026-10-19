@@ -199,7 +199,7 @@
 	import { addFavorite, removeFavorite, getFavoriteIdSet } from '../../api/interaction.js'
 	import { retryRequest } from '../../api/request-retry.js'
 	import { getScannedHttpUrl } from '../../utils/scanned-url.mjs'
-	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
+	import { createPageStateMixin, getPageStateScope, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
 	export default {
 		mixins: [createPageStateMixin({
@@ -265,7 +265,7 @@
 			if (!this.hasRestoredPageState('list')) this.applyPersonaTab()
 		},
 		onShow() {
-			if (this.shouldRevalidatePageState('list')) this.refreshList()
+			return this.shouldRevalidatePageState('list') ? this.refreshList() : this.refreshFavoriteState()
 		},
 		async onPullDownRefresh() {
 			try {
@@ -275,6 +275,25 @@
 			}
 		},
 		methods: {
+			createRefreshGuard() {
+				const requestId = (this._refreshRequestId || 0) + 1
+				this._refreshRequestId = requestId
+				const scope = getPageStateScope()
+				return () => this._refreshRequestId === requestId && getPageStateScope() === scope && !this._favoriteMutationCount
+			},
+			async refreshFavoriteState() {
+				const isCurrent = this.createRefreshGuard()
+				try {
+					const [demands, results] = getCurrentUser()
+						? await Promise.all([getFavoriteIdSet('demand'), getFavoriteIdSet('result')])
+						: [new Set(), new Set()]
+					if (!isCurrent()) return
+					this.demandList = this.demandList.map(item => ({ ...item, favorited: demands.has(String(item.id)) }))
+					this.resultList = this.resultList.map(item => ({ ...item, favorited: results.has(String(item.id)) }))
+				} catch (e) {
+					console.error('[index] loadFavorites failed:', e)
+				}
+			},
 			/** 画像=推荐信号（非门禁）：勾选「寻找技术成果」默认展示成果 Tab，其余默认需求 Tab */
 			applyPersonaTab() {
 				try {
@@ -290,6 +309,7 @@
 				}
 			},
 			async refreshList(target = 'all') {
+				const isCurrent = this.createRefreshGuard()
 				const shouldRefreshDemand = target !== 'result'
 				const shouldRefreshResult = target !== 'demand'
 				// 收藏状态（后端 API，失败时列表仍正常展示，只是不带收藏标记）
@@ -308,11 +328,16 @@
 					} catch (e) {
 						console.error('[index] loadFavorites failed:', e)
 					}
+				} else {
+					favDemandIds = new Set()
+					favResultIds = new Set()
 				}
+				if (!isCurrent()) return
 
 				// 需求列表（真实 API）
 				if (shouldRefreshDemand) try {
 					const data = await retryRequest(() => getDemands({ page: 1, pageSize: 10 }))
+					if (!isCurrent()) return
 					this.demandList = (data.list || []).map((item) => {
 						const card = toDemandCard(item)
 						return {
@@ -330,6 +355,7 @@
 				// 成果列表（真实 API）
 				if (shouldRefreshResult) try {
 					const data = await retryRequest(() => getAchievements({ page: 1, pageSize: 10 }))
+					if (!isCurrent()) return
 					this.resultList = (data.list || []).map((item) =>
 						toAchievementPreviewCard(item, favResultIds.has(String(item.id)))
 					)
@@ -337,7 +363,7 @@
 					console.error('[index] loadAchievements failed:', e)
 					refreshSucceeded = false
 				}
-				if (refreshSucceeded) this.markPageStateFresh('list')
+				if (refreshSucceeded && isCurrent()) this.markPageStateFresh('list')
 			},
 			switchTab(index) {
 				const tab = this.tabs[index]
@@ -399,6 +425,12 @@
 			},
 			async onToggleFavorite(type, item) {
 				if (!ensureLoginForDock()) return
+				const pending = this._favoritePendingKeys || (this._favoritePendingKeys = new Set())
+				const key = type + ':' + item.id
+				if (pending.has(key)) return
+				pending.add(key)
+				this._favoriteMutationCount = (this._favoriteMutationCount || 0) + 1
+				this._refreshRequestId = (this._refreshRequestId || 0) + 1
 				// 乐观更新，失败回滚
 				const next = !item.favorited
 				item.favorited = next
@@ -413,6 +445,10 @@
 				} catch (e) {
 					item.favorited = !next
 					uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
+				} finally {
+					this._favoriteMutationCount--
+					this._refreshRequestId = (this._refreshRequestId || 0) + 1
+					pending.delete(key)
 				}
 			},
 			openDetail(type, id) {

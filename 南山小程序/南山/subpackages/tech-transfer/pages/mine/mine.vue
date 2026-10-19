@@ -299,7 +299,7 @@
 	} from '../../api/membership.js'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
-	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
+	import { createPageStateMixin, getPageStateScope } from '../../api/page-state-cache.mjs'
 
 	export default {
 		components: {
@@ -396,10 +396,13 @@
 			}
 		},
 		onShow() {
-			this.refresh()
+			return this.refresh()
 		},
 		methods: {
 			async refresh() {
+				const requestId = (this._dashboardRequestId || 0) + 1
+				this._dashboardRequestId = requestId
+				const scope = getPageStateScope()
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
@@ -417,13 +420,12 @@
 			} else {
 				this.viewMode = 'auth'
 			}
-				if (isLoggedIn() && !this.shouldRevalidatePageState('dashboard')) return
-
 				const loaded = await Promise.all([
 					this.loadMyPublicationCounts(),
 					this.loadInteractionCounts(),
 					this.loadMemberships(),
 				])
+				if (this._dashboardRequestId !== requestId || getPageStateScope() !== scope) return
 
 				if (this.profile && this.viewMode === 'home') {
 					this.fillForm(this.profile)
@@ -458,6 +460,9 @@
 				}
 			},
 			async loadMyPublicationCounts() {
+				const requestId = (this._publicationRequestId || 0) + 1
+				this._publicationRequestId = requestId
+				const scope = getPageStateScope()
 				if (!isLoggedIn()) {
 					this.myDemandCount = 0
 					this.myDemandPendingCount = 0
@@ -472,6 +477,7 @@
 						getMyAchievements({ page: 1, pageSize: 1, status: 'published' }),
 						getMyAchievements({ page: 1, pageSize: 1, status: 'pending_review' })
 					])
+					if (this._publicationRequestId !== requestId || getPageStateScope() !== scope) return false
 					this.myDemandCount = demands.total || 0
 					this.myDemandPendingCount = pendingDemands.total || 0
 					this.myResultCount = achievements.total || 0
@@ -483,6 +489,10 @@
 				}
 			},
 			async loadInteractionCounts() {
+				const requestId = (this._interactionRequestId || 0) + 1
+				this._interactionRequestId = requestId
+				const scope = getPageStateScope()
+				const isCurrent = () => this._interactionRequestId === requestId && getPageStateScope() === scope
 				if (!isLoggedIn()) {
 					this.favoriteDemandCount = 0
 					this.favoriteResultCount = 0
@@ -490,24 +500,34 @@
 					this.intentionSuccessCount = 0
 					return true
 				}
-				try {
-					const [favDemand, favResult, pending, accepted, confirmed, completed] = await Promise.all([
-						getMyFavorites('demand', { page: 1, pageSize: 1 }),
-						getMyFavorites('result', { page: 1, pageSize: 1 }),
-						getMyCooperations({ role: 'both', status: 'pending', page: 1, pageSize: 1 }),
-						getMyCooperations({ role: 'both', status: 'accepted', page: 1, pageSize: 1 }),
-						getMyCooperations({ role: 'both', status: 'confirmed', page: 1, pageSize: 1 }),
-						getMyCooperations({ role: 'both', status: 'completed', page: 1, pageSize: 1 })
-					])
+				const favorites = Promise.all([
+					getMyFavorites('demand', { page: 1, pageSize: 1 }),
+					getMyFavorites('result', { page: 1, pageSize: 1 }),
+				]).then(([favDemand, favResult]) => {
+					if (!isCurrent()) return false
 					this.favoriteDemandCount = favDemand.total || 0
 					this.favoriteResultCount = favResult.total || 0
+					return true
+				}).catch(e => {
+					console.error('[mine] loadFavoriteCounts failed:', e)
+					return false
+				})
+				const cooperations = Promise.all([
+					getMyCooperations({ role: 'both', status: 'pending', page: 1, pageSize: 1 }),
+					getMyCooperations({ role: 'both', status: 'accepted', page: 1, pageSize: 1 }),
+					getMyCooperations({ role: 'both', status: 'confirmed', page: 1, pageSize: 1 }),
+					getMyCooperations({ role: 'both', status: 'completed', page: 1, pageSize: 1 }),
+				]).then(([pending, accepted, confirmed, completed]) => {
+					if (!isCurrent()) return false
 					this.intentionPendingCount = (pending.total || 0) + (accepted.total || 0)
 					this.intentionSuccessCount = (confirmed.total || 0) + (completed.total || 0)
 					return true
-				} catch (e) {
-					console.error('[mine] loadInteractionCounts failed:', e)
+				}).catch(e => {
+					console.error('[mine] loadCooperationCounts failed:', e)
 					return false
-				}
+				})
+				const loaded = await Promise.all([favorites, cooperations])
+				return loaded.every(Boolean)
 			},
 			toggleAuthMode() {
 				this.authMode = this.authMode === 'login' ? 'register' : 'login'
