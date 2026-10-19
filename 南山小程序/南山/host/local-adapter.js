@@ -82,6 +82,11 @@ const LocalAdapter = {
 
     const requestId = headers['X-Request-Id'] || generateRequestId()
     headers['X-Request-Id'] = requestId
+    
+    // 确保POST/PUT请求使用JSON格式
+    if (body && method !== 'GET') {
+      headers['Content-Type'] = 'application/json'
+    }
 
     return new Promise((resolve, reject) => {
       uni.request({

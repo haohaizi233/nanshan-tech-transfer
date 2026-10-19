@@ -18,7 +18,8 @@
 			class="chat-scroll"
 			scroll-y
 			:scroll-into-view="scrollIntoView"
-			scroll-with-animation
+			:scroll-top="scrollTopValue"
+			:scroll-with-animation="scrollAnimation"
 		>
 			<view v-if="chatPreview.collapsed" class="history-fold" @click="historyExpanded = true">
 				<text class="history-fold__text">更早的 {{ chatPreview.hiddenCount }} 条对话已折叠，点击展开</text>
@@ -235,6 +236,9 @@
 		saveTurnResult
 	} from '../../api/ai-chat-wal.mjs'
 	import { getPageStateScope, createPageStateMixin } from '../../api/page-state-cache.mjs'
+
+// P0-A: 模块级内存缓存（跨页面切换保持数据）
+const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputText, scrollPos }
 	import { ensureLoginForDock } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
@@ -266,10 +270,12 @@
 			aiEnabled: AI_FEATURE_ENABLED,
 			messages: [createWelcomeMessage()],
 			suggestions: getChatSuggestions(),
-			inputText: '',
+			inputText: _memCache.inputText || '',
 			typing: false,
 			scrollIntoView: '',
-			pendingQueue: [],
+			scrollAnimation: false,
+			scrollTopValue: 0,
+			pendingQueue: _memCache.pendingQueue || [],
 			inflightText: '',
 			inflightTurnId: '',
 			recoveringTurn: false,
@@ -373,9 +379,16 @@
 			}
 			return
 		}
-		if (!this._sessionReady) return
+		if (!this._sessionReady) {
+			this.restoreScrollPosition()
+			return
+		}
 		const activeTurn = loadActiveTurn(uni, this._scope)
-		if (activeTurn) this.recoverActiveTurn(activeTurn)
+		if (activeTurn) {
+			this.recoverActiveTurn(activeTurn)
+		} else {
+			this.restoreScrollPosition()
+		}
 	},
 	onHide() {
 		this._visible = false
@@ -621,7 +634,38 @@
 				this.inputText = skill.cmd
 				this.onSend()
 			},
-			scrollToBottom() {
+			restoreScrollPosition() {
+			// P0-B: 精确恢复滚动位置（无动画，瞬时定位）
+			this.scrollAnimation = false
+			// 优先从内存缓存恢复
+			const memCache = _chatMemoryCache.get(this._scope)
+			const cached = memCache?.scrollPos || uni.getStorageSync('tt_ai_match_scroll') || 0
+			if (cached > 0) {
+				this.scrollTopValue = cached
+				// 强制Vue更新scroll-view的scrollTop
+				this.$nextTick(() => {
+					this.scrollIntoView = ''
+				})
+			} else {
+				this.$nextTick(() => {
+					this.scrollIntoView = 'msg-bottom'
+				})
+			}
+			// 恢复后重新启用动画
+			setTimeout(() => { this.scrollAnimation = true }, 100)
+		},
+		saveScrollPosition() {
+			try {
+				const query = uni.createSelectorQuery().in(this)
+				query.select('.chat-scroll').scrollOffset()
+				query.exec((res) => {
+					if (res && res[0]) {
+						uni.setStorageSync('tt_ai_match_scroll', res[0].scrollTop || 0)
+					}
+				})
+			} catch (e) {}
+		},
+		scrollToBottom() {
 				this.scrollIntoView = ''
 				this.$nextTick(() => {
 					this.scrollIntoView = 'msg-bottom'
@@ -694,7 +738,7 @@
 					if (!this._alive || this._scope !== getPageStateScope(uni)) return
 					if (res && res.status === 'running') {
 						const pollResult = await this.waitForTurnStatus(turnId, text)
-						if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
+						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 						return
 					}
 					const reply = formatAgentReply(res)
@@ -702,7 +746,7 @@
 						await this.presentSavedTurn(loadActiveTurn(uni, this._scope))
 					} else {
 						const pollResult = await this.waitForTurnStatus(turnId, text)
-						if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
+						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 					}
 				} catch (e) {
 					if (!this._alive || this._scope !== getPageStateScope(uni)) return
@@ -714,7 +758,7 @@
 						return
 					}
 					const pollResult = await this.waitForTurnStatus(turnId, text)
-					if (pollResult === 'pending' && this._alive) this.scheduleTurnRecovery()
+					if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 				} finally {
 					this._requestInFlight = false
 					if (this._alive && this.inflightTurnId === turnId) {
@@ -1375,6 +1419,9 @@
 	}
 
 	.composer__row {
+		display: flex;
+		align-items: center;
+		width: 100%;
 		display: flex;
 		flex-direction: row;
 		align-items: center;

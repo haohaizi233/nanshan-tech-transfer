@@ -32,6 +32,18 @@
 					--window-right: calc(50% - 207px) !important;
 				}
 			}
+					/* 超宽屏强制居中（覆盖uni-app运行时的width:100%） */
+			@media screen and (min-width: 500px) {
+				html body uni-app,
+				html body uni-page,
+				html body uni-page-wrapper,
+				html body uni-page-body {
+					max-width: 414px !important;
+					width: 414px !important;
+					margin-left: auto !important;
+					margin-right: auto !important;
+				}
+			}
 		</style>
 		<!--preload-links-->
 		<!--app-context-->
