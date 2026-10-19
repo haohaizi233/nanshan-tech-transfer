@@ -441,6 +441,22 @@
 			return this.refresh()
 		},
 		methods: {
+			async _loadCertificationFromAPI() {
+				try {
+					const { getMyOrganizationCertification } = await import('../../api/membership.js')
+					const result = await getMyOrganizationCertification()
+					if (result && result.certification) {
+						this.certification = result.certification
+						// 更新缓存
+						try {
+							const { setCachedOrganizationCertification } = await import('../../api/membership.js')
+							setCachedOrganizationCertification(result.certification)
+						} catch (e) {}
+					}
+				} catch (e) {
+					// API失败时使用缓存
+				}
+			},
 			loadPrivacySetting() {
 				// #ifdef MP-WEIXIN
 				if (typeof wx !== 'undefined' && typeof wx.getPrivacySetting === 'function') {
@@ -525,6 +541,8 @@
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
+				// 强制从API刷新认证状态（不信任本地缓存）
+				this._loadCertificationFromAPI()
 
 				if (this.editing) {
 				this.viewMode = 'profile'
