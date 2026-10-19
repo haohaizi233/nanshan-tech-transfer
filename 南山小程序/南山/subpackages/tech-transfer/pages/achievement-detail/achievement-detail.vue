@@ -229,7 +229,7 @@ export default {
   onShow() {
 			// 缓存过期时刷新详情数据
 			if (this.shouldRevalidatePageState('detail')) {
-				this.refreshDetail()
+				this.loadDetail()
 			}
     this.loading = !this.detail
     return this.loadDetail()
