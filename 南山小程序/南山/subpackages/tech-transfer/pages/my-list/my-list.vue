@@ -168,6 +168,10 @@
 			})
 		},
 		onShow() {
+			// 缓存过期时刷新列表数据
+			if (this.shouldRevalidatePageState('list')) {
+				this.refreshList()
+			}
 			if (this.needLogin) return
 			return this.loadList()
 		},
