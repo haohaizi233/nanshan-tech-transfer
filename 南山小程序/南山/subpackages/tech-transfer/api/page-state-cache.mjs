@@ -27,7 +27,10 @@ function createLocalStorageAdapter() {
     },
     removeStorageSync: (key) => {
       try { localStorage.removeItem(key) } catch {}
-    }
+    },
+    getStorageInfoSync: () => ({
+      keys: Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(Boolean),
+    }),
   }
 }
 
@@ -201,7 +204,12 @@ export function invalidatePageState(key, scope, storage) {
 }
 
 export function invalidatePageStateKeys(keys, scope = getPageStateScope(), storage) {
-  return (Array.isArray(keys) ? keys : []).map(key => invalidatePageState(key, scope, storage)).every(Boolean)
+  return (Array.isArray(keys) ? keys : []).map(key => {
+    const removed = invalidatePageState(key, scope, storage)
+    if (key === undefined || key === null || String(key).endsWith('*')) return removed
+    const variantsRemoved = invalidatePageState(`${key}:*`, scope, storage)
+    return removed && variantsRemoved
+  }).every(Boolean)
 }
 
 export function clearPageStateScope(scope, storage) {

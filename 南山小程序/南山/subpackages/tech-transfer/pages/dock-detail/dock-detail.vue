@@ -492,6 +492,13 @@
 		onShow() {
 			if (this.detail) this.refreshDockState(this.detail.id)
 		},
+		async onPullDownRefresh() {
+			try {
+				await this.refreshDockState(this.loadedId)
+			} finally {
+				uni.stopPullDownRefresh()
+			}
+		},
 		onHide() {
 			this.stopIntentRefresh()
 		},
@@ -562,12 +569,12 @@
 					if (!this.intention) this.intentId = ''
 				}
 			},
-			async refreshDockState(id) {
+			async refreshDockState(id, { force = true } = {}) {
 				const targetId = id || (this.detail && this.detail.id)
 				if (!targetId || this.intentRefreshing) return
 				this.intentRefreshing = true
 				try {
-					if (!this.detail || this.shouldRevalidatePageState('detail')) {
+					if (!this.detail || this.shouldRevalidatePageState('detail', force)) {
 						if (this.type === 'demand') {
 							await this.loadDemandDetail(targetId)
 						} else {
@@ -589,7 +596,7 @@
 				}
 				if (this.intentRefreshTimer) return
 				this.intentRefreshTimer = setInterval(() => {
-					this.refreshDockState()
+					this.refreshDockState(undefined, { force: false })
 				}, 10000)
 			},
 			stopIntentRefresh() {

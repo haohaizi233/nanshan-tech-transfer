@@ -5,6 +5,7 @@ import {
   cancelAllPageStateWrites,
   createPageStateMixin,
   invalidatePageState,
+  invalidatePageStateKeys,
   PAGE_STATE_STALE_RETENTION,
   PAGE_STATE_TTL,
   readPageState,
@@ -94,6 +95,53 @@ test('prefix invalidation cancels pending writes for matching page keys', async 
   invalidatePageState('pages/detail/detail:*', 'u1', storage)
   await new Promise(resolve => setTimeout(resolve, 35))
   assert.equal(readPageState('pages/detail/detail:3', 'u1', 'detail', storage), null)
+})
+
+test('business invalidation removes parameterized lists without touching other groups or accounts', () => {
+  const storage = createStorage()
+  const key = 'pages/my-list/my-list:list'
+  for (const suffix of ['', ':type=favorite', ':type=demand']) {
+    writePageState(key + suffix, 'u1', 'list', { list: ['old'] }, storage)
+  }
+  writePageState(key + ':type=favorite', 'u2', 'list', { list: ['other user'] }, storage)
+  writePageState(key + 'Extra', 'u1', 'list', { list: ['other group'] }, storage)
+  invalidatePageStateKeys([key], 'u1', storage)
+  for (const suffix of ['', ':type=favorite', ':type=demand']) {
+    assert.equal(readPageState(key + suffix, 'u1', 'list', storage), null)
+  }
+  assert.deepEqual(readPageState(key + ':type=favorite', 'u2', 'list', storage).value.list, ['other user'])
+  assert.deepEqual(readPageState(key + 'Extra', 'u1', 'list', storage).value.list, ['other group'])
+})
+
+test('business invalidation cancels queued writes of parameterized pages', async () => {
+  const storage = createStorage()
+  const key = 'pages/my-list/my-list:list:type=favorite'
+  schedulePageStateWrite(key, 'u1', 'list', { list: ['old'] }, 20, storage)
+  invalidatePageStateKeys(['pages/my-list/my-list:list'], 'u1', storage)
+  await new Promise(resolve => setTimeout(resolve, 35))
+  assert.equal(readPageState(key, 'u1', 'list', storage), null)
+})
+
+test('H5 localStorage fallback can invalidate parameterized pages', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const values = new Map()
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key),
+    get length() { return values.size },
+    key: index => [...values.keys()][index] ?? null,
+  } })
+  try {
+    const key = 'pages/my-list/my-list:list:type=favorite'
+    writePageState(key, 'u1', 'list', { list: ['old'] })
+    assert.ok(readPageState(key, 'u1', 'list'))
+    invalidatePageStateKeys(['pages/my-list/my-list:list'], 'u1')
+    assert.equal(readPageState(key, 'u1', 'list'), null)
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor)
+    else delete globalThis.localStorage
+  }
 })
 
 test('scope clearing preserves all other accounts', () => {

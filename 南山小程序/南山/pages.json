@@ -130,7 +130,8 @@
 						"navigationBarTitleText": "对接详情",
 						"navigationBarBackgroundColor": "#FFFFFF",
 						"navigationBarTextStyle": "black",
-						"backgroundColor": "#F5F6F8"
+						"backgroundColor": "#F5F6F8",
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -166,7 +167,8 @@
 						"navigationBarTitleText": "我的内容",
 						"navigationBarBackgroundColor": "#FFFFFF",
 						"navigationBarTextStyle": "black",
-						"backgroundColor": "#F5F6F8"
+						"backgroundColor": "#F5F6F8",
+						"enablePullDownRefresh": true
 					}
 				},
 				{

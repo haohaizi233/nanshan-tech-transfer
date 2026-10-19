@@ -77,7 +77,7 @@
 	import { createEvaluationTask } from '../../api/ai.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
-		import { createPageStateMixin } from '../../api/page-state-cache.mjs'
+	import { createPageStateMixin, getPageStateScope, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 	import {
 		getMyFavorites,
 		removeFavorite,
@@ -169,7 +169,14 @@
 		},
 		onShow() {
 			if (this.needLogin) return
-			if (this.shouldRevalidatePageState('list')) this.loadList()
+			return this.loadList()
+		},
+		async onPullDownRefresh() {
+			try {
+				if (!this.needLogin) await this.loadList()
+			} finally {
+				uni.stopPullDownRefresh()
+			}
 		},
 		methods: {
 			currentListContext() {
@@ -233,11 +240,22 @@
 				})
 			},
 			async loadList() {
+				const requestId = (this._listRequestId || 0) + 1
+				this._listRequestId = requestId
 				const context = this.currentListContext()
+				const scope = getPageStateScope()
+				const isCurrent = () => this._listRequestId === requestId
+					&& this.currentListContext() === context && getPageStateScope() === scope
+				const applyRows = rows => {
+					if (!isCurrent()) return
+					this.list = rows
+					this.listContext = context
+					this.markPageStateFresh('list')
+				}
 				if (this.listContext !== context) this.list = []
 			if (this.pageType === 'demand') {
 					try {
-						this.list = await this.loadPublicationList(getMyDemands, (item) => {
+						const rows = await this.loadPublicationList(getMyDemands, (item) => {
 							const card = toDemandCard(item)
 							return {
 								...card,
@@ -252,8 +270,7 @@
 								_statusHint: card.statusHint
 							}
 						})
-						this.listContext = this.currentListContext()
-						this.markPageStateFresh('list')
+						applyRows(rows)
 					} catch (e) {
 						console.error('[my-list] loadMyDemands failed:', e)
 					}
@@ -261,7 +278,7 @@
 				}
 			if (this.pageType === 'result') {
 					try {
-						this.list = await this.loadPublicationList(getMyAchievements, (item) => {
+						const rows = await this.loadPublicationList(getMyAchievements, (item) => {
 							const card = toAchievementCard(item)
 							return {
 								...card,
@@ -277,8 +294,7 @@
 								_evalLoading: false
 							}
 						})
-						this.listContext = this.currentListContext()
-						this.markPageStateFresh('list')
+						applyRows(rows)
 					} catch (e) {
 						console.error('[my-list] loadMyAchievements failed:', e)
 					}
@@ -288,6 +304,7 @@
 					try {
 						const role = this.intentTab === 0 ? 'initiator' : 'target'
 						const data = await getMyCooperations({ role, page: 1, pageSize: 50 })
+						if (!isCurrent()) return
 						this.list = this.mapIntentionRows(data.list || [])
 						// 默认 tab（我提出的）为空但对侧有数据时自动切换一次，
 						// 避免 mine 角标有计数、点进来却看到空列表误以为接口未接通
@@ -295,6 +312,7 @@
 							this.intentAutoSwitched = true
 							const otherRole = role === 'initiator' ? 'target' : 'initiator'
 							const other = await getMyCooperations({ role: otherRole, page: 1, pageSize: 50 })
+							if (!isCurrent()) return
 							if ((other.total || 0) > 0) {
 								this.intentTab = otherRole === 'initiator' ? 0 : 1
 								this.list = this.mapIntentionRows(other.list || [])
@@ -342,9 +360,7 @@
 					}
 					;(favDemand.list || []).forEach((fav) => push(fav, 'demand'))
 					;(favResult.list || []).forEach((fav) => push(fav, 'result'))
-					this.list = rows
-					this.listContext = this.currentListContext()
-					this.markPageStateFresh('list')
+					applyRows(rows)
 				} catch (e) {
 					console.error('[my-list] loadFavorites failed:', e)
 				}
@@ -383,7 +399,8 @@
 			async onRemoveFavorite(item) {
 				try {
 					await removeFavorite(item._type, item.id)
-					this.loadList()
+					invalidatePageStateKeys(['pages/mine/mine:dashboard', 'pages/my-list/my-list:list'])
+					await this.loadList()
 					uni.showToast({ title: '已取消收藏', icon: 'none' })
 				} catch (e) {
 					console.error('[my-list] removeFavorite failed:', e)
