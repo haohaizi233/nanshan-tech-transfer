@@ -76,7 +76,15 @@
 									<text class="agent-card__title">{{ card.title }}</text>
 								</view>
 								<text v-if="card.organization" class="agent-card__org">{{ card.organization }}</text>
-								<text v-if="card.description" class="agent-card__desc">{{ card.description }}</text>
+								<view v-if="card.advisorSummary" class="agent-card__advice">
+									<text class="agent-card__advice-label">发布资料摘要</text>
+									<text class="agent-card__advice-text">{{ card.advisorSummary }}</text>
+								</view>
+								<text v-else-if="card.description" class="agent-card__desc">{{ card.description }}</text>
+								<view v-if="card.advisorInsight" class="agent-card__advice">
+									<text class="agent-card__advice-label">AI适配解读（供参考）</text>
+									<text class="agent-card__advice-text">{{ card.advisorInsight }}</text>
+								</view>
 								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
 
 								<view v-if="card.card_type === 'achievement'" class="agent-card__meta">
@@ -98,6 +106,10 @@
 
 								<view v-if="card.matchReason && card.matchReason.length" class="agent-card__reasons">
 									<text v-for="(reason, k) in card.matchReason" :key="k" class="reason-chip">{{ reason }}</text>
+								</view>
+								<view v-if="card.advisorCautions && card.advisorCautions.length" class="agent-card__advice agent-card__advice--caution">
+									<text class="agent-card__advice-label">待确认</text>
+									<text v-for="(concern, index) in card.advisorCautions" :key="index" class="agent-card__advice-text">{{ concern }}</text>
 								</view>
 							</view>
 						</view>
@@ -915,6 +927,10 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 </script>
 
 <style>
+	.agent-card__advice { margin-top: 14rpx; }
+	.agent-card__advice-label { display: block; font-size: 23rpx; color: #51627a; font-weight: 600; margin-bottom: 6rpx; }
+	.agent-card__advice-text { display: block; font-size: 24rpx; line-height: 1.65; color: #40516b; white-space: pre-wrap; overflow-wrap: anywhere; }
+	.agent-card__advice--caution { padding: 12rpx; background: #fff8ed; border-radius: 10rpx; }
 	.agent-card__views {
 		display: block;
 		margin-top: 12rpx;

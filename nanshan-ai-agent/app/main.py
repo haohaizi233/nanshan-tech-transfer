@@ -40,6 +40,7 @@ from app.formatters import (
 )
 
 from app.reranker import rerank_results
+from app.advisor import enrich_cards, local_reply, result_message
 from app.runtime_budget import reset_deadline, set_deadline
 from app.runtime_trace import request_trace, trace_stage
 
@@ -159,6 +160,10 @@ def _run_ai_chat(body: ChatRequest, request_id: str | None = None, deadline_at: 
 
 def _process_ai_chat(request: ChatRequest):
 
+    reply = local_reply(request.message)
+    if reply is not None:
+        return ChatResponse(success=True, intent="out_of_scope", message=reply, data=[])
+
     try:
         route = classify_intent(
             request.message
@@ -203,8 +208,9 @@ def _process_ai_chat(request: ChatRequest):
             success=True,
             intent="out_of_scope",
             message=(
-                "当前仅支持南山科转通相关的"
-                "科技成果查询和技术需求查询。"
+                "我可以帮你查找、介绍科技成果和技术需求，结合场景推荐并说明依据，"
+                "也可以介绍平台功能和指导发布、收藏、认证、申请对接等操作。"
+                "请告诉我技术方向、成果名称或想完成的操作。"
             ),
             data=[],
         )
@@ -284,7 +290,7 @@ def _process_ai_chat(request: ChatRequest):
             return ChatResponse(
                 success=True,
                 intent="search_achievement",
-                message="暂未找到匹配的科技成果。",
+                message=result_message(request.message, [], route),
                 data=[],
             )
 
@@ -292,11 +298,12 @@ def _process_ai_chat(request: ChatRequest):
             format_achievement_card(item)
             for item in results
         ]
+        cards = enrich_cards(cards, results, route)
 
         return ChatResponse(
             success=True,
             intent="search_achievement",
-            message=f"找到 {len(cards)} 条相关科技成果。",
+            message=result_message(request.message, cards, route),
             data=cards,
         )
 
@@ -362,7 +369,7 @@ def _process_ai_chat(request: ChatRequest):
             return ChatResponse(
                 success=True,
                 intent="search_demand",
-                message="暂未找到匹配的技术需求。",
+                message=result_message(request.message, [], route),
                 data=[],
             )
 
@@ -370,11 +377,12 @@ def _process_ai_chat(request: ChatRequest):
             format_demand_card(item)
             for item in results
         ]
+        cards = enrich_cards(cards, results, route)
 
         return ChatResponse(
             success=True,
             intent="search_demand",
-            message=f"找到 {len(cards)} 条相关技术需求。",
+            message=result_message(request.message, cards, route),
             data=cards,
         )
 

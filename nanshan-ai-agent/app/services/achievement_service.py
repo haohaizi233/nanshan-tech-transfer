@@ -169,7 +169,8 @@ def search_achievements(
     search_terms = expand_keywords(keywords)
 
     conditions = [
-        "status = 'published'"
+        "status = 'published'",
+        "deleted_at IS NULL",
     ]
 
     params = []

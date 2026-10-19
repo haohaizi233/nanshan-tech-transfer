@@ -68,6 +68,7 @@ def search_demands(
 
     conditions = [
         "status = 'published'",
+        "deleted_at IS NULL",
 
         """
         title NOT IN (
