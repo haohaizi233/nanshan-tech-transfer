@@ -274,7 +274,7 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
     actor_user_id BIGINT      DEFAULT NULL,
     actor_user_no VARCHAR(32) DEFAULT NULL,
     action        VARCHAR(64) NOT NULL,
-    resource_type VARCHAR(32) NOT NULL,
+    resource_type VARCHAR(64) NOT NULL,
     resource_id   VARCHAR(64) DEFAULT NULL,
     details       JSONB       DEFAULT NULL,
     ip_address    VARCHAR(45) DEFAULT NULL,

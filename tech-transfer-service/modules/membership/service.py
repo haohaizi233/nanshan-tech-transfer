@@ -426,7 +426,7 @@ def apply_membership(user: dict, body: dict) -> dict:
             )
             application = cur.fetchone()
             audit_record(
-                "membership.apply", "organization_membership_application", application["id"],
+                "membership.apply", "membership_application", application["id"],
                 user_id, user.get("userNo", ""),
                 {"orgId": org_id, "userId": user_id}, cur=cur,
             )

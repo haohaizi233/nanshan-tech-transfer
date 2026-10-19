@@ -8,7 +8,7 @@
 # 正确测法：在本文件点 Send；或 curl（见下方注释）。
 ###############################################################################
 
-@host = http://127.0.0.1:8787
+@host = http://inanshan.sjhcip.com/h5
 @api = {{host}}/api/tech-transfer/v1
 @adminUsername = admin
 @adminPassword = Admin@2026
