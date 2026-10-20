@@ -330,6 +330,7 @@ def _normalize_query_keyword(keyword: str) -> str:
 
 def _strip_query_noise(text: str) -> str:
     cleaned = (text or "").strip()
+    cleaned = re.sub(r"^再(?=找|查|搜|推荐)", "", cleaned)
     prev = None
     while prev != cleaned:
         prev = cleaned

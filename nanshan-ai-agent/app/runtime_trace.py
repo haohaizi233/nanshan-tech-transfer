@@ -7,11 +7,39 @@ from uuid import uuid4
 
 
 _trace_id = ContextVar("ai_trace_id", default="")
+_stage_observer = ContextVar("ai_stage_observer", default=None)
 _logger = logging.getLogger("nanshan.ai.trace")
 
 
 def current_trace_id() -> str:
     return _trace_id.get()
+
+
+@contextmanager
+def stage_observer(observer):
+    token = _stage_observer.set(observer)
+    try:
+        yield
+    finally:
+        _stage_observer.reset(token)
+
+
+def emit_stage(stage: str):
+    observer = _stage_observer.get()
+    if observer is not None:
+        observer(stage)
+
+
+def trace_count(name: str, count: int):
+    if name not in {"candidate_count", "selected_count", "returned_count"}:
+        return
+    if type(count) is int and count >= 0:
+        _logger.info("agent_count trace_id=%s metric=%s value=%d", current_trace_id(), name, count)
+
+
+def trace_degradation(reason: str):
+    if reason in {"small_candidate_set", "budget_low", "rerank_failed", "context_limit", "no_candidates", "visibility_changed"}:
+        _logger.info("agent_degradation trace_id=%s reason=%s", current_trace_id(), reason)
 
 
 @contextmanager

@@ -6,7 +6,7 @@ from app.advisor import grounded_explanation
 
 from app.llm_client import chat_completion, extract_llm_json
 from app.runtime_budget import remaining_seconds
-from app.runtime_trace import trace_stage
+from app.runtime_trace import emit_stage, trace_degradation, trace_stage
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -168,6 +168,7 @@ def rerank_results(
 ) -> list[dict]:
 
     if not candidates:
+        trace_degradation("no_candidates")
         return []
 
     top_n = min(max(top_n, 1), 10)
@@ -178,10 +179,12 @@ def rerank_results(
     # 候选数不超过 top_n 时直接返回，省掉一次 LLM 重排（常见慢路径）。
     # E6: 阈值改为 3（候选极少时排序价值低；top_n 条时仍走 LLM 语义排序）
     if len(candidates) <= 3:
+        trace_degradation("small_candidate_set")
         return candidates[:top_n]
 
     remaining = remaining_seconds()
     if remaining is not None and remaining < 1.0:
+        trace_degradation("budget_low")
         return candidates[:top_n]
 
     if intent == "search_achievement":
@@ -212,9 +215,11 @@ def rerank_results(
             user_content["candidates"].pop()
             break
     if len(user_content["candidates"]) <= 3:
+        trace_degradation("context_limit")
         return candidates[:top_n]
 
     try:
+        emit_stage("reranking")
         parsed = _call_reranker(
             user_content
         )
@@ -228,6 +233,7 @@ def rerank_results(
             raise ValueError("重排结果 results 必须是列表")
 
     except Exception as exc:
+        trace_degradation("rerank_failed")
         _logger.warning("[Reranker Error] %r", exc)
 
         # 语义重排失败

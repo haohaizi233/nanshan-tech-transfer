@@ -1,5 +1,6 @@
+import json
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 IntentType = Literal[
@@ -18,19 +19,8 @@ MaturityType = Literal[
 ]
 
 
-class ChatRequest(BaseModel):
-    message: str = Field(
-        ...,
-        min_length=1,
-        max_length=2000,
-    )
-
-    # 调用方（tech-transfer-service）传入的当前用户 id；
-    # agent 检索时排除该用户自己的成果/需求，避免把用户自己的内容推荐给自己。
-    exclude_owner_user_id: int | None = None
-
-
 class RouteResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     intent: IntentType
 
     keywords: list[str] = []
@@ -75,9 +65,75 @@ class RouteResult(BaseModel):
 
     reason: str = ""
 
+    @model_validator(mode="after")
+    def validate_ranges(self):
+        if self.intent == "search_achievement" and (self.min_budget_wan is not None or self.max_budget_wan is not None or self.coop_modes):
+            raise ValueError("成果查询不能包含需求专用条件")
+        if self.intent == "search_demand" and (self.min_price_wan is not None or self.max_price_wan is not None or self.min_maturity is not None):
+            raise ValueError("需求查询不能包含成果专用条件")
+        for lower, upper in [(self.min_price_wan, self.max_price_wan), (self.min_budget_wan, self.max_budget_wan)]:
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError("最低金额不能超过最高金额")
+        if len(self.keywords) > 20 or any(len(word) > 100 for word in self.keywords):
+            raise ValueError("关键词超出限制")
+        return self
+
+
+class CardReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    card_type: Literal["achievement", "demand"]
+    id: int = Field(gt=0, strict=True)
+
+
+class CardLocator(CardReference):
+    title: str = Field(default="", max_length=80)
+    messageId: int = Field(gt=0, strict=True)
+
+
+class ContextMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=800)
+
+
+class ConversationContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    generation: int = Field(ge=0, strict=True)
+    queryPlan: dict = Field(default_factory=dict)
+    cards: list[CardLocator] = Field(default_factory=list, max_length=10)
+    messages: list[ContextMessage] = Field(default_factory=list, max_length=4)
+    reference: CardReference | None = None
+
+    @model_validator(mode="after")
+    def validate_context(self):
+        if len(json.dumps(self.queryPlan, ensure_ascii=False, separators=(",", ":"))) > 2000:
+            raise ValueError("查询状态超出限制")
+        if self.queryPlan:
+            RouteResult.model_validate(self.queryPlan)
+        if len(self.messages) % 2 or any(message.role != ("user" if index % 2 == 0 else "assistant") for index, message in enumerate(self.messages)):
+            raise ValueError("历史消息必须是完整的成功轮次")
+        if self.reference and not any(card.card_type == self.reference.card_type and card.id == self.reference.id for card in self.cards):
+            raise ValueError("引用不在服务端卡片上下文中")
+        if len(self.model_dump_json()) > 8000:
+            raise ValueError("上下文超出限制")
+        return self
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message: str = Field(min_length=1, max_length=2000)
+    exclude_owner_user_id: int | None = Field(default=None, gt=0)
+    context: ConversationContext | None = None
+
+
+class InternalChatRequest(ChatRequest):
+    executionId: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")
+
 
 class ChatResponse(BaseModel):
     success: bool
     intent: str | None = None
     message: str
     data: Any = None
+    queryPlan: dict | None = None

@@ -162,6 +162,8 @@ def search_achievements(
     min_maturity: str | None = None,
     limit: int = 10,
     exclude_owner_user_id: int | None = None,
+    target_ids: list[int] | None = None,
+    region: str | None = None,
 ) -> list[dict]:
 
     limit = min(max(limit, 1), 30)
@@ -174,6 +176,13 @@ def search_achievements(
     ]
 
     params = []
+    if region:
+        raise ValueError("成果未披露地域字段，无法核实该地域条件")
+    if target_ids is not None:
+        if not target_ids:
+            return []
+        conditions.append("id = ANY(%s)")
+        params.append(target_ids[:10])
 
     # 不把用户自己的成果推荐给自己（owner_user_id 可空：未绑定归属人的成果仍可被检索到）
     if exclude_owner_user_id is not None:
@@ -291,6 +300,9 @@ def search_achievements(
     sql = f"""
         SELECT
             id,
+            owner_user_id,
+            status,
+            deleted_at,
             title,
             source_org_name,
             tech_intro,

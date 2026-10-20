@@ -72,6 +72,24 @@ Invoke-RestMethod `
 
 返回结果包含查询意图、提示信息和成果或需求卡片；每次最多返回 10 条。
 
+## 成果顾问二期
+
+支持经过主服务校验的会话上下文、卡片指代、预算调整与两项比较；客户端不能自行提交历史事实。
+本服务 `/api/ai/chat` 是内部接口。公网客户端应使用 `POST /api/tech-transfer/v1/ai/chat` 并携带登录 Token，地址不含 `/h5`。
+
+新持久执行模式默认关闭。启用需要迁移 029、独立聊天 worker、私网 Agent 和双方一致的 `AI_INTERNAL_SERVICE_KEY`；不能仅部署前端。
+新私有端点 `POST /internal/ai/chat/stream` 与 `GET /internal/ai/ready` 必须携带 `X-AI-Service-Key`，不能发布到公网。
+
+完整配置、灰度、回退和测试说明见 [二期交付说明](../docs/agent-evolution-2026-10-20.md)。
+
+离线合成评测（不会请求模型或生产数据库）：
+
+```powershell
+python evals/run_advisor_eval.py --output ../outputs/advisor-eval.json
+```
+
+真实模型评测必须显式设置 `AI_EVAL_ALLOW_LIVE=1` 并提供 `--live`，可能产生费用；离线通过率不代表真实模型准确率或生产延迟。
+
 ## 常见问题
 
 - `ModuleNotFoundError`：确认已激活 `.venv`，并从项目根目录执行 `uvicorn app.main:app --reload`。

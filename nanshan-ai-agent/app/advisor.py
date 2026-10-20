@@ -34,6 +34,8 @@ _REFERENCE_POINTER = re.compile(
 
 
 def advice_mode(message: str) -> str:
+    if re.search(r"比较|对比|选哪|哪个好|哪个更", message):
+        return "compare"
     if re.search(r"介绍|解读|讲解|讲讲|有什么用|是什么", message):
         return "introduce"
     if re.search(r"推荐|适合|优先|对比|选哪|匹配|建议", message):
@@ -41,7 +43,7 @@ def advice_mode(message: str) -> str:
     return "search"
 
 
-def local_reply(message: str) -> str | None:
+def local_reply(message: str, resolve_references: bool = True) -> str | None:
     text = message.strip()
     if re.fullmatch(r"(?:你好|您好|嗨|hi|hello|谢谢|再见|在吗)[!！。.?？~～\s]*", text, re.I):
         return _OVERVIEW
@@ -67,7 +69,7 @@ def local_reply(message: str) -> str | None:
         if guide.startswith("publish_") and "对接" in text:
             reply += "\n\n" + _GUIDES["cooperation"]
         return reply
-    if not _REFERENCE_WORDS.sub("", text) or _REFERENCE_POINTER.search(text):
+    if resolve_references and (not _REFERENCE_WORDS.sub("", text) or _REFERENCE_POINTER.search(text)):
         return "请提供你指的成果名称、技术方向或具体内容，避免把“这个/第一个”误指到其他卡片。我会根据对应资料介绍用途、匹配依据和待确认事项。"
     if re.search(r"你能做什么|你有什么功能|你是谁|平台.*(?:有哪些功能|能做什么|怎么用)|小程序.*(?:有哪些功能|怎么用)", text):
         return _OVERVIEW
@@ -159,9 +161,26 @@ def enrich_cards(cards: list[dict], records: list[dict], route) -> list[dict]:
 def result_message(message: str, cards: list[dict], route) -> str:
     name = "科技成果" if route.intent == "search_achievement" else "技术需求"
     if not cards:
-        return f"暂未找到符合当前条件的{name}，不会用无关结果代替推荐。可以调整技术关键词、机构、预算或成熟度条件后再试。"
+        conditions = ["、".join(route.keywords)]
+        for label, value in [("机构", route.organization), ("地域", route.region), ("最低报价（万元）", route.min_price_wan), ("最高报价（万元）", route.max_price_wan), ("最低预算（万元）", route.min_budget_wan), ("最高预算（万元）", route.max_budget_wan), ("最低成熟度", route.min_maturity)]:
+            if value is not None:
+                conditions.append(f"{label}：{value}")
+        return f"暂未找到符合当前条件的{name}（{'；'.join(conditions)}），不会用无关结果代替推荐。可以选择调整技术关键词、机构、预算或成熟度条件后再试。"
     mode = advice_mode(message)
-    if mode == "introduce":
+    if mode == "compare" and len(cards) == 2:
+        comparison = []
+        for card in cards:
+            amount = card.get("price" if card.get("card_type") == "achievement" else "budget") or {}
+            amount_text = amount.get("text")
+            if amount_text in (None, "未填写", "面议"):
+                amount_text = "未披露，待确认"
+            maturity = card.get("maturity") or {}
+            maturity_text = maturity.get("label") if isinstance(maturity, dict) else str(maturity)
+            if maturity_text == "未填写":
+                maturity_text = "未披露，待确认"
+            comparison.append(f"《{str(card.get('title') or '未命名')[:60]}》：报价或预算 {amount_text}；成熟度 {maturity_text or '未披露，待确认'}")
+        reply = "按最新发布资料并列比较两项：\n" + "\n".join(comparison) + "\n用途和应用方向见各卡片资料摘要；未披露的性能、实施成本及适配性均待确认。"
+    elif mode == "introduce":
         reply = f"以下基于发布资料介绍 {len(cards)} 项{name}，用途、依据和待确认事项见对应卡片。"
     elif mode == "recommend":
         titles = "、".join(f"《{str(card.get('title') or '未命名')[:60]}》" for card in cards[:3])

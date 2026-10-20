@@ -41,6 +41,7 @@ class Settings:
     AI_CHAT_TIMEOUT_SECONDS = float(os.getenv("AI_CHAT_TIMEOUT_SECONDS", "90"))
     AI_CHAT_MAX_CONCURRENCY = int(os.getenv("AI_CHAT_MAX_CONCURRENCY", "4"))
     AI_RERANK_MAX_CHARS = int(os.getenv("AI_RERANK_MAX_CHARS", "24000"))
+    AI_INTERNAL_SERVICE_KEY = os.getenv("AI_INTERNAL_SERVICE_KEY", "")
 
     # L5: 日志级别可配
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

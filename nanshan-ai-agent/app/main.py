@@ -24,7 +24,8 @@ logger = logging.getLogger("nanshan.ai-agent")
 from app.database import get_db
 from app.llm_client import LLMError, set_fallback_provider
 from app.router import classify_intent
-from app.schemas import ChatRequest, ChatResponse
+from app.schemas import ChatRequest, ChatResponse, InternalChatRequest, RouteResult
+from app.conversation import merge_route, record_matches, resolve_context
 
 from app.services.achievement_service import (
     search_achievements,
@@ -42,7 +43,8 @@ from app.formatters import (
 from app.reranker import rerank_results
 from app.advisor import enrich_cards, local_reply, result_message
 from app.runtime_budget import reset_deadline, set_deadline
-from app.runtime_trace import request_trace, trace_stage
+from app.runtime_trace import emit_stage, request_trace, stage_observer, trace_count, trace_degradation, trace_stage
+from app.internal_stream import authorize_internal, prepare_stream
 
 
 app = FastAPI(
@@ -148,249 +150,179 @@ async def ai_chat(body: ChatRequest, http_request: Request):
             worker.cancel()
 
 
-def _run_ai_chat(body: ChatRequest, request_id: str | None = None, deadline_at: float | None = None):
+@app.post("/internal/ai/chat/stream")
+async def internal_ai_chat(body: InternalChatRequest, http_request: Request):
+    return prepare_stream(
+        body, http_request, slots=_chat_slots, executor=_chat_executor, run=_run_ai_chat,
+        timeout_seconds=min(55.0, chat_timeout_seconds(http_request.headers.get("X-AI-Timeout-Seconds"))),
+    )
+
+
+@app.get("/internal/ai/ready")
+async def internal_ready(http_request: Request):
+    authorize_internal(http_request.headers.get("X-AI-Service-Key"))
+    return {
+        "schemaVersion": 1,
+        "capacity": settings.AI_CHAT_MAX_CONCURRENCY,
+        "executionBudgetSeconds": min(55.0, settings.AI_CHAT_TIMEOUT_SECONDS),
+        "modelConfigured": bool(settings.LLM_API_URL and settings.LLM_API_KEY and settings.LLM_MODEL),
+    }
+
+
+def _run_ai_chat(body: ChatRequest, request_id: str | None = None, deadline_at: float | None = None, observer=None):
     remaining = max(0.0, deadline_at - time.monotonic()) if deadline_at is not None else settings.AI_CHAT_TIMEOUT_SECONDS
     deadline_token = set_deadline(remaining)
     try:
-        with request_trace(request_id), trace_stage("request"):
+        with request_trace(request_id), stage_observer(observer), trace_stage("request"):
             return _process_ai_chat(body)
     finally:
         reset_deadline(deadline_token)
 
 
-def _process_ai_chat(request: ChatRequest):
-
-    reply = local_reply(request.message)
-    if reply is not None:
-        return ChatResponse(success=True, intent="out_of_scope", message=reply, data=[])
-
-    try:
-        route = classify_intent(
-            request.message
-        )
-
-    except LLMError as exc:
-        logger.warning(
-            "[LLM Error] %r llmStatus=%s reason=%s",
-            exc, exc.status_code, exc.reason,
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "message": "AI服务暂时不可用，请稍后重试。",
-                "layer": "llm",
-                "llmStatus": exc.status_code,
-                "llmReason": exc.reason,
-                "llmBody": (exc.body or "")[:300],
-            },
-        )
-
-    except Exception as exc:
-        logger.warning("[Router Error] %r", exc)
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "AI业务意图识别失败，请稍后重试。",
-                "layer": "agent",
-                "agentReason": "router_error",
-            },
-        )
-
-    # =========================
-    # 非业务问题
-    # =========================
-
-    if route.intent == "out_of_scope":
-
-        return ChatResponse(
-            success=True,
-            intent="out_of_scope",
-            message=(
-                "我可以帮你查找、介绍科技成果和技术需求，结合场景推荐并说明依据，"
-                "也可以介绍平台功能和指导发布、收藏、认证、申请对接等操作。"
-                "请告诉我技术方向、成果名称或想完成的操作。"
-            ),
-            data=[],
-        )
-
-    # 没有关键词
-    if not route.keywords:
-
-        return ChatResponse(
-            success=True,
-            intent=route.intent,
-            message=(
-                "请告诉我你想查询的技术方向，"
-                "例如人工智能、机器视觉、生物医药等。"
-            ),
-            data=[],
-        )
-
-    # =========================
-    # 查询成果
-    # =========================
-
+def _search(route, request, target_ids=None):
+    common = {
+        "keywords": route.keywords,
+        "organization": route.organization,
+        "limit": min(route.limit, 10) if target_ids is not None else 20,
+        "exclude_owner_user_id": request.exclude_owner_user_id,
+    }
+    if target_ids is not None:
+        common["target_ids"] = target_ids
     if route.intent == "search_achievement":
-
-        try:
-            candidates = search_achievements(
-                keywords=route.keywords,
-                organization=route.organization,
-                min_price_wan=route.min_price_wan,
-                max_price_wan=route.max_price_wan,
-                min_maturity=route.min_maturity,
-                limit=20,
-                exclude_owner_user_id=request.exclude_owner_user_id,
-            )
-            # 种子账号挂了绝大部分成果时，排除归属会把库搜空或只剩噪音；
-            # 他人成果不足 3 条则回退不过滤，避免「暂未找到」。
-            if (
-                request.exclude_owner_user_id is not None
-                and len(candidates) < 3
-            ):
-                fallback = search_achievements(
-                    keywords=route.keywords,
-                    organization=route.organization,
-                    min_price_wan=route.min_price_wan,
-                    max_price_wan=route.max_price_wan,
-                    min_maturity=route.min_maturity,
-                    limit=20,
-                    exclude_owner_user_id=None,
-                )
-                if len(fallback) > len(candidates):
-                    logger.info(
-                        "[Achievement] exclude_owner 候选不足，回退为不过滤归属 %s kept=%d",
-                        request.exclude_owner_user_id, len(fallback),
-                    )
-                    candidates = fallback
-
-            results = rerank_results(
-                intent="search_achievement",
-                user_message=request.message,
-                candidates=candidates,
-                top_n=route.limit,
-            )
-
-        except Exception as exc:
-            logger.error("[Achievement DB Error] %r", exc)
-
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "message": "数据库暂时繁忙，请稍后重试。",
-                    "layer": "agent",
-                    "agentReason": "achievement_database_unavailable",
-                },
-            )
-
-        if not results:
-
-            return ChatResponse(
-                success=True,
-                intent="search_achievement",
-                message=result_message(request.message, [], route),
-                data=[],
-            )
-
-        cards = [
-            format_achievement_card(item)
-            for item in results
-        ]
-        cards = enrich_cards(cards, results, route)
-
-        return ChatResponse(
-            success=True,
-            intent="search_achievement",
-            message=result_message(request.message, cards, route),
-            data=cards,
+        if route.region:
+            common["region"] = route.region
+        return search_achievements(
+            **common, min_price_wan=route.min_price_wan,
+            max_price_wan=route.max_price_wan, min_maturity=route.min_maturity,
         )
-
-    # =========================
-    # 查询需求
-    # =========================
-
-    if route.intent == "search_demand":
-
-        try:
-            candidates = search_demands(
-                keywords=route.keywords,
-                organization=route.organization,
-                region=route.region,
-                min_budget_wan=route.min_budget_wan,
-                max_budget_wan=route.max_budget_wan,
-                coop_modes=route.coop_modes,
-                limit=20,
-                exclude_owner_user_id=request.exclude_owner_user_id,
-            )
-            if (
-                request.exclude_owner_user_id is not None
-                and len(candidates) < 3
-            ):
-                fallback = search_demands(
-                    keywords=route.keywords,
-                    organization=route.organization,
-                    region=route.region,
-                    min_budget_wan=route.min_budget_wan,
-                    max_budget_wan=route.max_budget_wan,
-                    coop_modes=route.coop_modes,
-                    limit=20,
-                    exclude_owner_user_id=None,
-                )
-                if len(fallback) > len(candidates):
-                    logger.info(
-                        "[Demand] exclude_owner 候选不足，回退为不过滤归属 %s kept=%d",
-                        request.exclude_owner_user_id, len(fallback),
-                    )
-                    candidates = fallback
-
-            results = rerank_results(
-                intent="search_demand",
-                user_message=request.message,
-                candidates=candidates,
-                top_n=route.limit,
-            )
-
-        except Exception as exc:
-            logger.error("[Demand DB Error] %r", exc)
-
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "message": "数据库暂时繁忙，请稍后重试。",
-                    "layer": "agent",
-                    "agentReason": "demand_database_unavailable",
-                },
-            )
-
-        if not results:
-
-            return ChatResponse(
-                success=True,
-                intent="search_demand",
-                message=result_message(request.message, [], route),
-                data=[],
-            )
-
-        cards = [
-            format_demand_card(item)
-            for item in results
-        ]
-        cards = enrich_cards(cards, results, route)
-
-        return ChatResponse(
-            success=True,
-            intent="search_demand",
-            message=result_message(request.message, cards, route),
-            data=cards,
-        )
-
-    raise HTTPException(
-        status_code=500,
-        detail={
-            "message": "未知业务类型。",
-            "layer": "agent",
-            "agentReason": "unknown_intent",
-        },
+    return search_demands(
+        **common, region=route.region, min_budget_wan=route.min_budget_wan,
+        max_budget_wan=route.max_budget_wan, coop_modes=route.coop_modes,
     )
+
+
+def get_visible_records(card_type, ids, exclude_owner_user_id=None):
+    route = RouteResult(intent="search_" + card_type, limit=10)
+    request = ChatRequest(message="visibility", exclude_owner_user_id=exclude_owner_user_id)
+    return _search(route, request, ids)
+
+
+def _visible(item, owner):
+    return (
+        item.get("status", "published") == "published"
+        and item.get("deleted_at") is None
+        and (owner is None or item.get("owner_user_id") != owner)
+    )
+
+
+def _final_records(results, request, route):
+    if not results:
+        return []
+    kind = "achievement" if route.intent == "search_achievement" else "demand"
+    current = get_visible_records(kind, [item["id"] for item in results], request.exclude_owner_user_id)
+    by_id = {item["id"]: item for item in current if _visible(item, request.exclude_owner_user_id)}
+    records = []
+    for item in results:
+        latest = by_id.get(item["id"])
+        if latest is None or not record_matches(latest, route):
+            continue
+        refreshed = dict(latest)
+        for key in ("_advisor_evidence", "_advisor_insight"):
+            if item.get(key) and all(item.get(field) == latest.get(field) for field in ("title", "tech_intro", "description", "application_fields", "innovation_points", "region", "coop_mode")):
+                refreshed[key] = item[key]
+        records.append(refreshed)
+    if len(records) < len(results):
+        trace_degradation("visibility_changed")
+    return records[:route.limit]
+
+
+def _respond(route, request, records):
+    emit_stage("formatting")
+    formatter = format_achievement_card if route.intent == "search_achievement" else format_demand_card
+    cards = enrich_cards([formatter(item) for item in records], records, route)
+    trace_count("returned_count", len(cards))
+    return ChatResponse(
+        success=True, intent=route.intent, message=result_message(request.message, cards, route),
+        data=cards, queryPlan=route.model_dump(),
+    )
+
+
+def _clarification(message):
+    emit_stage("formatting")
+    return ChatResponse(success=True, intent="out_of_scope", message=message, data=[])
+
+
+def _process_ai_chat(request: ChatRequest):
+    emit_stage("context")
+    reply = local_reply(request.message, resolve_references=False)
+    if reply is not None:
+        return _clarification(reply)
+    resolution = resolve_context(request)
+    if resolution.clarification:
+        return _clarification(resolution.clarification)
+    if resolution.targets:
+        emit_stage("retrieving")
+        records = []
+        for target in resolution.targets:
+            current = get_visible_records(target.card_type, [target.id], request.exclude_owner_user_id)
+            matches = [item for item in current if item.get("id") == target.id and _visible(item, request.exclude_owner_user_id)]
+            if not matches:
+                return _clarification("所选成果或需求已不可用，请重新选择当前可见的卡片。")
+            records.append(matches[0])
+        kinds = {target.card_type for target in resolution.targets}
+        if len(kinds) != 1:
+            return _clarification("请选取相同类型的两项成果或需求进行比较。")
+        route = RouteResult(
+            intent="search_" + resolution.targets[0].card_type,
+            keywords=[], limit=len(records),
+        )
+        records = _final_records(records, request, route)
+        if len(records) != len(resolution.targets):
+            return _clarification("所选成果或需求已不可用，请重新选择当前可见的卡片。")
+        response = _respond(route, request, records)
+        if request.context and request.context.queryPlan:
+            response.queryPlan = request.context.queryPlan
+        return response
+    emit_stage("routing")
+    try:
+        route = resolution.route or classify_intent(request.message)
+        route = merge_route(request.message, route)
+    except ValueError:
+        return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
+    except LLMError as exc:
+        logger.warning("router_failed llm_status=%s reason=%s", exc.status_code, exc.reason)
+        raise HTTPException(status_code=502, detail={"message": "AI服务暂时不可用，请稍后重试。", "layer": "llm", "llmReason": exc.reason}) from exc
+    except Exception as exc:
+        logger.warning("router_failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail={"message": "AI业务意图识别失败，请稍后重试。", "agentReason": "router_error"}) from exc
+    if route.intent == "out_of_scope":
+        return _clarification("我可以帮你查找、介绍科技成果和技术需求，说明依据并指导平台操作。请告诉我技术方向、成果名称或想完成的操作。")
+    if not route.keywords:
+        return _clarification("请告诉我你想查询的技术方向，例如人工智能、机器视觉、生物医药等。")
+    if route.intent == "search_achievement" and route.region:
+        return _clarification("成果资料未披露可核实的地域字段，请确认是否保留地域要求或改查技术需求。")
+    emit_stage("retrieving")
+    try:
+        candidates = _search(route, request)
+        candidates = [item for item in candidates[:20] if _visible(item, request.exclude_owner_user_id) and record_matches(item, route)]
+        trace_count("candidate_count", len(candidates))
+        results = rerank_results(intent=route.intent, user_message=request.message, candidates=candidates, top_n=route.limit)
+        candidates_by_id = {item["id"]: item for item in candidates}
+        selected = []
+        selected_ids = set()
+        for item in results:
+            identifier = item.get("id")
+            if identifier not in candidates_by_id or identifier in selected_ids:
+                continue
+            original = dict(candidates_by_id[identifier])
+            for key in ("_advisor_evidence", "_advisor_insight"):
+                if key in item:
+                    original[key] = item[key]
+            selected.append(original)
+            selected_ids.add(identifier)
+        trace_count("selected_count", len(selected))
+        selected = _final_records(selected, request, route)
+    except Exception as exc:
+        logger.error("retrieval_failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail={"message": "数据库暂时繁忙，请稍后重试。", "agentReason": "database_unavailable"}) from exc
+    return _respond(route, request, selected)

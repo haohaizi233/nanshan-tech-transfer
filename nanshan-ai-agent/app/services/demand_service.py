@@ -56,6 +56,7 @@ def search_demands(
     coop_modes: list[str] | None = None,
     limit: int = 10,
     exclude_owner_user_id: int | None = None,
+    target_ids: list[int] | None = None,
 ) -> list[dict]:
 
     limit = min(max(limit, 1), 30)
@@ -84,6 +85,11 @@ def search_demands(
     ]
 
     params = []
+    if target_ids is not None:
+        if not target_ids:
+            return []
+        conditions.append("id = ANY(%s)")
+        params.append(target_ids[:10])
 
     # 不把用户自己的需求推荐给自己
     if exclude_owner_user_id is not None:
@@ -213,6 +219,9 @@ def search_demands(
     sql = f"""
         SELECT
             id,
+            owner_user_id,
+            status,
+            deleted_at,
             title,
             description,
             org_name_snapshot,
