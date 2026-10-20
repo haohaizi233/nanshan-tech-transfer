@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     AI_AGENT_TIMEOUT: int = 30  # 秒；主服务转发 ai-agent 的单次超时（M1：防止 sync 路由长阻塞耗尽线程池）
     # 同步阻塞 LLM 转发并发上限（routes/ai.py 的信号量）；运维可通过 .env 调参。
     AI_MAX_CONCURRENT: int = 4
+    AI_CHAT_RUNS_ENABLED: bool = False
+    AI_INTERNAL_SERVICE_KEY: str = ""
+    AI_CHAT_STREAM_URL: str = "http://127.0.0.1:8001/internal/ai/chat/stream"
+    AI_CHAT_GLOBAL_SLOTS: int = 4
+    AI_CHAT_QUEUE_SECONDS: int = 30
+    AI_CHAT_EXECUTION_SECONDS: int = 55
+    AI_CHAT_LEASE_SECONDS: int = 20
+    AI_CHAT_RENEW_SECONDS: int = 5
+    AI_CHAT_REAP_SECONDS: int = 5
 
     # ── 爱马仕 Hermes / OpenAI 兼容 Provider（密钥只在服务端）──
     # 企业微信 Bot 长连接由爱马仕 gateway 持有（服务器在别处），本服务只走 HTTP。
@@ -207,7 +216,9 @@ class Settings(BaseSettings):
             raise ValueError("DB_POOL_ACQUIRE_TIMEOUT 必须 >= 0")
         return v
 
-    @field_validator("AI_MAX_CONCURRENT", "AI_AGENT_TIMEOUT")
+    @field_validator("AI_MAX_CONCURRENT", "AI_AGENT_TIMEOUT", "AI_CHAT_GLOBAL_SLOTS",
+                     "AI_CHAT_QUEUE_SECONDS", "AI_CHAT_EXECUTION_SECONDS", "AI_CHAT_LEASE_SECONDS",
+                     "AI_CHAT_RENEW_SECONDS", "AI_CHAT_REAP_SECONDS")
     @classmethod
     def _validate_ai_limits(cls, v: int) -> int:
         if v < 1:

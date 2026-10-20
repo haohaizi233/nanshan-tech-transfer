@@ -230,8 +230,17 @@ class EvaluationTaskRequest(RequestBody):
     achievementId: int = Field(..., ge=1)
 
 
+class AiChatReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    messageId: int = Field(..., ge=1, strict=True)
+    cardType: Literal["achievement", "demand"]
+    cardId: int = Field(..., ge=1, strict=True)
+
+
 class AiChatRequest(RequestBody):
+    model_config = ConfigDict(extra="forbid")
     message: str = Field(..., min_length=1)
+    reference: AiChatReference | None = None
     turnId: str | None = Field(
         None,
         min_length=1,

@@ -34,6 +34,7 @@ from modules.ai.chat_store import (
     append_turn, clear_messages, complete_turn, fail_turn, get_turn as get_chat_turn,
     list_messages, start_turn,
 )
+from modules.ai.chat_runs import submit_run, clear_runs, has_durable_history
 from modules.ai.service import (
     create_evaluation_task,
     get_card_view_counts,
@@ -300,7 +301,7 @@ def _persist_failed_turn(user_id: int, user_message: str, assistant_message: str
 
 
 @router.post("/ai/chat")
-def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
+def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Request = None):
     # M5: 用户级频控防 LLM 成本刷单（30 次/5 分钟，正常多轮对话不受影响）
     check_user_rate(user["userId"], "ai_chat", limit=30, window_s=300)
     message = body.as_dict().get("message")
@@ -308,6 +309,9 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity)):
         raise bad_request("message 不能为空")
     user_message = message.strip()
     turn_id = body.as_dict().get("turnId")
+    if settings.AI_CHAT_RUNS_ENABLED and turn_id and request is not None and "respond-async" in request.headers.get("Prefer", "").lower():
+        turn = submit_run(user["userId"], turn_id, user_message, body.reference.model_dump() if body.reference else None)
+        return JSONResponse(status_code=202 if turn["status"] == "running" else 200, content=success(turn, "任务已受理"))
     if turn_id:
         turn, is_new = start_turn(user["userId"], turn_id, user_message)
         if not is_new:
@@ -516,7 +520,7 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
 @router.get("/ai/chat/messages")
 def ai_chat_messages_list(user: dict = Depends(identity)):
     messages = list_messages(user["userId"])
-    return success({"messages": messages}, "ok")
+    return success({"messages": messages, "referenceSupported": settings.AI_CHAT_RUNS_ENABLED}, "ok")
 
 
 @router.get("/ai/chat/turns/{turn_id}")
@@ -531,5 +535,7 @@ def ai_chat_turn_detail(turn_id: str, user: dict = Depends(identity)):
 
 @router.delete("/ai/chat/messages")
 def ai_chat_messages_clear(user: dict = Depends(identity)):
+    if settings.AI_CHAT_RUNS_ENABLED or has_durable_history(user["userId"]):
+        return success(clear_runs(user["userId"]), "聊天记录已清空")
     deleted = clear_messages(user["userId"])
     return success({"deleted": deleted}, "聊天记录已清空")

@@ -20,6 +20,9 @@ _VALID_ROLES = ('user', 'assistant')
 def _turn_view(row: dict | None) -> dict | None:
     if not row:
         return None
+    if row.get('execution_mode') == 'durable':
+        from modules.ai.chat_runs import run_view
+        return run_view(row)
     def format_time(value):
         return value.isoformat() if value else None
     return {
@@ -65,8 +68,7 @@ def get_turn(user_id: int, turn_id: str) -> dict | None:
     """Read a turn only inside the authenticated user's namespace."""
     with get_cursor() as cur:
         cur.execute(
-            '''SELECT turn_id, status, reply, cards, error_message, error_code,
-                      error_status, created_at, updated_at
+            '''SELECT *
                FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s''',
             (user_id, turn_id),
         )
@@ -186,7 +188,9 @@ def list_messages(user_id: int, limit: int = 100) -> list[dict]:
     limit = max(1, min(int(limit or 100), 200))
     with get_cursor() as cur:
         cur.execute(
-            '''SELECT id, role, content, cards, created_at
+            '''SELECT id, role, content, cards, created_at,
+                      to_jsonb(ai_chat_message)->>'turn_id' AS turn_id,
+                      COALESCE((to_jsonb(ai_chat_message)->>'generation')::bigint, 0) AS generation
                FROM ai_chat_message
                WHERE user_id = %s
                ORDER BY id DESC
@@ -202,6 +206,8 @@ def list_messages(user_id: int, limit: int = 100) -> list[dict]:
             'content': row.get('content') or '',
             'cards': row.get('cards') or None,
             'createdAt': row['created_at'].strftime('%Y-%m-%d %H:%M:%S'),
+            'turnId': row.get('turn_id'),
+            'generation': row.get('generation', 0),
         }
         for row in rows
     ]
