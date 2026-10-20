@@ -48,6 +48,10 @@ https://{$NS_SITE:inanshan.sjhcip.com} {
 
 	import {$NS_TLS_SNIPPET:tls-acme.caddy}
 
+	handle /internal/* {
+		respond "Not Found" 404
+	}
+
 	handle /health {
 		import nanshan_api
 	}

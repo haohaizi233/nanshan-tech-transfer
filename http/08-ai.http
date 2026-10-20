@@ -71,3 +71,36 @@ Authorization: {{auth}}
 ### 清空聊天历史
 DELETE {{api}}/ai/chat/messages
 Authorization: {{auth}}
+
+### 持久对话（新模式默认关闭；未启用时按原接口同步返回）
+# @name durableChat
+POST {{api}}/ai/chat
+Authorization: {{auth}}
+Content-Type: application/json
+Prefer: respond-async
+
+{
+  "message": "推荐机器视觉成果",
+  "turnId": "http-chat-{{$timestamp}}"
+}
+
+> {%
+if (response.status === 202 && response.body && response.body.data) {
+  client.global.set("chatTurnId", response.body.data.turnId);
+}
+%}
+
+### 查询已受理轮次（只读，不会重新生成）
+GET {{api}}/ai/chat/turns/{{chatTurnId}}
+Authorization: {{auth}}
+
+### 继续追问（上下文由服务端生成，需新模式与前一轮成功）
+POST {{api}}/ai/chat
+Authorization: {{auth}}
+Content-Type: application/json
+Prefer: respond-async
+
+{
+  "message": "预算改成30万元以内",
+  "turnId": "http-followup-{{$timestamp}}"
+}
