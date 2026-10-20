@@ -12,6 +12,7 @@
 			<text class="header__title">AI 智能匹配</text>
 			<text class="header__desc">对话描述需求，或输入 / 调用技能</text>
 			<AiGeneratedMark class="header__mark" />
+			<text class="header__desc" @click="clearConversation">清空对话</text>
 		</view>
 
 		<scroll-view
@@ -86,6 +87,7 @@
 									<text class="agent-card__advice-text">{{ card.advisorInsight }}</text>
 								</view>
 								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
+								<button v-if="referenceForCard(msg, card)" size="mini" :disabled="typing" @click.stop="introduceCard(msg, card)">介绍这项</button>
 
 								<view v-if="card.card_type === 'achievement'" class="agent-card__meta">
 									<text v-if="card.maturity && card.maturity.label" class="meta-chip">成熟度：{{ card.maturity.label }}</text>
@@ -120,7 +122,7 @@
 			<view v-if="typing" class="msg msg--bot">
 				<AiGeneratedMark mode="badge" />
 				<view class="bubble bubble--bot bubble--typing">
-					<text class="bubble__text">人工智能正在生成…</text>
+					<text class="bubble__text">{{ progressText }}</text>
 				</view>
 			</view>
 
@@ -216,7 +218,8 @@
 		matchDemand,
 		getChatHistory,
 		getCardViewCounts,
-		getChatTurn
+		getChatTurn,
+		clearChatHistory
 	} from '../../api/ai.js'
 	import {
 		createWelcomeMessage,
@@ -247,8 +250,10 @@
 		acknowledgeTurn,
 		beginTurn,
 		loadActiveTurn,
-		saveTurnResult
+		saveTurnResult,
+		saveTurnProgress
 	} from '../../api/ai-chat-wal.mjs'
+	import { createChatProgress, mergeChatProgress, chatProgressText, cardReference } from '../../api/ai-chat-progress.mjs'
 	import { getPageStateScope, createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 // P0-A: 模块级内存缓存（跨页面切换保持数据）
@@ -264,10 +269,6 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 
 	function createTurnId() {
 		return 'ai_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 12)
-	}
-
-	function waitMs(ms) {
-		return new Promise((resolve) => setTimeout(resolve, ms))
 	}
 
 	export default {
@@ -294,6 +295,10 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			inflightText: '',
 			inflightTurnId: '',
 			recoveringTurn: false,
+			chatGeneration: null,
+			referenceSupported: false,
+			chatProgress: null,
+			waitNotice: '',
 			queueExpanded: false,
 			historyExpanded: false,
 			waitingDemandPick: false,
@@ -301,6 +306,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		}
 	},
 	computed: {
+		progressText() {
+			return this.waitNotice || chatProgressText(this.chatProgress)
+		},
 		showSuggestions() {
 			return !this.typing && this.messages.length <= 1 && !this.pendingQueue.length
 		},
@@ -358,7 +366,11 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		const currentScope = getPageStateScope(uni)
 		this.startCardStatsRefresh()
 		if (currentScope !== this._scope) {
+			this.stopTurnPolling()
 			this._scope = currentScope
+			this.chatGeneration = null
+			this.referenceSupported = false
+			this.chatProgress = null
 			this.cardViewCounts = {}
 			this._sessionReady = false
 			this.messages = [createWelcomeMessage()]
@@ -373,36 +385,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			return
 		}
 		if (this._recovering) return
-		if (this._requestInFlight) {
-			// 请求可能已中断（页面切走时fetch被abort），检查WAL中是否有未完成的turn
-			const activeTurn = loadActiveTurn(uni, this._scope)
-			if (activeTurn && activeTurn.status === 'pending') {
-				// 容灾：pending超过2分钟视为超时，强制清理
-				if (Date.now() - (activeTurn.createdAt || 0) > 2 * 60 * 1000) {
-					acknowledgeTurn(activeTurn.turnId, uni, this._scope)
-					this._requestInFlight = false
-					this.typing = false
-					this.recoveringTurn = false
-					this.inflightText = ''
-					this.inflightTurnId = ''
-					this.pushMessage('assistant', '上一条问答超时未返回，已自动清理。请重新发送。')
-					this.persistQueue()
-					this.pumpQueue()
-				} else {
-					this._requestInFlight = false
-					this.recoverActiveTurn(activeTurn)
-				}
-			} else if (!activeTurn) {
-				// WAL中没有turn，说明请求从未发出或已完成，重置状态
-				this._requestInFlight = false
-				this.typing = false
-				this.recoveringTurn = false
-				this.pumpQueue()
-			}
-			return
-		}
+		if (this._requestInFlight) this.stopTurnPolling()
 		if (!this._sessionReady) {
-			this.restoreScrollPosition()
+			this.resumeSession()
 			return
 		}
 		const activeTurn = loadActiveTurn(uni, this._scope)
@@ -414,6 +399,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	},
 	onHide() {
 		this._visible = false
+		this.stopTurnPolling(false)
 		this.stopCardStatsRefresh()
 		if (!this.aiEnabled) return
 		this.persistQueue()
@@ -421,12 +407,79 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	onUnload() {
 		this._alive = false
 		this._visible = false
+		this.stopTurnPolling()
 		this.stopCardStatsRefresh()
 		if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
 		if (!this.aiEnabled) return
 		this.persistQueue()
 	},
 	methods: {
+		stopTurnPolling(invalidate = true) {
+			if (invalidate) this._chatRequestVersion = (this._chatRequestVersion || 0) + 1
+			if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
+			this._recoveryTimer = null
+			if (this._pollTimer) clearTimeout(this._pollTimer)
+			this._pollTimer = null
+			if (this._pollWake) this._pollWake()
+			this._pollWake = null
+			this._requestInFlight = false
+			this._recovering = false
+		},
+		isCurrentChatRequest(version, scope) {
+			return this._alive && (this._chatRequestVersion || 0) === version && this._scope === scope && scope === getPageStateScope(uni)
+		},
+		acceptChatProgress(response, turnId) {
+			if (!this.chatProgress || this.chatProgress.turnId !== turnId) {
+				const active = loadActiveTurn(uni, this._scope)
+				this.chatProgress = createChatProgress({ ...active, scope: this._scope, turnId, generation: active?.generation ?? this.chatGeneration })
+			}
+			const next = mergeChatProgress(this.chatProgress, response, getPageStateScope(uni))
+			if (next === this.chatProgress) return false
+			this.chatProgress = next
+			this.referenceSupported = response.referenceSupported === true
+			this.chatGeneration = next.generation
+			saveTurnProgress(turnId, next, uni, this._scope)
+			return true
+		},
+		referenceForCard(message, card) {
+			if (!this.referenceSupported || message.serverGeneration !== this.chatGeneration) return null
+			return cardReference(message, card)
+		},
+		introduceCard(message, card) {
+			const reference = this.referenceForCard(message, card)
+			if (!reference || this.typing) return
+			this.runAgentChat('介绍这项：' + card.title, reference)
+		},
+		async clearConversation() {
+			if (this._clearingHistory) return
+			this.stopTurnPolling()
+			this._clearingHistory = true
+			this._sessionReady = false
+			this.typing = true
+			const scope = this._scope
+			const version = this._chatRequestVersion || 0
+			try {
+				const result = await clearChatHistory()
+				if (!this.isCurrentChatRequest(version, scope)) return
+				this.chatGeneration = result.generation ?? null
+				this._sessionReady = true
+				this.chatProgress = null
+				this.waitNotice = ''
+				this.messages = [createWelcomeMessage()]
+				this.pendingQueue = []
+				this.inputText = ''
+				this.finishTurn()
+			} catch (error) {
+				if (this.isCurrentChatRequest(version, scope)) {
+					this._sessionReady = true
+					uni.showToast({ title: error.message || '清空失败，请稍后重试', icon: 'none' })
+					this.typing = !!loadActiveTurn(uni, scope)
+					this.scheduleTurnRecovery()
+				}
+			} finally {
+				this._clearingHistory = false
+			}
+		},
 		cardViewCount(card) {
 			const value = this.cardViewCounts[card.card_type + ':' + card.id] ?? card.viewCount
 			return Number.isSafeInteger(value) && value >= 0 ? value : '—'
@@ -487,14 +540,21 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			// 从后端回放历史聊天（切页/重登后不丢）。欢迎语前置，历史卡片快照复用
 			// 现有 agent-cards 模板渲染，openCard 仍按 card.id 跳最新详情页。
 			const requestScope = this._scope
+			const requestVersion = this._chatRequestVersion || 0
 			try {
 				const data = await getChatHistory()
 				if (requestScope !== this._scope || requestScope !== getPageStateScope(uni)) return false
+				if (requestVersion !== (this._chatRequestVersion || 0)) return false
+				if (Number.isSafeInteger(data.generation)) this.chatGeneration = data.generation
+				this.referenceSupported = data.referenceSupported === true
 				const msgs = (data && data.messages) || []
 				const restored = msgs.map((m) => {
 					const cards = Array.isArray(m.cards) ? m.cards : null
 					return createMessage(m.role === 'user' ? 'user' : 'assistant', m.content || '', {
 						id: 'm_' + m.id,
+						serverMessageId: m.id,
+						serverTurnId: m.turnId,
+						serverGeneration: m.generation,
 						type: cards && cards.length ? 'agent-cards' : 'text',
 						payload: cards && cards.length ? { cards } : null,
 					})
@@ -518,14 +578,22 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			if (!this._alive || this._scope !== getPageStateScope(uni)) return false
 			this.inflightText = turn.message
 			this.inflightTurnId = turn.turnId
-			await this.loadHistory()
-			if (!this._alive || this._scope !== getPageStateScope(uni)) return false
-			if (findInflightStatus(this.messages, turn.message) !== 'done') {
+			const scope = this._scope
+			const version = this._chatRequestVersion || 0
+			const historyLoaded = await this.loadHistory()
+			if (!this.isCurrentChatRequest(version, scope)) return false
+			const result = turn.result || {}
+			const alreadyShown = result.serverMessageId
+				? this.messages.some(message => String(message.serverMessageId) === String(result.serverMessageId))
+				: historyLoaded && findInflightStatus(this.messages, turn.message) === 'done'
+			if (!alreadyShown) {
 				this.ensureLocalUserMessage(turn.message)
-				const result = turn.result || {}
 				this.pushMessage('assistant', result.content || 'AI 助手暂时不可用，请稍后重试。', {
 					type: result.type || 'text',
 					payload: result.payload || null,
+					serverMessageId: result.serverMessageId,
+					serverTurnId: result.serverTurnId,
+					serverGeneration: result.serverGeneration,
 				})
 			}
 			acknowledgeTurn(turn.turnId, uni, this._scope)
@@ -541,6 +609,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					message: turn.reply || '',
 					data: Array.isArray(turn.cards) ? turn.cards : [],
 				})
+				result.serverMessageId = turn.messageId || null
+				result.serverTurnId = turn.turnId || null
+				result.serverGeneration = turn.generation ?? null
 			} else {
 				result = {
 					content: String(turn.errorMessage || turn.reply || 'AI 助手暂时不可用，请稍后重试。'),
@@ -553,45 +624,68 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			return this.presentSavedTurn(loadActiveTurn(uni, this._scope))
 		},
 		async waitForTurnStatus(turnId, message) {
+			const scope = this._scope
+			const version = this._chatRequestVersion || 0
 			const deadline = Date.now() + INFLIGHT_WAIT_MS
 			let nextPollAt = Date.now()
-			while (this._alive && Date.now() < deadline) {
+			while (this.isCurrentChatRequest(version, scope) && Date.now() < deadline) {
 				if (!this._visible) return 'paused'
 				const delay = nextPollAt - Date.now()
-				if (delay > 0) await waitMs(delay)
-				if (!this._alive || this._scope !== getPageStateScope(uni)) return 'left'
+				if (delay > 0) await new Promise(resolve => {
+					this._pollWake = resolve
+					this._pollTimer = setTimeout(() => {
+						this._pollTimer = null
+						this._pollWake = null
+						resolve()
+					}, delay)
+				})
+				if (!this.isCurrentChatRequest(version, scope)) return 'left'
 				if (!this._visible) return 'paused'
 				try {
 					const turn = await getChatTurn(turnId)
-					if (turn && ['succeeded', 'failed'].includes(turn.status)) {
+					if (!this.isCurrentChatRequest(version, scope) || !this._visible) return 'left'
+					if (this.acceptChatProgress(turn, turnId) && ['succeeded', 'failed'].includes(turn.status)) {
 						this.inflightText = message
 						this.inflightTurnId = turnId
 						this.ensureLocalUserMessage(message)
 						if (await this.saveServerTurn(turn)) return 'done'
 					}
 				} catch (e) {
-					// A timeout/404 may race the original POST. Keep the WAL pending and never resend it.
+					if (!this.isCurrentChatRequest(version, scope)) return 'left'
+					if (e.details?.reason === 'chat_history_cleared') {
+						acknowledgeTurn(turnId, uni, scope)
+						this.pendingQueue = []
+						this.finishTurn()
+						await this.loadHistory()
+						return 'done'
+					}
 				}
 				nextPollAt = Date.now() + INFLIGHT_POLL_MS
 			}
-			return this._alive ? 'pending' : 'left'
+			if (!this.isCurrentChatRequest(version, scope)) return 'left'
+			this.waitNotice = '等待时间较长，请稍后回来查看；本轮仍会继续确认。'
+			return 'pending'
 		},
 		scheduleTurnRecovery() {
 			if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
+			if (!this._alive || !this._visible) return
 			this._recoveryTimer = setTimeout(() => {
 				this._recoveryTimer = null
-				if (!this._alive || this._requestInFlight || this._recovering) return
+				if (!this._alive || !this._visible || this._requestInFlight || this._recovering) return
 				const active = loadActiveTurn(uni, this._scope)
 				if (active) this.recoverActiveTurn(active)
-			}, INFLIGHT_POLL_MS * 3)
+			}, INFLIGHT_POLL_MS)
 		},
 		async recoverActiveTurn(turn) {
-			if (!turn || !this._alive || this._recovering) return
+			if (!turn || !this._alive || !this._visible || this._recovering || this._requestInFlight) return
+			const scope = this._scope
+			const version = this._chatRequestVersion || 0
 			if (turn.status !== 'pending') {
 				await this.presentSavedTurn(turn)
 				return
 			}
 			this._recovering = true
+			this.waitNotice = ''
 			this.recoveringTurn = true
 			this.typing = true
 			this.inflightText = turn.message
@@ -602,21 +696,10 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				const result = await this.waitForTurnStatus(turn.turnId, turn.message)
 				if (result === 'pending' && this._alive) this.scheduleTurnRecovery()
 			} finally {
+				if (!this.isCurrentChatRequest(version, scope)) return
 				this._recovering = false
 				const active = loadActiveTurn(uni, this._scope)
 				if (this._alive && active && active.turnId === turn.turnId && active.status === 'pending') {
-					// 容灾：pending超过2分钟视为超时，强制清理
-					if (Date.now() - (active.createdAt || 0) > 2 * 60 * 1000) {
-						acknowledgeTurn(active.turnId, uni, this._scope)
-						this.typing = false
-						this.recoveringTurn = false
-						this.inflightText = ''
-						this.inflightTurnId = ''
-						this.persistQueue()
-						this.pushMessage('assistant', '上一条问答超时未返回，已自动清理。请重新发送。')
-						this.pumpQueue()
-						return
-					}
 					this.typing = true
 					this.recoveringTurn = true
 				} else if (this._alive && !this.inflightTurnId) {
@@ -625,33 +708,32 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			}
 		},
 		async resumeSession() {
+			const scope = this._scope
+			const version = this._chatRequestVersion || 0
 			const saved = loadQueueState(uni, this._scope)
 			this.pendingQueue = saved.queue
 			if (saved.draft) this.inputText = saved.draft
 			this.inflightText = saved.inflight
 			this.inflightTurnId = saved.inflightTurnId
 			await this.loadHistory()
-			if (!this._alive || this._scope !== getPageStateScope(uni)) return
+			if (!this.isCurrentChatRequest(version, scope)) return
 			this._sessionReady = true
 			const activeTurn = loadActiveTurn(uni, this._scope)
 			if (activeTurn) {
-				// 容灾：pending超过2分钟视为超时，强制清理
-				if (activeTurn.status === 'pending' && Date.now() - (activeTurn.createdAt || 0) > 2 * 60 * 1000) {
-					acknowledgeTurn(activeTurn.turnId, uni, this._scope)
-					this.pushMessage('assistant', '上一条问答超时未返回，已自动清理。请重新发送。')
-				} else {
 					this.inflightText = activeTurn.message
 					this.inflightTurnId = activeTurn.turnId
 					this.ensureLocalUserMessage(activeTurn.message)
 					if (activeTurn.status === 'pending') await this.recoverActiveTurn(activeTurn)
 					else await this.presentSavedTurn(activeTurn)
 					return
-				}
 			}
 			const status = findInflightStatus(this.messages, this.inflightText)
 			if (!this.inflightText || status === 'done') {
 				this.inflightText = ''
 				this.inflightTurnId = ''
+				this.typing = false
+				this.recoveringTurn = false
+				this.chatProgress = null
 				this.persistQueue()
 				this.pumpQueue()
 				return
@@ -671,7 +753,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.pumpQueue()
 		},
 		pumpQueue() {
-			if (!this._alive || this.typing || this.waitingDemandPick) return
+			if (!this._alive || !this._visible || this.typing || this.waitingDemandPick || this._clearingHistory) return
 			const { queue, item } = dequeueMessage(this.pendingQueue)
 			if (!item) {
 				this.persistQueue()
@@ -682,6 +764,8 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.dispatchUserText(item.text)
 		},
 		finishTurn() {
+			this.chatProgress = null
+			this.waitNotice = ''
 			this.typing = false
 			this.recoveringTurn = false
 			this.inflightText = ''
@@ -785,10 +869,12 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				}
 				this.runAgentChat(text)
 			},
-			async runAgentChat(text) {
+			async runAgentChat(text, reference) {
 				const turnId = createTurnId()
+				const scope = this._scope
+				const version = this._chatRequestVersion || 0
 				if (this._scope !== getPageStateScope(uni)) return
-				if (!beginTurn({ turnId, message: text }, uni, this._scope)) {
+				if (!beginTurn({ turnId, message: text, reference, generation: this.chatGeneration }, uni, this._scope)) {
 					this.inputText = text
 					const active = loadActiveTurn(uni, this._scope)
 					uni.showToast({
@@ -802,25 +888,35 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				this.ensureLocalUserMessage(text)
 				this.persistQueue()
 				this.typing = true
+				this.waitNotice = ''
+				this.chatProgress = createChatProgress({ scope, turnId, generation: this.chatGeneration })
 				this.recoveringTurn = false
 				this._requestInFlight = true
 				try {
-					const res = await chatWithAgent(text, turnId)
-					if (!this._alive || this._scope !== getPageStateScope(uni)) return
+					const res = await chatWithAgent(text, turnId, reference)
+					if (!this.isCurrentChatRequest(version, scope)) return
+					if (!this.acceptChatProgress(res, turnId)) return
 					if (res && res.status === 'running') {
 						const pollResult = await this.waitForTurnStatus(turnId, text)
 						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 						return
 					}
+					if (res.status === 'succeeded' || res.status === 'failed') {
+						await this.saveServerTurn(res)
+						return
+					}
 					const reply = formatAgentReply(res)
-					if (saveTurnResult(turnId, reply, 'succeeded', uni, this._scope)) {
+					reply.serverMessageId = res.messageId || null
+					reply.serverTurnId = res.turnId || null
+					reply.serverGeneration = res.generation ?? null
+					if (saveTurnResult(turnId, reply, res.success === false ? 'failed' : 'succeeded', uni, this._scope)) {
 						await this.presentSavedTurn(loadActiveTurn(uni, this._scope))
 					} else {
 						const pollResult = await this.waitForTurnStatus(turnId, text)
 						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 					}
 				} catch (e) {
-					if (!this._alive || this._scope !== getPageStateScope(uni)) return
+					if (!this.isCurrentChatRequest(version, scope)) return
 					if (e.details?.reason === 'chat_history_cleared') {
 						acknowledgeTurn(turnId, uni, this._scope)
 						this.pendingQueue = []
@@ -831,6 +927,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					const pollResult = await this.waitForTurnStatus(turnId, text)
 					if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 				} finally {
+					if (!this.isCurrentChatRequest(version, scope)) return
 					this._requestInFlight = false
 					if (this._alive && this.inflightTurnId === turnId) {
 						this.typing = true

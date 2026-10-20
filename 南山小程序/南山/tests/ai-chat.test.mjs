@@ -69,7 +69,7 @@ test('ai-match composer stays editable while generating and queues follow-ups lo
     new URL('../subpackages/tech-transfer/pages/ai-match/ai-match.vue', import.meta.url),
     'utf8',
   )
-  assert.doesNotMatch(source, /:disabled="typing"/)
+  assert.doesNotMatch(source.match(/<input[\s\S]*?\/>/)[0], /:disabled="typing"/)
   assert.match(source, /pendingQueue/)
   assert.match(source, /enqueueMessage/)
   assert.match(source, /pumpQueue/)
@@ -81,13 +81,13 @@ test('ai-match composer stays editable while generating and queues follow-ups lo
   assert.match(source, /saveQueueState/)
   assert.match(source, /onHide\(\)/)
   assert.match(source, /onUnload\(\)/)
-  assert.match(source, /beginTurn\(\{ turnId, message: text \}/)
-  assert.match(source, /chatWithAgent\(text, turnId\)/)
+  assert.match(source, /beginTurn\(\{ turnId, message: text, reference/)
+  assert.match(source, /chatWithAgent\(text, turnId, reference\)/)
   assert.match(source, /loadActiveTurn/)
   assert.match(source, /getChatTurn/)
   assert.match(source, /为避免重复请求/)
   assert.doesNotMatch(source, /waitForInflightTurn/)
-  const saved = source.indexOf("saveTurnResult(turnId, reply, 'succeeded'")
+  const saved = source.indexOf('saveTurnResult(turnId, reply, res.success')
   const rendered = source.indexOf('presentSavedTurn(loadActiveTurn(uni, this._scope))', saved)
   assert.ok(saved >= 0 && rendered > saved, 'persist the terminal result before rendering it')
 })
@@ -97,7 +97,7 @@ test('AI page drops an in-flight local turn when the server reports cleared hist
     new URL('../subpackages/tech-transfer/pages/ai-match/ai-match.vue', import.meta.url),
     'utf8',
   )
-  const start = source.indexOf('async runAgentChat(text)')
+  const start = source.indexOf('async runAgentChat(text, reference)')
   const end = source.indexOf('openCard(card)', start)
   const runAgentChat = start >= 0 && end > start ? source.slice(start, end) : ''
   assert.match(runAgentChat, /e\.details\?\.reason === 'chat_history_cleared'/)
@@ -112,12 +112,12 @@ test('AI chat API sends a turn ID and exposes the authenticated status lookup', 
     new URL('../subpackages/tech-transfer/api/ai.js', import.meta.url),
     'utf8',
   )
-  assert.match(source, /export async function chatWithAgent\(message, turnId\)/)
+  assert.match(source, /export async function chatWithAgent\(message, turnId, reference\)/)
   assert.match(source, /turnId: turnId \|\| undefined/)
   assert.match(source, /export async function getChatTurn\(turnId\)/)
   assert.match(source, /\/ai\/chat\/turns\//)
-  assert.match(source, /clearTurns\(\)/)
-  assert.match(source, /clearQueueState\(\)/)
+  assert.match(source, /clearTurns\(undefined, scope\)/)
+  assert.match(source, /clearQueueState\(undefined, scope\)/)
 })
 
 function memoryStorage(init) {

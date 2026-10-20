@@ -40,6 +40,9 @@ export function createMessage(role, content, extra = {}) {
     content: String(content || ''),
     time: Date.now(),
     payload: extra.payload || null,
+    serverMessageId: extra.serverMessageId || null,
+    serverTurnId: extra.serverTurnId || null,
+    serverGeneration: Number.isSafeInteger(extra.serverGeneration) ? extra.serverGeneration : null,
   }
 }
 

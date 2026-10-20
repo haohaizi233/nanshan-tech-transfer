@@ -13,6 +13,7 @@
 import { apiRequest } from './client.js'
 import { clearQueueState } from './ai-chat-queue.mjs'
 import { clearTurns } from './ai-chat-wal.mjs'
+import { getPageStateScope } from './page-state-cache.mjs'
 import { AI_FEATURE_ENABLED } from '../../../config/feature-flags.js'
 
 /** 任务处于未终态时前端轮询参数 */
@@ -77,9 +78,12 @@ export async function getEvaluationTask(taskId) {
  * @param {string} turnId 客户端在发送前持久化的幂等轮次 ID
  * @returns {Promise<{success:boolean, intent:string, message:string, data:Array}>}
  */
-export async function chatWithAgent(message, turnId) {
+export async function chatWithAgent(message, turnId, reference) {
   assertAiRuntimeEnabled()
-  return apiRequest('POST', '/ai/chat', null, { message, turnId: turnId || undefined }, { timeout: AI_CHAT_TIMEOUT_MS })
+  return apiRequest('POST', '/ai/chat', null, { message, turnId: turnId || undefined, reference: reference || undefined }, {
+    timeout: AI_CHAT_TIMEOUT_MS,
+    headers: { Prefer: 'respond-async' },
+  })
 }
 
 /** 查询指定 AI 对话轮次，供页面切换或请求超时后的 WAL 恢复使用。 */
@@ -110,8 +114,9 @@ export async function getCardViewCounts(cards) {
  */
 export async function clearChatHistory() {
   assertAiRuntimeEnabled()
+  const scope = getPageStateScope()
   const result = await apiRequest('DELETE', '/ai/chat/messages')
-  clearTurns()
-  clearQueueState()
+  clearTurns(undefined, scope)
+  clearQueueState(undefined, scope)
   return result
 }

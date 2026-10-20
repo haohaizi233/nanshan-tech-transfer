@@ -131,6 +131,8 @@ export function beginTurn(turn, storage, scope) {
     result: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    reference: sanitize(turn.reference) || undefined,
+    generation: Number.isSafeInteger(turn.generation) ? turn.generation : null,
   }
   return writeEntry(storage, resolvedScope, safeTurn)
 }
@@ -157,6 +159,21 @@ export function loadActiveTurn(storage, scope) {
   const resolvedScope = normalizeScope(scope, storage)
   const entry = readEntry(storage, resolvedScope)
   return entry.ok && entry.turn ? { ...entry.turn } : null
+}
+
+export function saveTurnProgress(turnId, progress, storage, scope) {
+  const resolvedScope = normalizeScope(scope, storage)
+  const existing = readEntry(storage, resolvedScope)
+  if (!existing.ok || !existing.turn || existing.turn.turnId !== String(turnId) || existing.turn.status !== 'pending') return false
+  if (existing.turn.generation !== null && existing.turn.generation !== undefined && existing.turn.generation !== progress.generation) return false
+  if ((existing.turn.stageSeq ?? -1) > (progress.stageSeq ?? -1)) return false
+  return writeEntry(storage, resolvedScope, {
+    ...existing.turn,
+    generation: progress.generation ?? existing.turn.generation,
+    stage: progress.stage,
+    stageSeq: progress.stageSeq,
+    updatedAt: Date.now(),
+  })
 }
 
 export function acknowledgeTurn(turnId, storage, scope) {

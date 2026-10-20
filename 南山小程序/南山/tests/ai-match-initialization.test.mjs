@@ -6,6 +6,7 @@ import * as chat from '../subpackages/tech-transfer/api/ai-chat.mjs'
 import * as queue from '../subpackages/tech-transfer/api/ai-chat-queue.mjs'
 import * as wal from '../subpackages/tech-transfer/api/ai-chat-wal.mjs'
 import * as pageState from '../subpackages/tech-transfer/api/page-state-cache.mjs'
+import * as progress from '../subpackages/tech-transfer/api/ai-chat-progress.mjs'
 import { AI_FEATURE_ENABLED } from '../config/feature-flags.js'
 
 function createPage(storage = {}, overrides = {}) {
@@ -18,12 +19,14 @@ function createPage(storage = {}, overrides = {}) {
     ...queue,
     ...wal,
     ...pageState,
+    ...progress,
     AI_FEATURE_ENABLED,
     AppTabbar: {},
     AiGeneratedMark: {},
     uni: {
       getStorageSync(key) { return storage[key] },
       setStorageSync(key, value) { storage[key] = value },
+      removeStorageSync(key) { delete storage[key] },
     },
     async getChatHistory() { throw new Error('History service unavailable') },
     ...overrides,
@@ -143,4 +146,256 @@ test('late AI card counts are ignored after switching accounts', async () => {
   resolveCounts({ list: [{ card_type: 'achievement', id: 42, viewCount: 99 }] })
   await pending
   assert.deepEqual(page.cardViewCounts, {})
+})
+
+test('expired pending WAL is queried on return and is never cleared by local age', async () => {
+  const storage = {}
+  const { component, page } = createPage(storage)
+  wal.beginTurn({ turnId: 'old_pending', message: 'question' }, pageStorage(storage), 'anonymous')
+  storage['tt_ai_chat_wal_v1:anonymous'].turn.createdAt = 1
+  page._alive = true
+  page._scope = 'anonymous'
+  page._sessionReady = true
+  page._requestInFlight = true
+  page.startCardStatsRefresh = () => {}
+  let queried = ''
+  page.recoverActiveTurn = async turn => { queried = turn.turnId }
+  component.onShow.call(page)
+  assert.equal(queried, 'old_pending')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').turnId, 'old_pending')
+})
+
+test('hiding the page cancels a scheduled chat recovery', () => {
+  const stopped = []
+  const { component, page } = createPage({}, { clearTimeout: timer => stopped.push(timer) })
+  page._scope = 'anonymous'
+  page._recoveryTimer = 27
+  component.onHide.call(page)
+  assert.deepEqual(stopped, [27])
+  assert.equal(page._recoveryTimer, null)
+})
+
+test('history cards retain a server message ID separately from their local rendering ID', async () => {
+  const { page } = createPage({}, { getChatHistory: async () => ({ generation: 4, messages: [
+    { id: 81, role: 'assistant', content: '结果', cards: [{ card_type: 'achievement', id: 12 }] },
+  ] }) })
+  page._scope = 'anonymous'
+  await page.loadHistory()
+  assert.equal(page.messages[1].id, 'm_81')
+  assert.equal(page.messages[1].serverMessageId, 81)
+  assert.equal(page.chatGeneration, 4)
+})
+
+function pageStorage(storage) {
+  return {
+    getStorageSync: key => storage[key],
+    setStorageSync: (key, value) => { storage[key] = value },
+    removeStorageSync: key => { delete storage[key] },
+  }
+}
+
+test('legacy synchronous replies persist then confirm WAL and do not invent a server message ID', async () => {
+  const storage = {}
+  const { page } = createPage(storage, {
+    chatWithAgent: async () => ({ success: true, message: '旧版回答', data: [{ card_type: 'achievement', id: 12 }] }),
+  })
+  page._scope = 'anonymous'
+  page._alive = true
+  page._visible = true
+  await page.runAgentChat('问题')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+  assert.equal(page.messages.at(-1).content, '旧版回答')
+  assert.equal(page.referenceForCard(page.messages.at(-1), page.messages.at(-1).payload.cards[0]), null)
+  assert.equal(page.typing, false)
+})
+
+test('an async reply polls one turn after two seconds and acknowledges only its terminal response', async () => {
+  const storage = {}
+  const timers = []
+  const requests = []
+  let turnId
+  let clock = 100
+  const { page } = createPage(storage, {
+    Date: { now: () => clock },
+    setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length },
+    clearTimeout: () => {},
+    chatWithAgent: async (text, id) => {
+      requests.push({ text, id }); turnId = id
+      return { turnId: id, status: 'running', generation: 2, stage: 'queued', stageSeq: 0 }
+    },
+    getChatTurn: async id => {
+      assert.equal(id, turnId)
+      return requests.length === 1
+        ? (requests.push({ poll: true }), { turnId: id, status: 'running', generation: 2, stage: 'retrieving', stageSeq: 3 })
+        : { turnId: id, status: 'succeeded', generation: 2, stage: 'succeeded', stageSeq: 4, reply: '新回答', cards: [], messageId: 90 }
+    },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  const pending = page.runAgentChat('问题')
+  await settle()
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').status, 'pending')
+  assert.equal(page.chatProgress.stage, 'retrieving')
+  assert.equal(timers[0].delay, 2000)
+  clock += 2000
+  timers.shift().callback()
+  await pending
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+  assert.equal(page.messages.at(-1).content, '新回答')
+  assert.equal(page.messages.at(-1).serverMessageId, 90)
+  assert.equal(requests.filter(request => request.text).length, 1)
+})
+
+test('hidden pages ignore a late poll result and keep pending WAL for the next visit', async () => {
+  const storage = {}
+  let reply
+  const { component, page } = createPage(storage, {
+    getChatTurn: () => new Promise(resolve => { reply = resolve }),
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  wal.beginTurn({ turnId: 'hidden', message: '问题' }, pageStorage(storage), 'anonymous')
+  const pending = page.recoverActiveTurn(wal.loadActiveTurn(pageStorage(storage), 'anonymous'))
+  component.onHide.call(page)
+  reply({ turnId: 'hidden', status: 'succeeded', reply: '迟到回答', cards: [] })
+  await pending
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').status, 'pending')
+  assert.equal(page.messages.some(message => message.content === '迟到回答'), false)
+  assert.equal(page._recoveryTimer, null)
+})
+
+test('clear generation invalidates an outstanding POST before it can save a terminal result', async () => {
+  const storage = {}
+  let reply
+  const { page } = createPage(storage, {
+    chatWithAgent: () => new Promise(resolve => { reply = resolve }),
+    clearChatHistory: async () => { wal.clearTurns(pageStorage(storage), 'anonymous'); return { deleted: 2, generation: 3 } },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  const pending = page.runAgentChat('旧问题')
+  await page.clearConversation()
+  reply({ success: true, message: '旧结果', data: [] })
+  await pending
+  assert.equal(page.chatGeneration, 3)
+  assert.equal(page.messages.length, 1)
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+})
+
+test('a local wait threshold leaves WAL pending and shows a later-check notice', async () => {
+  const storage = {}
+  let clock = 1
+  const { page } = createPage(storage, {
+    Date: { now: () => clock },
+    getChatTurn: async id => { clock += 120001; return { turnId: id, status: 'running', stage: 'routing', stageSeq: 1 } },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  wal.beginTurn({ turnId: 'waiting', message: '问题' }, pageStorage(storage), 'anonymous')
+  assert.equal(await page.waitForTurnStatus('waiting', '问题'), 'pending')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').status, 'pending')
+  assert.match(page.progressText, /稍后/)
+})
+
+async function settle() {
+  for (let step = 0; step < 8; step++) await Promise.resolve()
+}
+
+test('returning before session initialization finishes retries the read-only history load', () => {
+  const { component, page } = createPage()
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  page._sessionReady = false
+  page.startCardStatsRefresh = () => {}
+  page.restoreScrollPosition = () => {}
+  let resumed = 0
+  page.resumeSession = () => { resumed++ }
+  component.onShow.call(page)
+  assert.equal(resumed, 1)
+})
+
+test('a repeated question cannot substitute an earlier answer when history refresh fails', async () => {
+  const storage = {}
+  const { page } = createPage(storage)
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  page.messages.push(chat.createMessage('user', '重复问题'), chat.createMessage('assistant', '旧回答', { serverMessageId: 30 }))
+  wal.beginTurn({ turnId: 'repeat', message: '重复问题' }, pageStorage(storage), 'anonymous')
+  await page.saveServerTurn({ turnId: 'repeat', status: 'succeeded', reply: '本轮回答', cards: [], messageId: 31 })
+  assert.equal(page.messages.at(-1).content, '本轮回答')
+  assert.equal(page.messages.at(-1).serverMessageId, 31)
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+})
+
+test('reloading progress uses the WAL sequence to reject an older terminal response', () => {
+  const storage = {}
+  const { page } = createPage(storage)
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  wal.beginTurn({ turnId: 'ordered', message: '问题' }, pageStorage(storage), 'anonymous')
+  wal.saveTurnProgress('ordered', { generation: 2, stage: 'retrieving', stageSeq: 4 }, pageStorage(storage), 'anonymous')
+  assert.equal(page.acceptChatProgress({ turnId: 'ordered', generation: 2, status: 'succeeded', stage: 'succeeded', stageSeq: 3 }, 'ordered'), false)
+  assert.equal(page.chatProgress.stage, 'retrieving')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').status, 'pending')
+})
+
+test('only current-generation durable cards are referenceable when the server capability is enabled', async () => {
+  const cards = [{ card_type: 'achievement', id: 12 }]
+  const { page } = createPage({}, { getChatHistory: async () => ({ generation: 4, referenceSupported: true, messages: [
+    { id: 81, role: 'assistant', content: '旧同步结果', cards },
+    { id: 82, role: 'assistant', content: '可引用结果', cards, turnId: 'durable', generation: 4 },
+  ] }) })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  await page.loadHistory()
+  assert.equal(page.referenceForCard(page.messages[1], cards[0]), null)
+  assert.deepEqual(page.referenceForCard(page.messages[2], cards[0]), { messageId: 82, cardType: 'achievement', cardId: 12 })
+  page.referenceSupported = false
+  assert.equal(page.referenceForCard(page.messages[2], cards[0]), null)
+  page.referenceSupported = true
+  page.chatGeneration = 5
+  assert.equal(page.referenceForCard(page.messages[2], cards[0]), null)
+})
+
+test('a durable terminal response preserves reference metadata even when history is unavailable', async () => {
+  const card = { card_type: 'achievement', id: 12 }
+  const { page } = createPage({}, { chatWithAgent: async (text, turnId) => ({
+    turnId, generation: 4, status: 'succeeded', stage: 'succeeded', stageSeq: 8,
+    messageId: 99, reply: '回答', cards: [card], referenceSupported: true,
+  }) })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  await page.runAgentChat('问题')
+  assert.deepEqual(page.referenceForCard(page.messages.at(-1), card), { messageId: 99, cardType: 'achievement', cardId: 12 })
+})
+
+test('clear completion while hidden resets typing and allows sending after returning', async () => {
+  const storage = {}
+  let finishClear
+  const { component, page } = createPage(storage, {
+    clearChatHistory: () => new Promise(resolve => { finishClear = () => {
+      wal.clearTurns(pageStorage(storage), 'anonymous')
+      queue.clearQueueState(pageStorage(storage), 'anonymous')
+      resolve({ deleted: 2, generation: 2 })
+    } }),
+    getChatHistory: async () => ({ messages: [], generation: 2, referenceSupported: true }),
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page._sessionReady = true
+  page.startCardStatsRefresh = () => {}
+  page.restoreScrollPosition = () => {}
+  const pending = page.clearConversation()
+  component.onHide.call(page)
+  finishClear()
+  await pending
+  component.onShow.call(page)
+  await settle()
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+  assert.equal(page.chatGeneration, 2)
+  assert.equal(page.typing, false)
+  let sent
+  page.dispatchUserText = text => { sent = text }
+  page.inputText = '清空后的问题'
+  page.onSend()
+  assert.equal(sent, '清空后的问题')
+  assert.deepEqual(page.pendingQueue, [])
+})
+
+test('resuming without a WAL releases stale typing state', async () => {
+  const { page } = createPage({}, { getChatHistory: async () => ({ messages: [], generation: 2, referenceSupported: true }) })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page.typing = true
+  page.recoveringTurn = true
+  await page.resumeSession()
+  assert.equal(page.typing, false)
+  assert.equal(page.recoveringTurn, false)
 })

@@ -8,6 +8,7 @@ import {
   clearTurns,
   loadActiveTurn,
   saveTurnResult,
+  saveTurnProgress,
 } from '../subpackages/tech-transfer/api/ai-chat-wal.mjs'
 
 function memoryStorage(initial = {}) {
@@ -118,4 +119,15 @@ test('clearTurns removes only the active account WAL', () => {
   assert.equal(clearTurns(first), true)
   assert.equal(loadActiveTurn(first), null)
   assert.equal(loadActiveTurn(second).message, 'other question')
+})
+
+test('WAL preserves reference and accepted generation for a hidden-page recovery', () => {
+  const storage = accountStorage(7)
+  const reference = { messageId: 31, cardType: 'demand', cardId: 12 }
+  beginTurn({ turnId: 'ai_ref', message: '介绍这项', reference }, storage)
+  assert.deepEqual(loadActiveTurn(storage).reference, reference)
+  assert.equal(saveTurnProgress('ai_ref', { generation: 3, stage: 'retrieving', stageSeq: 4 }, storage), true)
+  assert.equal(loadActiveTurn(storage).generation, 3)
+  assert.equal(loadActiveTurn(storage).status, 'pending')
+  assert.equal(saveTurnProgress('other', { generation: 4 }, storage), false)
 })

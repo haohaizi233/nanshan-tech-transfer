@@ -294,7 +294,7 @@ export async function apiRequest(method, path, query, body, options = {}) {
     await ensureSession()
   }
 
-  const headers = {}
+  const headers = { ...options.headers }
   if (method === 'POST' || method === 'PATCH') {
     headers['X-Idempotency-Key'] =
       'tt_' + Date.now() + '_' + Math.floor(Math.random() * 100000)
