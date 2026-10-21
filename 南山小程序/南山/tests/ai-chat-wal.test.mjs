@@ -131,3 +131,11 @@ test('WAL preserves reference and accepted generation for a hidden-page recovery
   assert.equal(loadActiveTurn(storage).status, 'pending')
   assert.equal(saveTurnProgress('other', { generation: 4 }, storage), false)
 })
+
+test('a terminal unacknowledged turn does not block the next question', () => {
+  const storage = memoryStorage()
+  assert.equal(beginTurn({ turnId: 'ai_terminal', message: 'question' }, storage), true)
+  assert.equal(saveTurnResult('ai_terminal', { content: 'reply' }, 'failed', storage), true)
+  assert.equal(beginTurn({ turnId: 'ai_next', message: 'next question' }, storage), true)
+  assert.equal(loadActiveTurn(storage).turnId, 'ai_next')
+})

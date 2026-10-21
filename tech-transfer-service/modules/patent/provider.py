@@ -209,6 +209,23 @@ def search_raw(
     )
 
 
+def search_total_pages(raw: dict) -> int:
+    """上游声明的总页数。
+
+    上游把可达页数封顶在 100（实测 page=100 起返回空列表），
+    而 ``total`` 是 Google Patents 的估算值（按 125 分桶，
+    常见词命中数几乎恒定在 12.4 万），两者都不是真实命中数。
+    本地用它给前端一个"最多能翻多少页"的上界，避免翻到空页。
+    """
+    if not isinstance(raw, dict):
+        return 0
+    try:
+        pages = int(raw.get("total_pages") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, pages)
+
+
 def info_raw(publication_no: str, language: str = "", fetcher: JsonFetcher | None = None) -> dict:
     if not _configured() and fetcher is None:
         _not_configured()

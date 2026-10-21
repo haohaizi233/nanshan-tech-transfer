@@ -140,7 +140,7 @@
 						this.applications = []
 						this.invalidatePageState('list')
 					}
-					if (this.currentOrgId && this.shouldRevalidatePageState('list')) this.loadList()
+					if (this.currentOrgId) this.loadList()
 				} catch (e) {
 					uni.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
 				} finally {

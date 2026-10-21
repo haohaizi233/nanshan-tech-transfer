@@ -319,7 +319,6 @@
 		fetchCurrentUser,
 		getMyOrganizationCertification,
 		getCachedOrganizationCertification,
-		isOrganizationCertificationCacheFresh,
 		cacheOrganizationCertification,
 		clearCachedOrganizationCertification,
 		searchInstitutions,
@@ -441,22 +440,6 @@
 			return this.refresh()
 		},
 		methods: {
-			async _loadCertificationFromAPI() {
-				try {
-					const { getMyOrganizationCertification } = await import('../../api/membership.js')
-					const result = await getMyOrganizationCertification()
-					if (result && result.certification) {
-						this.certification = result.certification
-						// 更新缓存
-						try {
-							const { setCachedOrganizationCertification } = await import('../../api/membership.js')
-							setCachedOrganizationCertification(result.certification)
-						} catch (e) {}
-					}
-				} catch (e) {
-					// API失败时使用缓存
-				}
-			},
 			loadPrivacySetting() {
 				// #ifdef MP-WEIXIN
 				if (typeof wx !== 'undefined' && typeof wx.getPrivacySetting === 'function') {
@@ -541,8 +524,6 @@
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
-				// 强制从API刷新认证状态（不信任本地缓存）
-				this._loadCertificationFromAPI()
 
 				if (this.editing) {
 				this.viewMode = 'profile'
@@ -575,17 +556,16 @@
 					this.certification = { status: 'unverified', label: '未认证', canApply: true, pendingName: '' }
 					return true
 				}
-				const cachedCertification = getCachedOrganizationCertification()
-				if (cachedCertification) {
-					this.certification = cachedCertification.certification
-					this.memberships = cachedCertification.certification.memberships || []
-					if (isOrganizationCertificationCacheFresh(cachedCertification)) return true
-				}
+				const requestId = this._dashboardRequestId
+				const scope = getPageStateScope()
 				try {
-					const [user, certification] = await Promise.all([
-						fetchCurrentUser(),
-						getMyOrganizationCertification()
+					// 认证状态由后台审核决定，每次进入页面都以接口为准；
+					// 本地快照（tt_org_certification）只用于首屏渲染与接口失败兜底。
+					const [certification] = await Promise.all([
+						getMyOrganizationCertification(),
+						fetchCurrentUser()
 					])
+					if (this._dashboardRequestId !== requestId || getPageStateScope() !== scope) return false
 					this.certification = certification
 					this.memberships = certification.memberships
 					cacheOrganizationCertification(certification)
@@ -593,6 +573,11 @@
 					return true
 				} catch (e) {
 					console.error('[mine] loadMemberships failed:', e)
+					const cachedCertification = getCachedOrganizationCertification()
+					if (cachedCertification && this._dashboardRequestId === requestId && getPageStateScope() === scope) {
+						this.certification = cachedCertification.certification
+						this.memberships = cachedCertification.certification.memberships || []
+					}
 					return false
 				}
 			},

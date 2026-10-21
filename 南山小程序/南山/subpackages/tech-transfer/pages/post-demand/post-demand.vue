@@ -217,11 +217,12 @@
 			const saved = restorePublishDraft('demand')
 			if (saved) this.form = { ...this.form, ...saved }
 			this.prefillFromProfile()
-			if (isLoggedIn() && this.shouldRevalidatePageState('organizations')) this.loadOrganizations()
 		},
 		onShow() {
 			if (isLoggedIn() && !this.form.phone) this.prefillFromProfile()
-			if (isLoggedIn() && this.shouldRevalidatePageState('organizations')) this.loadOrganizations()
+			// 发布主体来自机构认证（后台审核决定），每次进入页面都重拉，
+			// 避免认证通过后仍因页面缓存看不到可选机构。
+			if (isLoggedIn()) this.loadOrganizations()
 		},
 		methods: {
 			prefillFromProfile() {

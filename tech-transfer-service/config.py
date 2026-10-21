@@ -155,6 +155,9 @@ class Settings(BaseSettings):
     AI_MAX_CONCURRENT: int = 4
     AI_CHAT_RUNS_ENABLED: bool = False
     AI_INTERNAL_SERVICE_KEY: str = ""
+    # 同步对话通道（主服务 → ai-agent /api/ai/chat）的服务间密钥。
+    # 留空时复用 AI_INTERNAL_SERVICE_KEY；两者都为空时 ai-agent 仅接受本机回环调用。
+    AI_PUBLIC_API_KEY: str = ""
     AI_CHAT_STREAM_URL: str = "http://127.0.0.1:8001/internal/ai/chat/stream"
     AI_CHAT_GLOBAL_SLOTS: int = 4
     AI_CHAT_QUEUE_SECONDS: int = 30

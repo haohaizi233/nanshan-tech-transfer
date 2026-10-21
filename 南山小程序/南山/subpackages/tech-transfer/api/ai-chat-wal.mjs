@@ -119,9 +119,11 @@ export function beginTurn(turn, storage, scope) {
   if (!TURN_ID_PATTERN.test(turnId) || !message) return false
   const existing = readEntry(storage, resolvedScope)
   if (!existing.ok) return false
-  if (existing.turn) {
-    // 未确认的 turn 不允许被覆盖：覆盖会让恢复中的问答永久丢失，
+  if (existing.turn && existing.turn.status === 'pending') {
+    // 未确认的 pending turn 不允许被覆盖：覆盖会让恢复中的问答永久丢失，
     // 正是 WAL 要防的场景。页面侧在 typing 期间会走排队，不会走到这里。
+    // 但终态（succeeded/failed）未 ack 的遗留 turn 不永久阻塞新提问：
+    // 其结果本应已由恢复流程展示，允许新一轮覆盖，避免聊天功能整体卡死。
     return false
   }
   const safeTurn = {

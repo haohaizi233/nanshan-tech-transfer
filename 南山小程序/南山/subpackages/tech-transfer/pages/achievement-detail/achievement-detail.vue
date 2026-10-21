@@ -227,10 +227,7 @@ export default {
     this.loading = !this.detail
   },
   onShow() {
-			// 缓存过期时刷新详情数据
-			if (this.shouldRevalidatePageState('detail')) {
-				this.loadDetail()
-			}
+    // 每次进入页面只拉一次接口；缓存详情仅用于首屏渲染（不闪烁），不作为跳过刷新的依据
     this.loading = !this.detail
     return this.loadDetail()
   },

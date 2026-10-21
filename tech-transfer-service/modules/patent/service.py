@@ -16,6 +16,11 @@ from modules.patent.normalize import (
     map_search_hit,
     page_meta,
 )
+from modules.patent.publication import (
+    filter_by_prefix,
+    is_publication_query,
+    parse_publication_query,
+)
 
 logger = logging.getLogger("nanshan.error")
 
@@ -39,10 +44,45 @@ def _require_query(keyword: str, assignee: str) -> None:
         raise bad_request("assignee 长度不能超过 64")
 
 
+def _search_rows(keyword: str, assignee: str, page: int, page_size: int, fetcher=None) -> list[dict]:
+    """取上游原始命中行（不做对外映射）。"""
+    raw = provider.search_raw(
+        keyword=keyword,
+        assignee=assignee,
+        page=page,
+        page_size=page_size,
+        fetcher=fetcher,
+    )
+    hits = raw.get("results") if isinstance(raw, dict) else None
+    return hits if isinstance(hits, list) else []
+
+
 def search_patents(keyword: str, assignee: str, page: int, page_size: int, fetcher=None) -> dict:
     keyword = (keyword or "").strip()
     assignee = (assignee or "").strip()
     _require_query(keyword, assignee)
+
+    # 公开号形态的查询走本地兜底：上游对长度不在 {7, 9} 的号段会退化成全文检索，
+    # 把引用了别号段专利的文献当成匹配结果返回（实测 CN110086 → 葡萄酒专利 CN1170923C）。
+    publication_hits = None
+    if keyword and not assignee and is_publication_query(keyword):
+        country, number, kind = parse_publication_query(keyword)
+        raw_rows = _search_rows(keyword, assignee, page, page_size, fetcher)
+        publication_hits = filter_by_prefix(raw_rows, country, number, kind)
+
+    if publication_hits is not None:
+        items = []
+        for row in publication_hits:
+            mapped = map_search_hit(row)
+            if mapped:
+                items.append(mapped)
+                if len(items) >= page_size:
+                    break
+        # 严格前缀过滤后的命中数就是真实命中数，不用上游的估算值。
+        total = len(publication_hits)
+        meta = page_meta(total, page, page_size)
+        meta["list"] = items
+        return meta
 
     raw = provider.search_raw(
         keyword=keyword,
@@ -66,6 +106,12 @@ def search_patents(keyword: str, assignee: str, page: int, page_size: int, fetch
     except (TypeError, ValueError):
         total = len(items)
     meta = page_meta(total, page, page_size)
+    # 上游的 total 是按 125 分桶的估算值，total_pages 封顶 100。
+    # 直接用估算 total 算总页数会得到 12000+ 页，前端会一直翻到上游返回空列表
+    # （实测上游 page=100 起返回空）。这里把页数收敛到上游真正可达的范围。
+    upstream_pages = provider.search_total_pages(raw)
+    if upstream_pages > 0:
+        meta["totalPages"] = min(meta["totalPages"], upstream_pages)
     meta["list"] = items
     return meta
 

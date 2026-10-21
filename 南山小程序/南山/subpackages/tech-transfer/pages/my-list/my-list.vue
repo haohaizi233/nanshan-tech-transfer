@@ -168,10 +168,8 @@
 			})
 		},
 		onShow() {
-			// 缓存过期时刷新列表数据
-			if (this.shouldRevalidatePageState('list')) {
-				this.loadList()
-			}
+			// 每次进入都重拉一次（发布内容的审核状态会随后台变化），
+			// 缓存仅用于首屏渲染；去掉旧的 TTL 门控分支避免重复请求。
 			if (this.needLogin) return
 			return this.loadList()
 		},

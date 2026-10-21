@@ -126,7 +126,9 @@
 				safeBackWithToast('请先登录', 800)
 				return
 			}
-			if (this.shouldRevalidatePageState('certification')) this.loadCertification()
+			// 认证状态由后台审核决定，每次进入页面都重拉接口，
+			// 页面缓存只负责首屏渲染，避免审核通过后仍显示「正在申请加入」。
+			this.loadCertification()
 		},
 		computed: {
 			certificationHint() {

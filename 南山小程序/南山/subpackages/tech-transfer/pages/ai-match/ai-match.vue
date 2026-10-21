@@ -660,6 +660,19 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 						await this.loadHistory()
 						return 'done'
 					}
+					if (e && e.code === 'TT_AI_40401') {
+						// 服务端不存在该轮次（提问请求未送达/轮次丢失）：
+						// 永远轮询不到结果，本地判失败并清理 WAL，放行后续提问。
+						this.inflightText = message
+						this.inflightTurnId = turnId
+						this.ensureLocalUserMessage(message)
+						await this.saveServerTurn({
+							turnId,
+							status: 'failed',
+							errorMessage: '上一条问答未送达，请重新提问。',
+						})
+						return 'done'
+					}
 				}
 				nextPollAt = Date.now() + INFLIGHT_POLL_MS
 			}

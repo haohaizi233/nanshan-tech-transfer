@@ -119,8 +119,17 @@ export function readPageState(key, scope, dataClass = 'list', storage, now = Dat
       removeQuietly(store, cacheKey)
       return null
     }
+    const hasValidatedMarker = Object.prototype.hasOwnProperty.call(entry.value || {}, '__pageCacheValidatedAt')
     const validatedAt = Number(entry.value && entry.value.__pageCacheValidatedAt)
-    const lastValidatedAt = Number.isFinite(validatedAt) && validatedAt > 0 ? validatedAt : entry.savedAt
+    // 显式 marker 为 0 表示「本会话从未验证成功」（加载失败/被 invalidate 后写回）：
+    // 直接当作缓存未命中丢弃，禁止用 savedAt 冒充验证时间把失败快照洗成 fresh，
+    // 也禁止其保留期随每次写回无限续期。缺失 marker 的条目
+    // （直连 writePageState 的调用方）仍按 savedAt 计算。
+    if (hasValidatedMarker && !(Number.isFinite(validatedAt) && validatedAt > 0)) {
+      removeQuietly(store, cacheKey)
+      return null
+    }
+    const lastValidatedAt = hasValidatedMarker ? validatedAt : entry.savedAt
     const freshUntil = dataClass === 'draft'
       ? entry.expiresAt
       : Math.min(entry.expiresAt, lastValidatedAt + ttlFor(dataClass))
@@ -393,6 +402,9 @@ export function createPageStateMixin({ route, groups = [], cacheKey, scope = get
         const group = groupList.find(item => item.name === name)
         if (!group) return false
         meta.freshUntil[name] = 0
+        // 重置验证时间：否则 persist 会把旧验证 marker 盖到已变化的内存数据上，
+        // 让「清空/失败」的快照被洗成已验证条目。
+        meta.validatedAt[name] = 0
         return deletePageStateEntry(meta.keys[name], meta.scope, resolveStorage(storage))
       },
       clearPageState(name) {
@@ -400,6 +412,7 @@ export function createPageStateMixin({ route, groups = [], cacheKey, scope = get
         if (!meta || !groupList.some(item => item.name === name)) return false
         meta.skipPersist[name] = true
         meta.freshUntil[name] = 0
+        meta.validatedAt[name] = 0
         return deletePageStateEntry(meta.keys[name], meta.scope, resolveStorage(storage))
       },
       hasRestoredPageState(name) {

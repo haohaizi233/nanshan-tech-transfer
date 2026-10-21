@@ -227,10 +227,17 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
     if exclude_user_id is not None:
         payload_dict["exclude_owner_user_id"] = exclude_user_id
     payload = json.dumps(payload_dict).encode("utf-8")
+    # 服务间身份：主服务 → ai-agent 必须携带共享密钥。
+    # ai-agent 侧 /api/ai/chat 在配置了密钥时强制校验；
+    # 未配置密钥时仅接受本机回环来源（主服务与 agent 同机部署即满足）。
+    agent_headers = {"Content-Type": "application/json", "X-Request-Id": get_request_id() or ""}
+    service_key = settings.AI_PUBLIC_API_KEY or settings.AI_INTERNAL_SERVICE_KEY
+    if service_key:
+        agent_headers["X-AI-Service-Key"] = service_key
     req = urllib.request.Request(
         settings.AI_AGENT_URL,
         data=payload,
-        headers={"Content-Type": "application/json", "X-Request-Id": get_request_id() or ""},
+        headers=agent_headers,
         method="POST",
     )
     last_exc: Exception | None = None

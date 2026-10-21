@@ -25,8 +25,8 @@ test('org-apply keeps type picker computeds alongside certification hint', () =>
   assert.match(orgApply, /certificationHint\(\)/)
 })
 
-test('org-manage restores cached members and refreshes them when stale or switched', () => {
-  assert.match(orgManage, /this\.currentOrgId && this\.shouldRevalidatePageState\('list'\)\) this\.loadList\(\)/)
+test('org-manage restores cached members and always refreshes them on show', () => {
+  assert.match(orgManage, /if \(this\.currentOrgId\) this\.loadList\(\)/)
   assert.match(orgManage, /this\.invalidatePageState\('list'\)/)
 })
 

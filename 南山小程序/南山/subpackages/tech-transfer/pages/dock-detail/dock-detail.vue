@@ -185,7 +185,7 @@
 				<!-- 本人发布内容：下架 -->
 				<button
 					v-if="actionMode === 'offline'"
-					class="confirm-btn confirm-btn-cancel"
+					class="confirm-btn confirm-btn-green"
 					@click="openConfirm('offline')"
 				>下架</button>
 
@@ -1076,6 +1076,13 @@
 		background: #c8c8c8 !important;
 		color: #ffffff !important;
 		font-weight: 500;
+	}
+
+	/* 下架：绿色主行动按钮 */
+	.confirm-btn-green {
+		background: #0f9d58 !important;
+		color: #ffffff !important;
+		font-weight: 600;
 	}
 
 	.btn-row {

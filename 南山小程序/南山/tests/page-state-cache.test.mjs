@@ -279,3 +279,30 @@ test('cleared drafts are not recreated by the page hide hook after successful su
   mixin.onHide.call(page)
   assert.equal(readPageState('pages/post-result/post-result:draft', 'u1', 'draft', storage), null)
 })
+
+test('an explicitly unvalidated snapshot is dropped instead of laundered into a fresh entry', () => {
+  const storage = createStorage()
+  writePageState('list', 'u1', 'list', { items: [], __pageCacheValidatedAt: 0 }, storage, 10_000)
+  assert.equal(readPageState('list', 'u1', 'list', storage, 10_001), null)
+  writePageState('validated', 'u1', 'list', { items: [1], __pageCacheValidatedAt: 5_000 }, storage, 10_000)
+  assert.equal(readPageState('validated', 'u1', 'list', storage, 10_001).fresh, true)
+})
+
+test('invalidating a group stops the hide hook from laundering its snapshot', () => {
+  const storage = createStorage()
+  const mixin = createPageStateMixin({
+    route: 'pages/org-manage/org-manage',
+    groups: [{ name: 'list', dataClass: 'list', fields: ['members'] }],
+    scope: () => 'u1',
+    storage,
+  })
+  const page = { $data: { members: [] }, members: [] }
+  Object.assign(page, mixin.methods)
+  mixin.onLoad.call(page, {})
+  page.members = [{ id: 1 }]
+  page.markPageStateFresh('list')
+  page.invalidatePageState('list')
+  page.members = []
+  mixin.onHide.call(page)
+  assert.equal(readPageState('pages/org-manage/org-manage:list', 'u1', 'list', storage), null)
+})

@@ -107,6 +107,9 @@ _SOURCE_URL_RE = re.compile(
     re.IGNORECASE,
 )
 _PUB_NO_RE = re.compile(r"^[A-Za-z]{1,4}[\d.]{4,24}[A-Za-z]?$", re.IGNORECASE)
+# 上游用 <b> 标出命中关键词（Google Patents 派生）。标签本身必须剥除，
+# 但命中词要保留下来给前端高亮。
+_HIGHLIGHT_RE = re.compile(r"<b>(.*?)</b>", re.IGNORECASE | re.DOTALL)
 # t2s 只做字形；tw2sp 同时把台湾用词收到大陆简体（軟體→软件、資訊→信息）。
 # 词典进程内加载一次。无 CJK 的英/数字字段直接跳过。
 _T2S = OpenCC("tw2sp")
@@ -592,6 +595,24 @@ def assert_no_source_leak(payload) -> None:
             raise ValueError("outbound leak in value")
 
 
+def _extract_highlight(value) -> list[str]:
+    """从上游 ``<b>`` 标记中取出命中词。
+
+    上游（Google Patents 派生）在 title / snippet / assignee 里用 ``<b>``
+    标出命中关键词。原先 clean_text 会把这些标签连同语义一起剥掉，
+    导致前端无法高亮命中位置。现在把命中词单独取出来，
+    以结构化字段 ``highlights`` 传给前端，标签本身仍然被剥除。
+    """
+    if value is None:
+        return []
+    text = str(value)
+    hits = [
+        clean_text(part)
+        for part in _HIGHLIGHT_RE.findall(text)
+    ]
+    return [hit for hit in hits if hit]
+
+
 def map_search_hit(raw: dict) -> dict | None:
     if not isinstance(raw, dict):
         return None
@@ -600,6 +621,11 @@ def map_search_hit(raw: dict) -> dict | None:
         return None
     title = clean_text(raw.get("title"))
     snippet = clean_text(raw.get("snippet"))
+    highlights: list[str] = []
+    for field in (raw.get("title"), raw.get("snippet"), raw.get("assignee")):
+        for hit in _extract_highlight(field):
+            if hit not in highlights:
+                highlights.append(hit)
     item = {
         "publicationNo": publication_no,
         "title": title,
@@ -613,6 +639,7 @@ def map_search_hit(raw: dict) -> dict | None:
         "patentType": infer_patent_type(publication_no),
         "language": clean_text(raw.get("language"))[:8],
         "hasPdf": bool(str(raw.get("pdf_url") or "").strip()),
+        "highlights": highlights,
     }
     assert_no_source_leak(item)
     return item
