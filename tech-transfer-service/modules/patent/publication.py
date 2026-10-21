@@ -28,13 +28,38 @@ CN113077 (6 位)       **退化为全文检索**          CN1121865C（无关专
 实测（真实上游）：6 位 CN 前缀枚举 10 个 7 位候选，
 10 路并发耗时约 1.2s，严格前缀过滤后命中 20 条真实专利；
 而直接透传只会得到 1 条误报。
+
+上游限流约束（实测，决定了枚举规模的上限）：
+上游内部转发 Google Patents，吞吐约 2.8~7.5 req/s。
+并发 20~40 压测 100~200 次后，上游会持续返回
+``{"detail":"search failed: HTTP Error 503: "}``（自身存活，
+是它的后端被打挂/限流），需等待其自行恢复。
+
+由此得到两条工程约束：
+- 100 候选（7 位→9 位补 2 位）16 并发实测 12.5s，同步接口不可接受；
+- 1000 候选（6 位→9 位补 3 位）同理不可行。
+
+所以枚举只做**补 1 位**（10 个候选，约 1.2s）；补 3 位及以上直接放弃枚举，
+交给上游按其能识别的长度处理，并在本地做严格前缀过滤兜底。
+
+其他上游实测结论（避免后人重复踩坑）：
+- ``num`` 上限 100，超出返回 HTTP 422；
+- ``total_pages`` 封顶 100（page=100 起返回空列表）；
+- ``total`` 是 Google Patents 的**估算值**，按 125 分桶，不是精确命中数；
+- ``PN=`` / ``publication:`` / ``pub:`` / ``intext:`` / ``intitle:`` 等
+  公开号字段语法上游均返回 0 条，不可用；
+- 其他国家（US/EP/WO）前缀匹配正常，不需要枚举补齐。
 """
 
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import re
+import time
 from collections.abc import Callable
+
+logger = logging.getLogger("nanshan.error")
 
 # 国家/地区码 + 数字段，数字段 3~12 位。允许尾随的 kind code（A/B/C/U…）。
 _PUB_NO_QUERY_RE = re.compile(
@@ -87,12 +112,15 @@ def needs_prefix_expansion(country: str, number: str) -> bool:
     return len(number) not in _CN_BODY_LENGTHS
 
 
-def expansion_candidates(country: str, number: str) -> list[str]:
-    """枚举补齐候选号。
+def expansion_candidates(country: str, number: str, kind: str = "") -> list[str]:
+    """枚举补齐候选号（可直接作为上游 ``q`` 的完整查询串）。
 
     6 位号段可补齐到 7 位（10 种），8 位号段可补齐到 9 位（10 种），
     代价可控。4 位及以下、或需要补 3 位以上时返回空列表——
     候选数会爆炸，不适合在一次请求里做。
+
+    注意候选必须带国家码：上游只认 ``CN1100860`` 这种完整公开号形态，
+    裸数字 ``1100860`` 会被当成普通词做全文检索（实测返回 0 条）。
     """
     if country != "CN":
         return []
@@ -104,8 +132,9 @@ def expansion_candidates(country: str, number: str) -> list[str]:
     missing = target - length
     if missing < 1 or 10 ** missing > _ENUM_MAX_CANDIDATES:
         return []
-    prefix = number
-    return [prefix + str(i).zfill(missing) for i in range(10 ** missing)]
+    prefix = f"{country.upper()}{number}"
+    tail = (kind or "").upper()
+    return [prefix + str(i).zfill(missing) + tail for i in range(10 ** missing)]
 
 
 def _prefix_of(country: str, number: str, kind: str) -> str:
@@ -158,30 +187,68 @@ def filter_by_prefix(
 
 def search_publication_prefix(
     keyword: str,
-    search_fn: Callable[[str], list[dict]],
+    search_fn: Callable[[str, int], list[dict]],
     *,
+    num: int = 100,
     max_workers: int = _ENUM_WORKERS,
+    timeout: float | None = None,
 ) -> tuple[list[dict], bool]:
     """按公开号前缀检索。
 
     返回 (命中行列表, 是否走了枚举路径)。
 
-    枚举路径：对每个候选号段并发调用 ``search_fn``，合并后严格前缀过滤。
-    非枚举路径：直接把原查询交给 ``search_fn``，再按前缀过滤——
-    这样即便上游退化成全文检索，也不会把无关专利当成匹配结果。
+    枚举路径：对每个候选号段并发调用 ``search_fn(candidate, num)``，
+    合并后严格前缀过滤。非枚举路径：直接把原查询交给 ``search_fn``，
+    再按前缀过滤——这样即便上游退化成全文检索，也不会把无关专利当成匹配结果。
+
+    ``num`` 是每个候选向上游要的条数（上游上限 100）。
+    枚举路径下结果的总数会小于真实总量（每个候选只取首页），
+    因此调用方应把返回列表当作"已知的全部命中"在本地分页。
+
+    ``timeout`` 是整轮枚举的时间预算（秒）。上游实测单次 200~400ms，
+    但上游被限流时会退化到十几秒（实测冷启动一次 22 秒），
+    同步接口不能被拖死：超预算后放弃剩余候选，用已拿到的结果返回。
+    单个候选失败（超时/上游报错）只丢弃该候选，不影响其余候选。
     """
     parsed = parse_publication_query(keyword)
     if parsed is None:
         return [], False
     country, number, kind = parsed
 
-    candidates = expansion_candidates(country, number)
+    candidates = expansion_candidates(country, number, kind)
     if not candidates:
-        rows = search_fn(f"{country}{number}{kind}".upper())
+        rows = search_fn(f"{country}{number}{kind}".upper(), num)
         return filter_by_prefix(rows, country, number, kind), False
 
     merged: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        for rows in pool.map(search_fn, candidates):
-            merged.extend(rows or [])
-    return filter_by_prefix(merged, country, number, kind), True
+    deadline = time.monotonic() + timeout if timeout else None
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        futures = {pool.submit(search_fn, c, num): c for c in candidates}
+        for future in concurrent.futures.as_completed(futures, timeout=timeout):
+            try:
+                merged.extend(future.result() or [])
+            except Exception:  # noqa: BLE001 —— 单个候选失败不影响其余候选
+                logger.warning(
+                    "patent publication candidate failed query=%s",
+                    futures[future],
+                    exc_info=True,
+                )
+    except TimeoutError:
+        # 超出时间预算：放弃剩余候选，用已拿到的结果返回。
+        # 不能走 ThreadPoolExecutor 的默认 shutdown(wait=True)——那会等所有
+        # 卡住的请求结束，预算就形同虚设。
+        logger.warning(
+            "patent publication enumeration exceeded budget=%.1fs candidates=%d",
+            timeout or 0.0,
+            len(candidates),
+        )
+    finally:
+        # wait=False：不让已经卡住的上游请求拖住返回。
+        # 上游请求本身有 PATENT_PROVIDER_TIMEOUT 兜底，不会永久泄漏线程。
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    hits = filter_by_prefix(merged, country, number, kind)
+    # 并发合并后顺序取决于完成顺序，排序保证结果稳定可复现。
+    hits.sort(key=lambda row: str(row.get("pub_number") or row.get("number") or ""))
+    return hits, True

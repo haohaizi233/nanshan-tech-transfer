@@ -214,3 +214,61 @@ class TestPatentNormalize:
         result = _semantic_marker("sup", "1")
         assert isinstance(result, str)
         assert "1" in result
+
+    # ── _extract_highlight ───────────────────────────────────
+    def test_extract_highlight_none(self):
+        from modules.patent.normalize import _extract_highlight
+        assert _extract_highlight(None) == []
+
+    def test_extract_highlight_plain_text(self):
+        from modules.patent.normalize import _extract_highlight
+        assert _extract_highlight("华为技术有限公司") == []
+
+    def test_extract_highlight_single(self):
+        from modules.patent.normalize import _extract_highlight
+        assert _extract_highlight("<b>华为技术有限公司</b>") == ["华为技术有限公司"]
+
+    def test_extract_highlight_multiple(self):
+        from modules.patent.normalize import _extract_highlight
+        result = _extract_highlight("<b>华为</b>的<b>技术</b>")
+        assert result == ["华为", "技术"]
+
+    def test_extract_highlight_strips_nested_tags(self):
+        from modules.patent.normalize import _extract_highlight
+        result = _extract_highlight("<b>数据<i>安全</i></b>")
+        assert result == ["数据安全"]
+
+    def test_extract_highlight_unclosed_tag(self):
+        from modules.patent.normalize import _extract_highlight
+        # 未闭合的 <b> 不应被当成命中词
+        assert _extract_highlight("<b>华为") == []
+
+    def test_map_search_hit_highlights_field(self):
+        from modules.patent.normalize import map_search_hit
+        result = map_search_hit({
+            "pub_number": "CN110086609B",
+            "title": "数据安全备份",
+            "assignee": "<b>华为技术有限公司</b>",
+            "snippet": "涉及<b>华为</b>的方案",
+        })
+        assert result is not None
+        assert result["highlights"] == ["华为", "华为技术有限公司"]
+        # 标签本身必须被剥掉
+        assert "<b>" not in result["applicant"]
+        assert result["applicant"] == "华为技术有限公司"
+
+    def test_map_search_hit_highlights_deduplicated(self):
+        from modules.patent.normalize import map_search_hit
+        result = map_search_hit({
+            "pub_number": "CN110086609B",
+            "title": "<b>华为</b>",
+            "assignee": "<b>华为</b>",
+        })
+        assert result is not None
+        assert result["highlights"] == ["华为"]
+
+    def test_map_search_hit_highlights_empty_list(self):
+        from modules.patent.normalize import map_search_hit
+        result = map_search_hit({"pub_number": "CN110086609B", "title": "数据安全备份"})
+        assert result is not None
+        assert result["highlights"] == []

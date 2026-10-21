@@ -86,7 +86,13 @@
           @click="openDetail(item)"
         >
           <view class="card-head">
-            <text class="card-title">{{ item.title || item.publicationNo }}</text>
+            <text class="card-title">
+              <text
+                v-for="(seg, segIndex) in titleSegments(item)"
+                :key="`${item.publicationNo}-${segIndex}`"
+                :class="seg.hit ? 'hl-hit' : ''"
+              >{{ seg.text }}</text>
+            </text>
             <text class="badge">{{ typeLabel(item.patentType) }}</text>
           </view>
           <view class="meta-row">
@@ -120,6 +126,7 @@ import {
 import { getCurrentUser } from '../../api/client.js'
 import HostBridge from '../../../../host/host-bridge.js'
 import { createPageStateMixin } from '../../api/page-state-cache.mjs'
+import { splitHighlightSegments } from '../../utils/patent-highlight.mjs'
 
 export default {
   mixins: [createPageStateMixin({
@@ -165,6 +172,10 @@ export default {
   methods: {
     typeLabel(type) {
       return getPatentTypeLabel(type)
+    },
+    titleSegments(item) {
+      const title = (item && item.title) || (item && item.publicationNo) || ''
+      return splitHighlightSegments(title, item && item.highlights)
     },
     onKeywordInput(e) {
       this.keyword = (e.detail && e.detail.value) || ''
@@ -551,6 +562,12 @@ export default {
   color: #1a1a1a;
   line-height: 1.4;
   padding-right: 16rpx;
+}
+
+/* 检索命中词高亮（后端 highlights 字段回传的命中位置） */
+.hl-hit {
+  color: #d4380d;
+  font-weight: 700;
 }
 
 .badge {

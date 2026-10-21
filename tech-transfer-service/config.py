@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     PATENT_PROVIDER_KEY: str = ""
     PATENT_PROVIDER_TIMEOUT: int = 30
     PATENT_PDF_TIMEOUT: int = 45
+    # 公开号补位枚举的整轮时间预算（秒）。上游被限流时单次请求会退化到十几秒，
+    # 同步接口不能被拖死：超预算后放弃剩余候选，用已拿到的结果返回。
+    PATENT_ENUM_TIMEOUT: float = 8.0
 
     # ── AI 能力开关（与前端 feature-flags.js 对齐）──────────
     AI_FEATURE_ENABLED: bool = True

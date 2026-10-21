@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterator
 from io import BytesIO
 
+from config import settings
 from core.errors import BizError, bad_request, patent_not_found, patent_unavailable
 from modules.patent import provider
 from modules.patent.normalize import (
@@ -17,9 +18,8 @@ from modules.patent.normalize import (
     page_meta,
 )
 from modules.patent.publication import (
-    filter_by_prefix,
     is_publication_query,
-    parse_publication_query,
+    search_publication_prefix,
 )
 
 logger = logging.getLogger("nanshan.error")
@@ -57,6 +57,33 @@ def _search_rows(keyword: str, assignee: str, page: int, page_size: int, fetcher
     return hits if isinstance(hits, list) else []
 
 
+def _publication_rows(keyword: str, fetcher=None) -> tuple[list[dict], bool]:
+    """公开号检索：严格前缀过滤 + 受控补位枚举。
+
+    上游只在数字段恰好 7 位或 9 位时做公开号前缀匹配，
+    其余长度退化成全文检索（实测 CN110086 → 葡萄酒专利 CN1170923C）。
+    因此这里：
+
+    1. 总是对上游返回结果做严格前缀过滤，杜绝误报；
+    2. 号段长度不被上游识别时（6 位 / 8 位），受控枚举 10 个候选号段
+       再检索，把"搜不到"变成"搜得到"。
+
+    两条路径都一次性取回上游可给的全部结果（每路 num=100，上游上限），
+    由调用方在本地分页——这样 total 才是真实的过滤后命中数，
+    而不是某一页的条数。
+
+    返回 (全部命中行列表, 是否走了枚举路径)。
+    """
+    def fetch(query: str, num: int) -> list[dict]:
+        return _search_rows(query, "", 1, num, fetcher)
+
+    return search_publication_prefix(
+        keyword,
+        fetch,
+        timeout=settings.PATENT_ENUM_TIMEOUT,
+    )
+
+
 def search_patents(keyword: str, assignee: str, page: int, page_size: int, fetcher=None) -> dict:
     keyword = (keyword or "").strip()
     assignee = (assignee or "").strip()
@@ -64,22 +91,16 @@ def search_patents(keyword: str, assignee: str, page: int, page_size: int, fetch
 
     # 公开号形态的查询走本地兜底：上游对长度不在 {7, 9} 的号段会退化成全文检索，
     # 把引用了别号段专利的文献当成匹配结果返回（实测 CN110086 → 葡萄酒专利 CN1170923C）。
-    publication_hits = None
     if keyword and not assignee and is_publication_query(keyword):
-        country, number, kind = parse_publication_query(keyword)
-        raw_rows = _search_rows(keyword, assignee, page, page_size, fetcher)
-        publication_hits = filter_by_prefix(raw_rows, country, number, kind)
-
-    if publication_hits is not None:
+        publication_hits, _expanded = _publication_rows(keyword, fetcher)
+        # 严格前缀过滤后的命中数就是真实命中数，不用上游的估算值。
+        total = len(publication_hits)
+        offset = max(0, page - 1) * page_size
         items = []
-        for row in publication_hits:
+        for row in publication_hits[offset:offset + page_size]:
             mapped = map_search_hit(row)
             if mapped:
                 items.append(mapped)
-                if len(items) >= page_size:
-                    break
-        # 严格前缀过滤后的命中数就是真实命中数，不用上游的估算值。
-        total = len(publication_hits)
         meta = page_meta(total, page, page_size)
         meta["list"] = items
         return meta
