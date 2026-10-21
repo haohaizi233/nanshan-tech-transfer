@@ -29,10 +29,10 @@
 				<text v-if="task.createdAt" class="created-at">发起时间：{{ task.createdAt }}</text>
 			</view>
 
-			<!-- 排队中：worker 未接入前任务保持 queued，不展示任何假结果 -->
+			<!-- 排队中：任务创建后由服务端后台自动执行，不展示任何假结果 -->
 			<view v-if="task.status === 'queued'" class="section state-section">
 				<text class="state-title">排队中</text>
-				<text class="state-desc">AI 服务接入中，任务将在排队后自动执行，结果生成后在此展示</text>
+				<text class="state-desc">任务已受理，AI 正在排队处理，结果生成后在此展示</text>
 			</view>
 
 			<!-- 处理中 -->
@@ -41,9 +41,9 @@
 				<text class="state-desc">AI 正在对成果进行多维评估，请稍候…</text>
 			</view>
 
-			<!-- 失败：failReason + 重新发起 -->
-			<view v-else-if="task.status === 'failed'" class="section state-section">
-				<text class="state-title">评估失败</text>
+			<!-- 失败/排队超时（stale）：failReason + 重新发起 -->
+			<view v-else-if="task.status === 'failed' || task.status === 'stale'" class="section state-section">
+				<text class="state-title">{{ failTitle }}</text>
 				<text class="fail-reason">{{ task.failReason || '未知原因，请稍后重试' }}</text>
 				<button v-if="canRetry" class="primary-btn" size="mini" :disabled="retrying" @click="onRetry">
 					{{ retrying ? '提交中…' : '重新发起评估' }}
@@ -152,6 +152,12 @@
 		POLL_INTERVAL_MS,
 		POLL_MAX_MS
 	} from '../../api/ai.js'
+	import {
+		acknowledgeEval,
+		beginEval,
+		loadActiveEval,
+		saveEvalTask
+	} from '../../api/ai-eval-wal.mjs'
 	import { AI_EVAL_NOTICE } from '../../api/ai-disclosure.mjs'
 	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 	import HostBridge from '../../../../host/host-bridge.js'
@@ -170,7 +176,8 @@
 		queued: '排队中',
 		running: '评估中',
 		succeeded: '已完成',
-		failed: '失败'
+		failed: '失败',
+		stale: '排队超时'
 	}
 
 	export default {
@@ -198,6 +205,9 @@
 		computed: {
 			statusText() {
 				return STATUS_TEXT[this.task.status] || this.task.status
+			},
+			failTitle() {
+				return this.task && this.task.status === 'stale' ? '排队超时' : '评估失败'
 			},
 			evaluation() {
 				return (this.task && this.task.evaluation) || null
@@ -254,7 +264,7 @@
 			// 失败/成功但结果缺失时可重新发起（需知道成果 id）
 			canRetry() {
 				if (!this.task || !this.achievementId) return false
-				if (this.task.status === 'failed') return true
+				if (this.task.status === 'failed' || this.task.status === 'stale') return true
 				return this.task.status === 'succeeded' && !this.evaluation
 			},
 			dockId() {
@@ -279,6 +289,11 @@
 			return
 		}
 			this.taskId = taskId
+			// WAL 同步：详情页持有权威 taskId，补全本地未确认的提交记录
+			const pendingEval = loadActiveEval(uni)
+			if (pendingEval && pendingEval.achievementId === this.achievementId) {
+				saveEvalTask(this.achievementId, taskId, uni)
+			}
 			if (this.shouldRevalidatePageState('task')) this.fetchTask()
 			else if (this.task && !isTerminalStatus(this.task.status)) this.startPolling()
 			// 页面缓存恢复的任务也可能已含结果

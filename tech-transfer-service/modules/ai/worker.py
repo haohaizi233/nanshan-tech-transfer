@@ -145,10 +145,10 @@ def _snapshot(raw: Any) -> dict:
     return {}
 
 
-def _run_evaluation(task: dict) -> None:
+def _run_evaluation(task: dict, timeout: float | None = None) -> None:
     achievement_id = task["target_id"]
     snapshot = _snapshot(task.get("input_snapshot"))
-    result = provider.evaluate_achievement(snapshot)
+    result = provider.evaluate_achievement(snapshot, timeout=timeout)
     legacy = result["legacyScores"]
     with transaction() as conn:
         cur = conn.cursor()
@@ -163,7 +163,7 @@ def _run_evaluation(task: dict) -> None:
                 SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                        t.input_data_version
                 FROM ai_task t
-                WHERE t.id = %s
+                WHERE t.id = %s AND t.status = 'running'
                 ON CONFLICT (task_id) DO NOTHING
                 """,
                 (
@@ -192,6 +192,11 @@ def _run_evaluation(task: dict) -> None:
                 """,
                 (task["id"],),
             )
+            if not cur.rowcount:
+                # 超时看门狗/清理器已把任务标记 failed：迟到的结果被丢弃，
+                # 不覆盖终态（INSERT 的 SELECT 同样带 status='running' 条件，
+                # 不会留下孤儿评分行）。
+                logger.warning("ai worker result discarded task=%s (no longer running)", task["id"])
         finally:
             cur.close()
 

@@ -4,11 +4,14 @@ AI 模块服务层（P0-2）—— 异步任务边界
 Architecture source: 06-api-design.md §AI, openapi.yaml /ai/match-tasks,
                      05-data-model-design.md §7.1/§7.3
 
-边界原则（P0-2 只交付稳定边界，不实现 AI 执行）：
-- POST 创建任务：校验、去重、限流、快照固化、落库 queued、审计
-- 任务执行由外部 worker 认领（本阶段未接入）——任务保持 queued，
+边界原则：
+- POST 创建任务：校验、去重、限流、快照固化、落库 queued、审计，
+  然后交由进程内执行器（modules.ai.eval_executor）后台自动执行
+- 任务执行状态流转 queued → running → succeeded / failed，
   GET 对 queued/running 返回 results=null，禁止假 AI 结果回填
-- ai_match_result 仅由 worker 写入；GET 在 succeeded 时读取组装
+- ai_match_result 仅由执行器/worker 写入；GET 在 succeeded 时读取组装
+- 容灾：queued 超过 5 分钟的任务自动清理为 failed，GET 对外返回 stale
+  终态（前端展示"排队超时"并可重试），任务不会永远卡在"排队中"
 """
 import hashlib
 import json
@@ -16,6 +19,7 @@ import time
 from collections import defaultdict
 from threading import Lock
 
+from modules.ai import eval_executor
 from core.errors import (
     TT_ACH_40301,
     TT_ACH_40401,
@@ -82,6 +86,9 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
     去重/限流与 match 同模式：同成果活跃任务 10 分钟窗口复用；
     仅真正新建消耗用户小时额度（与 match 共享）。
     """
+    # 机会式容灾清理：先把卡死的 queued/running 任务落终态，
+    # 避免去重窗口复用一个永远不会执行的任务。
+    _safe_reap_dead_tasks()
     with get_cursor(commit=True) as cur:
         cur.execute(
             "SELECT id, title, owner_user_id FROM achievement WHERE id = %s AND deleted_at IS NULL FOR UPDATE",
@@ -108,6 +115,8 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
         )
         existing = cur.fetchone()
         if existing:
+            # 去重命中也补偿提交：进程重启后遗留的 queued 任务可被重新唤起。
+            eval_executor.submit(existing["id"])
             return _task_view(existing["id"]), False
 
         # 限流：去重未命中才计数（与 match 共享小时额度）
@@ -150,20 +159,30 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
             request_id=request_id, cur=cur,
         )
 
+    # 提交后台执行（非阻塞）：任务不会停留在 queued 等外部 worker。
+    eval_executor.submit(task_id)
     return _task_view(task_id), True
 
 
 def get_evaluation_task(user_id: int, task_id: int) -> dict:
-    """查询评估任务（仅创建者；succeeded 时带多维评分 + 评价报告）"""
+    """查询评估任务（仅创建者；succeeded 时带多维评分 + 评价报告）。
+
+    容灾：
+    - queued 超过 5 分钟（stale）→ 清理落库 failed，对外返回 status='stale'
+      终态，前端停止轮询并展示"排队超时"，可重新发起；
+    - 未过期的 queued 任务补偿提交给进程内执行器（进程重启后轮询即可恢复执行）。
+    """
     with get_cursor() as cur:
         cur.execute(
             """
             SELECT id, task_type, status, created_by_user_id, target_id,
                    input_data_version, model_version_id, fail_reason,
-                   created_at, started_at, finished_at
+                   created_at, started_at, finished_at,
+                   (status = 'queued' AND created_at < NOW()
+                    - (%s || ' seconds')::interval) AS stale
             FROM ai_task WHERE id = %s AND task_type = 'evaluation'
             """,
-            (task_id,),
+            (str(eval_executor.STALE_QUEUED_SECONDS), task_id),
         )
         task = cur.fetchone()
         if not task:
@@ -173,11 +192,24 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
             code, message, status = TT_AI_40301
             raise BizError(code, message, status)
 
+        stale_queued = bool(task.get("stale")) and task["status"] == "queued"
+        if stale_queued:
+            # 卡死的"排队中"任务不再占位：落库 failed（幂等），对外返回 stale 终态。
+            _safe_reap_dead_tasks()
+        elif task["status"] == "queued":
+            # 补偿提交（非阻塞）：进程重启/队列丢失后，轮询即可重新唤起执行。
+            eval_executor.submit(task_id)
+
         view = {
             "taskId": task["id"],
-            "status": task["status"],
+            "status": "stale" if stale_queued else task["status"],
+            "stale": stale_queued,
             "evaluation": None,
-            "failReason": _desensitize_fail_reason(task.get("fail_reason")),
+            "failReason": (
+                eval_executor.STALE_QUEUED_REASON
+                if stale_queued
+                else _desensitize_fail_reason(task.get("fail_reason"))
+            ),
             "createdAt": _iso(task.get("created_at")),
             "finishedAt": _iso(task.get("finished_at")),
             "modelVersionLabel": None,
@@ -297,3 +329,10 @@ def _desensitize_fail_reason(reason: str | None) -> str | None:
 
 def _iso(dt):
     return dt.isoformat() if dt else None
+
+def _safe_reap_dead_tasks() -> int:
+    """容灾清理（尽力而为）：卡死任务标记 failed，失败不影响业务主流程。"""
+    try:
+        return eval_executor.reap_dead_tasks()
+    except Exception:
+        return 0

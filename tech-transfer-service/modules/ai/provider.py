@@ -100,17 +100,17 @@ def _chat(messages: list[dict], timeout: int | None = None) -> str:
     return content
 
 
-def complete_json(system: str, user: str) -> Any:
+def complete_json(system: str, user: str, timeout: int | None = None) -> Any:
     content = _chat(
         [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
-        ]
+        ],
+        timeout=timeout,
     )
     return parse_json_content(content)
 
-
-def evaluate_achievement(snapshot: dict) -> dict:
+def evaluate_achievement(snapshot: dict, timeout: int | None = None) -> dict:
     """多维成果评价 + 评价报告（LLM 生成，评分算法在 evaluation 模块换算）。
 
     返回 assemble_result 结构：dimensions/totalScore/starScore/rating/
@@ -133,7 +133,7 @@ def evaluate_achievement(snapshot: dict) -> dict:
         "所有文字用简体中文，基于给出的成果信息客观评价，信息不足时说明假设。"
     )
     user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
-    data = complete_json(system, user)
+    data = complete_json(system, user, timeout=timeout)
     try:
         normalized = evaluation.normalize_llm_result(data)
     except evaluation.EvaluationDataError as exc:

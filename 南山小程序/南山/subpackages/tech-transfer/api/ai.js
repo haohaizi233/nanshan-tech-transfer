@@ -4,7 +4,10 @@
  * 需求匹配 / 对话：同步经后端转发到 nanshan-ai-agent，直接返回成果卡片。
  * 成果评估：任务排队制——创建 202 queued / 去重命中 200；结果仅由 worker 写入，
  * 前端轮询展示，无 worker 时任务保持 queued（无假数据回填）。
- * 任务状态机：queued → running → succeeded | failed
+ * 任务状态机：queued → running → succeeded | failed；queued 超时会被服务端
+ * 清理并对外返回 stale 终态（前端展示"排队超时"，可重新发起）。
+ * 提交走 WAL（ai-eval-wal.mjs）：先落本地意图再发请求，切页/杀进程后可恢复。
+ * 轮询：2s 间隔，120s 上限；到期仍未终态由前端兜底转 stale，不会永远"排队中"。
  *
  * 运行时开关：AI_FEATURE_ENABLED=false 时本模块拒绝发起请求，
  * 页面与函数保留，后续打开开关即可恢复。
@@ -13,18 +16,19 @@
 import { apiRequest } from './client.js'
 import { clearQueueState } from './ai-chat-queue.mjs'
 import { clearTurns } from './ai-chat-wal.mjs'
+import { loadActiveEval, saveEvalTask } from './ai-eval-wal.mjs'
 import { getPageStateScope } from './page-state-cache.mjs'
 import { AI_FEATURE_ENABLED } from '../../../config/feature-flags.js'
 
 /** 任务处于未终态时前端轮询参数 */
-export const POLL_INTERVAL_MS = 3000
+export const POLL_INTERVAL_MS = 2000
 export const POLL_MAX_MS = 120000
 
 /** E5: AI 对话/匹配同步链路最长等待（与后端 MAX_REQUEST_SECONDS=60s 对齐，留 10s 余量） */
 export const AI_CHAT_TIMEOUT_MS = 70000
 
 export function isTerminalStatus(status) {
-  return status === 'succeeded' || status === 'failed'
+  return status === 'succeeded' || status === 'failed' || status === 'stale'
 }
 
 export function assertAiRuntimeEnabled() {
@@ -56,6 +60,25 @@ export async function matchDemand(demandId) {
 export async function createEvaluationTask(achievementId) {
   assertAiRuntimeEnabled()
   return apiRequest('POST', '/ai/evaluation-tasks', null, { achievementId })
+}
+
+/**
+ * WAL 恢复：补发一个"已记录意图但未拿到 taskId"的评估提交（切页/请求中断场景）。
+ * 服务端同成果 10 分钟去重，重复补发幂等。返回恢复后的任务视图，无可恢复记录返回 null。
+ * @returns {Promise<{taskId:number, status:string}|null>}
+ */
+export async function resumeEvaluationSubmission() {
+  assertAiRuntimeEnabled()
+  const entry = loadActiveEval()
+  if (!entry || entry.status !== 'pending' || entry.taskId !== null) return null
+  try {
+    const task = await createEvaluationTask(entry.achievementId)
+    saveEvalTask(entry.achievementId, task.taskId)
+    return task
+  } catch (e) {
+    console.error('[ai] resumeEvaluationSubmission failed:', e)
+    return null
+  }
 }
 
 /**
