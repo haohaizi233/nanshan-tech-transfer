@@ -9,9 +9,9 @@ const STAGE_TEXT = {
   failed: '本轮未完成',
 }
 
-export function createChatProgress({ scope, turnId, generation = null, stage = '', stageSeq = -1 }) {
+export function createChatProgress({ scope, turnId, generation = null, generationConfirmed = true, stage = '', stageSeq = -1 }) {
   return {
-    scope: String(scope), turnId, generation, status: 'running',
+    scope: String(scope), turnId, generation, generationConfirmed, status: 'running',
     stage: Object.hasOwn(STAGE_TEXT, stage) ? stage : '',
     stageSeq: Number.isSafeInteger(stageSeq) ? stageSeq : -1,
   }
@@ -20,7 +20,9 @@ export function createChatProgress({ scope, turnId, generation = null, stage = '
 export function mergeChatProgress(current, response, scope) {
   if (!current || !response || String(scope) !== current.scope) return current
   if (response.turnId !== undefined && response.turnId !== current.turnId) return current
-  if (current.generation !== null && response.generation !== undefined && response.generation !== current.generation) return current
+  if (current.generation !== null && response.generation !== undefined && response.generation !== current.generation) {
+    if (current.generationConfirmed || !Number.isSafeInteger(response.generation) || response.generation < current.generation) return current
+  }
   if (['succeeded', 'failed'].includes(current.status)) return current
   const sequence = Number.isSafeInteger(response.stageSeq) && response.stageSeq >= 0 ? response.stageSeq : current.stageSeq
   if (sequence < current.stageSeq) return current
@@ -30,6 +32,7 @@ export function mergeChatProgress(current, response, scope) {
   return {
     ...current,
     generation: response.generation ?? current.generation,
+    generationConfirmed: current.generationConfirmed || Number.isSafeInteger(response.generation),
     status,
     stage: Object.hasOwn(STAGE_TEXT, response.stage) ? response.stage : current.stage,
     stageSeq: sequence,

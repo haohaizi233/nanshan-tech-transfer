@@ -349,6 +349,30 @@ test('only current-generation durable cards are referenceable when the server ca
   assert.equal(page.referenceForCard(page.messages[2], cards[0]), null)
 })
 
+test('the shared history API contract restores referenceable cards on a fresh page', async () => {
+  const response = JSON.parse(readFileSync(new URL('./fixtures/ai-chat-history-contract.json', import.meta.url), 'utf8'))
+  const apiSource = readFileSync(new URL('../subpackages/tech-transfer/api/ai.js', import.meta.url), 'utf8')
+    .replace(/^import .*$/gm, '').replace(/export /g, '')
+  const clientSource = readFileSync(new URL('../subpackages/tech-transfer/api/client.js', import.meta.url), 'utf8')
+  const requestScript = clientSource.slice(clientSource.indexOf('export async function apiRequest'), clientSource.indexOf('export async function publicRequest')).replace('export ', '')
+  const request = new Function('ensureSession', 'HostBridge', requestScript + '; return apiRequest')(
+    async () => {}, { request: async options => {
+      assert.equal(options.method, 'GET')
+      assert.equal(options.path, '/ai/chat/messages')
+      return { code: 0, data: response }
+    } },
+  )
+  const getChatHistory = new Function('apiRequest', 'AI_FEATURE_ENABLED', apiSource + '; return getChatHistory')(request, true)
+  const { page } = createPage({}, { getChatHistory })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  await page.resumeSession()
+  assert.equal(page.chatGeneration, 4)
+  assert.equal(page.referenceSupported, true)
+  assert.deepEqual(page.referenceForCard(page.messages[1], page.messages[1].payload.cards[0]), {
+    messageId: 82, cardType: 'achievement', cardId: 12,
+  })
+})
+
 test('a durable terminal response preserves reference metadata even when history is unavailable', async () => {
   const card = { card_type: 'achievement', id: 12 }
   const { page } = createPage({}, { chatWithAgent: async (text, turnId) => ({
@@ -398,4 +422,125 @@ test('resuming without a WAL releases stale typing state', async () => {
   await page.resumeSession()
   assert.equal(page.typing, false)
   assert.equal(page.recoveringTurn, false)
+})
+
+test('resuming a cleared WAL releases typing even when the send queue retains an interrupted question', async () => {
+  const storage = { tt_ai_chat_send_queue: { queue: [], inflight: '已清空的问题', inflightTurnId: 'cleared' } }
+  const { page } = createPage(storage, { getChatHistory: async () => ({ messages: [], generation: 2, referenceSupported: true }) })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  page.typing = true; page.recoveringTurn = true
+  await page.resumeSession()
+  assert.equal(page.typing, false)
+  assert.equal(page.recoveringTurn, false)
+  assert.equal(page.inflightTurnId, '')
+  let sent
+  page.dispatchUserText = text => { sent = text }
+  page.inputText = '下一问'
+  page.onSend()
+  assert.equal(sent, '下一问')
+})
+
+test('returning during a clear keeps sending paused until the authoritative clear finishes', async () => {
+  const storage = {}
+  let finishClear
+  const { component, page } = createPage(storage, {
+    clearChatHistory: () => new Promise(resolve => { finishClear = () => resolve({ deleted: 0, generation: 2 }) }),
+    getChatHistory: async () => ({ messages: [], generation: 1, referenceSupported: true }),
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page._sessionReady = true
+  page.startCardStatsRefresh = () => {}
+  const pending = page.clearConversation()
+  component.onHide.call(page)
+  component.onShow.call(page)
+  await settle()
+  assert.equal(page.typing, true)
+  finishClear()
+  await pending
+  assert.equal(page.typing, false)
+  assert.equal(page.chatGeneration, 2)
+})
+
+test('a new turn accepts the current server generation after another device clears history', async () => {
+  const storage = {}
+  const { page } = createPage(storage, {
+    chatWithAgent: async (text, turnId) => ({ turnId, generation: 2, status: 'running', stage: 'queued', stageSeq: 0 }),
+    getChatTurn: async turnId => {
+      assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').generation, 2)
+      return { turnId, generation: 2, status: 'succeeded', stage: 'succeeded', stageSeq: 3, reply: '新代际回答', cards: [] }
+    },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page.chatGeneration = 1
+  await page.runAgentChat('新问题')
+  assert.equal(page.chatGeneration, 2)
+  assert.equal(page.messages.at(-1).content, '新代际回答')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+  assert.equal(page.typing, false)
+})
+
+test('reentering can confirm a new generation for a WAL whose POST acceptance was lost', async () => {
+  const storage = {}
+  wal.beginTurn({ turnId: 'accepted_elsewhere', message: '新问题', generation: 1 }, pageStorage(storage), 'anonymous')
+  let clock = 1
+  const { page } = createPage(storage, {
+    Date: { now: () => clock },
+    getChatHistory: async () => ({ generation: 2, referenceSupported: true, messages: [] }),
+    getChatTurn: async turnId => { clock += 120001; return { turnId, generation: 2, status: 'succeeded', stage: 'succeeded', stageSeq: 3, reply: '恢复回答', cards: [] } },
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  await page.resumeSession()
+  assert.equal(page.messages.at(-1).content, '恢复回答')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+  assert.equal(page.typing, false)
+})
+
+test('a confirmed generation cannot be replaced by a different generation on recovery', () => {
+  const storage = {}
+  const { page } = createPage(storage)
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  wal.beginTurn({ turnId: 'confirmed', message: '旧问题', generation: 1 }, pageStorage(storage), 'anonymous')
+  wal.saveTurnProgress('confirmed', { generation: 1, stage: 'retrieving', stageSeq: 2 }, pageStorage(storage), 'anonymous')
+  assert.equal(page.acceptChatProgress({ turnId: 'confirmed', generation: 2, status: 'succeeded', stageSeq: 3 }, 'confirmed'), false)
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').generation, 1)
+})
+
+test('a known unaccepted rejection releases WAL and permits the next question without polling', async () => {
+  const storage = {}
+  let polls = 0
+  const { page } = createPage(storage, {
+    chatWithAgent: async () => { throw Object.assign(new Error('请求太频繁，请稍后重试'), { code: 'TT_COMMON_42901', status: 429, details: { accepted: false } }) },
+    getChatTurn: async turnId => { polls++; return { turnId, status: 'failed', errorMessage: '不应轮询' } },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  await page.runAgentChat('被拒绝的问题')
+  assert.equal(polls, 0)
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous'), null)
+  assert.match(page.messages.at(-1).content, /请求太频繁/)
+  assert.equal(page.typing, false)
+  let sent
+  page.dispatchUserText = text => { sent = text }
+  page.inputText = '下一问'
+  page.onSend()
+  assert.equal(sent, '下一问')
+})
+
+test('an unknown POST outcome keeps WAL and checks status without resending even after a 404', async () => {
+  const storage = {}
+  let posts = 0
+  let polls = 0
+  let clock = 1
+  const { page } = createPage(storage, {
+    Date: { now: () => clock },
+    chatWithAgent: async () => { posts++; throw new Error('network disconnected') },
+    getChatTurn: async () => { polls++; clock += 120001; throw Object.assign(new Error('not found'), { status: 404 }) },
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true
+  await page.runAgentChat('结果未知的问题')
+  assert.equal(posts, 1)
+  assert.equal(polls, 1)
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').status, 'pending')
+  assert.equal(page.recoveringTurn, true)
 })

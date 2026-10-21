@@ -133,6 +133,7 @@ export function beginTurn(turn, storage, scope) {
     updatedAt: Date.now(),
     reference: sanitize(turn.reference) || undefined,
     generation: Number.isSafeInteger(turn.generation) ? turn.generation : null,
+    generationConfirmed: false,
   }
   return writeEntry(storage, resolvedScope, safeTurn)
 }
@@ -165,11 +166,14 @@ export function saveTurnProgress(turnId, progress, storage, scope) {
   const resolvedScope = normalizeScope(scope, storage)
   const existing = readEntry(storage, resolvedScope)
   if (!existing.ok || !existing.turn || existing.turn.turnId !== String(turnId) || existing.turn.status !== 'pending') return false
-  if (existing.turn.generation !== null && existing.turn.generation !== undefined && existing.turn.generation !== progress.generation) return false
+  if (existing.turn.generation !== null && existing.turn.generation !== undefined && existing.turn.generation !== progress.generation) {
+    if (existing.turn.generationConfirmed || existing.turn.stageSeq >= 0 || !Number.isSafeInteger(progress.generation) || progress.generation < existing.turn.generation) return false
+  }
   if ((existing.turn.stageSeq ?? -1) > (progress.stageSeq ?? -1)) return false
   return writeEntry(storage, resolvedScope, {
     ...existing.turn,
     generation: progress.generation ?? existing.turn.generation,
+    generationConfirmed: existing.turn.generationConfirmed || Number.isSafeInteger(progress.generation),
     stage: progress.stage,
     stageSeq: progress.stageSeq,
     updatedAt: Date.now(),

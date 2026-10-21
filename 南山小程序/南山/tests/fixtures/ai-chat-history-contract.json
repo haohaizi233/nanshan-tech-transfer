@@ -1,0 +1,14 @@
+{
+  "generation": 4,
+  "referenceSupported": true,
+  "messages": [
+    {
+      "id": 82,
+      "role": "assistant",
+      "content": "可引用结果",
+      "turnId": "durable_history",
+      "generation": 4,
+      "cards": [{ "card_type": "achievement", "id": 12, "title": "测试成果" }]
+    }
+  ]
+}

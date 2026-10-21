@@ -384,7 +384,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.resumeSession()
 			return
 		}
-		if (this._recovering) return
+		if (this._clearingHistory || this._recovering) return
 		if (this._requestInFlight) this.stopTurnPolling()
 		if (!this._sessionReady) {
 			this.resumeSession()
@@ -429,9 +429,10 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			return this._alive && (this._chatRequestVersion || 0) === version && this._scope === scope && scope === getPageStateScope(uni)
 		},
 		acceptChatProgress(response, turnId) {
+			if (Number.isSafeInteger(response.generation) && Number.isSafeInteger(this.chatGeneration) && response.generation < this.chatGeneration) return false
 			if (!this.chatProgress || this.chatProgress.turnId !== turnId) {
 				const active = loadActiveTurn(uni, this._scope)
-				this.chatProgress = createChatProgress({ ...active, scope: this._scope, turnId, generation: active?.generation ?? this.chatGeneration })
+				this.chatProgress = createChatProgress({ ...active, scope: this._scope, turnId, generation: active?.generation ?? this.chatGeneration, generationConfirmed: active?.generationConfirmed === true || active?.stageSeq >= 0 })
 			}
 			const next = mergeChatProgress(this.chatProgress, response, getPageStateScope(uni))
 			if (next === this.chatProgress) return false
@@ -727,6 +728,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					else await this.presentSavedTurn(activeTurn)
 					return
 			}
+			this.typing = false
+			this.recoveringTurn = false
+			this.chatProgress = null
 			const status = findInflightStatus(this.messages, this.inflightText)
 			if (!this.inflightText || status === 'done') {
 				this.inflightText = ''
@@ -889,7 +893,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				this.persistQueue()
 				this.typing = true
 				this.waitNotice = ''
-				this.chatProgress = createChatProgress({ scope, turnId, generation: this.chatGeneration })
+				this.chatProgress = createChatProgress({ scope, turnId, generation: this.chatGeneration, generationConfirmed: false })
 				this.recoveringTurn = false
 				this._requestInFlight = true
 				try {
@@ -922,6 +926,12 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 						this.pendingQueue = []
 						this.finishTurn()
 						await this.loadHistory()
+						return
+					}
+					if (e.details?.accepted === false) {
+						if (saveTurnResult(turnId, { content: e.message || '本轮未受理，请稍后重试。', type: 'text', payload: null }, 'failed', uni, this._scope)) {
+							await this.presentSavedTurn(loadActiveTurn(uni, this._scope))
+						}
 						return
 					}
 					const pollResult = await this.waitForTurnStatus(turnId, text)
