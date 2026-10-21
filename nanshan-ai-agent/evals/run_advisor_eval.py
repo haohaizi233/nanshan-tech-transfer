@@ -203,7 +203,7 @@ def main():
     if args.limit is not None and args.limit < 1:
         parser.error("limit must be positive")
     if not args.live:
-        for key, value in {"LLM_API_URL": "https://offline.invalid/v1/chat/completions", "LLM_API_KEY": "offline-fixture", "LLM_MODEL": "offline-fixture", "DB_HOST": "127.0.0.1", "DB_NAME": "offline_fixture", "DB_USER": "offline_fixture", "DB_PASSWORD": "offline_fixture"}.items():
+        for key, value in {"LLM_API_URL": "https://offline.invalid/v1/chat/completions", "LLM_API_KEY": "offline-fixture", "LLM_MODEL": "offline-fixture", "DB_HOST": "127.0.0.1", "DB_NAME": "offline_fixture", "DB_USER": "offline_fixture", "DB_PASSWORD": "offline_fixture", "AI_EMPTY_DIAGNOSTICS": "0"}.items():
             os.environ.setdefault(key, value)
     sys.path.insert(0, str(args.agent_root.resolve()))
     corpus = json.loads(args.corpus.read_text(encoding="utf-8"))

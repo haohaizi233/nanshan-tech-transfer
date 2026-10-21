@@ -1,0 +1,922 @@
+{
+  "mode": "offline",
+  "cases": 80,
+  "passed": 80,
+  "failed": 0,
+  "hitAt5": 1,
+  "latencyP50Ms": 2.385,
+  "latencyP95Ms": 7.977,
+  "modelCalls": 10,
+  "providerTokens": null,
+  "warning": "离线耗时和替身调用次数不是生产延迟、真实模型准确率或账单",
+  "results": [
+    {
+      "id": "s01",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 7.488,
+      "modelCalls": 0
+    },
+    {
+      "id": "s02",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.799,
+      "modelCalls": 0
+    },
+    {
+      "id": "s03",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        103
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.411,
+      "modelCalls": 0
+    },
+    {
+      "id": "s04",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        104
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.903,
+      "modelCalls": 0
+    },
+    {
+      "id": "s05",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        105
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.405,
+      "modelCalls": 0
+    },
+    {
+      "id": "s06",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        106,
+        102
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.522,
+      "modelCalls": 0
+    },
+    {
+      "id": "s07",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        107
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.355,
+      "modelCalls": 0
+    },
+    {
+      "id": "s08",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        111
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.336,
+      "modelCalls": 0
+    },
+    {
+      "id": "s09",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        201
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.915,
+      "modelCalls": 0
+    },
+    {
+      "id": "s10",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        202
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.338,
+      "modelCalls": 0
+    },
+    {
+      "id": "s11",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        203
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.296,
+      "modelCalls": 0
+    },
+    {
+      "id": "s12",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        204
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.34,
+      "modelCalls": 0
+    },
+    {
+      "id": "s13",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        205
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.664,
+      "modelCalls": 0
+    },
+    {
+      "id": "s14",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 7.008,
+      "modelCalls": 0
+    },
+    {
+      "id": "s15",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        107
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.314,
+      "modelCalls": 0
+    },
+    {
+      "id": "s16",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        105
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.734,
+      "modelCalls": 0
+    },
+    {
+      "id": "s17",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        111
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.084,
+      "modelCalls": 0
+    },
+    {
+      "id": "s18",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        103
+      ],
+      "hitAt5": 1,
+      "latencyMs": 7.977,
+      "modelCalls": 0
+    },
+    {
+      "id": "s19",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        201
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.198,
+      "modelCalls": 0
+    },
+    {
+      "id": "s20",
+      "category": "search",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        204
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.501,
+      "modelCalls": 0
+    },
+    {
+      "id": "f01",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 9.864,
+      "modelCalls": 0
+    },
+    {
+      "id": "f02",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.682,
+      "modelCalls": 0
+    },
+    {
+      "id": "f03",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 2.035,
+      "modelCalls": 0
+    },
+    {
+      "id": "f04",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.393,
+      "modelCalls": 0
+    },
+    {
+      "id": "f05",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.532,
+      "modelCalls": 0
+    },
+    {
+      "id": "f06",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 7.837,
+      "modelCalls": 0
+    },
+    {
+      "id": "f07",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 2.973,
+      "modelCalls": 0
+    },
+    {
+      "id": "f08",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.624,
+      "modelCalls": 0
+    },
+    {
+      "id": "f09",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.065,
+      "modelCalls": 0
+    },
+    {
+      "id": "f10",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        105
+      ],
+      "hitAt5": 1,
+      "latencyMs": 8.742,
+      "modelCalls": 1
+    },
+    {
+      "id": "f11",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        104
+      ],
+      "hitAt5": 1,
+      "latencyMs": 5.712,
+      "modelCalls": 1
+    },
+    {
+      "id": "f12",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        107
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.249,
+      "modelCalls": 0
+    },
+    {
+      "id": "f13",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        201
+      ],
+      "hitAt5": 1,
+      "latencyMs": 7.446,
+      "modelCalls": 0
+    },
+    {
+      "id": "f14",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 2.009,
+      "modelCalls": 0
+    },
+    {
+      "id": "f15",
+      "category": "followup",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        201
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.016,
+      "modelCalls": 0
+    },
+    {
+      "id": "r01",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.139,
+      "modelCalls": 0
+    },
+    {
+      "id": "r02",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.585,
+      "modelCalls": 0
+    },
+    {
+      "id": "r03",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 6.417,
+      "modelCalls": 0
+    },
+    {
+      "id": "r04",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.86,
+      "modelCalls": 0
+    },
+    {
+      "id": "r05",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102
+      ],
+      "hitAt5": 1,
+      "latencyMs": 4.777,
+      "modelCalls": 0
+    },
+    {
+      "id": "r06",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.687,
+      "modelCalls": 0
+    },
+    {
+      "id": "r07",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.806,
+      "modelCalls": 0
+    },
+    {
+      "id": "r08",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 5.468,
+      "modelCalls": 0
+    },
+    {
+      "id": "r09",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.241,
+      "modelCalls": 0
+    },
+    {
+      "id": "r10",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.681,
+      "modelCalls": 0
+    },
+    {
+      "id": "r11",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        101,
+        102
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.28,
+      "modelCalls": 0
+    },
+    {
+      "id": "r12",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.162,
+      "modelCalls": 0
+    },
+    {
+      "id": "r13",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        201
+      ],
+      "hitAt5": 1,
+      "latencyMs": 1.471,
+      "modelCalls": 0
+    },
+    {
+      "id": "r14",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 0.995,
+      "modelCalls": 0
+    },
+    {
+      "id": "r15",
+      "category": "reference",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 7.399,
+      "modelCalls": 0
+    },
+    {
+      "id": "e01",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.848,
+      "modelCalls": 0
+    },
+    {
+      "id": "e02",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.782,
+      "modelCalls": 0
+    },
+    {
+      "id": "e03",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.03,
+      "modelCalls": 0
+    },
+    {
+      "id": "e04",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 0.806,
+      "modelCalls": 0
+    },
+    {
+      "id": "e05",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 2.385,
+      "modelCalls": 1
+    },
+    {
+      "id": "e06",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.981,
+      "modelCalls": 1
+    },
+    {
+      "id": "e07",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.416,
+      "modelCalls": 0
+    },
+    {
+      "id": "e08",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 5.438,
+      "modelCalls": 0
+    },
+    {
+      "id": "e09",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 4.607,
+      "modelCalls": 0
+    },
+    {
+      "id": "e10",
+      "category": "empty_conflict",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.486,
+      "modelCalls": 1
+    },
+    {
+      "id": "g01",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 0.746,
+      "modelCalls": 0
+    },
+    {
+      "id": "g02",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.224,
+      "modelCalls": 0
+    },
+    {
+      "id": "g03",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.151,
+      "modelCalls": 0
+    },
+    {
+      "id": "g04",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 8.177,
+      "modelCalls": 0
+    },
+    {
+      "id": "g05",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 0.959,
+      "modelCalls": 0
+    },
+    {
+      "id": "g06",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.19,
+      "modelCalls": 0
+    },
+    {
+      "id": "g07",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 0.65,
+      "modelCalls": 0
+    },
+    {
+      "id": "g08",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 0.818,
+      "modelCalls": 0
+    },
+    {
+      "id": "g09",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 3.615,
+      "modelCalls": 0
+    },
+    {
+      "id": "g10",
+      "category": "guide",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.176,
+      "modelCalls": 0
+    },
+    {
+      "id": "x01",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 12.012,
+      "modelCalls": 1
+    },
+    {
+      "id": "x02",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 5.113,
+      "modelCalls": 1
+    },
+    {
+      "id": "x03",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 2.476,
+      "modelCalls": 0
+    },
+    {
+      "id": "x04",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        112
+      ],
+      "hitAt5": 1,
+      "latencyMs": 6.583,
+      "modelCalls": 0
+    },
+    {
+      "id": "x05",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.2,
+      "modelCalls": 0
+    },
+    {
+      "id": "x06",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.077,
+      "modelCalls": 0
+    },
+    {
+      "id": "x07",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        102,
+        101
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.201,
+      "modelCalls": 1
+    },
+    {
+      "id": "x08",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        104
+      ],
+      "hitAt5": 1,
+      "latencyMs": 2.886,
+      "modelCalls": 1
+    },
+    {
+      "id": "x09",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [
+        105
+      ],
+      "hitAt5": 1,
+      "latencyMs": 3.133,
+      "modelCalls": 1
+    },
+    {
+      "id": "x10",
+      "category": "security",
+      "passed": true,
+      "violations": [],
+      "ids": [],
+      "hitAt5": null,
+      "latencyMs": 1.234,
+      "modelCalls": 0
+    }
+  ],
+  "corpusSha256": "6979192fcc6dc9b1ca3f5f9e0aeb2f59550f59fded1cc751175275908fb95668"
+}
