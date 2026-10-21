@@ -13,6 +13,7 @@ import urllib.request
 from typing import Any
 
 from config import settings
+from modules.ai import evaluation
 
 logger = logging.getLogger("nanshan.error")
 
@@ -110,46 +111,31 @@ def complete_json(system: str, user: str) -> Any:
 
 
 def evaluate_achievement(snapshot: dict) -> dict:
+    """多维成果评价 + 评价报告（LLM 生成，评分算法在 evaluation 模块换算）。
+
+    返回 assemble_result 结构：dimensions/totalScore/starScore/rating/
+    ratingLabel/conclusion/highlights/report/legacyScores。
+    """
+    dim_desc = "；".join(
+        f"{d['key']}（{d['label']}，权重{d['weight']}：{d['hint']}）"
+        for d in evaluation.DIMENSIONS
+    )
     system = (
-        "你是南山科转通的成果评估助手。只输出 JSON，不要 markdown。"
-        "格式：{\"scores\":{\"techFeature\":0-100,\"applyScope\":0-100,"
-        "\"maturity\":0-100,\"cooperation\":0-100},\"totalScore\":0-100,"
-        "\"conclusion\":\"摘要\",\"highlights\":[\"要点\"]}。"
-        "四维对应技术特点/应用范围/成熟度/合作可行性。"
+        "你是南山科转通的成果评价专家。只输出 JSON，不要 markdown。\n"
+        f"请对成果做多维评价，必须包含六个维度：{dim_desc}。\n"
+        '输出格式：{"dimensions":{"innovation":{"score":0-100,"comment":"30字内点评"},'
+        '"techMaturity":{...},"marketProspect":{...},"teamStrength":{...},'
+        '"cooperation":{...},"riskAssessment":{...}},'
+        '"conclusion":"150字内综合评价摘要","highlights":["亮点1","亮点2"],'
+        '"report":[{"heading":"小节标题","content":"150-300字详细评价分析"}]}。\n'
+        "要求：score 为 0-100 百分制；riskAssessment 分越高代表风险越可控；"
+        "report 输出 4-8 个小节，覆盖总体评价、各维度分析与成果转化建议；"
+        "所有文字用简体中文，基于给出的成果信息客观评价，信息不足时说明假设。"
     )
     user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
     data = complete_json(system, user)
-    if not isinstance(data, dict):
-        raise AiProviderError("evaluation JSON is not an object")
-    scores_in = data.get("scores") if isinstance(data.get("scores"), dict) else data
-
-    def _score(keys):
-        for key in keys:
-            if scores_in.get(key) is not None:
-                try:
-                    return max(0.0, min(100.0, round(float(scores_in[key]), 1)))
-                except (TypeError, ValueError):
-                    continue
-        raise AiProviderError(f"evaluation missing score {keys[0]}")
-
-    scores = {
-        "techFeature": _score(("techFeature", "score_tech", "tech")),
-        "applyScope": _score(("applyScope", "score_application", "application")),
-        "maturity": _score(("maturity", "score_maturity")),
-        "cooperation": _score(("cooperation", "score_feasibility", "feasibility")),
-    }
     try:
-        total = float(data.get("totalScore"))
-    except (TypeError, ValueError):
-        total = sum(scores.values()) / 4.0
-    total = max(0.0, min(100.0, round(total, 1)))
-    highlights = data.get("highlights") or data.get("suggestions") or []
-    if not isinstance(highlights, list):
-        highlights = [str(highlights)]
-    highlights = [str(x).strip() for x in highlights if str(x).strip()][:8]
-    return {
-        "scores": scores,
-        "totalScore": total,
-        "conclusion": str(data.get("conclusion") or data.get("summary") or "").strip(),
-        "highlights": highlights,
-    }
+        normalized = evaluation.normalize_llm_result(data)
+    except evaluation.EvaluationDataError as exc:
+        raise AiProviderError(f"evaluation JSON invalid: {exc}") from None
+    return evaluation.assemble_result(normalized)

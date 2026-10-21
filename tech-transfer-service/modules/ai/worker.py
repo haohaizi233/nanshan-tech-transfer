@@ -148,8 +148,8 @@ def _snapshot(raw: Any) -> dict:
 def _run_evaluation(task: dict) -> None:
     achievement_id = task["target_id"]
     snapshot = _snapshot(task.get("input_snapshot"))
-    evaluation = provider.evaluate_achievement(snapshot)
-    scores = evaluation["scores"]
+    result = provider.evaluate_achievement(snapshot)
+    legacy = result["legacyScores"]
     with transaction() as conn:
         cur = conn.cursor()
         try:
@@ -158,8 +158,10 @@ def _run_evaluation(task: dict) -> None:
                 INSERT INTO ai_evaluation
                     (task_id, achievement_id, score_tech, score_application,
                      score_maturity, score_feasibility, total_score, summary,
-                     suggestions, model_version_id, input_data_version)
-                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, t.input_data_version
+                     suggestions, dimensions, report_sections, rating,
+                     model_version_id, input_data_version)
+                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       t.input_data_version
                 FROM ai_task t
                 WHERE t.id = %s
                 ON CONFLICT (task_id) DO NOTHING
@@ -167,13 +169,16 @@ def _run_evaluation(task: dict) -> None:
                 (
                     task["id"],
                     achievement_id,
-                    scores["techFeature"],
-                    scores["applyScope"],
-                    scores["maturity"],
-                    scores["cooperation"],
-                    evaluation["totalScore"],
-                    evaluation["conclusion"],
-                    Json(evaluation["highlights"]),
+                    legacy["techFeature"],
+                    legacy["applyScope"],
+                    legacy["maturity"],
+                    legacy["cooperation"],
+                    result["totalScore"],
+                    result["conclusion"],
+                    Json(result["highlights"]),
+                    Json(result["dimensions"]),
+                    Json(result["report"]),
+                    result["rating"],
                     0,
                     task["id"],
                 ),

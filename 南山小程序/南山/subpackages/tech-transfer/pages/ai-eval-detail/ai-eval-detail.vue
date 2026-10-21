@@ -38,7 +38,7 @@
 			<!-- 处理中 -->
 			<view v-else-if="task.status === 'running'" class="section state-section">
 				<text class="state-title">评估处理中</text>
-				<text class="state-desc">AI 正在对成果进行四维评估，请稍候…</text>
+				<text class="state-desc">AI 正在对成果进行多维评估，请稍候…</text>
 			</view>
 
 			<!-- 失败：failReason + 重新发起 -->
@@ -67,18 +67,41 @@
 							<text class="total-num">{{ evaluation.totalScore }}</text>
 							<text class="total-unit">/ 100</text>
 						</view>
-						<text class="tip">四维评分由人工智能生成，仅供参考</text>
+						<view class="score-badges">
+							<text v-if="evaluation.ratingLabel" class="rating-chip">{{ evaluation.ratingLabel }}</text>
+							<text v-if="evaluation.starScore != null" class="star-chip">{{ evaluation.starScore }} / 5.0 星</text>
+						</view>
+						<text class="tip">AI 多维评分由人工智能生成，仅供参考</text>
 					</view>
 
+					<!-- 能力雷达图（多维评分可视化） -->
+					<view v-if="dims.length >= 3" class="section">
+						<view class="section-head">
+							<text class="section-title">能力雷达图</text>
+							<AiGeneratedMark mode="badge" />
+						</view>
+						<view class="radar-wrap">
+							<canvas canvas-id="evalRadar" id="evalRadar" class="radar-canvas"></canvas>
+						</view>
+					</view>
+
+					<!-- 分维度评分卡片（多维含权重/五分制/评语；旧数据为四维卡片） -->
 					<view class="section">
-						<text class="section-title">四维评分</text>
-						<view v-for="dim in dims" :key="dim.key" class="dim-item">
-							<view class="dim-top">
-								<text class="dim-label">{{ dim.label }}</text>
-								<text class="dim-score">{{ dim.score }}</text>
-							</view>
-							<view class="bar-track">
-								<view class="bar-fill" :style="{ width: dim.score + '%' }"></view>
+						<text class="section-title">{{ dimsTitle }}</text>
+						<view class="dim-grid">
+							<view v-for="dim in dims" :key="dim.key" class="dim-card">
+								<view class="dim-card__head">
+									<text class="dim-card__label">{{ dim.label }}</text>
+									<text v-if="dim.weightText" class="dim-card__weight">{{ dim.weightText }}</text>
+								</view>
+								<view class="dim-card__score-row">
+									<text class="dim-card__score">{{ dim.score }}</text>
+									<text v-if="dim.star != null" class="dim-card__star">{{ dim.star }} 星</text>
+								</view>
+								<view class="bar-track">
+									<view class="bar-fill" :style="{ width: dim.score + '%' }"></view>
+								</view>
+								<text v-if="dim.comment" class="dim-card__comment">{{ dim.comment }}</text>
 							</view>
 						</view>
 					</view>
@@ -96,6 +119,18 @@
 						<view v-for="(item, index) in evaluation.highlights" :key="index" class="highlight">
 							<text class="highlight__dot">{{ index + 1 }}</text>
 							<text class="highlight__text">{{ item }}</text>
+						</view>
+					</view>
+
+					<!-- AI 评价报告分节 -->
+					<view v-if="reportSections.length" class="section">
+						<view class="section-head">
+							<text class="section-title">AI 评价报告</text>
+							<AiGeneratedMark mode="badge" />
+						</view>
+						<view v-for="(sec, sIndex) in reportSections" :key="sIndex" class="report-sec">
+							<text class="report-sec__heading">{{ sec.heading }}</text>
+							<text class="report-sec__content">{{ sec.content }}</text>
 						</view>
 					</view>
 				</block>
@@ -175,12 +210,46 @@
 			},
 			dims() {
 				if (!this.evaluation) return []
+				if (this.multiDim) {
+					// 多维数据：六维 + 权重 + 五分制 + 维度评语
+					return this.evaluation.dimensions.map((d) => {
+						const value = Math.max(0, Math.min(100, Number(d.score) || 0))
+						return {
+							key: d.key,
+							label: d.label,
+							score: Math.round(value),
+							value,
+							star: d.starScore != null ? d.starScore : null,
+							weightText: d.weight != null ? '权重 ' + Math.round(d.weight * 100) + '%' : '',
+							comment: d.comment || ''
+						}
+					})
+				}
+				// 旧数据：013 四维真实分
 				const scores = this.evaluation.scores || {}
-				return SCORE_DIMENSIONS.map((d) => ({
-					key: d.key,
-					label: d.label,
-					score: Math.round(Number(scores[d.key]) || 0)
-				}))
+				return SCORE_DIMENSIONS.map((d) => {
+					const value = Math.max(0, Math.min(100, Number(scores[d.key]) || 0))
+					return {
+						key: d.key,
+						label: d.label,
+						score: Math.round(value),
+						value,
+						star: null,
+						weightText: '',
+						comment: ''
+					}
+				})
+			},
+			// 是否为 enhance 后的多维评价数据
+			multiDim() {
+				return !!(this.evaluation && Array.isArray(this.evaluation.dimensions) && this.evaluation.dimensions.length)
+			},
+			dimsTitle() {
+				return this.multiDim ? '多维评分' : '四维评分'
+			},
+			reportSections() {
+				const report = (this.evaluation && this.evaluation.report) || []
+				return report.filter((sec) => sec && sec.heading && sec.content)
 			},
 			// 失败/成功但结果缺失时可重新发起（需知道成果 id）
 			canRetry() {
@@ -190,6 +259,12 @@
 			},
 			dockId() {
 				return this.achievementId || (this.evaluation && this.evaluation.achievementId) || null
+			}
+		},
+		watch: {
+			// 轮询/重试拿到结果后重绘雷达图
+			evaluation(val) {
+				if (val) this.scheduleRadarDraw()
 			}
 		},
 		onLoad(options) {
@@ -206,6 +281,8 @@
 			this.taskId = taskId
 			if (this.shouldRevalidatePageState('task')) this.fetchTask()
 			else if (this.task && !isTerminalStatus(this.task.status)) this.startPolling()
+			// 页面缓存恢复的任务也可能已含结果
+			this.scheduleRadarDraw()
 		},
 		onShow() {
 			if (!this.aiEnabled) return
@@ -214,6 +291,7 @@
 				if (this.shouldRevalidatePageState('task')) this.fetchTask()
 				else this.startPolling()
 			}
+			this.scheduleRadarDraw()
 		},
 		onHide() {
 			this.stopPolling()
@@ -222,6 +300,89 @@
 			this.stopPolling()
 		},
 		methods: {
+			// 结果展示后绘制能力雷达图（H5 / 小程序通用 canvas 旧 API）
+			scheduleRadarDraw() {
+				this.$nextTick(() => {
+					setTimeout(() => this.drawRadar(), 50)
+				})
+			},
+			drawRadar() {
+				const dims = this.dims
+				if (!this.aiEnabled || dims.length < 3) return
+				uni.createSelectorQuery()
+					.select('#evalRadar')
+					.boundingClientRect((rect) => {
+						if (!rect || !rect.width || !rect.height) return
+						const ctx = uni.createCanvasContext('evalRadar', this)
+						const w = rect.width
+						const h = rect.height
+						const cx = w / 2
+						const cy = h / 2
+						const R = Math.min(w, h) / 2 - 28
+						const n = dims.length
+						const angleAt = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / n
+						const ratioOf = (d) => Math.max(0, Math.min(1, d.value / 100))
+						const pointAt = (i, ratio) => [
+							cx + R * ratio * Math.cos(angleAt(i)),
+							cy + R * ratio * Math.sin(angleAt(i))
+						]
+						// 网格：4 圈等比多边形
+						const levels = [0.25, 0.5, 0.75, 1]
+						ctx.setLineWidth(1)
+						ctx.setStrokeStyle('#e3e9f2')
+						levels.forEach((level) => {
+							ctx.beginPath()
+							for (let i = 0; i < n; i++) {
+								const p = pointAt(i, level)
+								if (i === 0) ctx.moveTo(p[0], p[1])
+								else ctx.lineTo(p[0], p[1])
+							}
+							ctx.closePath()
+							ctx.stroke()
+						})
+						// 轴线
+						for (let i = 0; i < n; i++) {
+							const p = pointAt(i, 1)
+							ctx.beginPath()
+							ctx.moveTo(cx, cy)
+							ctx.lineTo(p[0], p[1])
+							ctx.stroke()
+						}
+						// 评分多边形
+						ctx.beginPath()
+						dims.forEach((d, i) => {
+							const p = pointAt(i, ratioOf(d))
+							if (i === 0) ctx.moveTo(p[0], p[1])
+							else ctx.lineTo(p[0], p[1])
+						})
+						ctx.closePath()
+						ctx.setFillStyle('rgba(43, 115, 248, 0.22)')
+						ctx.fill()
+						ctx.setStrokeStyle('#2b73f8')
+						ctx.setLineWidth(2)
+						ctx.stroke()
+						// 顶点
+						ctx.setFillStyle('#2b73f8')
+						dims.forEach((d, i) => {
+							const p = pointAt(i, ratioOf(d))
+							ctx.beginPath()
+							ctx.arc(p[0], p[1], 2.5, 0, 2 * Math.PI)
+							ctx.fill()
+						})
+						// 维度标签
+						ctx.setFillStyle('#666666')
+						ctx.setFontSize(11)
+						ctx.setTextAlign('center')
+						ctx.setTextBaseline('middle')
+						dims.forEach((d, i) => {
+							const x = cx + (R + 18) * Math.cos(angleAt(i))
+							const y = cy + (R + 18) * Math.sin(angleAt(i))
+							ctx.fillText(d.label, x, y)
+						})
+						ctx.draw()
+					})
+					.exec()
+			},
 			async fetchTask() {
 				if (!this.aiEnabled) return
 				this.loading = !this.task
@@ -484,30 +645,126 @@
 		margin-bottom: 0;
 	}
 
-	.dim-item {
-		margin-bottom: 22rpx;
-	}
-
-	.dim-item:last-child {
-		margin-bottom: 0;
-	}
-
-	.dim-top {
+	.score-badges {
 		display: flex;
 		flex-direction: row;
-		justify-content: space-between;
-		margin-bottom: 10rpx;
+		justify-content: center;
+		margin-top: 16rpx;
 	}
 
-	.dim-label {
+	.rating-chip {
+		font-size: 24rpx;
+		font-weight: 600;
+		color: #1f9d63;
+		background: #e8f7f0;
+		border-radius: 8rpx;
+		padding: 4rpx 16rpx;
+		margin-right: 12rpx;
+	}
+
+	.star-chip {
+		font-size: 24rpx;
+		color: #c47b1a;
+		background: #fff4e5;
+		border-radius: 8rpx;
+		padding: 4rpx 16rpx;
+	}
+
+	.radar-wrap {
+		display: flex;
+		flex-direction: row;
+		justify-content: center;
+	}
+
+	.radar-canvas {
+		width: 100%;
+		height: 520rpx;
+	}
+
+	.dim-grid {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		justify-content: space-between;
+	}
+
+	.dim-card {
+		width: calc(50% - 10rpx);
+		box-sizing: border-box;
+		background: #f8fafc;
+		border: 1rpx solid #e8ecf2;
+		border-radius: 12rpx;
+		padding: 20rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.dim-card__head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8rpx;
+	}
+
+	.dim-card__label {
 		font-size: 26rpx;
 		color: #555555;
 	}
 
-	.dim-score {
+	.dim-card__weight {
+		font-size: 20rpx;
+		color: #999999;
+	}
+
+	.dim-card__score-row {
+		display: flex;
+		flex-direction: row;
+		align-items: baseline;
+		margin-bottom: 10rpx;
+	}
+
+	.dim-card__score {
+		font-size: 40rpx;
+		font-weight: 700;
+		color: #2b73f8;
+		line-height: 1.1;
+	}
+
+	.dim-card__star {
+		margin-left: 10rpx;
+		font-size: 20rpx;
+		color: #c47b1a;
+	}
+
+	.dim-card__comment {
+		display: block;
+		margin-top: 12rpx;
+		font-size: 22rpx;
+		color: #888888;
+		line-height: 1.5;
+	}
+
+	.report-sec {
+		margin-bottom: 24rpx;
+	}
+
+	.report-sec:last-child {
+		margin-bottom: 0;
+	}
+
+	.report-sec__heading {
+		display: block;
 		font-size: 26rpx;
 		font-weight: 600;
-		color: #2b73f8;
+		color: #1a1a1a;
+		margin-bottom: 10rpx;
+	}
+
+	.report-sec__content {
+		display: block;
+		font-size: 26rpx;
+		color: #444444;
+		line-height: 1.7;
 	}
 
 	.bar-track {

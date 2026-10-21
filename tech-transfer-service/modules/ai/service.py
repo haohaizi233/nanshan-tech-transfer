@@ -25,6 +25,7 @@ from core.errors import (
     BizError,
 )
 from db import get_cursor
+from modules.ai.evaluation import build_evaluation_view
 from modules.audit.service import record as audit_record
 
 # 同一需求重复创建去重窗口（秒）—— 评估任务复用同一限流，保留常量供未来匹配复用
@@ -153,7 +154,7 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
 
 
 def get_evaluation_task(user_id: int, task_id: int) -> dict:
-    """查询评估任务（仅创建者；succeeded 时带 evaluation 四维评分）"""
+    """查询评估任务（仅创建者；succeeded 时带多维评分 + 评价报告）"""
     with get_cursor() as cur:
         cur.execute(
             """
@@ -184,7 +185,8 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
         }
 
         if task["status"] == "succeeded":
-            # 结果仅由 worker 写入；此处只做读取组装（禁止假评分回填）
+            # 结果仅由 worker 写入；此处只做读取组装（禁止假评分回填）。
+            # 多维评分/评价报告见 evaluation.build_evaluation_view（旧数据只给旧四维）。
             cur.execute(
                 """
                 SELECT e.*, a.title AS achievement_title
@@ -196,21 +198,61 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
             )
             row = cur.fetchone()
             if row:
-                view["evaluation"] = {
-                    "achievementId": row["achievement_id"],
-                    "achievementTitle": row["achievement_title"],
-                    "scores": {
-                        "techFeature": float(row["score_tech"]),
-                        "applyScope": float(row["score_application"]),
-                        "maturity": float(row["score_maturity"]),
-                        "cooperation": float(row["score_feasibility"]),
-                    },
-                    "totalScore": float(row["total_score"]),
-                    "conclusion": row.get("summary") or "",
-                    "highlights": _parse_reasons(row.get("suggestions")),
-                    "modelVersionLabel": None,
-                }
+                view["evaluation"] = build_evaluation_view(dict(row))
         return view
+
+
+def list_evaluations(
+    user_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    achievement_id: int | None = None,
+) -> dict:
+    """评价历史记录：当前用户发起过的全部成果评价（分页，倒序）。
+
+    数据权限：仅任务创建者（= 成果 owner，见 create_evaluation_task）可见。
+    列表项不含 report 全文（详情经 taskId 走 get_evaluation_task）。
+    """
+    page = max(1, int(page))
+    page_size = max(1, min(50, int(page_size)))
+    where = "t.created_by_user_id = %s"
+    params: list = [user_id]
+    if achievement_id:
+        where += " AND e.achievement_id = %s"
+        params.append(achievement_id)
+
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS n
+            FROM ai_evaluation e
+            JOIN ai_task t ON e.task_id = t.id
+            WHERE {where}
+            """,
+            params,
+        )
+        count_row = dict(cur.fetchone() or {})
+        total = int(count_row.get("n") or 0)
+        cur.execute(
+            f"""
+            SELECT e.*, a.title AS achievement_title
+            FROM ai_evaluation e
+            JOIN ai_task t ON e.task_id = t.id
+            JOIN achievement a ON e.achievement_id = a.id
+            WHERE {where}
+            ORDER BY e.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            [*params, page_size, (page - 1) * page_size],
+        )
+        items = []
+        for row in cur.fetchall():
+            data = dict(row)
+            item = build_evaluation_view(data)
+            item.pop("report", None)  # 列表不带全文，详情走任务查询
+            item["createdAt"] = _iso(data.get("created_at"))
+            items.append(item)
+    return {"list": items, "total": total, "page": page, "pageSize": page_size}
 
 
 def _task_view(task_id: int) -> dict:

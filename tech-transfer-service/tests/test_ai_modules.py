@@ -55,24 +55,48 @@ class TestAiProvider:
         from modules.ai.provider import evaluate_achievement, AiProviderError
         with patch("modules.ai.provider.complete_json") as mock_complete:
             mock_complete.return_value = {
-                "scores": {"techFeature": 80, "applyScope": 70, "maturity": 90, "cooperation": 85},
-                "totalScore": 81.3,
+                "dimensions": {
+                    "innovation": {"score": 80, "comment": "创新明确"},
+                    "techMaturity": {"score": 90, "comment": "成熟度高"},
+                    "marketProspect": {"score": 70, "comment": "市场可期"},
+                    "teamStrength": {"score": 60, "comment": "团队完整"},
+                    "cooperation": {"score": 85, "comment": "合作灵活"},
+                    "riskAssessment": {"score": 75, "comment": "风险可控"},
+                },
                 "conclusion": "Good",
                 "highlights": ["Fast", "Reliable"],
+                "report": [{"heading": "总体评价", "content": "详细分析"}],
             }
             result = evaluate_achievement({"id": 1, "title": "Test"})
-            assert result["scores"]["techFeature"] == 80.0
-            assert result["totalScore"] == 81.3
-            assert result["highlights"] == ["Fast", "Reliable"]
+        assert [d["key"] for d in result["dimensions"]] == [
+            "innovation", "techMaturity", "marketProspect",
+            "teamStrength", "cooperation", "riskAssessment",
+        ]
+        assert result["dimensions"][0]["score"] == 80.0
+        assert result["dimensions"][0]["weight"] == 0.18
+        # 013 兼容四列 ← 多维 1:1 派生
+        assert result["legacyScores"] == {
+            "techFeature": 80.0, "applyScope": 70.0,
+            "maturity": 90.0, "cooperation": 85.0,
+        }
+        assert result["totalScore"] == pytest.approx(77.15, abs=0.2)
+        assert result["highlights"] == ["Fast", "Reliable"]
+        assert result["report"] == [{"heading": "总体评价", "content": "详细分析"}]
+        assert result["rating"] in {"excellent", "good", "fair", "weak"}
 
     def test_evaluate_achievement_fallback_total(self):
         from modules.ai.provider import evaluate_achievement
         with patch("modules.ai.provider.complete_json") as mock_complete:
             mock_complete.return_value = {
-                "scores": {"techFeature": 80, "applyScope": 70, "maturity": 90, "cooperation": 85},
+                # 扁平写法 + LLM 未回 totalScore：由权重换算
+                "dimensions": {
+                    "innovation": 80, "techMaturity": 90, "marketProspect": 70,
+                    "teamStrength": 60, "cooperation": 85, "riskAssessment": 75,
+                },
             }
             result = evaluate_achievement({"id": 1})
-            assert 81.0 <= result["totalScore"] <= 82.0
+            assert result["totalScore"] == pytest.approx(77.15, abs=0.2)
+            assert result["conclusion"] == ""
 
     def test_evaluate_achievement_invalid_scores(self):
         from modules.ai.provider import evaluate_achievement, AiProviderError
@@ -92,8 +116,10 @@ class TestAiProvider:
         from modules.ai.provider import evaluate_achievement
         with patch("modules.ai.provider.complete_json") as mock_complete:
             mock_complete.return_value = {
-                "scores": {"techFeature": 80, "applyScope": 70, "maturity": 90, "cooperation": 85},
-                "totalScore": 80,
+                "dimensions": {
+                    "innovation": 80, "techMaturity": 90, "marketProspect": 70,
+                    "teamStrength": 60, "cooperation": 85, "riskAssessment": 75,
+                },
                 "highlights": "single string",
             }
             result = evaluate_achievement({"id": 1})
@@ -103,8 +129,11 @@ class TestAiProvider:
         from modules.ai.provider import evaluate_achievement, AiProviderError
         with patch("modules.ai.provider.complete_json") as mock_complete:
             mock_complete.return_value = {
-                "scores": {"applyScope": 70, "maturity": 90, "cooperation": 85},
-                "totalScore": 80,
+                "dimensions": {
+                    "innovation": 80, "techMaturity": 90, "marketProspect": 70,
+                    "teamStrength": 60, "cooperation": 85,
+                    # riskAssessment 缺失
+                },
             }
             with pytest.raises(AiProviderError):
                 evaluate_achievement({"id": 1})

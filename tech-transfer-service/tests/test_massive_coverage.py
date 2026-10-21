@@ -1020,19 +1020,31 @@ class TestAiProviderEvaluate:
     def test_evaluate_achievement_success(self):
         from modules.ai.provider import evaluate_achievement
         mock_result = {
-            "scores": {"techFeature": 80, "applyScope": 70, "maturity": 90, "cooperation": 75},
-            "totalScore": 78.8,
+            "dimensions": {
+                "innovation": {"score": 80, "comment": "创新明确"},
+                "techMaturity": {"score": 90, "comment": "成熟度高"},
+                "marketProspect": {"score": 70, "comment": "市场可期"},
+                "teamStrength": {"score": 65, "comment": "团队完整"},
+                "cooperation": {"score": 75, "comment": "合作灵活"},
+                "riskAssessment": {"score": 80, "comment": "风险可控"},
+            },
             "conclusion": "Good",
             "highlights": ["Fast", "Reliable"],
+            "report": [{"heading": "总体评价", "content": "详细分析"}],
         }
         with patch("modules.ai.provider.complete_json", return_value=mock_result):
             result = evaluate_achievement({"id": 1, "title": "Test"})
-        assert "scores" in result
-        assert result["totalScore"] == 78.8
+        assert len(result["dimensions"]) == 6
+        assert result["legacyScores"]["techFeature"] == 80.0
+        assert result["totalScore"] == pytest.approx(77.35, abs=0.2)
+        assert result["conclusion"] == "Good"
+        assert result["report"] == [{"heading": "总体评价", "content": "详细分析"}]
 
     def test_evaluate_achievement_missing_score(self):
         from modules.ai.provider import evaluate_achievement, AiProviderError
-        mock_result = {"scores": {"techFeature": 80}}  # missing others
+        mock_result = {
+            "dimensions": {"innovation": 80},  # 其余维度缺失
+        }
         with patch("modules.ai.provider.complete_json", return_value=mock_result):
             with pytest.raises(AiProviderError):
                 evaluate_achievement({"id": 1})
@@ -1046,19 +1058,25 @@ class TestAiProviderEvaluate:
     def test_evaluate_achievement_fallback_total(self):
         from modules.ai.provider import evaluate_achievement
         mock_result = {
-            "scores": {"techFeature": 80, "applyScope": 70, "maturity": 90, "cooperation": 75},
-            # no totalScore
+            # LLM 不回 totalScore：由权重换算
+            "dimensions": {
+                "innovation": 80, "techMaturity": 90, "marketProspect": 70,
+                "teamStrength": 65, "cooperation": 75, "riskAssessment": 80,
+            },
             "conclusion": "ok",
         }
         with patch("modules.ai.provider.complete_json", return_value=mock_result):
             result = evaluate_achievement({"id": 1})
-        assert result["totalScore"] == pytest.approx(78.8, abs=0.2)
+        assert result["totalScore"] == pytest.approx(77.35, abs=0.2)
+        assert result["starScore"] == pytest.approx(3.9, abs=0.2)
 
     def test_evaluate_achievement_string_highlights(self):
         from modules.ai.provider import evaluate_achievement
         mock_result = {
-            "scores": {"techFeature": 80, "applyScope": 70, "maturity": 90, "cooperation": 75},
-            "totalScore": 78.8,
+            "dimensions": {
+                "innovation": 80, "techMaturity": 90, "marketProspect": 70,
+                "teamStrength": 65, "cooperation": 75, "riskAssessment": 80,
+            },
             "conclusion": "ok",
             "highlights": "single highlight",
         }
@@ -1069,12 +1087,21 @@ class TestAiProviderEvaluate:
     def test_evaluate_achievement_alt_score_keys(self):
         from modules.ai.provider import evaluate_achievement
         mock_result = {
-            "score_tech": 80, "score_application": 70, "score_maturity": 90, "score_feasibility": 75,
-            "totalScore": 78.8, "summary": "ok",
+            # 列表形态（与 dict 形态等价，normalize 两者都接受）
+            "dimensions": [
+                {"key": "innovation", "score": 80},
+                {"key": "techMaturity", "score": 90},
+                {"key": "marketProspect", "score": 70},
+                {"key": "teamStrength", "score": 65},
+                {"key": "cooperation", "score": 75},
+                {"key": "riskAssessment", "score": 80},
+            ],
+            "summary": "ok",
         }
         with patch("modules.ai.provider.complete_json", return_value=mock_result):
             result = evaluate_achievement({"id": 1})
-        assert "scores" in result
+        assert len(result["dimensions"]) == 6
+        assert result["conclusion"] == "ok"
 
 
 # ══════════════════════════════════════════════════════════════

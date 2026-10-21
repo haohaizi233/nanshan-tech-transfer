@@ -28,6 +28,7 @@ from core.idempotency import cache_response as cache_idem_response
 from core.idempotency import idempotent_create
 from core.middleware import identity
 from core.rate_limit import check_user_rate
+from core.pagination import parse_page_args
 from core.request_schemas import AiCardViewCountsRequest, AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from core.response import get_request_id, success
 from modules.ai.chat_store import (
@@ -39,6 +40,7 @@ from modules.ai.service import (
     create_evaluation_task,
     get_card_view_counts,
     get_evaluation_task,
+    list_evaluations,
 )
 
 logger = logging.getLogger("nanshan.error")
@@ -98,6 +100,26 @@ def evaluation_tasks_create(request: Request, body: EvaluationTaskRequest, user:
 @router.get("/ai/evaluation-tasks/{task_id}")
 def evaluation_task_detail(task_id: int, user: dict = Depends(identity)):
     return success(get_evaluation_task(user["userId"], task_id))
+
+
+@router.get("/ai/evaluations")
+def evaluation_history(request: Request, user: dict = Depends(identity)):
+    """评价历史记录：当前用户发起过的全部成果评价（分页倒序）。
+
+    query: page/pageSize（约定同 core.pagination）、achievementId 可选过滤。
+    """
+    page, page_size, _ = parse_page_args(request)
+    raw_ach = request.query_params.get("achievementId")
+    achievement_id = None
+    if raw_ach not in (None, ""):
+        try:
+            achievement_id = int(raw_ach)
+        except (ValueError, TypeError):
+            achievement_id = 0
+        if achievement_id <= 0:
+            from core.errors import bad_request
+            raise bad_request("achievementId 必须为正整数")
+    return success(list_evaluations(user["userId"], page, page_size, achievement_id))
 
 
 # ── 自然语言对话代理（nanshan-ai-agent demo）──────────────────
