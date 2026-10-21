@@ -174,3 +174,45 @@ def test_worker_once_reports_failed_execution_as_failure():
         patch.object(worker.signal, "signal"),
     ):
         assert worker.main() == 1
+
+
+@pytest.mark.parametrize("cleared_during_forward", [False, True])
+def test_match_history_uses_the_generation_captured_before_forward(cleared_during_forward):
+    from unittest.mock import MagicMock
+
+    from core.request_schemas import AiMatchRequest
+    from routes.ai import ai_match
+
+    demand_cursor = MagicMock()
+    demand_cursor.fetchone.return_value = {
+        "id": 12, "title": "水处理", "description": "技术需求", "owner_user_id": 7, "status": "published",
+    }
+    history_cursor = MagicMock()
+    generation = [4]
+
+    def forward(*_args, **_kwargs):
+        if cleared_during_forward:
+            generation[0] += 1
+        return {"success": True, "message": "找到成果", "data": [{"card_type": "achievement", "id": 3}]}
+
+    with (
+        patch("db.get_cursor") as demand_context,
+        patch("modules.ai.chat_store.get_cursor") as history_context,
+        patch("modules.ai.chat_store._session_generation", side_effect=lambda *_args: generation[0]),
+        patch("routes.ai.check_user_rate"),
+        patch("routes.ai.settings.AI_AGENT_URL", "http://127.0.0.1:8000"),
+        patch("routes.ai._forward_to_agent", side_effect=forward),
+    ):
+        demand_context.return_value.__enter__.return_value = demand_cursor
+        history_context.return_value.__enter__.return_value = history_cursor
+        response = ai_match(AiMatchRequest(demandId=12), {"userId": 7})
+
+    assert response["data"]["cards"][0]["id"] == 3
+    writes = [call.args for call in history_cursor.execute.call_args_list if "INSERT INTO ai_chat_message" in call.args[0]]
+    if cleared_during_forward:
+        assert writes == []
+    else:
+        assert len(writes) == 1
+        assert writes[0][1][0:4] == (7, "匹配需求：水处理", 4, None)
+        assert writes[0][1][4:6] == (7, "找到成果")
+        assert writes[0][1][7:] == (4, None)

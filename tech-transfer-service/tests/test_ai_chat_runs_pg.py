@@ -63,7 +63,11 @@ def database(request):
         return isolated_cursor(TEST_DSN, schema, commit)
 
     try:
-        with patch.object(chat_runs, "get_cursor", cursor_factory), patch.object(chat_runs, "require_ready"):
+        with (
+            patch.object(chat_runs, "get_cursor", cursor_factory),
+            patch.object(chat_runs, "require_ready"),
+            patch.object(chat_runs, "check_user_rate", create=True),
+        ):
             yield chat_runs, cursor_factory, schema
     finally:
         with connection.cursor() as cursor:
@@ -86,6 +90,7 @@ def test_same_key_conflict_and_queue_limit(database):
     with pytest.raises(BizError) as queue_error:
         runs.submit_run(1, "excess", "question")
     assert queue_error.value.http_status == 429
+    assert queue_error.value.details == {"accepted": False}
     assert active["turn_id"] == "turn-1"
     assert runs.claim_one("second-worker") is None
 
@@ -282,3 +287,225 @@ def test_latest_query_survives_more_than_twelve_non_search_turns(database):
         context = load_context(cursor, 1, 0)
     assert context["queryPlan"]["max_price_wan"] == 50
     assert len(context["messages"]) == 4
+
+
+@pytest.mark.parametrize("database", [False, True], indirect=True)
+def test_history_route_reports_current_generation_even_without_messages(database):
+    from modules.ai import chat_store
+    from routes.ai import ai_chat_messages_list
+
+    runs, cursor_factory, _schema = database
+    with patch.object(chat_store, "get_cursor", cursor_factory):
+        assert ai_chat_messages_list({"userId": 2})["data"]["generation"] == 0
+        with cursor_factory() as cursor:
+            cursor.execute("SELECT to_regclass('ai_chat_session') AS relation")
+            migrated = bool(cursor.fetchone()["relation"])
+        if not migrated:
+            with cursor_factory(commit=True) as cursor:
+                cursor.execute("INSERT INTO ai_chat_message(user_id, role, content) VALUES (1, 'assistant', 'legacy')")
+            data = ai_chat_messages_list({"userId": 1})["data"]
+            assert data["generation"] == data["messages"][0]["generation"] == 0
+            return
+        assert runs.clear_runs(1)["generation"] == 1
+        assert ai_chat_messages_list({"userId": 1})["data"]["generation"] == 1
+        assert ai_chat_messages_list({"userId": 1})["data"]["messages"] == []
+        runs.submit_run(1, "new", "hello")
+        active = runs.claim_one("worker")
+        assert runs.finish_run(active, result={"success": True, "message": "answer", "data": []})
+        data = ai_chat_messages_list({"userId": 1})["data"]
+    assert data["generation"] == 1
+    assert len(data["messages"]) == 2
+    assert all(message["generation"] == 1 for message in data["messages"])
+
+
+@pytest.mark.parametrize("failure", ["rate", "readiness", "reference"])
+def test_async_pre_accept_errors_are_explicit_and_keep_status_and_code(database, failure):
+    from core.errors import BizError
+    from core.request_schemas import AiChatRequest
+    from routes.ai import ai_chat
+    from starlette.requests import Request
+
+    runs, _cursor_factory, _schema = database
+    error = BizError("TT_COMMON_42901", "slow down", 429, {"reason": "rate_limit"})
+    if failure == "readiness":
+        error = BizError("TT_AI_50301", "not ready", 503)
+    if failure == "reference":
+        error = BizError("TT_COMMON_40901", "invalid reference", 409, {"reason": "reference_unavailable"})
+    target = {"rate": "check_user_rate", "readiness": "require_ready", "reference": "validate_reference"}[failure]
+    request = Request({"type": "http", "headers": [(b"prefer", b"respond-async")]})
+    with (
+        patch("routes.ai.settings.AI_CHAT_RUNS_ENABLED", True),
+        patch("routes.ai.check_user_rate", side_effect=error if failure == "rate" else None),
+        patch.object(runs, target, side_effect=error, create=True),
+    ):
+        with pytest.raises(BizError) as caught:
+            ai_chat(AiChatRequest(message="hello", turnId="new"), {"userId": 1}, request)
+    assert (caught.value.code, caught.value.http_status) == (error.code, error.http_status)
+    assert caught.value.details["accepted"] is False
+    if failure != "readiness":
+        assert caught.value.details["reason"] == error.details["reason"]
+    assert runs.get_run(1, "new") is None
+
+
+def test_async_duplicate_is_recovered_before_rate_or_readiness_checks(database):
+    import json
+
+    from core.errors import BizError
+    from core.request_schemas import AiChatRequest
+    from routes.ai import ai_chat
+    from starlette.requests import Request
+
+    runs, _cursor_factory, _schema = database
+    original = runs.submit_run(1, "existing", "hello")
+    request = Request({"type": "http", "headers": [(b"prefer", b"respond-async")]})
+    with (
+        patch("routes.ai.settings.AI_CHAT_RUNS_ENABLED", True),
+        patch("routes.ai.check_user_rate", side_effect=BizError("TT_COMMON_42901", "slow down", 429)),
+        patch.object(runs, "check_user_rate", side_effect=BizError("TT_COMMON_42901", "slow down", 429), create=True),
+        patch.object(runs, "require_ready", side_effect=BizError("TT_AI_50301", "not ready", 503)),
+    ):
+        response = ai_chat(AiChatRequest(message="hello", turnId="existing"), {"userId": 1}, request)
+    assert response.status_code == 202
+    original["referenceSupported"] = True
+    assert json.loads(response.body)["data"] == original
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_sync_fallback_cannot_recreate_cleared_turn(database, enabled):
+    from core.errors import BizError
+    from core.request_schemas import AiChatRequest
+    from modules.ai import chat_store
+    from routes.ai import ai_chat
+
+    runs, cursor_factory, _schema = database
+    runs.submit_run(1, "old", "private text")
+    runs.clear_runs(1)
+    with (
+        patch.object(chat_store, "get_cursor", cursor_factory),
+        patch("routes.ai.settings.AI_CHAT_RUNS_ENABLED", enabled),
+        patch("routes.ai.check_user_rate"),
+        patch("routes.ai._forward_to_agent", return_value={"success": True, "message": "answer", "data": []}),
+    ):
+        with pytest.raises(BizError) as error:
+            ai_chat(AiChatRequest(message="private text", turnId="old"), {"userId": 1})
+    assert error.value.http_status == 409
+    assert runs.get_run(1, "old") is None
+
+
+def test_sync_fallback_rejects_changed_payload_for_existing_durable_turn(database):
+    from core.errors import BizError
+    from core.request_schemas import AiChatRequest
+    from modules.ai import chat_store
+    from routes.ai import ai_chat
+
+    runs, cursor_factory, _schema = database
+    runs.submit_run(1, "same", "first")
+    with patch.object(chat_store, "get_cursor", cursor_factory), patch("routes.ai.check_user_rate"):
+        with pytest.raises(BizError) as error:
+            ai_chat(AiChatRequest(message="different", turnId="same"), {"userId": 1})
+    assert error.value.http_status == 409
+
+
+def test_sync_fallback_persists_current_generation_after_clear(database):
+    from core.request_schemas import AiChatRequest
+    from modules.ai import chat_store
+    from routes.ai import ai_chat
+
+    runs, cursor_factory, _schema = database
+    runs.clear_runs(1)
+    with (
+        patch.object(chat_store, "get_cursor", cursor_factory),
+        patch("routes.ai.check_user_rate"),
+        patch("routes.ai._forward_to_agent", return_value={"success": True, "message": "answer", "data": []}),
+    ):
+        ai_chat(AiChatRequest(message="hello", turnId="sync"), {"userId": 1})
+        history = chat_store.list_history(1)
+    assert history["generation"] == 1
+    assert len(history["messages"]) == 2
+    assert all(message["generation"] == 1 for message in history["messages"])
+    assert runs.get_run(1, "sync")["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("turn_id", [None, "sync"])
+def test_sync_late_result_cannot_restore_cleared_history(database, failure, turn_id):
+    from core.errors import BizError
+    from core.request_schemas import AiChatRequest
+    from modules.ai import chat_store
+    from routes.ai import ai_chat
+
+    runs, cursor_factory, _schema = database
+    runs.clear_runs(1)
+
+    def clear_during_forward(*_args, **_kwargs):
+        runs.clear_runs(1)
+        if failure:
+            raise BizError("TT_AI_50301", "unavailable", 503)
+        return {"success": True, "message": "late answer", "data": []}
+
+    with (
+        patch.object(chat_store, "get_cursor", cursor_factory),
+        patch("routes.ai.check_user_rate"),
+        patch("routes.ai._forward_to_agent", side_effect=clear_during_forward),
+    ):
+        try:
+            ai_chat(AiChatRequest(message="private text", turnId=turn_id), {"userId": 1})
+        except BizError as error:
+            assert error.http_status in (409, 503)
+        assert chat_store.list_messages(1) == []
+
+
+@pytest.mark.parametrize("finish", ["complete", "fail"])
+def test_sync_completion_cannot_take_ownership_of_durable_worker(database, finish):
+    from modules.ai import chat_store
+
+    runs, cursor_factory, _schema = database
+    runs.submit_run(1, "durable", "hello")
+    assert runs.claim_one("worker") is not None
+    with patch.object(chat_store, "get_cursor", cursor_factory):
+        if finish == "complete":
+            chat_store.complete_turn(1, "durable", "hello", "wrong answer", [], expected_generation=0)
+        else:
+            chat_store.fail_turn(1, "durable", "hello", "wrong failure", "TT_AI_50301", 503, expected_generation=0)
+        assert chat_store.list_messages(1) == []
+    assert runs.get_run(1, "durable")["status"] == "running"
+
+
+@pytest.mark.parametrize("cleared_during_forward", [False, True])
+def test_match_history_persists_only_in_its_original_generation(database, cleared_during_forward):
+    from unittest.mock import MagicMock
+
+    from core.request_schemas import AiMatchRequest
+    from modules.ai import chat_store
+    from routes.ai import ai_match
+
+    runs, cursor_factory, _schema = database
+    runs.clear_runs(1)
+    demand_cursor = MagicMock()
+    demand_cursor.fetchone.return_value = {
+        "id": 12, "title": "水处理", "description": "技术需求", "owner_user_id": 1, "status": "published",
+    }
+
+    def forward(*_args, **_kwargs):
+        if cleared_during_forward:
+            runs.clear_runs(1)
+        return {"success": True, "message": "找到成果", "data": [{"card_type": "achievement", "id": 3}]}
+
+    with (
+        patch("db.get_cursor") as demand_context,
+        patch.object(chat_store, "get_cursor", cursor_factory),
+        patch("routes.ai.check_user_rate"),
+        patch("routes.ai.settings.AI_AGENT_URL", "http://127.0.0.1:8000"),
+        patch("routes.ai._forward_to_agent", side_effect=forward),
+    ):
+        demand_context.return_value.__enter__.return_value = demand_cursor
+        ai_match(AiMatchRequest(demandId=12), {"userId": 1})
+        history = chat_store.list_history(1)
+
+    if cleared_during_forward:
+        assert history == {"messages": [], "generation": 2}
+    else:
+        assert history["generation"] == 1
+        assert len(history["messages"]) == 2
+        assert history["messages"][1]["content"] == "找到成果"
+        assert all(message["generation"] == 1 for message in history["messages"])

@@ -189,6 +189,11 @@ class TestAiWorker:
 # ── chat_store ──────────────────────────────────────────────
 
 class TestChatStore:
+    @pytest.fixture(autouse=True)
+    def legacy_schema(self):
+        with patch("modules.ai.chat_store._session_generation", return_value=None):
+            yield
+
     @patch("modules.ai.chat_store.get_cursor")
     def test_append_message_valid(self, mock_gc):
         from modules.ai.chat_store import append_message

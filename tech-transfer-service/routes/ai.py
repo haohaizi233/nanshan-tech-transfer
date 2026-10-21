@@ -31,8 +31,8 @@ from core.rate_limit import check_user_rate
 from core.request_schemas import AiCardViewCountsRequest, AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from core.response import get_request_id, success
 from modules.ai.chat_store import (
-    append_turn, clear_messages, complete_turn, fail_turn, get_turn as get_chat_turn,
-    list_messages, start_turn,
+    append_turn, capture_generation, clear_messages, complete_turn, fail_turn, get_turn as get_chat_turn,
+    list_history, start_turn,
 )
 from modules.ai.chat_runs import submit_run, clear_runs, has_durable_history
 from modules.ai.service import (
@@ -292,18 +292,16 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
     raise ai_unavailable("AI 助手暂时不可用，请稍后重试", {"layer": "agent", "reason": "unreachable"})
 
 
-def _persist_failed_turn(user_id: int, user_message: str, assistant_message: str) -> None:
+def _persist_failed_turn(user_id: int, user_message: str, assistant_message: str, **generation_options) -> None:
     """失败时也保留问答痕迹，避免刷新后用户看不到自己刚发的问题。"""
     try:
-        append_turn(user_id, user_message, assistant_message)
+        append_turn(user_id, user_message, assistant_message, **generation_options)
     except Exception:
         logger.exception("[ai/chat] 失败对话入库失败 user_id=%s", user_id)
 
 
 @router.post("/ai/chat")
 def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Request = None):
-    # M5: 用户级频控防 LLM 成本刷单（30 次/5 分钟，正常多轮对话不受影响）
-    check_user_rate(user["userId"], "ai_chat", limit=30, window_s=300)
     message = body.as_dict().get("message")
     if not isinstance(message, str) or not message.strip():
         raise bad_request("message 不能为空")
@@ -312,8 +310,12 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Reques
     if settings.AI_CHAT_RUNS_ENABLED and turn_id and request is not None and "respond-async" in request.headers.get("Prefer", "").lower():
         turn = submit_run(user["userId"], turn_id, user_message, body.reference.model_dump() if body.reference else None)
         return JSONResponse(status_code=202 if turn["status"] == "running" else 200, content=success(turn, "任务已受理"))
+    check_user_rate(user["userId"], "ai_chat", limit=30, window_s=300)
+    generation = None
     if turn_id:
-        turn, is_new = start_turn(user["userId"], turn_id, user_message)
+        reference_options = {"reference": body.reference.model_dump()} if body.reference else {}
+        turn, is_new = start_turn(user["userId"], turn_id, user_message, **reference_options)
+        generation = turn.get("generation")
         if not is_new:
             if turn["status"] == "succeeded":
                 return success(
@@ -330,24 +332,28 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Reques
                 status_code=202,
                 content=success({"turnId": turn_id, "status": "running"}, "AI 回答仍在生成中"),
             )
+    else:
+        generation = capture_generation(user["userId"])
+    generation_options = {"expected_generation": generation} if generation is not None else {}
     if not settings.AI_AGENT_URL:
         exc = ai_unavailable("AI 助手未配置")
         if turn_id:
-            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status)
+            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status, **generation_options)
         raise exc
     try:
         result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
     except BizError as exc:
         if turn_id:
-            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status)
+            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status, **generation_options)
         elif exc.http_status in (502, 503, 429):
-            _persist_failed_turn(user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试")
+            _persist_failed_turn(user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试", **generation_options)
         raise
     except Exception:
         if turn_id:
             fail_turn(
                 user["userId"], turn_id, user_message,
                 "AI 助手暂时不可用，请稍后重试", "TT_COMMON_50001", 500,
+                **generation_options,
             )
         raise
     # 入库：用户提问 + 助手回复（含卡片快照）
@@ -356,7 +362,7 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Reques
     cards = [c for c in data if isinstance(c, dict)] if isinstance(data, list) else None
     if turn_id:
         completed_turn = complete_turn(
-            user["userId"], turn_id, user_message, agent_message, cards=cards
+            user["userId"], turn_id, user_message, agent_message, cards=cards, **generation_options
         )
         if completed_turn is None:
             raise conflict(
@@ -370,7 +376,7 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Reques
             )
     else:
         try:
-            append_turn(user["userId"], user_message, agent_message, cards=cards)
+            append_turn(user["userId"], user_message, agent_message, cards=cards, **generation_options)
         except Exception:
             logger.exception("[ai/chat] 聊天记录入库失败 user_id=%s", user["userId"])
     return success(result, result.get("message") or "ok")
@@ -478,6 +484,7 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
     if not title and not description:
         raise bad_request("需求内容为空，无法匹配")
 
+    generation = capture_generation(user["userId"])
     result = _forward_to_agent(message, exclude_user_id=user["userId"])
     cards = []
     if isinstance(result, dict):
@@ -500,6 +507,7 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
             f"匹配需求：{title}" if title else "匹配需求",
             agent_message,
             cards=cards if cards else None,
+            expected_generation=generation,
         )
     except Exception:
         logger.exception("[ai/match] 聊天记录入库失败 user_id=%s", user["userId"])
@@ -519,8 +527,8 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
 # ── 聊天记录持久化（切页/重登后历史不丢）──────────────────────
 @router.get("/ai/chat/messages")
 def ai_chat_messages_list(user: dict = Depends(identity)):
-    messages = list_messages(user["userId"])
-    return success({"messages": messages, "referenceSupported": settings.AI_CHAT_RUNS_ENABLED}, "ok")
+    history = list_history(user["userId"])
+    return success({**history, "referenceSupported": settings.AI_CHAT_RUNS_ENABLED}, "ok")
 
 
 @router.get("/ai/chat/turns/{turn_id}")

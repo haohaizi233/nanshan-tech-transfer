@@ -1,11 +1,12 @@
 """Single-attempt private Agent stream transport and durable run executor."""
 
+import http.client
 import json
 import socket
 import threading
 import time
 import urllib.request
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 
 from config import settings
@@ -27,8 +28,96 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def private_opener():
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+class _ConnectionBudget:
+    def __init__(self, deadline):
+        self.deadline = deadline
+        self.expired = threading.Event()
+        self.connections = []
+        self.sockets = []
+        self.lock = threading.Lock()
+
+    def track(self, connection):
+        with self.lock:
+            self.connections.append(connection)
+
+    def check(self):
+        if self.expired.is_set() or time.monotonic() >= self.deadline:
+            raise StreamError("execution deadline")
+
+    def track_socket(self, connection_socket):
+        with self.lock:
+            self.sockets.append(connection_socket)
+
+    def interrupt(self):
+        self.expired.set()
+        with self.lock:
+            connections = tuple(self.connections)
+            sockets = tuple(self.sockets)
+        for connection_socket in sockets + tuple(connection.sock for connection in connections):
+            if connection_socket is not None:
+                with suppress(OSError):
+                    connection_socket.shutdown(socket.SHUT_RDWR)
+
+
+class _DeadlineConnection:
+    def __init__(self, *args, budget, **kwargs):
+        self.budget = budget
+        super().__init__(*args, **kwargs)
+        budget.track(self)
+
+    def connect(self):
+        self.budget.check()
+        super().connect()
+        self.budget.track_socket(self.sock)
+        self.budget.check()
+
+
+class _HTTPConnection(_DeadlineConnection, http.client.HTTPConnection):
+    pass
+
+
+class _HTTPSConnection(_DeadlineConnection, http.client.HTTPSConnection):
+    pass
+
+
+class _HTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, budget):
+        super().__init__()
+        self.budget = budget
+
+    def http_open(self, request):
+        return self.do_open(lambda *args, **kwargs: _HTTPConnection(*args, budget=self.budget, **kwargs), request)
+
+
+class _HTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, budget):
+        super().__init__()
+        self.budget = budget
+
+    def https_open(self, request):
+        return self.do_open(lambda *args, **kwargs: _HTTPSConnection(*args, budget=self.budget, **kwargs), request, context=self._context)
+
+
+def private_opener(budget=None):
+    handlers = [urllib.request.ProxyHandler({}), NoRedirect()]
+    if budget is not None:
+        handlers.extend([_HTTPHandler(budget), _HTTPSHandler(budget)])
+    return urllib.request.build_opener(*handlers)
+
+
+@contextmanager
+def private_response(request, deadline):
+    budget = _ConnectionBudget(deadline)
+    budget.check()
+    timer = threading.Timer(max(0.001, deadline - time.monotonic()), budget.interrupt)
+    timer.daemon = True
+    timer.start()
+    try:
+        with private_opener(budget).open(request, timeout=max(0.001, deadline - time.monotonic())) as response:
+            budget.check()
+            yield response
+    finally:
+        timer.cancel()
 
 
 def validate_result(result):
@@ -119,22 +208,8 @@ def post_agent(url, service_key, payload, budget, on_stage):
         },
         method="POST",
     )
-    opened = private_opener().open(request, timeout=max(0.01, deadline - time.monotonic()))
-    with opened as response:
-        connection_socket = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
-
-        def interrupt_read():
-            if connection_socket is not None:
-                with suppress(OSError):
-                    connection_socket.shutdown(socket.SHUT_RDWR)
-
-        timer = threading.Timer(max(0.01, deadline - time.monotonic()), interrupt_read)
-        timer.daemon = True
-        timer.start()
-        try:
-            return consume_stream(response, payload["executionId"], deadline, on_stage)
-        finally:
-            timer.cancel()
+    with private_response(request, deadline) as response:
+        return consume_stream(response, payload["executionId"], deadline, on_stage)
 
 
 def execute_run(run):

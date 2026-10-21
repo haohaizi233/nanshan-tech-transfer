@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 from config import settings
 from db import close_pool, get_cursor
 from modules.ai import chat_runs
-from modules.ai.chat_runner import execute_run, private_opener
+from modules.ai.chat_runner import execute_run, private_response
 
 
 def probe_agent():
@@ -27,7 +27,7 @@ def probe_agent():
     url = f"{parsed.scheme}://{parsed.netloc}/internal/ai/ready"
     try:
         request = urllib.request.Request(url, headers={"X-AI-Service-Key": settings.AI_INTERNAL_SERVICE_KEY})
-        with private_opener().open(request, timeout=2) as response:
+        with private_response(request, time.monotonic() + 2) as response:
             payload = json.loads(response.read(4096))
             return (
                 response.status == 200

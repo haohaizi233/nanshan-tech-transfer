@@ -17,6 +17,20 @@ from db import get_cursor
 _VALID_ROLES = ('user', 'assistant')
 
 
+def _session_generation(cur, user_id):
+    cur.execute("SELECT to_regclass('ai_chat_session') AS relation")
+    relation = cur.fetchone()
+    if not relation or not relation['relation']:
+        return None
+    from modules.ai.chat_runs import _lock_session
+    return _lock_session(cur, user_id)
+
+
+def capture_generation(user_id):
+    with get_cursor(commit=True) as cur:
+        return _session_generation(cur, user_id)
+
+
 def _turn_view(row: dict | None) -> dict | None:
     if not row:
         return None
@@ -25,7 +39,7 @@ def _turn_view(row: dict | None) -> dict | None:
         return run_view(row)
     def format_time(value):
         return value.isoformat() if value else None
-    return {
+    result = {
         'turnId': row['turn_id'],
         'status': row['status'],
         'reply': row.get('reply'),
@@ -36,11 +50,34 @@ def _turn_view(row: dict | None) -> dict | None:
         'createdAt': format_time(row.get('created_at')),
         'updatedAt': format_time(row.get('updated_at')),
     }
+    if 'generation' in row:
+        result['generation'] = row['generation']
+    return result
 
 
-def start_turn(user_id: int, turn_id: str, user_message: str) -> tuple[dict, bool]:
+def start_turn(user_id: int, turn_id: str, user_message: str, reference=None) -> tuple[dict, bool]:
     """Create a running turn once, or return the existing per-user turn."""
     with get_cursor(commit=True) as cur:
+        generation = _session_generation(cur, user_id)
+        if generation is not None:
+            from core.errors import conflict
+            from modules.ai.chat_runs import request_hash
+            cur.execute("SELECT 1 FROM ai_chat_tombstone WHERE user_id = %s AND turn_id = %s AND expires_at > clock_timestamp()", (user_id, turn_id))
+            if cur.fetchone():
+                raise conflict('该轮次已清空，请重新发起提问', {'reason': 'chat_history_cleared', 'accepted': False})
+            cur.execute("SELECT * FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s", (user_id, turn_id))
+            existing = cur.fetchone()
+            fingerprint = request_hash(user_message, reference)
+            if existing:
+                if (existing.get('request_hash') or request_hash(existing['user_message'])) != fingerprint:
+                    raise conflict('相同 turnId 的请求内容不一致', {'reason': 'turn_request_conflict', 'accepted': False})
+                return _turn_view(existing), False
+            cur.execute(
+                """INSERT INTO ai_chat_turn(user_id, turn_id, status, user_message, execution_mode, request_hash, generation, reference)
+                   VALUES (%s, %s, 'running', %s, 'sync', %s, %s, %s) RETURNING *""",
+                (user_id, turn_id, user_message.strip(), fingerprint, generation, Json(reference) if reference else None),
+            )
+            return _turn_view(cur.fetchone()), True
         cur.execute(
             '''INSERT INTO ai_chat_turn (user_id, turn_id, status, user_message)
                VALUES (%s, %s, 'running', %s)
@@ -76,8 +113,15 @@ def get_turn(user_id: int, turn_id: str) -> dict | None:
     return _turn_view(row)
 
 
-def _insert_turn_messages(cur, user_id: int, user_message: str, assistant_message: str, cards=None):
+def _insert_turn_messages(cur, user_id: int, user_message: str, assistant_message: str, cards=None, generation=None, turn_id=None):
     cards_json = Json(cards) if cards is not None else None
+    if generation is not None:
+        cur.execute(
+            """INSERT INTO ai_chat_message(user_id, role, content, cards, generation, turn_id)
+               VALUES (%s, 'user', %s, NULL, %s, %s), (%s, 'assistant', %s, %s, %s, %s)""",
+            (user_id, user_message, generation, turn_id, user_id, assistant_message or '', cards_json, generation, turn_id),
+        )
+        return
     cur.execute(
         '''INSERT INTO ai_chat_message (user_id, role, content, cards)
            VALUES (%s, 'user', %s, NULL)''',
@@ -90,10 +134,32 @@ def _insert_turn_messages(cur, user_id: int, user_message: str, assistant_messag
     )
 
 
-def complete_turn(user_id: int, turn_id: str, user_message: str, reply: str, cards=None) -> dict | None:
+def _finish_sync_turn(cur, user_id, turn_id, user_message, reply, cards, generation, error_code=None, error_status=None):
+    status = 'failed' if error_code else 'succeeded'
+    cur.execute(
+        """UPDATE ai_chat_turn SET status = %s, reply = %s, cards = %s,
+                  error_message = %s, error_code = %s, error_status = %s,
+                  updated_at = now(), completed_at = now()
+           WHERE user_id = %s AND turn_id = %s AND generation = %s
+             AND execution_mode = 'sync' AND status = 'running' AND user_message = %s RETURNING *""",
+        (status, reply or '', Json(cards) if cards is not None else None,
+         reply if error_code else None, error_code, error_status, user_id, turn_id, generation, user_message.strip()),
+    )
+    row = cur.fetchone()
+    if row:
+        _insert_turn_messages(cur, user_id, user_message, reply, cards, generation)
+    return _turn_view(row)
+
+
+def complete_turn(user_id: int, turn_id: str, user_message: str, reply: str, cards=None, expected_generation=None) -> dict | None:
     """Atomically finish a running turn and persist its user/assistant message pair."""
     cards_json = Json(cards) if cards is not None else None
     with get_cursor(commit=True) as cur:
+        generation = _session_generation(cur, user_id)
+        if generation is not None:
+            if expected_generation != generation:
+                return None
+            return _finish_sync_turn(cur, user_id, turn_id, user_message, reply, cards, generation)
         cur.execute(
             '''UPDATE ai_chat_turn
                SET status = 'succeeded', reply = %s, cards = %s,
@@ -120,10 +186,15 @@ def complete_turn(user_id: int, turn_id: str, user_message: str, reply: str, car
 
 def fail_turn(
     user_id: int, turn_id: str, user_message: str, error_message: str,
-    error_code: str, error_status: int,
+    error_code: str, error_status: int, expected_generation=None,
 ) -> dict | None:
     """Atomically persist a failed turn and its visible user/assistant message pair."""
     with get_cursor(commit=True) as cur:
+        generation = _session_generation(cur, user_id)
+        if generation is not None:
+            if expected_generation != generation:
+                return None
+            return _finish_sync_turn(cur, user_id, turn_id, user_message, error_message, None, generation, error_code, error_status)
         cur.execute(
             '''UPDATE ai_chat_turn
                SET status = 'failed', reply = %s, error_message = %s,
@@ -148,10 +219,16 @@ def fail_turn(
     return _turn_view(row)
 
 
-def append_turn(user_id: int, user_message: str, assistant_message: str, cards=None) -> None:
+def append_turn(user_id: int, user_message: str, assistant_message: str, cards=None, expected_generation=None) -> bool:
     """原子写入一轮对话（user + assistant），避免只落一半。"""
     cards_json = Json(cards) if cards is not None else None
     with get_cursor(commit=True) as cur:
+        generation = _session_generation(cur, user_id)
+        if generation is not None:
+            if expected_generation != generation:
+                return False
+            _insert_turn_messages(cur, user_id, user_message, assistant_message, cards, generation)
+            return True
         cur.execute(
             '''INSERT INTO ai_chat_message (user_id, role, content, cards)
                VALUES (%s, 'user', %s, NULL)''',
@@ -162,6 +239,7 @@ def append_turn(user_id: int, user_message: str, assistant_message: str, cards=N
                VALUES (%s, 'assistant', %s, %s)''',
             (user_id, assistant_message or '', cards_json),
         )
+        return True
 
 
 def append_message(user_id: int, role: str, content: str, cards=None) -> dict:
@@ -185,19 +263,38 @@ def append_message(user_id: int, role: str, content: str, cards=None) -> dict:
 
 def list_messages(user_id: int, limit: int = 100) -> list[dict]:
     """返回当前用户最近 limit 条聊天消息（按时间升序）。"""
-    limit = max(1, min(int(limit or 100), 200))
     with get_cursor() as cur:
-        cur.execute(
+        return _list_messages(cur, user_id, limit)
+
+
+def list_history(user_id: int, limit: int = 100) -> dict:
+    with get_cursor() as cur:
+        cur.execute("SELECT to_regclass('ai_chat_session') AS relation")
+        relation = cur.fetchone()
+        generation = 0
+        if relation and relation['relation']:
+            cur.execute("SELECT generation FROM ai_chat_session WHERE user_id = %s FOR SHARE", (user_id,))
+            session = cur.fetchone()
+            if session:
+                generation = session['generation']
+        return {'messages': _list_messages(cur, user_id, limit, generation), 'generation': generation}
+
+
+def _list_messages(cur, user_id, limit, generation=None):
+    limit = max(1, min(int(limit or 100), 200))
+    generation_filter = '' if generation is None else " AND COALESCE((to_jsonb(ai_chat_message)->>'generation')::bigint, 0) = %s"
+    parameters = (user_id, limit) if generation is None else (user_id, generation, limit)
+    cur.execute(
             '''SELECT id, role, content, cards, created_at,
                       to_jsonb(ai_chat_message)->>'turn_id' AS turn_id,
                       COALESCE((to_jsonb(ai_chat_message)->>'generation')::bigint, 0) AS generation
                FROM ai_chat_message
-               WHERE user_id = %s
+               WHERE user_id = %s''' + generation_filter + '''
                ORDER BY id DESC
                LIMIT %s''',
-            (user_id, limit),
+            parameters,
         )
-        rows = cur.fetchall() or []
+    rows = cur.fetchall() or []
     rows.reverse()  # 升序回放
     return [
         {

@@ -53,9 +53,9 @@ class TestAiRoutes:
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
-    @patch("routes.ai.list_messages")
+    @patch("routes.ai.list_history")
     def test_ai_chat_history(self, mock_list, mock_active, client):
-        mock_list.return_value = []
+        mock_list.return_value = {"messages": [], "generation": 0}
         resp = client.get("/api/tech-transfer/v1/ai/chat/messages", headers=_auth())
         assert resp.status_code == 200
 

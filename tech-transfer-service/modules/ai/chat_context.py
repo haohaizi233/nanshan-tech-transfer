@@ -23,6 +23,16 @@ class QueryPlan(BaseModel):
         Literal["01_idea", "02_lab", "03_pilot_ready", "04_pilot_done", "05_mass_ready", "06_mass_done"] | None
     ) = None
     coop_modes: list[str] = Field(default_factory=list)
+    # 软偏好：只影响排序加权，不作为数据库硬性过滤条件（可选字段，向后兼容）
+    preferences: list[
+        Literal[
+            "prefer_recent",
+            "prefer_mature",
+            "prefer_stable_price",
+            "prefer_local",
+            "prefer_popular",
+        ]
+    ] = Field(default_factory=list)
     limit: int = Field(10, ge=1, le=10)
     reason: str = ""
 

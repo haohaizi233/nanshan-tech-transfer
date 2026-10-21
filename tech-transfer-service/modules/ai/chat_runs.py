@@ -10,6 +10,7 @@ from psycopg2.extras import Json
 
 from config import settings
 from core.errors import BizError, ai_unavailable, conflict
+from core.rate_limit import check_user_rate
 from db import get_cursor
 from modules.ai.chat_context import load_context, validate_reference
 
@@ -108,28 +109,33 @@ def submit_run(user_id, turn_id, message, reference=None):
     fingerprint = request_hash(message, reference)
     with get_cursor(commit=True) as cur:
         generation = _lock_session(cur, user_id)
-        cur.execute("DELETE FROM ai_chat_tombstone WHERE user_id = %s AND expires_at <= clock_timestamp()", (user_id,))
-        cur.execute("SELECT 1 FROM ai_chat_tombstone WHERE user_id = %s AND turn_id = %s", (user_id, turn_id))
-        if cur.fetchone():
-            raise conflict("该轮次已清空，请重新发起提问", {"reason": "chat_history_cleared"})
-        cur.execute("SELECT * FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s", (user_id, turn_id))
-        existing = cur.fetchone()
-        if existing:
-            existing_hash = existing.get("request_hash") or request_hash(existing["user_message"])
-            if existing_hash != fingerprint:
-                raise conflict("相同 turnId 的请求内容不一致", {"reason": "turn_request_conflict"})
-            return run_view(existing)
-        require_ready()
-        validate_reference(cur, user_id, generation, reference)
-        cur.execute(
-            """SELECT count(*) FILTER (WHERE status = 'queued') AS queued,
-                       count(*) FILTER (WHERE status = 'running') AS running FROM ai_chat_turn
-                       WHERE user_id = %s AND status IN ('queued', 'running')""",
-            (user_id,),
-        )
-        counts = cur.fetchone()
-        if counts["queued"] >= 3:
-            raise BizError("TT_AI_42901", "已有三个问题排队，请稍后再试", 429)
+        try:
+            cur.execute("DELETE FROM ai_chat_tombstone WHERE user_id = %s AND expires_at <= clock_timestamp()", (user_id,))
+            cur.execute("SELECT 1 FROM ai_chat_tombstone WHERE user_id = %s AND turn_id = %s", (user_id, turn_id))
+            if cur.fetchone():
+                raise conflict("该轮次已清空，请重新发起提问", {"reason": "chat_history_cleared"})
+            cur.execute("SELECT * FROM ai_chat_turn WHERE user_id = %s AND turn_id = %s", (user_id, turn_id))
+            existing = cur.fetchone()
+            if existing:
+                existing_hash = existing.get("request_hash") or request_hash(existing["user_message"])
+                if existing_hash != fingerprint:
+                    raise conflict("相同 turnId 的请求内容不一致", {"reason": "turn_request_conflict"})
+                return run_view(existing)
+            check_user_rate(user_id, "ai_chat", limit=30, window_s=300)
+            require_ready()
+            validate_reference(cur, user_id, generation, reference)
+            cur.execute(
+                """SELECT count(*) FILTER (WHERE status = 'queued') AS queued,
+                           count(*) FILTER (WHERE status = 'running') AS running FROM ai_chat_turn
+                           WHERE user_id = %s AND status IN ('queued', 'running')""",
+                (user_id,),
+            )
+            counts = cur.fetchone()
+            if counts["queued"] >= 3:
+                raise BizError("TT_AI_42901", "已有三个问题排队，请稍后再试", 429)
+        except BizError as exc:
+            exc.details = {**(exc.details or {}), "accepted": False}
+            raise
         cur.execute(
             """INSERT INTO ai_chat_turn(user_id, turn_id, status, user_message, execution_mode,
                        request_hash, generation, reference, stage, queue_deadline)

@@ -83,6 +83,11 @@ class TestAiChatTurnSchema:
 
 
 class TestAiChatTurnStore:
+    @pytest.fixture(autouse=True)
+    def legacy_schema(self):
+        with patch("modules.ai.chat_store._session_generation", return_value=None):
+            yield
+
     @patch("modules.ai.chat_store.get_cursor")
     def test_start_turn_creates_once_and_returns_existing_on_duplicate(self, mock_get_cursor):
         from modules.ai.chat_store import start_turn
@@ -175,6 +180,21 @@ class TestAiChatTurnStore:
 
 
 class TestAiChatTurnRoutes:
+    @patch("core.middleware._user_is_active", return_value=True)
+    @patch("routes.ai.list_history")
+    def test_http_history_matches_the_shared_client_contract(self, list_history, _active, client):
+        import json
+        from pathlib import Path
+
+        fixture = Path(__file__).resolve().parents[2] / "南山小程序" / "南山" / "tests" / "fixtures" / "ai-chat-history-contract.json"
+        expected = json.loads(fixture.read_text(encoding="utf-8"))
+        list_history.return_value = {key: value for key, value in expected.items() if key != "referenceSupported"}
+        with patch("routes.ai.settings.AI_CHAT_RUNS_ENABLED", True):
+            response = client.get("/api/tech-transfer/v1/ai/chat/messages", headers=_auth(7))
+        assert response.status_code == 200
+        assert response.json()["data"] == expected
+        list_history.assert_called_once_with(7)
+
     @patch("routes.ai.check_user_rate")
     @patch("routes.ai.start_turn")
     @patch("routes.ai._forward_to_agent")
