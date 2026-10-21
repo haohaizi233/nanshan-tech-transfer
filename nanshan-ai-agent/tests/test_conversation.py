@@ -44,6 +44,16 @@ class ConversationTests(unittest.TestCase):
         self.assertIsNone(response.route)
         self.assertIsNone(response.clarification)
 
+    def test_polite_filter_followup_still_inherits_previous_topic(self):
+        from app.conversation import resolve_context
+        plan = RouteResult(intent="search_achievement", keywords=["机器视觉"], max_price_wan=100).model_dump()
+        for message in ("请把预算改成50万元以内", "帮我预算改成50万元以内"):
+            with self.subTest(message=message):
+                response = resolve_context(ChatRequest(message=message, context=context(plan=plan)))
+                self.assertIsNotNone(response.route)
+                self.assertEqual(response.route.keywords, ["机器视觉"])
+                self.assertEqual(response.route.max_price_wan, 50)
+
     def test_changed_region_or_cooperation_drops_stale_model_evidence(self):
         route = RouteResult(intent="search_demand", keywords=["机器视觉"])
         original = {"id": 1, "title": "质检", "description": "机器视觉", "region": "深圳", "coop_mode": ["联合研发"], "_advisor_evidence": ["深圳"], "_advisor_insight": "可核对深圳场景"}

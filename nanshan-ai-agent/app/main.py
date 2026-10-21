@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger("nanshan.ai-agent")
 from app.database import get_db
 from app.llm_client import LLMError, set_fallback_provider
-from app.router import classify_intent
+from app.router import apply_condition_guards, classify_intent
 from app.schemas import ChatRequest, ChatResponse, InternalChatRequest, RouteResult
 from app.conversation import merge_route, record_matches, resolve_context
 
@@ -34,6 +34,9 @@ from app.services.achievement_service import (
 from app.services.demand_service import (
     search_demands,
 )
+
+from app.services.amount_parser import find_amount_bounds
+from app.services.diagnostics import facts_for
 
 from app.formatters import (
     format_achievement_card,
@@ -236,13 +239,13 @@ def _final_records(results, request, route):
     return records[:route.limit]
 
 
-def _respond(route, request, records):
+def _respond(route, request, records, facts=None):
     emit_stage("formatting")
     formatter = format_achievement_card if route.intent == "search_achievement" else format_demand_card
     cards = enrich_cards([formatter(item) for item in records], records, route)
     trace_count("returned_count", len(cards))
     return ChatResponse(
-        success=True, intent=route.intent, message=result_message(request.message, cards, route),
+        success=True, intent=route.intent, message=result_message(request.message, cards, route, facts),
         data=cards, queryPlan=route.model_dump(),
     )
 
@@ -287,6 +290,9 @@ def _process_ai_chat(request: ChatRequest):
     try:
         route = resolution.route or classify_intent(request.message)
         route = merge_route(request.message, route)
+        # 硬性条件 / 软偏好分离闸门：merge_route 会按原话重新解析条件，
+        # 必须在它之后再跑一次闸门，否则软偏好会被还原成硬过滤。
+        route = apply_condition_guards(route, request.message)
     except ValueError:
         return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
     except LLMError as exc:
@@ -306,7 +312,17 @@ def _process_ai_chat(request: ChatRequest):
         candidates = _search(route, request)
         candidates = [item for item in candidates[:20] if _visible(item, request.exclude_owner_user_id) and record_matches(item, route)]
         trace_count("candidate_count", len(candidates))
-        results = rerank_results(intent=route.intent, user_message=request.message, candidates=candidates, top_n=route.limit)
+        soft_cap = None
+        if "prefer_low_price" in route.preferences:
+            soft_cap = find_amount_bounds(request.message).get("max_wan")
+        results = rerank_results(
+            intent=route.intent,
+            user_message=request.message,
+            candidates=candidates,
+            top_n=route.limit,
+            preferences=route.preferences,
+            soft_cap_wan=soft_cap,
+        )
         candidates_by_id = {item["id"]: item for item in candidates}
         selected = []
         selected_ids = set()
@@ -325,4 +341,9 @@ def _process_ai_chat(request: ChatRequest):
     except Exception as exc:
         logger.error("retrieval_failed type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail={"message": "数据库暂时繁忙，请稍后重试。", "agentReason": "database_unavailable"}) from exc
-    return _respond(route, request, selected)
+    facts = None
+    if not selected and settings.AI_EMPTY_DIAGNOSTICS:
+        # 零结果时补一次轻量聚合查询，把库里的客观事实带进说明里，
+        # 避免把"库里没有"说成"你条件不合适"。
+        facts = facts_for(route.intent)
+    return _respond(route, request, selected, facts)

@@ -2,74 +2,15 @@ from typing import Any
 
 from app.database import get_db
 from app.runtime_trace import trace_stage
-from app.services.query_utils import escape_like_term, normalize_search_terms
+from app.services import retrieval, taxonomy
+from app.services.query_utils import escape_like_term
 
 
-# 第一版先用受控同义词表
-KEYWORD_EXPANSIONS = {
-    "人工智能": [
-        "人工智能",
-        "AI",
-        "artificial intelligence",
-        "机器学习",
-        "machine learning",
-        "深度学习",
-        "deep learning",
-    ],
-    "AI": [
-        "AI",
-        "人工智能",
-        "artificial intelligence",
-        "machine learning",
-        "deep learning",
-    ],
-    "机器视觉": [
-        "机器视觉",
-        "machine vision",
-        "computer vision",
-        "视觉检测",
-        "图像识别",
-    ],
-    "生物医药": [
-        "生物医药",
-        "生物",
-        "医药",
-        "生物医学",
-        "生物技术",
-        "biology",
-        "biological",
-        "pharmaceutical",
-        "medical",
-    ],
-    "生物": [
-        "生物",
-        "生物医药",
-        "生物医学",
-        "生物技术",
-        "医药",
-        "biology",
-        "biological",
-        "pharmaceutical",
-        "medical",
-    ],
-    "芯片": [
-        "芯片",
-        "半导体",
-        "集成电路",
-        "chip",
-        "semiconductor",
-        "integrated circuit",
-    ],
-}
+# 受控同义词表：既是检索扩展表，也是「裸领域词」启发式的白名单。
+# 实际取值集中在 taxonomy.KEYWORD_EXPANSIONS，这里保留同名导出以兼容既有引用。
+KEYWORD_EXPANSIONS = taxonomy.KEYWORD_EXPANSIONS
 
-MATURITY_ORDER = [
-    "01_idea",
-    "02_lab",
-    "03_pilot_ready",
-    "04_pilot_done",
-    "05_mass_ready",
-    "06_mass_done",
-]
+MATURITY_ORDER = taxonomy.MATURITY_ORDER
 
 
 def get_allowed_maturity_levels(
@@ -88,69 +29,9 @@ def get_allowed_maturity_levels(
 
 
 def expand_keywords(keywords: list[str]) -> list[str]:
-    result: list[str] = []
-
-    for keyword in normalize_search_terms(keywords):
-        keyword = keyword.strip()
-
-        if not keyword:
-            continue
-
-        expansions = KEYWORD_EXPANSIONS.get(
-            keyword,
-            [keyword],
-        )
-
-        for item in expansions:
-            if item not in result:
-                result.append(item)
-            if len(result) >= 8:
-                return result
-
-    return result
-
-
-def _calculate_score(
-    item: dict[str, Any],
-    search_terms: list[str],
-) -> int:
-    """
-    第一版简单相关度评分。
-
-    标题命中权重最高。
-    技术简介、应用领域、创新点其次。
-    """
-    score = 0
-
-    title = str(item.get("title") or "").lower()
-    tech_intro = str(item.get("tech_intro") or "").lower()
-    source_org = str(item.get("source_org_name") or "").lower()
-    application_fields = str(
-        item.get("application_fields") or ""
-    ).lower()
-    innovation_points = str(
-        item.get("innovation_points") or ""
-    ).lower()
-
-    for term in search_terms:
-        term = term.lower()
-
-        if term in title:
-            score += 5
-
-        if term in tech_intro:
-            score += 3
-
-        if term in application_fields:
-            score += 3
-
-        if term in innovation_points:
-            score += 3
-
-        if term in source_org:
-            score += 1
-
-    return score
+    """兼容入口：返回参与检索的全部词条（原词 + 同义扩展）。"""
+    plan = retrieval.build_term_plan(keywords, KEYWORD_EXPANSIONS)
+    return list(plan.all_terms)
 
 
 @trace_stage("retrieve_achievements")
@@ -168,7 +49,7 @@ def search_achievements(
 
     limit = min(max(limit, 1), 30)
 
-    search_terms = expand_keywords(keywords)
+    plan = retrieval.build_term_plan(keywords, KEYWORD_EXPANSIONS)
 
     conditions = [
         "status = 'published'",
@@ -190,41 +71,13 @@ def search_achievements(
         params.append(exclude_owner_user_id)
 
     # =========================
-    # 关键词
+    # 关键词（原词 + 同义扩展，OR 关系）
     # =========================
 
-    if search_terms:
-        keyword_conditions = []
-
-        for term in search_terms:
-
-            like_value = f"%{escape_like_term(term)}%"
-
-            keyword_conditions.append(
-                """
-                (
-                    title ILIKE %s ESCAPE E'\\\\'
-                    OR tech_intro ILIKE %s ESCAPE E'\\\\'
-                    OR source_org_name ILIKE %s ESCAPE E'\\\\'
-                    OR application_fields::text ILIKE %s ESCAPE E'\\\\'
-                    OR innovation_points::text ILIKE %s ESCAPE E'\\\\'
-                )
-                """
-            )
-
-            params.extend([
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-            ])
-
-        conditions.append(
-            "("
-            + " OR ".join(keyword_conditions)
-            + ")"
-        )
+    keyword_sql, keyword_params = retrieval.keyword_condition("achievement", plan)
+    if keyword_sql:
+        conditions.append(keyword_sql)
+        params.extend(keyword_params)
 
     # =========================
     # 机构
@@ -240,34 +93,18 @@ def search_achievements(
         )
 
     # =========================
-    # 最低价格
+    # 报价区间（重叠语义：价格未知不排除，非法数值排除）
     # =========================
 
-    if min_price_wan is not None:
-
-        conditions.append(
-            """
-            price_min_wan IS NOT NULL
-            AND price_min_wan >= %s
-            """
-        )
-
-        params.append(min_price_wan)
-
-    # =========================
-    # 最高价格
-    # =========================
-
-    if max_price_wan is not None:
-
-        conditions.append(
-            """
-            price_max_wan IS NOT NULL
-            AND price_max_wan <= %s
-            """
-        )
-
-        params.append(max_price_wan)
+    amount_sql, amount_params = retrieval.amount_condition(
+        min_price_wan,
+        max_price_wan,
+        "price_min_wan",
+        "price_max_wan",
+    )
+    if amount_sql:
+        conditions.append(amount_sql)
+        params.extend(amount_params)
 
     # =========================
     # 成熟度
@@ -295,6 +132,11 @@ def search_achievements(
         conditions
     )
 
+    # 相关度下沉到 SQL：候选池按相关度排序，created_at 只作同分次级键。
+    # （旧实现是 ORDER BY created_at DESC LIMIT 50，高相关的历史成果会被挤掉。）
+    relevance_sql, relevance_params = retrieval.relevance_expression("achievement", plan)
+
+    params = relevance_params + params
     params.append(50)
 
     sql = f"""
@@ -316,10 +158,11 @@ def search_achievements(
             contact_phone,
             contact_email,
             view_count,
-            created_at
+            created_at,
+            ({relevance_sql}) AS _rel
         FROM achievement
         WHERE {where_clause}
-        ORDER BY created_at DESC
+        ORDER BY _rel DESC, created_at DESC
         LIMIT %s;
     """
 
@@ -339,20 +182,8 @@ def search_achievements(
 
         item = dict(row)
 
-        item["_score"] = (
-            _calculate_score(
-                item,
-                search_terms,
-            )
-            if search_terms
-            else 1
-        )
+        item["_score"] = item.pop("_rel", 0) or 0
 
         results.append(item)
-
-    results.sort(
-        key=lambda x: x["_score"],
-        reverse=True,
-    )
 
     return results[:limit]

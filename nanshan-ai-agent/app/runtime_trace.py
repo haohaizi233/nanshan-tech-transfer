@@ -38,7 +38,7 @@ def trace_count(name: str, count: int):
 
 
 def trace_degradation(reason: str):
-    if reason in {"small_candidate_set", "budget_low", "rerank_failed", "context_limit", "no_candidates", "visibility_changed"}:
+    if reason in {"small_candidate_set", "budget_low", "rerank_failed", "context_limit", "no_candidates", "visibility_changed", "preference_weighted"}:
         _logger.info("agent_degradation trace_id=%s reason=%s", current_trace_id(), reason)
 
 

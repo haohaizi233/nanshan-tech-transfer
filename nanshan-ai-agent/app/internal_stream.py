@@ -59,7 +59,6 @@ def prepare_stream(body, request, *, slots, executor, run, timeout_seconds):
                 observer("failed")
                 publish({"type": "error", "reason": "stream_limit"})
             else:
-                observer("succeeded")
                 publish(final)
         except Exception as exc:
             observer("failed")

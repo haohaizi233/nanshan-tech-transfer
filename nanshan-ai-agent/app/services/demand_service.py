@@ -2,48 +2,8 @@ from typing import Any
 
 from app.database import get_db
 from app.runtime_trace import trace_stage
-from app.services.achievement_service import expand_keywords
-from app.services.query_utils import escape_like_term, normalize_search_terms
-
-
-def _calculate_score(
-    item: dict[str, Any],
-    search_terms: list[str],
-) -> int:
-
-    score = 0
-
-    title = str(item.get("title") or "").lower()
-    description = str(
-        item.get("description") or ""
-    ).lower()
-    org_name = str(
-        item.get("org_name_snapshot") or ""
-    ).lower()
-    region = str(item.get("region") or "").lower()
-    coop_mode = str(
-        item.get("coop_mode") or ""
-    ).lower()
-
-    for term in search_terms:
-        term = term.lower()
-
-        if term in title:
-            score += 5
-
-        if term in description:
-            score += 3
-
-        if term in org_name:
-            score += 1
-
-        if term in region:
-            score += 1
-
-        if term in coop_mode:
-            score += 1
-
-    return score
+from app.services import retrieval, taxonomy
+from app.services.query_utils import escape_like_term
 
 
 @trace_stage("retrieve_demands")
@@ -61,11 +21,7 @@ def search_demands(
 
     limit = min(max(limit, 1), 30)
 
-    coop_modes = normalize_search_terms(coop_modes or [])[:5]
-
-    search_terms = expand_keywords(
-        keywords
-    )
+    plan = retrieval.build_term_plan(keywords, taxonomy.KEYWORD_EXPANSIONS)
 
     conditions = [
         "status = 'published'",
@@ -97,42 +53,13 @@ def search_demands(
         params.append(exclude_owner_user_id)
 
     # =========================
-    # 关键词
+    # 关键词（原词 + 同义扩展，OR 关系）
     # =========================
 
-    if search_terms:
-
-        keyword_conditions = []
-
-        for term in search_terms:
-
-            like_value = f"%{escape_like_term(term)}%"
-
-            keyword_conditions.append(
-                """
-                (
-                    title ILIKE %s ESCAPE E'\\\\'
-                    OR description ILIKE %s ESCAPE E'\\\\'
-                    OR org_name_snapshot ILIKE %s ESCAPE E'\\\\'
-                    OR region ILIKE %s ESCAPE E'\\\\'
-                    OR coop_mode::text ILIKE %s ESCAPE E'\\\\'
-                )
-                """
-            )
-
-            params.extend([
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-            ])
-
-        conditions.append(
-            "("
-            + " OR ".join(keyword_conditions)
-            + ")"
-        )
+    keyword_sql, keyword_params = retrieval.keyword_condition("demand", plan)
+    if keyword_sql:
+        conditions.append(keyword_sql)
+        params.extend(keyword_params)
 
     # =========================
     # 发布机构
@@ -163,57 +90,36 @@ def search_demands(
         )
 
     # =========================
-    # 最低预算
+    # 预算区间（重叠语义：预算未知不排除，非法数值排除）
     # =========================
 
-    if min_budget_wan is not None:
-
-        conditions.append(
-            """
-            budget_min_wan IS NOT NULL
-            AND budget_min_wan >= %s
-            """
-        )
-
-        params.append(
-            min_budget_wan
-        )
+    amount_sql, amount_params = retrieval.amount_condition(
+        min_budget_wan,
+        max_budget_wan,
+        "budget_min_wan",
+        "budget_max_wan",
+    )
+    if amount_sql:
+        conditions.append(amount_sql)
+        params.extend(amount_params)
 
     # =========================
-    # 最高预算
+    # 合作方式（多个方式是 OR 关系，别名归一后命中任一即可）
     # =========================
 
-    if max_budget_wan is not None:
-
-        conditions.append(
-            """
-            budget_max_wan IS NOT NULL
-            AND budget_max_wan <= %s
-            """
-        )
-
-        params.append(
-            max_budget_wan
-        )
-
-    # =========================
-    # 合作方式
-    # =========================
-
-    for mode in coop_modes:
-
-        conditions.append(
-            "coop_mode::text ILIKE %s ESCAPE E'\\\\'"
-        )
-
-        params.append(
-            f"%{escape_like_term(mode)}%"
-        )
+    coop_sql, coop_params = retrieval.coop_mode_condition(list(coop_modes or []))
+    if coop_sql:
+        conditions.append(coop_sql)
+        params.extend(coop_params)
 
     where_clause = " AND ".join(
         conditions
     )
 
+    # 相关度下沉到 SQL：候选池按相关度排序，created_at 只作同分次级键。
+    relevance_sql, relevance_params = retrieval.relevance_expression("demand", plan)
+
+    params = relevance_params + params
     params.append(50)
 
     sql = f"""
@@ -234,10 +140,11 @@ def search_demands(
             view_count,
             region,
             coop_mode,
-            created_at
+            created_at,
+            ({relevance_sql}) AS _rel
         FROM demand
         WHERE {where_clause}
-        ORDER BY created_at DESC
+        ORDER BY _rel DESC, created_at DESC
         LIMIT %s;
     """
 
@@ -257,20 +164,8 @@ def search_demands(
 
         item = dict(row)
 
-        item["_score"] = (
-            _calculate_score(
-                item,
-                search_terms,
-            )
-            if search_terms
-            else 1
-        )
+        item["_score"] = item.pop("_rel", 0) or 0
 
         results.append(item)
-
-    results.sort(
-        key=lambda x: x["_score"],
-        reverse=True,
-    )
 
     return results[:limit]

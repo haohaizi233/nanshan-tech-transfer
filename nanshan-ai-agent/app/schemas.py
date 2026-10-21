@@ -18,6 +18,15 @@ MaturityType = Literal[
     "06_mass_done",
 ]
 
+# 软偏好编码：只影响排序加权，永远不进入数据库硬过滤。
+PreferenceType = Literal[
+    "prefer_recent",
+    "prefer_mature",
+    "prefer_stable_price",
+    "prefer_local",
+    "prefer_popular",
+]
+
 
 class RouteResult(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -57,6 +66,9 @@ class RouteResult(BaseModel):
     # 需求合作方式
     coop_modes: list[str] = []
 
+    # 软偏好：只参与排序加权，不作为数据库硬性过滤条件
+    preferences: list[PreferenceType] = []
+
     limit: int = Field(
         default=10,
         ge=1,
@@ -76,6 +88,10 @@ class RouteResult(BaseModel):
                 raise ValueError("最低金额不能超过最高金额")
         if len(self.keywords) > 20 or any(len(word) > 100 for word in self.keywords):
             raise ValueError("关键词超出限制")
+        if len(self.preferences) > len(PreferenceType.__args__):
+            raise ValueError("软偏好超出限制")
+        if len(set(self.preferences)) != len(self.preferences):
+            raise ValueError("软偏好不能重复")
         return self
 
 

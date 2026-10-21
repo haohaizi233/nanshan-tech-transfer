@@ -42,6 +42,11 @@ class Settings:
     AI_CHAT_MAX_CONCURRENCY = int(os.getenv("AI_CHAT_MAX_CONCURRENCY", "4"))
     AI_RERANK_MAX_CHARS = int(os.getenv("AI_RERANK_MAX_CHARS", "24000"))
     AI_INTERNAL_SERVICE_KEY = os.getenv("AI_INTERNAL_SERVICE_KEY", "")
+    # 零结果诊断：额外跑一次聚合查询，把库里客观事实带进"没找到"的说明里。
+    # 离线评测 / 压测场景可关闭，避免额外 DB 往返。
+    AI_EMPTY_DIAGNOSTICS = os.getenv("AI_EMPTY_DIAGNOSTICS", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
 
     # L5: 日志级别可配
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

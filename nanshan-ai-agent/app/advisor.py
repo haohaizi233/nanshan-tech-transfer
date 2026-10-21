@@ -32,6 +32,21 @@ _REFERENCE_POINTER = re.compile(
     r"第[一二三四五六七八九十\d]+(?:个|项|条)|(?:这个|那个|上一个|刚才的|上述|上面的)(?:成果|需求|技术|项目|卡片)|^(?:请|帮我|介绍|解读|讲讲|对比|一下|\s)*(?:它|这个|那个)(?:的|有|适|怎|能|可|是|在|和|跟|比)"
 )
 
+# 结论性 / 承诺性措辞：除非在原始资料里出现过，否则一律视为模型编造。
+_UNSUPPORTED_CLAIMS = (
+    "保证", "必然", "必定", "承诺", "稳赚", "包过", "一定能", "肯定能",
+    "已获认证", "已获批准", "已通过检测", "已通过认证", "已获专利", "已授权专利",
+    "国际领先", "国内领先", "行业领先", "全球领先", "填补空白",
+    "唯一", "首个", "首家", "首创", "独家", "成熟可靠", "完全满足",
+    "百分之百", "零风险", "立即见效", "稳定盈利", "投资回报",
+    "已量产", "已规模化", "已完成验证", "已通过验证", "已通过中试",
+)
+
+# 明显超出资料范围、不可核实的措辞。
+_UNSUPPORTED_PATTERNS = re.compile(
+    r"https?://|@|\d{11}|忽略.{0,8}(?:指令|规则)|系统提示|作为AI|我的知识库|训练数据"
+)
+
 
 def advice_mode(message: str) -> str:
     if re.search(r"比较|对比|选哪|哪个好|哪个更", message):
@@ -91,6 +106,14 @@ def _source_text(value, depth=0) -> str:
 
 
 def grounded_explanation(ranking: dict, item: dict) -> tuple[list[str], str]:
+    """校验模型给出的原文引用与解读，只放行可追溯的部分。
+
+    校验项：
+    1. quote 必须是该字段的逐字原文；
+    2. analysis 里的数字必须全部能在原始资料中找到；
+    3. analysis 里的结论性措辞（保证/领先/已认证…）必须也在原始资料里出现，
+       否则视为模型虚构，直接丢弃解读（引用仍保留）。
+    """
     evidence = []
     raw = ranking.get("evidence")
     for entry in raw[:3] if isinstance(raw, list) else []:
@@ -106,12 +129,15 @@ def grounded_explanation(ranking: dict, item: dict) -> tuple[list[str], str]:
     if not evidence or not isinstance(analysis, str) or len(analysis) > 180:
         return evidence, ""
     analysis = analysis.strip()
-    if re.search(r"https?://|@|\d{11}|保证|必然|稳赚|承诺|忽略.{0,8}(?:指令|规则)|系统提示", analysis):
+    if _UNSUPPORTED_PATTERNS.search(analysis):
         return evidence, ""
     source = " ".join(_source_text(item.get(field)) for field in _EVIDENCE_FIELDS)
     source_numbers = set(re.findall(r"\d+(?:\.\d+)?%?", source))
     if any(number not in source_numbers for number in re.findall(r"\d+(?:\.\d+)?%?", analysis)):
         return evidence, ""
+    for claim in _UNSUPPORTED_CLAIMS:
+        if claim in analysis and claim not in source:
+            return evidence, ""
     return evidence, analysis
 
 
@@ -158,14 +184,69 @@ def enrich_cards(cards: list[dict], records: list[dict], route) -> list[dict]:
     return enriched
 
 
-def result_message(message: str, cards: list[dict], route) -> str:
+def _condition_summary(route) -> list[str]:
+    conditions = []
+    for label, value in [
+        ("机构", route.organization), ("地域", route.region),
+        ("最低报价（万元）", route.min_price_wan), ("最高报价（万元）", route.max_price_wan),
+        ("最低预算（万元）", route.min_budget_wan), ("最高预算（万元）", route.max_budget_wan),
+        ("最低成熟度", route.min_maturity),
+    ]:
+        if value is not None:
+            conditions.append(f"{label}：{value}")
+    if route.coop_modes:
+        conditions.append("合作方式：" + "、".join(route.coop_modes))
+    return conditions
+
+
+def _empty_result_message(route, facts: dict | None) -> str:
+    """零结果时给出可核实的说明，而不是笼统的「不符合条件」。"""
+    from app.services.taxonomy import maturity_label
+
+    name = "科技成果" if route.intent == "search_achievement" else "技术需求"
+    keywords = "、".join(route.keywords) or "该方向"
+    conditions = _condition_summary(route)
+    detail = f"（{'；'.join(conditions)}）" if conditions else ""
+    reasons: list[str] = []
+
+    if facts:
+        total = facts.get("total") or 0
+        unpriced = facts.get("unpriced") or 0
+        priced = facts.get("priced") or 0
+        if route.intent == "search_achievement" and (route.min_price_wan is not None or route.max_price_wan is not None):
+            if total and unpriced and priced <= 1:
+                reasons.append(
+                    f"平台当前已发布的 {total} 项{name}里，{unpriced} 项报价为「面议」（未填写具体金额），"
+                    "无法与金额条件直接比较，这些记录不会被金额条件排除，但也不能据此断定符合预算"
+                )
+            elif total and priced == 0:
+                reasons.append(f"平台当前已发布的 {total} 项{name}全部未填写具体报价")
+        if route.intent == "search_demand" and (route.min_budget_wan is not None or route.max_budget_wan is not None):
+            if total and unpriced and priced <= 1:
+                reasons.append(
+                    f"平台当前已发布的 {total} 项{name}里，{unpriced} 项预算为「面议」，无法与预算条件直接比较"
+                )
+        max_maturity = facts.get("max_maturity")
+        if route.intent == "search_achievement" and route.min_maturity and max_maturity:
+            if not taxonomy.maturity_at_least(max_maturity, route.min_maturity):
+                reasons.append(
+                    f"已发布{name}中成熟度最高的是「{maturity_label(max_maturity)}」，"
+                    f"尚无达到「{maturity_label(route.min_maturity)}」的记录"
+                )
+
+    body = f"暂未找到同时满足「{keywords}」{detail}的{name}"
+    if reasons:
+        body += "。原因：" + "；".join(reasons)
+    else:
+        body += "，不会用无关结果代替推荐"
+    body += "。可以调整技术关键词或放宽条件后重试；若某项条件对您不是必须，建议直接去掉该条件再查一次。"
+    return body
+
+
+def result_message(message: str, cards: list[dict], route, facts: dict | None = None) -> str:
     name = "科技成果" if route.intent == "search_achievement" else "技术需求"
     if not cards:
-        conditions = ["、".join(route.keywords)]
-        for label, value in [("机构", route.organization), ("地域", route.region), ("最低报价（万元）", route.min_price_wan), ("最高报价（万元）", route.max_price_wan), ("最低预算（万元）", route.min_budget_wan), ("最高预算（万元）", route.max_budget_wan), ("最低成熟度", route.min_maturity)]:
-            if value is not None:
-                conditions.append(f"{label}：{value}")
-        return f"暂未找到符合当前条件的{name}（{'；'.join(conditions)}），不会用无关结果代替推荐。可以选择调整技术关键词、机构、预算或成熟度条件后再试。"
+        return _empty_result_message(route, facts)
     mode = advice_mode(message)
     if mode == "compare" and len(cards) == 2:
         comparison = []

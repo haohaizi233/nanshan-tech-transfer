@@ -39,8 +39,8 @@ class InternalStreamTests(unittest.TestCase):
         events = [json.loads(line) for line in response.text.splitlines()]
         self.assertTrue(all(event["executionId"] == "run-1" for event in events))
         stages = [event for event in events if event["type"] == "stage"]
-        self.assertEqual([event["stage"] for event in stages], ["context", "formatting", "succeeded"])
-        self.assertEqual([event["sequence"] for event in stages], [1, 2, 3])
+        self.assertEqual([event["stage"] for event in stages], ["context", "formatting"])
+        self.assertEqual([event["sequence"] for event in stages], [1, 2])
         terminal = [event for event in events if event["type"] in ("result", "error")]
         self.assertEqual(len(terminal), 1)
         self.assertTrue(terminal[0]["result"]["success"])
@@ -65,6 +65,28 @@ class InternalStreamTests(unittest.TestCase):
 
 
 class StreamLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_slow_consumer_cannot_observe_success_before_terminal_result(self):
+        from unittest.mock import Mock
+        clock = [0.0]
+        executor = Mock()
+
+        def submit(callback):
+            callback()
+            completed = Future()
+            completed.set_result(None)
+            return completed
+
+        executor.submit.side_effect = submit
+        body = InternalChatRequest(message="test", executionId="slow-reader")
+        with patch.object(settings, "AI_INTERNAL_SERVICE_KEY", "secret"), patch("app.internal_stream.time.monotonic", side_effect=lambda: clock[0]):
+            response = prepare_stream(body, Mock(headers={"X-AI-Service-Key": "secret"}), slots=BoundedSemaphore(1), executor=executor,
+                run=lambda *args: ChatResponse(success=True, intent="out_of_scope", message="done", data=[]), timeout_seconds=1)
+            first = json.loads(await response.body_iterator.__anext__())
+            clock[0] = 2.0
+            remaining = [json.loads(line) async for line in response.body_iterator]
+        self.assertEqual(first["type"], "result")
+        self.assertFalse(remaining)
+
     async def test_running_timeout_retains_capacity_until_actual_future_completes(self):
         from unittest.mock import Mock
         worker = Future()
