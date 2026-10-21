@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any
 
 from app.config import settings
@@ -42,7 +43,6 @@ RERANK_SYSTEM_PROMPT = """
 你只能输出合法 JSON。
 
 格式：
-
 {
     "results": [
     {
@@ -65,7 +65,6 @@ analysis 最多100字，解释为何值得用户进一步核对、与场景可�
 只排序真实候选，不可修改事实字段。没有证据时只输出 id 也合法。
 """
 
-
 # 软偏好加权：分值越高表示该候选更符合用户表达的偏好。
 _PREFERENCE_BONUS = {
     "prefer_recent": 6.0,
@@ -85,7 +84,6 @@ _LOCAL_HINTS = ("南山", "深圳")
 def _extract_json(text: str) -> dict:
     return extract_llm_json(text, required_any=("results",))
 
-
 def _short_text(
     value: Any,
     max_length: int = 400,
@@ -100,7 +98,6 @@ def _short_text(
 
     return text[:max_length] + "..."
 
-
 def _bounded_value(value: Any, depth: int = 0) -> Any:
     if isinstance(value, str):
         return _short_text(value, 200)
@@ -114,7 +111,6 @@ def _bounded_value(value: Any, depth: int = 0) -> Any:
         return {str(key)[:80]: _bounded_value(item, depth + 1) for key, item in list(value.items())[:12]}
     return _short_text(value, 200)
 
-
 def _as_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -123,7 +119,6 @@ def _as_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item)[:80] for item in value if str(item).strip()][:6]
     return []
-
 
 def _achievement_for_llm(item: dict) -> dict:
     """
@@ -163,7 +158,6 @@ def _achievement_for_llm(item: dict) -> dict:
         "view_count": item.get("view_count") or 0,
     }
 
-
 def _demand_for_llm(item: dict) -> dict:
     budget_min = item.get("budget_min_wan")
     budget_max = item.get("budget_max_wan")
@@ -195,11 +189,52 @@ def _demand_for_llm(item: dict) -> dict:
         "view_count": item.get("view_count") or 0,
     }
 
-
 def _maturity_label(level: Any) -> str:
     from app.services.taxonomy import maturity_label
 
     return maturity_label(level) or "未填写"
+
+
+def _parse_created_at(value: Any) -> float | None:
+    """created_at → 可比较时间戳；缺失或无法解析返回 None。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _recency_scores(candidates: list[dict]) -> dict[Any, float]:
+    """候选池内相对新鲜度得分（1=最新，0=最旧 / 无时间戳）。
+
+    prefer_recent 必须区分名次：此前只要求 created_at 非空就给固定加分，
+    所有候选同分，实际排序权重为 0（无效）。这里按候选池内的时间先后排名给分。
+    """
+    parsed = [
+        (item.get("id"), _parse_created_at(item.get("created_at")))
+        for item in candidates
+    ]
+    known = sorted(
+        ((identifier, stamp) for identifier, stamp in parsed if stamp is not None),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    count = len(known)
+    scores: dict[Any, float] = {}
+    if count == 1:
+        scores[known[0][0]] = 1.0
+    elif count > 1:
+        for rank, (identifier, _) in enumerate(known):
+            scores[identifier] = 1.0 - rank / (count - 1)
+    return scores
 
 
 def _preference_bonus(
@@ -207,6 +242,7 @@ def _preference_bonus(
     preferences: list[str],
     intent: str,
     soft_cap_wan: float | None = None,
+    recency_score: float = 0.0,
 ) -> float:
     """计算软偏好加权分（只影响排序，绝不突破已生效的硬性条件）。"""
     bonus = 0.0
@@ -215,9 +251,8 @@ def _preference_bonus(
         if not weight:
             continue
         if code == "prefer_recent":
-            created = str(item.get("created_at") or "")
-            if created:
-                bonus += weight
+            # 按池内新鲜度排名给分，保证「最新发布」真正影响排序。
+            bonus += weight * max(0.0, min(1.0, recency_score))
         elif code == "prefer_mature":
             from app.services.taxonomy import MATURITY_ORDER
 
@@ -254,7 +289,6 @@ def _preference_bonus(
                 pass
     return bonus
 
-
 def _apply_preference_promotion(
     final: list[dict],
     pool: list[dict],
@@ -286,7 +320,6 @@ def _apply_preference_promotion(
                 result[index] = candidate
                 break
     return result[:top_n]
-
 
 @trace_stage("rerank")
 def rerank_results(
@@ -321,8 +354,16 @@ def rerank_results(
     preferences = [code for code in (preferences or []) if code in _PREFERENCE_BONUS]
 
     # 软偏好加权：先算加权分，用于（1）送模型的候选顺序（2）补位名额。
+    # prefer_recent 用池内新鲜度排名区分名次（固定加分等于排序权重为 0）。
+    recency = _recency_scores(candidates) if "prefer_recent" in preferences else {}
     bonuses = {
-        item.get("id"): _preference_bonus(item, preferences, intent, soft_cap_wan)
+        item.get("id"): _preference_bonus(
+            item,
+            preferences,
+            intent,
+            soft_cap_wan,
+            recency.get(item.get("id"), 0.0),
+        )
         for item in candidates
     }
     if preferences:
@@ -428,8 +469,12 @@ def rerank_results(
     # 避免"模型少给一条 → 用户就少看一条"。
     if len(selected_items) < top_n:
         for item in candidates:
-            identifier = item.get("id")
-            if identifier in used_ids or identifier is None:
+            if item.get("id") is None:
+                continue
+            # used_ids 统一存 str(id)：LLM 路径已按 str 去重，
+            # 这里必须同口径，否则 int in set[str] 恒为 False，已选卡片会被重复补入。
+            identifier = str(item.get("id"))
+            if identifier in used_ids:
                 continue
             selected_items.append(item)
             used_ids.add(identifier)
@@ -444,7 +489,6 @@ def rerank_results(
     )
 
     return selected_items[:top_n]
-
 
 def _call_reranker(
     user_content: dict,
@@ -495,7 +539,6 @@ def _call_reranker(
 }
 
 要求：
-
 只能使用输入候选中真实存在的id。
 禁止新增候选。
 禁止编造数据。

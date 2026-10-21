@@ -27,7 +27,7 @@ def amount_to_wan(value, unit) -> float:
     """把「数值 + 单位」换算成万元。"""
     number = float(value)
     if number < 0:
-        raise ValueError("预算不能为负数")
+        return 0.0  # 负数视为0，不抛异常
     if unit and unit.startswith("亿"):
         return number * 10000
     if unit == "元":
