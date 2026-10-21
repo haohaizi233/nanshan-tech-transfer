@@ -36,9 +36,16 @@ from modules.achievement.service import (
     _validate_refs,
 )
 from modules.audit.service import record as audit_record
+from modules.admin.edit_log import (
+    compute_changes,
+    record_admin_edit_changes,
+)
 from modules.cooperation.service import (
     _release_target_slot,
     _reserve_target_slot,
+)
+from modules.demand.service import (
+    _load_tags as _load_demand_tags,
 )
 from modules.demand.service import (
     _parse_upsert_body as _parse_demand_upsert_body,
@@ -53,6 +60,20 @@ from modules.demand.service import (
     _validate_refs as _validate_demand_refs,
 )
 from modules.notification.service import emit_notification
+
+# 状态变更留痕（admin_edit_log）用的中文展示名
+_STATUS_LABELS = {
+    "draft": "草稿",
+    "pending_review": "待审核",
+    "published": "已发布",
+    "rejected": "已驳回",
+    "offline": "已下架",
+    "matched": "对接中",
+    "closed": "已关闭",
+    "cancelled": "已取消",
+    "completed": "已完成",
+}
+
 
 
 def _page_args(args) -> tuple[int, int]:
@@ -2731,7 +2752,7 @@ def update_achievement_admin(
 
         cur.execute(
             f"""
-            SELECT id, version, status, price_min_wan, price_max_wan
+            SELECT *
             FROM achievement
             WHERE {" AND ".join(where)}
             """,
@@ -2741,6 +2762,24 @@ def update_achievement_admin(
 
         if not current:
             raise achievement_not_found()
+
+        # 管理员修改变更留痕：完成人旧值必须在 _sync_inventors 重建前抓取。
+        old_inventor_names = []
+        if inventor_refs is not None:
+            cur.execute(
+                """
+                SELECT i.name
+                FROM achievement_inventor ai
+                JOIN inventor i ON i.id = ai.inventor_id
+                WHERE ai.achievement_id = %s
+                ORDER BY ai.sort_order, ai.id
+                """,
+                (ach_id,),
+            )
+            old_inventor_names = [
+                (row["name"] if isinstance(row, dict) else row[0])
+                for row in (cur.fetchall() or [])
+            ]
 
         _validate_refs(cur, fields)
 
@@ -2803,6 +2842,31 @@ def update_achievement_admin(
             _sync_inventors(cur, ach_id, inventor_refs)
         if content:
             sync_content(cur, ach_id, scope["userId"], content, allow_existing_media=True)
+
+        # 管理员修改变更留痕（发布者可见变更对比）：与业务写同事务。
+        change_extras = []
+        if inventor_refs is not None:
+            change_extras.append({
+                "field": "inventors",
+                "fieldLabel": "完成人",
+                "oldValue": "、".join(n for n in old_inventor_names if n),
+                "newValue": "、".join(ref["name"] for ref in inventor_refs),
+            })
+        if target_status is not None and target_status != current["status"]:
+            change_extras.append({
+                "field": "status",
+                "fieldLabel": "状态",
+                "oldValue": _STATUS_LABELS.get(current["status"], current["status"]),
+                "newValue": _STATUS_LABELS.get(target_status, target_status),
+            })
+        record_admin_edit_changes(
+            cur,
+            "achievement",
+            ach_id,
+            compute_changes(cur, "achievement", current, fields, extras=change_extras),
+            operator_user_id=scope["userId"],
+            operator_user_no=scope.get("userNo", ""),
+        )
 
         audit_record(
             "achievement.admin_update",
@@ -2994,7 +3058,7 @@ def update_demand_admin(
 
         cur.execute(
             f"""
-            SELECT id, version, status, budget_min_wan, budget_max_wan
+            SELECT *
             FROM demand
             WHERE {" AND ".join(where)}
             """,
@@ -3004,6 +3068,11 @@ def update_demand_admin(
 
         if not current:
             raise demand_not_found()
+
+        # 管理员修改变更留痕：标签旧值必须在 _sync_demand_tags 重建前抓取。
+        old_tag_names = []
+        if tags is not None:
+            old_tag_names = _load_demand_tags(cur, [demand_id]).get(demand_id, [])
 
         # orgName / categoryName 在这里转成真正的 ID。
         _resolve_demand_name_refs(
@@ -3067,6 +3136,31 @@ def update_demand_admin(
         # 传 tags: [] 表示清空标签；不传 tags 则不改标签。
         if tags is not None:
             _sync_demand_tags(cur, demand_id, tags)
+
+        # 管理员修改变更留痕（发布者可见变更对比）：与业务写同事务。
+        change_extras = []
+        if tags is not None:
+            change_extras.append({
+                "field": "tags",
+                "fieldLabel": "标签",
+                "oldValue": "、".join(n for n in old_tag_names if n),
+                "newValue": "、".join(dict.fromkeys(n.strip() for n in tags if n and n.strip())),
+            })
+        if target_status is not None and target_status != current["status"]:
+            change_extras.append({
+                "field": "status",
+                "fieldLabel": "状态",
+                "oldValue": _STATUS_LABELS.get(current["status"], current["status"]),
+                "newValue": _STATUS_LABELS.get(target_status, target_status),
+            })
+        record_admin_edit_changes(
+            cur,
+            "demand",
+            demand_id,
+            compute_changes(cur, "demand", current, fields, extras=change_extras),
+            operator_user_id=scope["userId"],
+            operator_user_no=scope.get("userNo", ""),
+        )
 
         audit_record(
             "demand.admin_update",

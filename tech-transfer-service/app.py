@@ -28,6 +28,7 @@ from core.response import get_request_id, set_request_id
 from db import close_pool, get_cursor, init_pool
 from routes.achievement import router as achievement_router
 from routes.admin import router as admin_router
+from routes.admin_changes import router as admin_changes_router
 from routes.admin_ops import router as admin_ops_router
 from routes.ai import router as ai_router
 from routes.auth import router as auth_router
@@ -112,6 +113,7 @@ app.include_router(ai_router)
 app.include_router(search_router)
 app.include_router(patent_router)
 app.include_router(admin_router)
+app.include_router(admin_changes_router)
 app.include_router(admin_ops_router)
 app.include_router(file_router)
 app.include_router(membership_router)

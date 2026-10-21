@@ -8,6 +8,38 @@
 		</view>
 	</view>
 	<view class="page" v-else-if="detail">
+		<!-- 管理员修改：顶部提示条 + 字段级对比卡片 -->
+		<view v-if="adminChanges.length" :class="adminUnreadCount > 0 ? 'admin-changes-wrap' : 'admin-changes-wrap read'">
+			<view class="admin-change-bar" @click="toggleAdminChanges">
+				<view class="admin-change-bar-main">
+					<text v-if="adminUnreadCount > 0" class="admin-change-dot"></text>
+					<text :class="adminUnreadCount > 0 ? 'admin-change-bar-text' : 'admin-change-bar-text read'">{{ adminBarText }}</text>
+				</view>
+				<view class="admin-change-bar-btn">
+					<text>{{ adminChangesExpanded ? '收起' : '查看修改' }}</text>
+					<text class="admin-change-arrow">{{ adminChangesExpanded ? '▲' : '▼' }}</text>
+				</view>
+			</view>
+			<view v-if="adminChangesExpanded" class="admin-change-list">
+				<view v-for="(item, index) in adminChanges" :key="item.id || index" class="admin-change-card">
+					<view class="admin-change-card-head">
+						<text class="admin-change-field">{{ item.fieldLabel }}</text>
+						<text :class="'admin-change-tag ' + (item.changeKind === 'created' ? 'tag-created' : 'tag-updated')">{{ item.changeKind === 'created' ? '新增' : '修改' }}</text>
+					</view>
+					<view class="admin-change-values">
+						<view class="admin-change-value-row row-old">
+							<text class="admin-change-value-label">修改前</text>
+							<text class="admin-change-value-text">{{ item.changeKind === 'created' ? '未填写' : (item.oldValue || '未填写') }}</text>
+						</view>
+						<view class="admin-change-value-row row-new">
+							<text class="admin-change-value-label">修改后</text>
+							<text class="admin-change-value-text">{{ item.newValue || '未填写' }}</text>
+						</view>
+					</view>
+					<text class="admin-change-meta">{{ item.operatorName || '管理员' }}修改 · {{ formatChangeTime(item.createdAt) }}</text>
+				</view>
+			</view>
+		</view>
 		<!-- 上方：业务信息 -->
 		<view class="section">
 			<view class="section-head">
@@ -287,7 +319,8 @@
 	import { getDemandDetail, toDemandCard, closeDemand } from '../../api/demand.js'
         import { getAchievementDetail, offlineAchievement } from '../../api/achievement.js'
         import HostBridge from '../../../../host/host-bridge.js'
-	import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
+        import { apiRequest } from '../../api/client.js'
+        import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
 	import { isImageMedia, mediaDisplayUrl, splitDemandAttachments } from '../../api/media-url.mjs'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
@@ -343,7 +376,11 @@
 			submitting: false,
 			intentRefreshTimer: null,
 			intentRefreshing: false,
-			loadedId: ''
+			loadedId: '',
+			adminChanges: [],
+			adminUnreadCount: 0,
+			adminChangesExpanded: false,
+			adminReadSubmitting: false
 		}
 	},
 		computed: {
@@ -469,6 +506,10 @@
 					offline: '确认下架这条内容？'
 				}
 				return titles[this.confirmOp] || '确认操作？'
+			},
+			adminBarText() {
+				if (this.adminUnreadCount > 0) return '管理员修改了' + this.adminUnreadCount + '处内容'
+				return '管理员修改记录（共' + this.adminChanges.length + '条）'
 			}
 		},
 	onLoad(options) {
@@ -484,6 +525,7 @@
 
 		this.loadFavoriteState(id)
 		this.refreshDockState(id)
+		this.loadAdminChanges(id)
 	},
 		onUnload() {
 			this.clearConfirmTimer()
@@ -495,6 +537,7 @@
 		async onPullDownRefresh() {
 			try {
 				await this.refreshDockState(this.loadedId)
+				await this.loadAdminChanges(this.loadedId)
 			} finally {
 				uni.stopPullDownRefresh()
 			}
@@ -833,6 +876,59 @@
 				} finally {
 					this.submitting = false
 				}
+			},
+			/** 管理员修改记录：需求/成果共用同一组接口，按 type 区分路径 */
+			adminChangesPath(id) {
+				return this.type === 'demand'
+					? '/demands/' + id + '/admin-changes'
+					: '/achievements/' + id + '/admin-changes'
+			},
+			async loadAdminChanges(id) {
+				if (!id) return
+				try {
+					const data = await apiRequest('GET', this.adminChangesPath(id))
+					const changes = (data && data.changes) || []
+					this.adminChanges = changes.map((item) => ({
+						id: item.id,
+						fieldLabel: item.fieldLabel || '字段',
+						oldValue: item.oldValue == null ? '' : String(item.oldValue),
+						newValue: item.newValue == null ? '' : String(item.newValue),
+						changeKind: item.changeKind === 'created' ? 'created' : 'updated',
+						operatorName: item.operatorName || '',
+						createdAt: item.createdAt || ''
+					}))
+					this.adminUnreadCount = Number(data && data.unreadCount) || 0
+				} catch (e) {
+					// 未登录/网络失败不阻断详情页展示
+					console.error('[dock-detail] loadAdminChanges failed:', e)
+				}
+			},
+			/** 展开/折叠对比区域；展开即视为已查看，自动标记已读 */
+			toggleAdminChanges() {
+				this.adminChangesExpanded = !this.adminChangesExpanded
+				if (this.adminChangesExpanded) this.markAdminChangesRead()
+			},
+			async markAdminChangesRead() {
+				if (this.adminUnreadCount <= 0 || this.adminReadSubmitting) return
+				const id = this.loadedId || (this.detail && this.detail.id)
+				if (!id) return
+				this.adminReadSubmitting = true
+				// 先本地清零，避免重复点击重复上报
+				this.adminUnreadCount = 0
+				try {
+					await apiRequest('POST', this.adminChangesPath(id) + '/read')
+				} catch (e) {
+					console.error('[dock-detail] markAdminChangesRead failed:', e)
+				} finally {
+					this.adminReadSubmitting = false
+				}
+			},
+			formatChangeTime(value) {
+				if (!value) return ''
+				const d = new Date(value)
+				if (isNaN(d.getTime())) return String(value)
+				const pad = (n) => (n < 10 ? '0' + n : '' + n)
+				return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())
 			}
 		}
 	}
@@ -1344,6 +1440,183 @@
 		background: transparent !important;
 		color: #888888 !important;
 		font-size: 28rpx;
+	}
+
+	/* ── 管理员修改提示条 + 对比卡片（手机端竖排） ── */
+	.admin-changes-wrap {
+		margin-bottom: 24rpx;
+	}
+
+	.admin-change-bar {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		background: #fff7e6;
+		border: 1rpx solid #f3ddb0;
+		border-radius: 16rpx;
+		padding: 22rpx 24rpx;
+	}
+
+	.admin-changes-wrap.read .admin-change-bar {
+		background: #f7f9fc;
+		border-color: #e8ecf2;
+	}
+
+	.admin-change-bar-main {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.admin-change-dot {
+		width: 14rpx;
+		height: 14rpx;
+		border-radius: 50%;
+		background: #f5a623;
+		margin-right: 14rpx;
+		flex-shrink: 0;
+	}
+
+	.admin-change-bar-text {
+		font-size: 26rpx;
+		color: #8a5a00;
+		font-weight: 600;
+		line-height: 1.5;
+	}
+
+	.admin-change-bar-text.read {
+		color: #666666;
+		font-weight: 500;
+	}
+
+	.admin-change-bar-btn {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		flex-shrink: 0;
+		margin-left: 18rpx;
+		font-size: 26rpx;
+		color: #2b73f8;
+		font-weight: 600;
+	}
+
+	.admin-change-arrow {
+		margin-left: 8rpx;
+		font-size: 22rpx;
+		color: #2b73f8;
+	}
+
+	.admin-change-list {
+		margin-top: 16rpx;
+	}
+
+	.admin-change-card {
+		background: #ffffff;
+		border: 1rpx solid #e8ecf2;
+		border-radius: 16rpx;
+		padding: 24rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.admin-change-card:last-child {
+		margin-bottom: 0;
+	}
+
+	.admin-change-card-head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 16rpx;
+	}
+
+	.admin-change-field {
+		flex: 1;
+		min-width: 0;
+		font-size: 28rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+		line-height: 1.5;
+	}
+
+	.admin-change-tag {
+		flex-shrink: 0;
+		margin-left: 16rpx;
+		font-size: 22rpx;
+		line-height: 1.4;
+		padding: 4rpx 16rpx;
+		border-radius: 8rpx;
+	}
+
+	.tag-created {
+		background: rgba(15, 157, 88, 0.12);
+		color: #0f9d58;
+	}
+
+	.tag-updated {
+		background: rgba(245, 166, 35, 0.16);
+		color: #c98a00;
+	}
+
+	.admin-change-values {
+		border-radius: 12rpx;
+		overflow: hidden;
+		margin-bottom: 14rpx;
+	}
+
+	.admin-change-value-row {
+		display: flex;
+		flex-direction: row;
+		align-items: flex-start;
+		padding: 14rpx 18rpx;
+	}
+
+	.row-old {
+		background: #fdf3f2;
+	}
+
+	.row-new {
+		background: #f1f9f3;
+	}
+
+	.admin-change-value-label {
+		width: 110rpx;
+		flex-shrink: 0;
+		font-size: 24rpx;
+		line-height: 1.6;
+		color: #888888;
+	}
+
+	.row-old .admin-change-value-label {
+		color: #c0392b;
+	}
+
+	.row-new .admin-change-value-label {
+		color: #0f9d58;
+	}
+
+	.admin-change-value-text {
+		flex: 1;
+		min-width: 0;
+		font-size: 26rpx;
+		color: #333333;
+		line-height: 1.6;
+		word-break: break-all;
+	}
+
+	.row-old .admin-change-value-text {
+		color: #8a6662;
+	}
+
+	.admin-change-meta {
+		display: block;
+		font-size: 22rpx;
+		color: #999999;
+		text-align: right;
+		line-height: 1.5;
 	}
 
 	.error-page {
