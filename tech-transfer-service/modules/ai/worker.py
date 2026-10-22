@@ -13,6 +13,7 @@ from psycopg2.extras import Json
 
 from db import close_pool, get_cursor, transaction
 from modules.ai import provider
+from modules.ai import progress
 
 logger = logging.getLogger("nanshan.ai.worker")
 FAIL_REASON_MAX = 500
@@ -145,11 +146,29 @@ def _snapshot(raw: Any) -> dict:
     return {}
 
 
+def _report_stage(task_id: int, stage: str) -> None:
+    """实时阶段回传（best-effort）：进度写库失败绝不打断评估主流程。"""
+    try:
+        progress.set_stage(task_id, stage)
+    except Exception:
+        logger.exception("ai evaluation stage report failed task=%s stage=%s", task_id, stage)
+
+
 def _run_evaluation(task: dict, timeout: float | None = None) -> None:
+    task_id = task["id"]
     achievement_id = task["target_id"]
+    # 实时阶段回传：每个关键阶段把文案写入 ai_task.progress_stage，
+    # 供 GET /ai/evaluation-tasks/{id} 轮询返回（best-effort，失败不影响评估）。
+    _report_stage(task_id, progress.STAGE_READING)  # 阶段1：快照加载
     snapshot = _snapshot(task.get("input_snapshot"))
-    result = provider.evaluate_achievement(snapshot, timeout=timeout)
+    result = provider.evaluate_achievement(
+        snapshot,
+        timeout=timeout,
+        # 阶段2/3/4（LLM 调用 → 解析输出 → 评分换算）由 provider 回传
+        on_stage=lambda stage: _report_stage(task_id, stage),
+    )
     legacy = result["legacyScores"]
+    _report_stage(task_id, progress.STAGE_SAVING)  # 阶段5：写入数据库
     with transaction() as conn:
         cur = conn.cursor()
         try:

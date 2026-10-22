@@ -177,7 +177,7 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
             """
             SELECT id, task_type, status, created_by_user_id, target_id,
                    input_data_version, model_version_id, fail_reason,
-                   created_at, started_at, finished_at,
+                   progress_stage, created_at, started_at, finished_at,
                    (status = 'queued' AND created_at < NOW()
                     - (%s || ' seconds')::interval) AS stale
             FROM ai_task WHERE id = %s AND task_type = 'evaluation'
@@ -200,10 +200,15 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
             # 补偿提交（非阻塞）：进程重启/队列丢失后，轮询即可重新唤起执行。
             eval_executor.submit(task_id)
 
+        # 实时阶段：running/queued 任务的当前阶段文案（modules/ai/progress.py
+        # 写入）；终态任务返回 None。progress_stage 为下划线别名，与库列名一致。
+        progress_stage = task.get("progress_stage") or None
         view = {
             "taskId": task["id"],
             "status": "stale" if stale_queued else task["status"],
             "stale": stale_queued,
+            "progressStage": progress_stage,
+            "progress_stage": progress_stage,
             "evaluation": None,
             "failReason": (
                 eval_executor.STALE_QUEUED_REASON
@@ -289,9 +294,9 @@ def list_evaluations(
 
 def _task_view(task_id: int) -> dict:
     with get_cursor() as cur:
-        cur.execute("SELECT id, status FROM ai_task WHERE id = %s", (task_id,))
+        cur.execute("SELECT id, status, progress_stage FROM ai_task WHERE id = %s", (task_id,))
         row = cur.fetchone()
-    return {"taskId": row["id"], "status": row["status"]}
+    return {"taskId": row["id"], "status": row["status"], "progressStage": row.get("progress_stage")}
 
 
 def _parse_reasons(raw):

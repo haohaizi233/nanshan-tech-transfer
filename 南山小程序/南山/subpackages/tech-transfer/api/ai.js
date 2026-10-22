@@ -83,7 +83,10 @@ export async function resumeEvaluationSubmission() {
 
 /**
  * 查询评估任务（仅创建者可见）
- * @returns {Promise<{taskId, status, evaluation, failReason, createdAt, finishedAt}>}
+ * @returns {Promise<{taskId, status, progressStage, evaluation, failReason, createdAt, finishedAt}>}
+ * progressStage：后端实时执行阶段文案（正在读取成果数据 / AI正在分析技术内容 /
+ * 正在生成评价报告 / 正在计算综合评分 / 正在保存评估结果），queued/running 时
+ * 随轮询更新；无值（旧任务）时前端退回本地模拟文案
  * succeeded 时 evaluation: {achievementId, achievementTitle, scores:{techFeature,
  * applyScope, maturity, cooperation}, totalScore, conclusion, highlights}
  */

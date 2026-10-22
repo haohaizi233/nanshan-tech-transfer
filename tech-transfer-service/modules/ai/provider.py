@@ -14,6 +14,7 @@ from typing import Any
 
 from config import settings
 from modules.ai import evaluation
+from modules.ai import progress
 
 logger = logging.getLogger("nanshan.error")
 
@@ -50,7 +51,7 @@ def parse_json_content(text: str) -> Any:
         raise AiProviderError("model did not return JSON")
 
 
-def _chat(messages: list[dict], timeout: int | None = None) -> str:
+def _chat(messages: list[dict], timeout: float | None = None) -> str:
     if not configured():
         raise AiProviderError("AI_PROVIDER_BASE is not set")
     url = f"{_base()}/chat/completions"
@@ -101,7 +102,7 @@ def _chat(messages: list[dict], timeout: int | None = None) -> str:
     return content
 
 
-def complete_json(system: str, user: str, timeout: int | None = None) -> Any:
+def complete_json(system: str, user: str, timeout: float | None = None) -> Any:
     content = _chat(
         [
             {"role": "system", "content": system},
@@ -111,12 +112,29 @@ def complete_json(system: str, user: str, timeout: int | None = None) -> Any:
     )
     return parse_json_content(content)
 
-def evaluate_achievement(snapshot: dict, timeout: int | None = None) -> dict:
+def evaluate_achievement(
+    snapshot: dict,
+    timeout: float | None = None,
+    on_stage=None,
+) -> dict:
     """多维成果评价 + 评价报告（LLM 生成，评分算法在 evaluation 模块换算）。
 
     返回 assemble_result 结构：dimensions/totalScore/starScore/rating/
     ratingLabel/conclusion/highlights/report/legacyScores。
+
+    on_stage：实时阶段回调（可选），在 LLM 调用/解析/评分换算三个关键节点
+    回传 progress.STAGE_ANALYZING / STAGE_REPORT / STAGE_SCORING，
+    由调用方（worker）写入 ai_task.progress_stage。回调异常只记日志，
+    不影响评价主流程。
     """
+    def _stage(stage: str) -> None:
+        if on_stage is None:
+            return
+        try:
+            on_stage(stage)
+        except Exception:
+            logger.exception("ai evaluation on_stage callback failed stage=%s", stage)
+
     dim_desc = "；".join(
         f"{d['key']}（{d['label']}，权重{d['weight']}：{d['hint']}）"
         for d in evaluation.DIMENSIONS
@@ -134,9 +152,12 @@ def evaluate_achievement(snapshot: dict, timeout: int | None = None) -> dict:
         "所有文字用简体中文，基于给出的成果信息客观评价，信息不足时说明假设。"
     )
     user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
+    _stage(progress.STAGE_ANALYZING)  # 阶段2：LLM 调用中
     data = complete_json(system, user, timeout=timeout)
+    _stage(progress.STAGE_REPORT)  # 阶段3：解析 LLM 输出
     try:
         normalized = evaluation.normalize_llm_result(data)
     except evaluation.EvaluationDataError as exc:
         raise AiProviderError(f"evaluation JSON invalid: {exc}") from None
+    _stage(progress.STAGE_SCORING)  # 阶段4：evaluation 模块评分换算
     return evaluation.assemble_result(normalized)

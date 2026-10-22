@@ -38,7 +38,8 @@
 			<!-- 处理中 -->
 			<view v-else-if="task.status === 'running'" class="section state-section">
 				<text class="state-title">评估处理中</text>
-				<text class="state-desc">AI 正在对成果进行多维评估，请稍候…</text>
+				<text class="state-desc">{{ stageText }}</text>
+				<text v-if="elapsedSeconds > 0" class="elapsed">已耗时 {{ elapsedSeconds }} 秒</text>
 			</view>
 
 			<!-- 失败/排队超时（stale）：failReason + 重新发起 -->
@@ -220,6 +221,7 @@
 				historyTotal: 0,
 				stageIndex: 0,
 				elapsedSeconds: 0,
+				progressAnchor: 0,
 				stageTimer: null,
 				loading: false,
 				loadError: '',
@@ -230,9 +232,17 @@
 		},
 		computed: {
 			stageText() {
+				// 优先后端实时阶段回传（evaluator 每个关键阶段写入
+				// ai_task.progress_stage，随轮询返回）；后端无值时
+				// （旧任务/刚创建）退回本地模拟轮播兜底。
+				const current = this.task || {}
+				const realStage = current.progressStage || current.progress_stage
+				if (realStage && (current.status === 'running' || current.status === 'queued')) {
+					return realStage
+				}
 				const stages = {
 					queued: ['任务已进入评估队列', '正在等待 AI 算力调度', '排队即将完成'],
-					running: ['AI 正在分析成果', '正在生成评价报告', '正在计算综合评分']
+					running: ['正在读取成果数据', 'AI正在分析技术内容', '正在生成评价报告', '正在计算综合评分', '正在保存评估结果']
 				}
 				const list = (this.task && stages[this.task.status]) || stages.running
 				return list[this.stageIndex % list.length] + '…'
@@ -309,6 +319,10 @@
 			// 轮询/重试拿到结果后重绘雷达图
 			evaluation(val) {
 				if (val) this.scheduleRadarDraw()
+			},
+			// 任务状态/进度刷新时同步进度计时器（真实阶段随轮询更新）
+			task() {
+				this.syncProgressTicker()
 			}
 		},
 		onLoad(options) {
@@ -354,8 +368,9 @@
 					if (!this.stageTimer) {
 						this.progressAnchor = Date.now()
 						this.stageTimer = setInterval(() => {
-							this.stageIndex++
 							this.elapsedSeconds = Math.floor((Date.now() - this.progressAnchor) / 1000)
+							// 兜底模拟文案每 3 秒推进一档；后端实时阶段到位后 stageIndex 不再参与展示
+							this.stageIndex = Math.floor(this.elapsedSeconds / 3)
 						}, 1000)
 					}
 				} else if (this.stageTimer) {
@@ -656,6 +671,13 @@
 		font-size: 24rpx;
 		color: #888888;
 		line-height: 1.6;
+	}
+
+	.elapsed {
+		margin-top: 8rpx;
+		font-size: 22rpx;
+		color: #b0b6c0;
+		line-height: 1.5;
 	}
 
 	.fail-reason {

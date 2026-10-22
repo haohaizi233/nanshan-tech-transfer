@@ -207,7 +207,7 @@ class TestServiceIntegration:
         from modules.ai.service import create_evaluation_task
         view, is_new = create_evaluation_task(1, "u1", 3)
         assert is_new is True
-        assert view == {"taskId": 11, "status": "queued"}
+        assert view == {"taskId": 11, "status": "queued", "progressStage": None}
         mock_exec.submit.assert_called_once_with(11)
 
     @patch("modules.ai.service._check_user_rate")
