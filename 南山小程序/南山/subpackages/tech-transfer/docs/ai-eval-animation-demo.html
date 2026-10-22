@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 评估动画 Demo（uni-app H5 适配预览）</title>
+<style>
+/* ════════════════════════════════════════════════════════════
+   单位约定：1rpx = 0.5px（375px 设计稿），demo 中直接写 px = rpx/2
+   所有 keyframes 带 aie 前缀（页面样式无 scoped，防全局冲突）
+   ════════════════════════════════════════════════════════════ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  background: #f5f6f8;
+  padding: 12px;
+  padding-bottom: 40px;
+  max-width: 414px;
+  margin: 0 auto;
+}
+h2 { font-size: 15px; color: #1a1a1a; margin: 22px 0 10px; }
+h2 small { font-size: 11px; color: #999; font-weight: 400; margin-left: 6px; }
+.section {
+  background: #fff; border-radius: 10px; border: 1px solid #e8ecf2;
+  padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  position: relative;
+}
+.section-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 10px; display: block; }
+
+/* ─────────── 1. 流式文字：词级渐现 + 呼吸光标 ─────────── */
+.report-sec__heading {
+  display: flex; align-items: center; font-size: 13px; font-weight: 600;
+  color: #1a1a1a; margin-bottom: 5px;
+}
+.report-sec__heading::before {
+  content: ''; width: 3px; height: 14px; background: #2b73f8;
+  border-radius: 2px; margin-right: 6px; flex-shrink: 0;
+  transform-origin: top center;
+  animation: aieBarGrow 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes aieBarGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+.report-sec__content {
+  font-size: 13px; color: #444; line-height: 2;
+  text-indent: 2em; text-align: justify; word-break: break-all;
+}
+@keyframes aieWordIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.aie-word-in { animation: aieWordIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes aieFadeUp {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.aie-fade-up { animation: aieFadeUp 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.aie-caret {
+  display: inline-block; margin-left: 1px; color: #2b73f8; font-style: normal;
+  animation: aieCaret 900ms step-end infinite;
+}
+@keyframes aieCaret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+.stage-line { display: block; font-size: 12px; color: #888; text-align: center; padding: 4px 0; }
+.aie-stage-enter-active { transition: opacity 240ms ease, transform 240ms cubic-bezier(0.22,1,0.36,1); }
+.aie-stage-leave-active { transition: opacity 120ms ease; position: absolute; left: 0; right: 0; }
+.aie-stage-enter-from { opacity: 0; transform: translateY(4px); }
+.aie-stage-leave-to   { opacity: 0; }
+
+/* ─────────── 2. 评分入场：count-up + scaleX 条 + 卡片 stagger + pop ─────────── */
+.total-wrap { display: flex; align-items: baseline; justify-content: center; }
+.total-label { font-size: 14px; color: #666; margin-right: 8px; }
+.total-num {
+  font-size: 36px; font-weight: 700; color: #2b73f8; line-height: 1;
+  display: inline-block;
+}
+@keyframes aieNumPop {
+  0% { transform: scale(1); } 40% { transform: scale(1.06); } 100% { transform: scale(1); }
+}
+.total-num--pop { animation: aieNumPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.total-unit { margin-left: 4px; font-size: 13px; color: #999; }
+
+.score-badges { display: flex; justify-content: center; margin-top: 8px; gap: 6px; }
+.chip {
+  font-size: 12px; border-radius: 4px; padding: 2px 8px;
+  animation: aieBadgePop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.rating-chip { font-weight: 600; color: #1f9d63; background: #e8f7f0; }
+.star-chip { color: #c47b1a; background: #fff4e5; animation-delay: 80ms; }
+@keyframes aieBadgePop {
+  0% { transform: scale(0.85); opacity: 0; } 60% { transform: scale(1.08); } 100% { transform: scale(1); opacity: 1; }
+}
+
+.dim-grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
+.dim-card {
+  width: calc(50% - 5px); background: #f8fafc; border: 1px solid #e8ecf2;
+  border-radius: 6px; padding: 10px; margin-bottom: 8px;
+  animation: aieCardIn 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+@keyframes aieCardIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.dim-card__label { font-size: 13px; color: #555; }
+.dim-card__weight { font-size: 10px; color: #999; float: right; }
+.dim-card__score-row { display: flex; align-items: baseline; margin: 4px 0 5px; }
+.dim-card__score { font-size: 20px; font-weight: 700; color: #2b73f8; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.dim-card__star { margin-left: 5px; font-size: 10px; color: #c47b1a; }
+
+.bar-track { height: 6px; background: #eef2f7; border-radius: 6px; overflow: hidden; }
+.bar-fill {
+  height: 100%; background: #2b73f8; border-radius: 6px;
+  transform: scaleX(0); transform-origin: left center;
+}
+.bar-fill--go {
+  transform: scaleX(var(--p, 0));
+  transition: transform 800ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ─────────── 3. 雷达图 ─────────── */
+.radar-wrap { display: flex; justify-content: center; }
+.radar-canvas { width: 100%; height: 260px; }
+
+/* ─────────── 4. 骨架屏 ─────────── */
+.aie-skel__card {
+  background: #fff; border: 1px solid #e8ecf2; border-radius: 10px;
+  padding: 16px; margin-bottom: 14px;
+}
+.aie-skel__grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
+.aie-skel__card--dim { width: calc(50% - 5px); padding: 10px; }
+.aie-skel__bar {
+  height: 14px; border-radius: 4px; margin-bottom: 8px;
+  background: #eef1f6; position: relative; overflow: hidden;
+}
+.aie-skel__bar--title { height: 18px; width: 70%; }
+.aie-skel__bar--score { height: 32px; width: 45%; margin: 0 auto 8px; }
+.aie-skel__bar--short { width: 40%; }
+.aie-skel__bar--line  { width: 100%; height: 12px; }
+.aie-skel__bar::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.85), transparent);
+  transform: translateX(-100%);
+  animation: aieShimmer 1.4s ease infinite;
+}
+@keyframes aieShimmer { to { transform: translateX(100%); } }
+.aie-skel-enter-active, .aie-skel-leave-active { transition: opacity 260ms ease; }
+.aie-skel-enter-from, .aie-skel-leave-to { opacity: 0; }
+
+/* ─────────── 5. 状态过渡 + dots + shimmer 条 ─────────── */
+.state-section { text-align: center; padding: 30px 20px; }
+.state-title { font-size: 16px; font-weight: 600; color: #1a1a1a; display: block; }
+.state-desc { margin-top: 7px; font-size: 12px; color: #888; line-height: 1.6; display: block; }
+.elapsed { margin-top: 4px; font-size: 11px; color: #b0b6c0; font-variant-numeric: tabular-nums; display: block; }
+
+.aie-state-enter-active { transition: opacity 260ms ease, transform 260ms cubic-bezier(0.22,1,0.36,1); }
+.aie-state-leave-active { transition: opacity 140ms ease; position: absolute; left: 16px; right: 16px; }
+.aie-state-enter-from { opacity: 0; transform: translateY(8px); }
+.aie-state-leave-to   { opacity: 0; transform: translateY(-4px); }
+
+.task-status {
+  display: inline-block; font-size: 11px; border-radius: 4px; padding: 2px 6px;
+  transition: background-color 300ms ease, color 300ms ease;
+}
+.task-status--queued { color: #c47b1a; background: #fff4e5; }
+.task-status--running { color: #2b73f8; background: rgba(43,115,248,0.1); }
+.task-status--succeeded { color: #1f9d63; background: #e8f7f0; animation: aieBadgePop 360ms cubic-bezier(0.34,1.56,0.64,1); }
+.task-status--failed { color: #d9534f; background: #fdecec; }
+
+.aie-stage-dots { display: flex; gap: 6px; justify-content: center; margin: 10px 0; }
+.aie-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #2b73f8;
+  animation: aieBreathe 1.2s ease-in-out infinite;
+}
+.aie-dot:nth-child(2) { animation-delay: 0.16s; }
+.aie-dot:nth-child(3) { animation-delay: 0.32s; }
+@keyframes aieBreathe {
+  0%, 100% { transform: scale(0.7); opacity: 0.35; }
+  50%      { transform: scale(1);   opacity: 1; }
+}
+.aie-progress-shimmer {
+  width: 60%; height: 4px; margin: 4px auto 0; border-radius: 4px;
+  background: #eef1f6; position: relative; overflow: hidden;
+}
+.aie-progress-shimmer::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, #2b73f8, transparent);
+  transform: translateX(-100%);
+  animation: aieShimmer 1.6s ease infinite;
+}
+
+/* ─────────── 6. 微交互 ─────────── */
+.btn {
+  width: 100%; height: 44px; line-height: 44px; border: none; border-radius: 6px;
+  background: #2b73f8; color: #fff; font-size: 15px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 150ms cubic-bezier(0.22,1,0.36,1), opacity 150ms ease;
+  cursor: pointer;
+}
+.btn:active { transform: scale(0.96); }
+.btn--ghost { background: #fff; color: #2b73f8; border: 1px solid #2b73f8; }
+.history-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-radius: 8px; background: #f8fafc;
+  border: 1px solid #e8ecf2; margin-bottom: 8px; cursor: pointer;
+  transition: transform 150ms cubic-bezier(0.22,1,0.36,1), opacity 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  animation: aieCardIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+.history-item:active { transform: scale(0.97); opacity: 0.88; }
+@media (hover: hover) {
+  .history-item:hover { background: #f4f8ff; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(43,115,248,0.10); }
+  .btn:hover { filter: brightness(1.06); }
+}
+.aie-mini-spin {
+  width: 14px; height: 14px; margin-right: 5px;
+  border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+  border-radius: 50%;
+  animation: aieSpin 0.8s linear infinite;
+}
+@keyframes aieSpin { to { transform: rotate(360deg); } }
+
+.state-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.state-btns button {
+  flex: 1; min-width: 70px; height: 30px; border: 1px solid #d8dfeb; border-radius: 6px;
+  background: #fff; color: #555; font-size: 12px; cursor: pointer;
+}
+.state-btns button.on { background: #2b73f8; color: #fff; border-color: #2b73f8; }
+
+/* ─────────── 7. reduced-motion 降级 ─────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .aie-skel__bar::after, .aie-progress-shimmer::after { animation: none !important; opacity: 0.5; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+<h2>1 · 流式文字 <small>词级渐现 + 呼吸光标 + 阶段文案淡切</small></h2>
+<div class="section">
+  <transition name="aie-stage">
+    <div class="stage-line" :key="stageText">{{ stageText }}</div>
+  </transition>
+  <div class="report-sec">
+    <div class="report-sec__heading aie-fade-up" v-if="streamHeading">{{ streamHeading }}</div>
+    <div class="report-sec__content">
+      <span v-for="b in streamBlocks" :key="b.id" :class="b.stable ? '' : 'aie-word-in'">{{ b.text }}</span><i class="aie-caret" v-if="streaming">▍</i>
+    </div>
+  </div>
+  <button class="btn btn--ghost" style="height:32px;line-height:32px;font-size:13px;margin-top:10px" @click="replayStream">重播打字机</button>
+</div>
+
+<h2>2 · 评分入场 <small>count-up + scaleX 条形 + 卡片 stagger + 徽章 pop</small></h2>
+<div class="section">
+  <div class="total-wrap">
+    <span class="total-label">综合评分</span>
+    <span class="total-num" :class="{ 'total-num--pop': popped }">{{ totalDisplay }}</span>
+    <span class="total-unit">/ 100</span>
+  </div>
+  <div class="score-badges">
+    <span class="chip rating-chip" v-if="resultReady">优秀</span>
+    <span class="chip star-chip" v-if="resultReady">4.6 / 5.0 星</span>
+  </div>
+  <div class="dim-grid" style="margin-top:12px">
+    <div class="dim-card" v-for="(d, i) in dims" :key="d.key" :style="{ '--i': i }">
+      <span class="dim-card__label">{{ d.label }}</span>
+      <span class="dim-card__weight" v-if="d.weight">权重 {{ d.weight }}%</span>
+      <div class="dim-card__score-row">
+        <span class="dim-card__score">{{ d.display }}</span>
+        <span class="dim-card__star" v-if="d.star">{{ d.star }} 星</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" :class="{ 'bar-fill--go': barsRevealed }" :style="{ '--p': d.score / 100 }"></div>
+      </div>
+    </div>
+  </div>
+  <button class="btn btn--ghost" style="height:32px;line-height:32px;font-size:13px" @click="replayResult">重播结果入场</button>
+</div>
+
+<h2>3 · 雷达图生长 <small>canvas 逐帧 · 从中心扩展 · easeOutCubic</small></h2>
+<div class="section">
+  <div class="radar-wrap"><canvas id="radar" class="radar-canvas"></canvas></div>
+  <button class="btn btn--ghost" style="height:32px;line-height:32px;font-size:13px" @click="drawRadar(true)">重播雷达动画</button>
+</div>
+
+<h2>4 · 骨架屏 <small>shimmer 光带 + crossfade 到真实内容（自动循环演示）</small></h2>
+<div class="section" style="padding:0;border:none;background:transparent;box-shadow:none">
+  <transition name="aie-skel" mode="out-in">
+    <div v-if="skeleton" key="skel">
+      <div class="aie-skel__card">
+        <div class="aie-skel__bar aie-skel__bar--title"></div>
+        <div class="aie-skel__bar aie-skel__bar--score"></div>
+        <div class="aie-skel__bar aie-skel__bar--short" style="margin:0 auto"></div>
+      </div>
+      <div class="aie-skel__grid">
+        <div class="aie-skel__card aie-skel__card--dim" v-for="i in 4" :key="i">
+          <div class="aie-skel__bar aie-skel__bar--short"></div>
+          <div class="aie-skel__bar aie-skel__bar--line"></div>
+        </div>
+      </div>
+      <div class="aie-skel__card">
+        <div class="aie-skel__bar aie-skel__bar--line" v-for="i in 3" :key="i"></div>
+      </div>
+    </div>
+    <div v-else key="real" class="section" style="margin:0">
+      <div class="total-wrap">
+        <span class="total-label">综合评分</span>
+        <span class="total-num">82</span>
+        <span class="total-unit">/ 100</span>
+      </div>
+      <div class="bar-track" style="margin-top:12px">
+        <div class="bar-fill bar-fill--go" style="--p: 0.82"></div>
+      </div>
+    </div>
+  </transition>
+</div>
+
+<h2>5 · 状态过渡 <small>queued → running → succeeded / failed（点按钮切换）</small></h2>
+<div class="section">
+  <div class="state-btns">
+    <button :class="{ on: taskStatus === 'queued' }" @click="taskStatus = 'queued'">queued</button>
+    <button :class="{ on: taskStatus === 'running' }" @click="taskStatus = 'running'">running</button>
+    <button :class="{ on: taskStatus === 'succeeded' }" @click="taskStatus = 'succeeded'">succeeded</button>
+    <button :class="{ on: taskStatus === 'failed' }" @click="taskStatus = 'failed'">failed</button>
+  </div>
+  <span class="task-status" :class="'task-status--' + taskStatus">{{ statusText }}</span>
+  <transition name="aie-state" mode="out-in">
+    <div v-if="taskStatus === 'queued'" key="queued" class="state-section">
+      <div class="aie-stage-dots"><div class="aie-dot"></div><div class="aie-dot"></div><div class="aie-dot"></div></div>
+      <span class="state-title">排队中</span>
+      <span class="state-desc">任务已受理，AI 正在排队处理</span>
+      <div class="aie-progress-shimmer"></div>
+    </div>
+    <div v-else-if="taskStatus === 'running'" key="running" class="state-section">
+      <div class="aie-stage-dots"><div class="aie-dot"></div><div class="aie-dot"></div><div class="aie-dot"></div></div>
+      <span class="state-title">评估处理中</span>
+      <span class="state-desc">AI 正在分析技术内容…</span>
+      <span class="elapsed">已耗时 {{ elapsed }} 秒</span>
+      <div class="aie-progress-shimmer"></div>
+    </div>
+    <div v-else-if="taskStatus === 'failed'" key="failed" class="state-section">
+      <span class="state-title">评估失败</span>
+      <span class="state-desc" style="color:#d9534f">服务繁忙，请稍后重试</span>
+      <button class="btn" style="width:auto;padding:0 20px;height:32px;line-height:32px;font-size:13px;margin-top:12px">重新发起评估</button>
+    </div>
+    <div v-else key="done" class="state-section">
+      <span class="state-title">✅ 评估完成</span>
+      <span class="state-desc">结构化结果已生成，评分卡片已渲染</span>
+    </div>
+  </transition>
+</div>
+
+<h2>6 · 微交互 <small>按钮 :active 缩放 · 列表项按压/hover · 按钮 spinner</small></h2>
+<div class="section">
+  <div class="history-item" v-for="(h, i) in history" :key="h.id" :style="{ '--i': i }">
+    <div>
+      <b style="font-size:20px;color:#2b73f8;font-variant-numeric:tabular-nums">{{ h.score }}</b>
+      <span style="font-size:11px;color:#999"> 分</span>
+    </div>
+    <div style="text-align:right">
+      <div v-if="h.rating" style="font-size:12px;color:#1f9d63;font-weight:600">{{ h.rating }}</div>
+      <div style="font-size:11px;color:#bbb">{{ h.time }}</div>
+    </div>
+  </div>
+  <button class="btn" @click="toggleLoading" style="margin-top:10px">
+    <div class="aie-mini-spin" v-if="btnLoading"></div>
+    <span>{{ btnLoading ? '提交中…' : '重新评估' }}</span>
+  </button>
+  <button class="btn btn--ghost" style="margin-top:8px">查看成果对接详情</button>
+</div>
+
+</div><!-- /#app -->
+
+<script src="./vue.global.prod.js"></script>
+<script>
+const { createApp } = Vue
+
+/* 与 ai-eval-stream.mjs 的内容_delta 语义一致的模拟流 */
+const DEMO_TEXT =
+  '该成果在关键技术指标上表现突出，核心算法具备自主知识产权，' +
+  '在多源数据融合与边缘推理方面形成了完整的技术链条。' +
+  '应用场景覆盖智慧园区、工业巡检与城市治理三大领域，' +
+  '已与两家龙头企业完成中试验证，市场前景广阔。' +
+  '建议进一步完善量产工艺与专利布局，加快成果转化节奏。'
+const DEMO_HEADING = '技术与市场综合评价'
+
+createApp({
+  data() {
+    return {
+      /* 1. 流式 */
+      streamBlocks: [],
+      streaming: true,
+      streamHeading: '',
+      stageText: '正在生成评价报告…',
+      _seq: 0,
+      _streamTimers: [],
+      /* 2. 评分 */
+      totalDisplay: 0,
+      barsRevealed: false,
+      resultReady: false,
+      popped: false,
+      dims: [
+        { key: 'innovation', label: '创新性', score: 88, star: 4.6, weight: 20, display: 0 },
+        { key: 'techMaturity', label: '技术成熟度', score: 82, star: 4.3, weight: 20, display: 0 },
+        { key: 'marketProspect', label: '市场前景', score: 85, star: 4.4, weight: 20, display: 0 },
+        { key: 'teamStrength', label: '团队实力', score: 76, star: 4.0, weight: 15, display: 0 },
+        { key: 'cooperation', label: '合作可行性', score: 80, star: 4.2, weight: 15, display: 0 },
+        { key: 'riskAssessment', label: '风险评估', score: 72, star: 3.8, weight: 10, display: 0 }
+      ],
+      /* 4. 骨架 */
+      skeleton: true,
+      /* 5. 状态 */
+      taskStatus: 'running',
+      elapsed: 0,
+      _elapsedTimer: null,
+      /* 6. 微交互 */
+      btnLoading: false,
+      history: [
+        { id: 1, score: 82, rating: '优秀', time: '2026-10-22 14:30' },
+        { id: 2, score: 76, rating: '良好', time: '2026-10-18 09:12' },
+        { id: 3, score: 68, rating: '一般', time: '2026-10-02 16:45' }
+      ]
+    }
+  },
+  computed: {
+    statusText() {
+      return { queued: '排队中', running: '评估中', succeeded: '已完成', failed: '失败' }[this.taskStatus]
+    }
+  },
+  mounted() {
+    this.replayStream()
+    setTimeout(() => { this.skeleton = false }, 2600)
+    this._elapsedTimer = setInterval(() => { this.elapsed += 1 }, 1000)
+    setTimeout(() => this.replayResult(), 600)
+  },
+  beforeUnmount() {
+    this._streamTimers.forEach(clearTimeout)
+    clearInterval(this._elapsedTimer)
+    if (this._radarTimer) clearInterval(this._radarTimer)
+  },
+  methods: {
+    /* ── 1. 流式：模拟 content_delta，块级 push（同 §1.1 方案） ── */
+    replayStream() {
+      this._streamTimers.forEach(clearTimeout)
+      this._streamTimers = []
+      this.streamBlocks = []
+      this.streamHeading = ''
+      this.streaming = true
+      this._seq = 0
+      const chunks = DEMO_TEXT.match(/[\s\S]{1,8}/g) || []
+      let t = 300
+      this._streamTimers.push(setTimeout(() => {
+        this.streamHeading = DEMO_HEADING
+        this.stageText = 'AI 正在撰写评价报告…'
+      }, t))
+      chunks.forEach((text, idx) => {
+        t += 120 + Math.random() * 140
+        this._streamTimers.push(setTimeout(() => {
+          this.streamBlocks.push({ id: ++this._seq, text, stable: false })
+          if (this.streamBlocks.length > 60) {
+            const merged = this.streamBlocks.slice(0, 30).map((b) => b.text).join('')
+            this.streamBlocks.splice(0, 30, { id: ++this._seq, text: merged, stable: true })
+          }
+          if (idx === chunks.length - 1) {
+            this._streamTimers.push(setTimeout(() => {
+              this.streaming = false
+              this.stageText = '报告撰写完成，正在计算综合评分…'
+            }, 600))
+          }
+        }, t))
+      })
+    },
+    /* ── 2. count-up（easeOutExpo，同 §2.1） ── */
+    countUp(field, from, to, duration, decimals = 0) {
+      this._countRafs = this._countRafs || {}
+      if (this._countRafs[field]) cancelAnimationFrame(this._countRafs[field])
+      const start = performance.now()
+      const tick = (now) => {
+        const t = Math.min(1, (now - start) / duration)
+        const eased = 1 - Math.pow(2, -10 * t)
+        const v = from + (to - from) * (t === 1 ? 1 : eased)
+        this[field] = decimals ? v.toFixed(decimals) : Math.round(v)
+        if (t < 1) this._countRafs[field] = requestAnimationFrame(tick)
+        else this[field] = decimals ? Number(to).toFixed(decimals) : to
+      }
+      this._countRafs[field] = requestAnimationFrame(tick)
+    },
+    replayResult() {
+      this.barsRevealed = false
+      this.resultReady = false
+      this.popped = false
+      this.dims.forEach((d) => { d.display = 0 })
+      this.totalDisplay = 0
+      this.$nextTick(() => {
+        this.countUp('totalDisplay', 0, 82, 1000)
+        this.dims.forEach((d) => this.countUp('display', 0, d.score, 900))
+        setTimeout(() => { this.barsRevealed = true }, 120)
+        setTimeout(() => { this.resultReady = true }, 300)
+        setTimeout(() => { this.popped = true; this.drawRadar(true) }, 900)
+      })
+    },
+    /* ── 3. 雷达生长（同 §3，H5 canvas 2D 等价实现） ── */
+    drawRadar(animated) {
+      const canvas = document.getElementById('radar')
+      const dpr = window.devicePixelRatio || 1
+      const w = canvas.clientWidth, h = canvas.clientHeight
+      canvas.width = w * dpr; canvas.height = h * dpr
+      const ctx = canvas.getContext('2d')
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 34
+      const dims = this.dims, n = dims.length
+      const angleAt = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / n
+      const pointAt = (i, ratio) => [cx + R * ratio * Math.cos(angleAt(i)), cy + R * ratio * Math.sin(angleAt(i))]
+      const ratioOf = (d) => Math.max(0, Math.min(1, d.score / 100))
+      const drawGrid = () => {
+        ctx.lineWidth = 1; ctx.strokeStyle = '#e3e9f2'
+        ;[0.25, 0.5, 0.75, 1].forEach((lv) => {
+          ctx.beginPath()
+          for (let i = 0; i < n; i++) {
+            const p = pointAt(i, lv); i === 0 ? ctx.moveTo(...p) : ctx.lineTo(...p)
+          }
+          ctx.closePath(); ctx.stroke()
+        })
+        for (let i = 0; i < n; i++) {
+          const p = pointAt(i, 1)
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(...p); ctx.stroke()
+        }
+      }
+      const drawData = (k) => {
+        ctx.clearRect(0, 0, w, h); drawGrid()
+        ctx.beginPath()
+        dims.forEach((d, i) => {
+          const p = pointAt(i, ratioOf(d) * k)
+          i === 0 ? ctx.moveTo(...p) : ctx.lineTo(...p)
+        })
+        ctx.closePath()
+        ctx.fillStyle = 'rgba(43, 115, 248, ' + (0.22 * k).toFixed(3) + ')'
+        ctx.fill()
+        ctx.strokeStyle = '#2b73f8'; ctx.lineWidth = 2; ctx.stroke()
+        if (k > 0.55) {
+          ctx.fillStyle = '#2b73f8'
+          dims.forEach((d, i) => {
+            const p = pointAt(i, ratioOf(d) * k)
+            ctx.beginPath(); ctx.arc(p[0], p[1], 2.5, 0, 2 * Math.PI); ctx.fill()
+          })
+        }
+        if (k > 0.75) {
+          ctx.fillStyle = '#666'; ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+          dims.forEach((d, i) => {
+            const x = cx + (R + 18) * Math.cos(angleAt(i))
+            const y = cy + (R + 18) * Math.sin(angleAt(i))
+            ctx.fillText(d.label, x, y)
+          })
+        }
+      }
+      if (this._radarTimer) clearInterval(this._radarTimer)
+      if (!animated) { drawData(1); return }
+      const FRAMES = 30, DUR = 800
+      let f = 0
+      this._radarTimer = setInterval(() => {
+        f += 1
+        drawData(1 - Math.pow(1 - f / FRAMES, 3))
+        if (f >= FRAMES) { clearInterval(this._radarTimer); this._radarTimer = null }
+      }, DUR / FRAMES)
+    },
+    toggleLoading() {
+      if (this.btnLoading) return
+      this.btnLoading = true
+      setTimeout(() => { this.btnLoading = false }, 1600)
+    }
+  }
+}).mount('#app')  /* Vue3 demo；实际项目为 options API 页面，逻辑逐字对应 */
+</script>
+</body>
+</html>
