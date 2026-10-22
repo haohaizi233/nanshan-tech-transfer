@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import time
 import logging
 import re
 import urllib.error
@@ -49,6 +50,65 @@ def parse_json_content(text: str) -> Any:
             except json.JSONDecodeError:
                 pass
         raise AiProviderError("model did not return JSON")
+
+
+def _chat_stream(messages: list[dict], timeout: float | None = None, on_progress=None) -> str:
+    """SSE流式聊天：逐token返回，on_progress(text, token_count)回调实时进度。"""
+    if not configured():
+        raise AiProviderError("AI_PROVIDER_BASE is not set")
+    url = f"{_base()}/chat/completions"
+    body = {
+        "model": settings.AI_PROVIDER_MODEL or "hermes-agent",
+        "temperature": 0.2,
+        "messages": messages,
+        "stream": True,
+    }
+    headers = {
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": "nanshan-tech-transfer/1.0",
+    }
+    key = settings.AI_PROVIDER_KEY.strip()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+        headers["x-api-key"] = key
+    req = urllib.request.Request(url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
+    wait = timeout if timeout is not None else float(settings.AI_PROVIDER_TIMEOUT or 120)
+    
+    content_parts = []
+    token_count = 0
+    try:
+        with _OPENER.open(req, timeout=wait) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    piece = delta.get("content", "")
+                    if piece:
+                        content_parts.append(piece)
+                        token_count += 1
+                        if on_progress:
+                            try:
+                                on_progress("".join(content_parts), token_count)
+                            except Exception:
+                                pass
+                except json.JSONDecodeError:
+                    continue
+    except urllib.error.HTTPError as exc:
+        raise AiProviderError(f"provider HTTP {exc.code}") from None
+    except Exception as exc:
+        raise AiProviderError(f"stream error: {exc}") from None
+    
+    result = "".join(content_parts)
+    if not result.strip():
+        raise AiProviderError("stream returned empty content")
+    return result
 
 
 def _chat(messages: list[dict], timeout: float | None = None) -> str:
@@ -153,7 +213,14 @@ def evaluate_achievement(
     )
     user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
     _stage(progress.STAGE_ANALYZING)  # 阶段2：LLM 调用中
-    data = complete_json(system, user, timeout=timeout)
+    llm_start = time.time()
+    
+    def _llm_progress(partial_text, token_count):
+        """实时进度回调：每30个token更新一次阶段信息"""
+        if token_count % 30 == 0:
+            elapsed = int(time.time() - llm_start)
+            _stage(f"AI生成中... 已产出{token_count}字 ({elapsed}s)")
+    data = parse_json_content(_chat_stream([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], timeout=timeout, on_progress=_llm_progress))
     _stage(progress.STAGE_REPORT)  # 阶段3：解析 LLM 输出
     try:
         normalized = evaluation.normalize_llm_result(data)
