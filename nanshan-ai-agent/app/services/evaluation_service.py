@@ -208,6 +208,9 @@ def evaluate(user_id: int, achievement_id: int, prefer_existing: bool = False) -
         payload={"userId": user_id, "achievementId": achievement_id},
     ) or {}
     task_id = created.get("taskId")
+    # 立即返回pending，不轮询等待（前端通过/ai/evaluation-tasks/{id}/stream获取进度）
+    if task_id is not None:
+        return {"status": "pending", "taskId": task_id, "progressStage": created.get("progressStage", "排队中"), "evaluation": None}
     if task_id is None:
         raise EvaluationError(GENERIC_ERROR)
 
