@@ -929,7 +929,10 @@
 	}
 
 	.actions {
-		margin-top: 8rpx;
+		margin-top: 24rpx;
+		display: flex;
+		flex-direction: column;
+		gap: 24rpx;
 	}
 
 	.btn {
@@ -938,5 +941,14 @@
 		border-radius: 12rpx;
 		font-size: 30rpx;
 		font-weight: 600;
+		height: 88rpx;
+		line-height: 88rpx;
+		margin: 0;
+	}
+
+	.btn--ghost {
+		background: #ffffff !important;
+		color: #2b73f8 !important;
+		border: 2rpx solid #2b73f8;
 	}
 </style>
