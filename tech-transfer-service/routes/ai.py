@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from config import settings
 from core.errors import (
@@ -36,6 +36,7 @@ from modules.ai.chat_store import (
     list_history, start_turn,
 )
 from modules.ai.chat_runs import submit_run, clear_runs, has_durable_history
+from modules.ai import eval_stream
 from modules.ai.service import (
     create_evaluation_task,
     get_card_view_counts,
@@ -100,6 +101,116 @@ def evaluation_tasks_create(request: Request, body: EvaluationTaskRequest, user:
 @router.get("/ai/evaluation-tasks/{task_id}")
 def evaluation_task_detail(task_id: int, user: dict = Depends(identity)):
     return success(get_evaluation_task(user["userId"], task_id))
+
+
+# ── 成果评估 SSE 流式（打字机效果）────────────────────────────
+# 事件流（text/event-stream，每条 data: 帧为一个 JSON 对象）：
+#   {"type":"snapshot","text":"<已生成全文>"}                  订阅回放（迟到连接补齐历史）
+#   {"type":"content_delta","text":"<增量>"}                   LLM 实时增量（报告原文）
+#   {"type":"stage","text":"正在生成评价报告"}                  阶段文案（ai_task.progress_stage）
+#   {"type":"done","status":"succeeded","result":{...}}        终态（result 同 GET 任务视图）
+#   {"type":"timeout"}                                        服务端流到时（前端转轮询兜底）
+#   {"type":"error","message":"..."}                          流内异常（前端转轮询兜底）
+# 前端无 SSE 能力（小程序）或流中断时降级 GET 轮询，轮询契约不变。
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    # 反代（Nginx/Caddy）默认缓冲响应体：显式关闭，保证逐 token 到达
+    "X-Accel-Buffering": "no",
+}
+# 单条 SSE 流最长持续时间（秒）：与前端轮询上限（120s）同量级。
+_SSE_MAX_SECONDS = 150.0
+# DB 状态巡检间隔（秒）：外部 worker 执行时进程内总线无事件，靠巡检收敛终态。
+_SSE_POLL_SECONDS = 1.0
+# 心跳注释间隔（秒）：防反代/移动网络空闲断连；客户端忽略 ":" 开头的行。
+_SSE_HEARTBEAT_SECONDS = 10.0
+_SSE_TERMINAL_STATUSES = ("succeeded", "failed", "stale")
+
+
+def _sse_frame(payload: dict) -> str:
+    return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+
+
+@router.get("/ai/evaluation-tasks/{task_id}/stream")
+def evaluation_task_stream(task_id: int, user: dict = Depends(identity)):
+    """评估报告 SSE 流式通道（ChatGPT 式打字机实时渲染）。
+
+    queued/running：持续推送 content_delta（LLM 生成中的报告原文）与 stage，
+    终态推 done（result 为 GET /ai/evaluation-tasks/{id} 同款任务视图，含
+    结构化评分/报告）后关闭。已终态任务单帧 done 直接返回。
+    数据权限同 GET：仅任务创建者可见。
+    """
+    # 预检：归属校验 + stale 清理 + queued 补偿提交（复用 GET 的全部容灾语义）
+    view = get_evaluation_task(user["userId"], task_id)
+    if view["status"] in _SSE_TERMINAL_STATUSES:
+        return StreamingResponse(
+            iter([_sse_frame({"type": "done", "status": view["status"], "result": view})]),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
+    return StreamingResponse(
+        _evaluation_event_stream(user["userId"], task_id),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+def _evaluation_event_stream(user_id: int, task_id: int):
+    """SSE 事件生成器（同步生成器，由 StreamingResponse 放入线程池执行）。
+
+    双通道收敛：
+    - 进程内流式总线（eval_stream）：LLM 增量 content_delta + 终态信号（实时）；
+    - DB 巡检（get_evaluation_task）：progress_stage 阶段文案 + 外部 worker
+      执行时的终态兜底（独立 worker 进程不共享内存总线）。
+    任一通道看到终态即推 done（查库组装结构化结果）收尾。
+    """
+    sub = eval_stream.subscribe(task_id)
+    deadline = time.monotonic() + _SSE_MAX_SECONDS
+    last_stage = None
+    last_poll = 0.0
+    last_beat = 0.0
+    terminal = False
+    try:
+        yield _sse_frame({"type": "snapshot", "text": sub.text})
+        while time.monotonic() < deadline:
+            event = sub.get(timeout=0.5)
+            now = time.monotonic()
+            if event is not None:
+                if event.get("type") == "terminal":
+                    terminal = True
+                    break
+                yield _sse_frame(event)
+            if now - last_poll >= _SSE_POLL_SECONDS:
+                last_poll = now
+                try:
+                    view = get_evaluation_task(user_id, task_id)
+                except BizError as exc:
+                    yield _sse_frame({"type": "error", "message": exc.message})
+                    return
+                stage = view.get("progressStage")
+                if stage and stage != last_stage:
+                    last_stage = stage
+                    yield _sse_frame({"type": "stage", "text": stage})
+                if view["status"] in _SSE_TERMINAL_STATUSES:
+                    yield _sse_frame({"type": "done", "status": view["status"], "result": view})
+                    return
+            if now - last_beat >= _SSE_HEARTBEAT_SECONDS:
+                last_beat = now
+                yield ": ping\n\n"
+        if terminal:
+            # 总线终态信号：结果体查库组装（worker 先落库后广播，此处必能读到）
+            try:
+                view = get_evaluation_task(user_id, task_id)
+            except BizError as exc:
+                yield _sse_frame({"type": "error", "message": exc.message})
+                return
+            yield _sse_frame({"type": "done", "status": view["status"], "result": view})
+        else:
+            # 流到时仍未终态：前端转 GET 轮询兜底
+            yield _sse_frame({"type": "timeout"})
+    finally:
+        sub.close()
 
 
 @router.get("/ai/evaluations")

@@ -176,6 +176,7 @@ def evaluate_achievement(
     snapshot: dict,
     timeout: float | None = None,
     on_stage=None,
+    on_delta=None,
 ) -> dict:
     """多维成果评价 + 评价报告（LLM 生成，评分算法在 evaluation 模块换算）。
 
@@ -186,6 +187,10 @@ def evaluate_achievement(
     回传 progress.STAGE_ANALYZING / STAGE_REPORT / STAGE_SCORING，
     由调用方（worker）写入 ai_task.progress_stage。回调异常只记日志，
     不影响评价主流程。
+
+    on_delta：报告原文增量回调（可选），LLM 每产出一段新文字就回传该增量，
+    供 SSE 流式总线（modules/ai/eval_stream）实时推给前端做打字机渲染。
+    回调异常只记日志，不影响评价主流程。
     """
     def _stage(stage: str) -> None:
         if on_stage is None:
@@ -214,9 +219,19 @@ def evaluate_achievement(
     user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
     _stage(progress.STAGE_ANALYZING)  # 阶段2：LLM 调用中
     llm_start = time.time()
-    
+    _seen_len = 0  # 已推送给 on_delta 的累计字数（增量 = 累计文本[_seen_len:]）
+
     def _llm_progress(partial_text, token_count):
-        """实时进度回调：每30个token更新一次阶段信息"""
+        """实时进度回调：增量推给 SSE 流（打字机），每 30 个 token 更新一次阶段信息。"""
+        nonlocal _seen_len
+        # 增量 = 本次回调相对上次的新增片段（_chat_stream 回传的是累计全文）
+        if on_delta is not None and partial_text and len(partial_text) > _seen_len:
+            delta = partial_text[_seen_len:]
+            _seen_len = len(partial_text)
+            try:
+                on_delta(delta)
+            except Exception:
+                logger.exception("ai evaluation on_delta callback failed")
         if token_count % 30 == 0:
             elapsed = int(time.time() - llm_start)
             _stage(f"AI生成中... 已产出{token_count}字 ({elapsed}s)")

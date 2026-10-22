@@ -12,6 +12,7 @@ from typing import Any
 from psycopg2.extras import Json
 
 from db import close_pool, get_cursor, transaction
+from modules.ai import eval_stream
 from modules.ai import provider
 from modules.ai import progress
 
@@ -132,6 +133,8 @@ def _fail(task_id: int, reason: str) -> None:
             """,
             (_clip(reason), task_id),
         )
+    # SSE 流式收尾：失败也告知订阅端（结果体由端点查库组装）
+    _stream_signal(eval_stream.finish, task_id, "failed")
 
 
 def _snapshot(raw: Any) -> dict:
@@ -153,10 +156,19 @@ def _report_stage(task_id: int, stage: str) -> None:
     except Exception:
         logger.exception("ai evaluation stage report failed task=%s stage=%s", task_id, stage)
 
+def _stream_signal(fn, *args) -> None:
+    """SSE 流式总线信号（best-effort）：总线异常绝不打断评估主流程。"""
+    try:
+        fn(*args)
+    except Exception:
+        logger.exception("ai evaluation stream bus signal failed args=%s", args)
+
 
 def _run_evaluation(task: dict, timeout: float | None = None) -> None:
     task_id = task["id"]
     achievement_id = task["target_id"]
+    # SSE 流式：打开进程内频道（幂等），LLM 增量经 on_delta 实时广播
+    _stream_signal(eval_stream.open, task_id)
     # 实时阶段回传：每个关键阶段把文案写入 ai_task.progress_stage，
     # 供 GET /ai/evaluation-tasks/{id} 轮询返回（best-effort，失败不影响评估）。
     _report_stage(task_id, progress.STAGE_READING)  # 阶段1：快照加载
@@ -166,9 +178,12 @@ def _run_evaluation(task: dict, timeout: float | None = None) -> None:
         timeout=timeout,
         # 阶段2/3/4（LLM 调用 → 解析输出 → 评分换算）由 provider 回传
         on_stage=lambda stage: _report_stage(task_id, stage),
+        # 报告原文增量（打字机）：逐 token 推给 SSE 流式总线
+        on_delta=lambda delta: _stream_signal(eval_stream.push_delta, task_id, delta),
     )
     legacy = result["legacyScores"]
     _report_stage(task_id, progress.STAGE_SAVING)  # 阶段5：写入数据库
+    saved = False
     with transaction() as conn:
         cur = conn.cursor()
         try:
@@ -216,8 +231,13 @@ def _run_evaluation(task: dict, timeout: float | None = None) -> None:
                 # 不覆盖终态（INSERT 的 SELECT 同样带 status='running' 条件，
                 # 不会留下孤儿评分行）。
                 logger.warning("ai worker result discarded task=%s (no longer running)", task["id"])
+            else:
+                saved = True
         finally:
             cur.close()
+    if saved:
+        # SSE 流式收尾：事务提交后再广播 succeeded，订阅端查库必能读到结果
+        _stream_signal(eval_stream.finish, task_id, "succeeded")
 
 
 def process_one() -> str:

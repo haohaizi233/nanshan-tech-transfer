@@ -137,6 +137,20 @@
 				</block>
 			</block>
 
+			<!-- 流式打字机：SSE 增量实时渲染 LLM 报告原文（done 后换结构化结果） -->
+			<view v-if="showStreamPreview" class="section stream-section">
+				<view class="section-head">
+					<text class="section-title">AI 评价报告</text>
+					<AiGeneratedMark mode="badge" />
+				</view>
+				<view v-for="(sec, sIndex) in streamPreview.sections" :key="'stream-' + sIndex" class="report-sec">
+					<text v-if="sec.heading" class="report-sec__heading">{{ sec.heading }}</text>
+					<text class="report-sec__content">{{ sec.content }}{{ sIndex === streamPreview.sections.length - 1 ? '▍' : '' }}</text>
+				</view>
+				<text v-if="!streamPreview.sections.length && streamPreview.conclusion" class="report-sec__content">{{ streamPreview.conclusion }}▍</text>
+				<text v-if="!streamPreview.sections.length && !streamPreview.conclusion" class="report-sec__content">AI 正在撰写评价报告…▍</text>
+			</view>
+
 			<!-- 历史评估记录 -->
 		<view v-if="history.length" class="section">
 			<view class="section-head">
@@ -181,6 +195,7 @@
 		saveEvalTask
 	} from '../../api/ai-eval-wal.mjs'
 	import { AI_EVAL_NOTICE } from '../../api/ai-disclosure.mjs'
+	import { openEvalTaskStream, extractStreamSections } from '../../api/ai-eval-stream.mjs'
 	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
@@ -227,7 +242,12 @@
 				loadError: '',
 				retrying: false,
 				timer: null,
-				pollStartedAt: 0
+				pollStartedAt: 0,
+				// SSE 流式打字机（H5）：无 fetch 能力时保持 false，走轮询
+				streaming: false,
+				streamText: '',
+				streamStage: '',
+				streamHandle: null
 			}
 		},
 		computed: {
@@ -236,7 +256,8 @@
 				// ai_task.progress_stage，随轮询返回）；后端无值时
 				// （旧任务/刚创建）退回本地模拟轮播兜底。
 				const current = this.task || {}
-				const realStage = current.progressStage || current.progress_stage
+				// SSE stage 事件实时性最好，优先于轮询到的 progressStage
+				const realStage = this.streamStage || current.progressStage || current.progress_stage
 				if (realStage && (current.status === 'running' || current.status === 'queued')) {
 					return realStage
 				}
@@ -249,6 +270,15 @@
 			},
 			statusText() {
 				return STATUS_TEXT[this.task.status] || this.task.status
+			},
+			// 流式原文（半截 JSON）容错解析出的可渲染分节
+			streamPreview() {
+				return extractStreamSections(this.streamText)
+			},
+			// running/queued 且 SSE 流在推送时展示打字机
+			showStreamPreview() {
+				return !!(this.streaming && this.task &&
+					(this.task.status === 'running' || this.task.status === 'queued'))
 			},
 			failTitle() {
 				return this.task && this.task.status === 'stale' ? '排队超时' : '评估失败'
@@ -343,24 +373,26 @@
 				saveEvalTask(this.achievementId, taskId, uni)
 			}
 			if (this.shouldRevalidatePageState('task')) this.fetchTask()
-			else if (this.task && !isTerminalStatus(this.task.status)) this.startPolling()
+			else if (this.task && !isTerminalStatus(this.task.status)) this.startRealtime()
 			// 页面缓存恢复的任务也可能已含结果
 			this.scheduleRadarDraw()
 		},
 		onShow() {
 			if (!this.aiEnabled) return
 			// 页面回前台：任务未终态且轮询已停（如轮询出错）时恢复
-			if (this.taskId && this.task && !isTerminalStatus(this.task.status) && !this.timer) {
+			if (this.taskId && this.task && !isTerminalStatus(this.task.status) && !this.timer && !this.streamHandle) {
 				if (this.shouldRevalidatePageState('task')) this.fetchTask()
-				else this.startPolling()
+				else this.startRealtime()
 			}
 			this.scheduleRadarDraw()
 		},
 		onHide() {
 			this.stopPolling()
+			this.stopStream()
 		},
 		onUnload() {
 			this.stopPolling()
+			this.stopStream()
 		},
 		methods: {
 			syncProgressTicker() {
@@ -388,6 +420,7 @@
 			},
 			openHistoryTask(item) {
 				if (item.taskId && item.taskId !== this.taskId) {
+					this.stopStream()
 					this.taskId = item.taskId
 					this.fetchTask()
 				}
@@ -484,7 +517,7 @@
 					this.task = task
 					this.markPageStateFresh('task')
 					if (!isTerminalStatus(task.status)) {
-						this.startPolling()
+						this.startRealtime()
 					}
 				} catch (e) {
 					console.error('[ai-eval-detail] getEvaluationTask failed:', e)
@@ -493,6 +526,81 @@
 				} finally {
 					this.loading = false
 				}
+			},
+			// SSE 流式打字机优先（H5 fetch + ReadableStream）；无能力/失败降级轮询
+			startRealtime() {
+				if (!this.aiEnabled || !this.taskId) return
+				this.stopStream()
+				this.streamText = ''
+				this.streamStage = ''
+				const taskId = this.taskId
+				const self = this
+				const handle = openEvalTaskStream(taskId, {
+					onSnapshot(text) {
+						if (self.taskId !== taskId) return
+						self.streamText = text || ''
+					},
+					onContentDelta(delta) {
+						if (self.taskId !== taskId) return
+						self.streamText += (delta || '')
+					},
+					onStage(text) {
+						if (self.taskId !== taskId) return
+						self.streamStage = text || ''
+					},
+					onDone(payload) {
+						if (self.taskId !== taskId) return
+						self.stopStream()
+						self.applyStreamDone(payload)
+					},
+					onTimeout() {
+						if (self.taskId !== taskId) return
+						self.handleStreamFallback()
+					},
+					onError() {
+						if (self.taskId !== taskId) return
+						self.handleStreamFallback()
+					},
+					onFallback() {
+						if (self.taskId !== taskId) return
+						self.handleStreamFallback()
+					}
+				})
+				if (!handle) {
+					// 非 H5 / 无 fetch：降级为既有轮询，契约不变
+					this.startPolling()
+					return
+				}
+				this.streamHandle = handle
+				this.streaming = true
+			},
+			// 流中断/超时/异常：转轮询兜底（轮询契约不变）
+			handleStreamFallback() {
+				this.stopStream()
+				if (this.taskId && (!this.task || !isTerminalStatus(this.task.status))) {
+					this.startPolling()
+				}
+			},
+			// done 事件：换结构化结果（评分卡片 + 雷达图）
+			applyStreamDone(payload) {
+				const result = payload && payload.result
+				if (result && result.taskId === this.taskId) {
+					this.task = result
+					this.markPageStateFresh('task')
+					this.stopPolling()
+					return
+				}
+				// done 但缺结果（异常收尾）：拉一次任务兜底
+				this.fetchTask()
+			},
+			stopStream() {
+				if (this.streamHandle) {
+					try {
+						this.streamHandle.close()
+					} catch (e) {}
+					this.streamHandle = null
+				}
+				this.streaming = false
 			},
 			startPolling() {
 				this.stopPolling()
@@ -530,7 +638,7 @@
 					this.task = task
 					this.markPageStateFresh('task')
 					if (!isTerminalStatus(task.status)) {
-						this.startPolling()
+						this.startRealtime()
 					}
 					uni.showToast({ title: '已重新发起评估', icon: 'none' })
 				} catch (e) {

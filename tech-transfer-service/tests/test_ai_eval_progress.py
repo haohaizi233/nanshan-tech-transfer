@@ -7,6 +7,7 @@
   回调异常不影响评价主流程
 - modules/ai/service.py：GET 视图返回 progressStage / progress_stage
 """
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -107,7 +108,7 @@ class TestRunEvaluationStages:
         recorded = []
         mock_set.side_effect = lambda task_id, stage: recorded.append((task_id, stage))
 
-        def fake_eval(snapshot, timeout=None, on_stage=None):
+        def fake_eval(snapshot, timeout=None, on_stage=None, on_delta=None):
             # 阶段2/3/4 由 provider 在真实执行中回调；这里模拟回调
             for stage in (progress.STAGE_ANALYZING, progress.STAGE_REPORT,
                           progress.STAGE_SCORING):
@@ -153,11 +154,11 @@ class TestRunEvaluationStages:
 # ══════════════════════════════════════════════════════════════
 
 class TestProviderStages:
-    @patch("modules.ai.provider.complete_json")
-    def test_on_stage_called_in_order(self, mock_complete):
+    @patch("modules.ai.provider._chat_stream")
+    def test_on_stage_called_in_order(self, mock_stream):
         from modules.ai import progress
         from modules.ai.provider import evaluate_achievement
-        mock_complete.return_value = _llm_payload()
+        mock_stream.return_value = json.dumps(_llm_payload(), ensure_ascii=False)
         stages = []
         result = evaluate_achievement(
             {"id": 1}, timeout=5, on_stage=stages.append,
@@ -169,10 +170,10 @@ class TestProviderStages:
         ]
         assert result["totalScore"] > 0
 
-    @patch("modules.ai.provider.complete_json")
-    def test_on_stage_optional_and_error_tolerant(self, mock_complete):
+    @patch("modules.ai.provider._chat_stream")
+    def test_on_stage_optional_and_error_tolerant(self, mock_stream):
         from modules.ai.provider import evaluate_achievement
-        mock_complete.return_value = _llm_payload()
+        mock_stream.return_value = json.dumps(_llm_payload(), ensure_ascii=False)
         # 不传 on_stage：正常完成
         assert evaluate_achievement({"id": 1})["totalScore"] > 0
 
@@ -182,11 +183,11 @@ class TestProviderStages:
         # 回调抛异常：不影响评价主流程
         assert evaluate_achievement({"id": 1}, on_stage=boom)["totalScore"] > 0
 
-    @patch("modules.ai.provider.complete_json")
-    def test_stage_report_emitted_before_normalize_error(self, mock_complete):
+    @patch("modules.ai.provider._chat_stream")
+    def test_stage_report_emitted_before_normalize_error(self, mock_stream):
         from modules.ai import progress
         from modules.ai.provider import evaluate_achievement, AiProviderError
-        mock_complete.return_value = {"not_scores": 1}
+        mock_stream.return_value = json.dumps({"not_scores": 1})
         stages = []
         with pytest.raises(AiProviderError):
             evaluate_achievement({"id": 1}, on_stage=stages.append)
