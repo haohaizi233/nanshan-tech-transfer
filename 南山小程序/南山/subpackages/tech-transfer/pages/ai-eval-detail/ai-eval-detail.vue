@@ -136,7 +136,28 @@
 				</block>
 			</block>
 
-			<view v-if="dockId" class="actions">
+			<!-- 历史评估记录 -->
+		<view v-if="history.length" class="section">
+			<view class="section-head">
+				<text class="section-title">历史评估记录</text>
+				<text class="history-count">共 {{ historyTotal }} 次</text>
+			</view>
+			<view v-for="item in history" :key="item.evaluationId" class="history-item" @click="openHistoryTask(item)">
+				<view class="history-item__score-wrap">
+					<text class="history-item__score">{{ item.totalScore }}</text>
+					<text class="history-item__unit">分</text>
+				</view>
+				<view class="history-item__info">
+					<text v-if="item.ratingLabel" class="history-item__rating">{{ item.ratingLabel }}</text>
+					<text class="history-item__time">{{ item.createdAt }}</text>
+				</view>
+			</view>
+		</view>
+
+		<view v-if="dockId" class="actions">
+			<button v-if="task.status === 'succeeded'" class="btn btn--ghost" :disabled="retrying" @click="onRetry">
+				{{ retrying ? '提交中…' : '重新评估' }}
+			</button>
 				<button class="btn" @click="goDock">查看成果对接详情</button>
 			</view>
 		</block>
@@ -195,6 +216,11 @@
 				taskId: null,
 				achievementId: null,
 				task: null,
+				history: [],
+				historyTotal: 0,
+				stageIndex: 0,
+				elapsedSeconds: 0,
+				stageTimer: null,
 				loading: false,
 				loadError: '',
 				retrying: false,
@@ -203,6 +229,14 @@
 			}
 		},
 		computed: {
+			stageText() {
+				const stages = {
+					queued: ['任务已进入评估队列', '正在等待 AI 算力调度', '排队即将完成'],
+					running: ['AI 正在分析成果', '正在生成评价报告', '正在计算综合评分']
+				}
+				const list = (this.task && stages[this.task.status]) || stages.running
+				return list[this.stageIndex % list.length] + '…'
+			},
 			statusText() {
 				return STATUS_TEXT[this.task.status] || this.task.status
 			},
@@ -315,6 +349,34 @@
 			this.stopPolling()
 		},
 		methods: {
+			syncProgressTicker() {
+				if (this.task && (this.task.status === 'queued' || this.task.status === 'running')) {
+					if (!this.stageTimer) {
+						this.progressAnchor = Date.now()
+						this.stageTimer = setInterval(() => {
+							this.stageIndex++
+							this.elapsedSeconds = Math.floor((Date.now() - this.progressAnchor) / 1000)
+						}, 1000)
+					}
+				} else if (this.stageTimer) {
+					clearInterval(this.stageTimer)
+					this.stageTimer = null
+				}
+			},
+			async fetchHistory() {
+				try {
+					const { getEvaluationHistory } = await import('../../api/ai.js')
+					const result = await getEvaluationHistory(this.achievementId)
+					this.history = result.list || []
+					this.historyTotal = result.total || 0
+				} catch (e) {}
+			},
+			openHistoryTask(item) {
+				if (item.taskId && item.taskId !== this.taskId) {
+					this.taskId = item.taskId
+					this.fetchTask()
+				}
+			},
 			// 结果展示后绘制能力雷达图（H5 / 小程序通用 canvas 旧 API）
 			scheduleRadarDraw() {
 				this.$nextTick(() => {

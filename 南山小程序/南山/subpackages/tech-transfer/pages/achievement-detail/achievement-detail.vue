@@ -23,6 +23,36 @@
         </view>
       </view>
 
+      <!-- AI 智能评估入口（仅成果所有者可见）：已有评估展示最近结果摘要 + 查看报告/重新评估，
+           没有评估时才显示“发起 AI 评估” -->
+      <view v-if="showAiEval" class="section-card ai-eval-card">
+        <view class="ai-eval-head">
+          <text class="section-title ai-eval-title">AI 智能评估</text>
+          <text v-if="latestEval && latestEval.ratingLabel" class="ai-eval-rating">{{ latestEval.ratingLabel }}</text>
+        </view>
+        <view v-if="evalLoading" class="ai-eval-loading">
+          <view class="ai-spinner"></view>
+          <text class="ai-eval-hint">正在获取评估结果…</text>
+        </view>
+        <block v-else-if="latestEval">
+          <view class="ai-eval-summary">
+            <text class="ai-eval-score">{{ latestEval.totalScore }}</text>
+            <text class="ai-eval-score-unit">/ 100</text>
+            <text v-if="latestEval.createdAt" class="ai-eval-time">评估于 {{ latestEval.createdAt }}</text>
+          </view>
+          <view class="ai-eval-actions">
+            <button class="ai-eval-btn ai-eval-btn--ghost" size="mini" :disabled="evalSubmitting" @click="onStartEval">重新评估</button>
+            <button class="ai-eval-btn" size="mini" @click="onViewEval">查看评估报告</button>
+          </view>
+        </block>
+        <block v-else>
+          <text class="ai-eval-hint">对成果进行多维智能评估，自动生成综合评分与评价报告</text>
+          <view class="ai-eval-actions">
+            <button class="ai-eval-btn" size="mini" :disabled="evalSubmitting" @click="onStartEval">{{ evalSubmitting ? '提交中…' : '发起 AI 评估' }}</button>
+          </view>
+        </block>
+      </view>
+
       <!-- 来源 -->
       <view class="info-card">
         <view class="info-row">
@@ -154,10 +184,12 @@
 
 <script>
 import { getAchievementDetail } from '../../api/achievement.js'
+import { createEvaluationTask, getEvaluationHistory } from '../../api/ai.js'
 import { formatMaturityLabel } from '../../api/achievement-dock-card.mjs'
 import { mediaDisplayUrl } from '../../api/media-url.mjs'
 import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
+import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 import { safeNavigateBack } from '../../utils/nav.mjs'
 
 const PRICING_MODE_LABELS = {
@@ -178,6 +210,11 @@ export default {
       detail: null,
       loading: true,
       error: '',
+      // AI 评估入口状态：最近一次评估摘要 / 加载与提交中标记
+      aiEnabled: AI_FEATURE_ENABLED,
+      latestEval: null,
+      evalLoading: false,
+      evalSubmitting: false,
     }
   },
   computed: {
@@ -221,6 +258,10 @@ export default {
       const d = this.detail || {}
       return d.pricingMode === 'negotiable' || d.priceMinWan != null || d.priceMaxWan != null
     },
+    // AI 评估入口仅成果所有者可见（后端发起评估为 owner-only），AI 关闭时整体隐藏
+    showAiEval() {
+      return this.aiEnabled && !!(this.detail && this.detail.isMine)
+    },
   },
   onLoad(options) {
     this.achId = parseInt(options.id, 10)
@@ -244,6 +285,8 @@ export default {
         const data = await getAchievementDetail(this.achId)
         this.detail = data
         this.markPageStateFresh('detail')
+        // 入口摘要：拉取最近一次 AI 评估（仅所有者可见），已有结果显示总分+等级
+        this.loadEvalSummary()
       } catch (e) {
         console.error('[achievement-detail] loadDetail failed:', e)
         if (!this.detail) this.error = e.message || '请求失败'
@@ -254,6 +297,50 @@ export default {
     },
     formatPricingMode(mode) {
       return PRICING_MODE_LABELS[mode] || ''
+    },
+    // ── AI 评估入口 ─────────────────────────────────────────
+    async loadEvalSummary() {
+      if (!this.showAiEval) return
+      this.evalLoading = true
+      try {
+        const data = await getEvaluationHistory(this.achId, 1, 20)
+        const list = (data && data.list) || []
+        // 列表按时间倒序，首个即最近一次评估
+        this.latestEval = list[0] || null
+      } catch (e) {
+        // 摘要拉取失败不影响详情展示：入口回退为“发起 AI 评估”
+        console.error('[achievement-detail] getEvaluationHistory failed:', e)
+      } finally {
+        this.evalLoading = false
+      }
+    },
+    onViewEval() {
+      const ev = this.latestEval
+      if (!ev || !ev.taskId) {
+        uni.showToast({ title: '暂无可查看的评估报告', icon: 'none' })
+        return
+      }
+      HostBridge.navigate('pages/ai-eval-detail/ai-eval-detail', {
+        taskId: ev.taskId,
+        achievementId: this.achId,
+      })
+    },
+    async onStartEval() {
+      if (!this.showAiEval || this.evalSubmitting || !this.achId) return
+      this.evalSubmitting = true
+      try {
+        // 服务端同成果 10 分钟去重：有进行中的任务会直接复用并跳转查看
+        const task = await createEvaluationTask(this.achId)
+        HostBridge.navigate('pages/ai-eval-detail/ai-eval-detail', {
+          taskId: task.taskId,
+          achievementId: this.achId,
+        })
+      } catch (e) {
+        console.error('[achievement-detail] createEvaluationTask failed:', e)
+        uni.showToast({ title: (e && e.message) || '评估发起失败', icon: 'none' })
+      } finally {
+        this.evalSubmitting = false
+      }
     },
     mediaSrc(media) {
       // 与 dock-detail.vue 的 mediaSrc 一致：把相对 /api/... 补成绝对地址并附带 access_token，
@@ -524,5 +611,106 @@ export default {
 .price-negotiable {
   font-size: 28rpx;
   font-weight: 500;
+}
+
+/* ── AI 智能评估入口卡片 ───────────────────────────────── */
+.ai-eval-card {
+  border: 1rpx solid rgba(43, 115, 248, 0.25);
+}
+
+.ai-eval-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.ai-eval-title {
+  margin-bottom: 0;
+  color: #2b73f8;
+}
+
+.ai-eval-rating {
+  font-size: 24rpx;
+  color: #1f9d63;
+  background: #e8f7f0;
+  padding: 4rpx 16rpx;
+  border-radius: 8rpx;
+}
+
+.ai-eval-loading {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 12rpx 0;
+}
+
+.ai-spinner {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  border: 4rpx solid rgba(43, 115, 248, 0.15);
+  border-top-color: #2b73f8;
+  animation: aiSpin 0.9s linear infinite;
+  margin-right: 16rpx;
+}
+
+@keyframes aiSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.ai-eval-summary {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+}
+
+.ai-eval-score {
+  font-size: 64rpx;
+  font-weight: 700;
+  color: #2b73f8;
+  line-height: 1;
+}
+
+.ai-eval-score-unit {
+  margin-left: 8rpx;
+  font-size: 24rpx;
+  color: #999;
+}
+
+.ai-eval-time {
+  margin-left: auto;
+  font-size: 22rpx;
+  color: #bbb;
+}
+
+.ai-eval-hint {
+  display: block;
+  font-size: 24rpx;
+  color: #888;
+  line-height: 1.6;
+}
+
+.ai-eval-actions {
+  display: flex;
+  flex-direction: row;
+  margin-top: 20rpx;
+}
+
+.ai-eval-btn {
+  flex: 1;
+  background: #2b73f8 !important;
+  color: #ffffff !important;
+  border-radius: 10rpx;
+  font-size: 26rpx;
+}
+
+.ai-eval-btn--ghost {
+  background: #ffffff !important;
+  color: #2b73f8 !important;
+  border: 1rpx solid #2b73f8;
+  margin-right: 16rpx;
 }
 </style>

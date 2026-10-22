@@ -51,15 +51,27 @@
 			<text v-if="item._sub" class="sub">{{ item._sub }}</text>
 			<text v-if="item._statusHint" :class="'review-hint review-hint-' + item._statusCls">{{ item._statusHint }}</text>
 			<text class="desc">{{ item._desc }}</text>
+			<!-- AI 评估入口摘要：已有评估直接展示最近结果（总分 + 等级），不再永远是“AI 评估” -->
+			<view v-if="pageType === 'result' && aiEnabled && item._eval" class="eval-summary">
+				<text class="eval-summary__label">AI 评估</text>
+				<text class="eval-summary__score">{{ item._eval.totalScore }} 分</text>
+				<text v-if="item._eval.ratingLabel" class="eval-summary__rating">{{ item._eval.ratingLabel }}</text>
+			</view>
 			<view class="card-foot">
 				<button v-if="!item._gone" class="btn" size="mini" @click="onOpen(item)">查看详情</button>
+				<button
+					v-if="pageType === 'result' && aiEnabled && item._eval"
+					class="btn"
+					size="mini"
+					@click="onViewEval(item)"
+				>查看评估报告</button>
 				<button
 					v-if="pageType === 'result' && aiEnabled"
 					class="btn ghost"
 					size="mini"
 					:disabled="item._evalLoading"
 					@click="onStartEval(item)"
-				>{{ item._evalLoading ? '提交中…' : 'AI 评估' }}</button>
+				>{{ item._evalLoading ? '提交中…' : (item._eval ? '重新评估' : 'AI 评估') }}</button>
 				<button
 					v-if="pageType === 'favorite'"
 					class="btn ghost"
@@ -74,7 +86,7 @@
 <script>
 	import { getMyDemands, toDemandCard } from '../../api/demand.js'
 	import { getMyAchievements, toAchievementCard } from '../../api/achievement.js'
-	import { createEvaluationTask } from '../../api/ai.js'
+	import { createEvaluationTask, getEvaluationHistory } from '../../api/ai.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 	import { createPageStateMixin, getPageStateScope, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
@@ -279,29 +291,32 @@
 					return
 				}
 			if (this.pageType === 'result') {
-					try {
-						const rows = await this.loadPublicationList(getMyAchievements, (item) => {
-							const card = toAchievementCard(item)
-							return {
-								...card,
-								_key: 'r-' + card.id,
-								_type: 'result',
-								_title: card.title,
-								_sub: card.sourceOrgName,
-								_desc: card.techIntro,
-								_status: card.status,
-								_statusLabel: card.statusLabel,
-								_statusCls: card.statusCls,
-								_statusHint: card.statusHint,
-								_evalLoading: false
-							}
-						})
-						applyRows(rows)
-					} catch (e) {
-						console.error('[my-list] loadMyAchievements failed:', e)
-					}
-					return
+				try {
+					// 入口摘要：先取每个成果最近一次评估（倒序首个），已有结果显示总分+等级
+					const evalMap = await this.loadEvalSummaries()
+					const rows = await this.loadPublicationList(getMyAchievements, (item) => {
+						const card = toAchievementCard(item)
+						return {
+							...card,
+							_key: 'r-' + card.id,
+							_type: 'result',
+							_title: card.title,
+							_sub: card.sourceOrgName,
+							_desc: card.techIntro,
+							_status: card.status,
+							_statusLabel: card.statusLabel,
+							_statusCls: card.statusCls,
+							_statusHint: card.statusHint,
+							_evalLoading: false,
+							_eval: evalMap[card.id] || null
+						}
+					})
+					applyRows(rows)
+				} catch (e) {
+					console.error('[my-list] loadMyAchievements failed:', e)
 				}
+				return
+			}
 				if (this.pageType === 'intention') {
 					try {
 						const role = this.intentTab === 0 ? 'initiator' : 'target'
@@ -380,6 +395,35 @@
 					params.role = item._role || ''
 				}
 				HostBridge.navigate('pages/dock-detail/dock-detail', params)
+			},
+			// 一次拉取当前用户全部评估记录（倒序），映射 achievementId → 最近一次评估摘要，
+			// 供入口显示已有结果（总分+等级）与「查看评估报告 / 重新评估」双按钮
+			async loadEvalSummaries() {
+				const map = {}
+				if (!this.aiEnabled) return map
+				try {
+					const data = await getEvaluationHistory(null, 1, 50)
+					for (const ev of (data && data.list) || []) {
+						if (ev && ev.achievementId != null && !map[ev.achievementId]) {
+							map[ev.achievementId] = ev
+						}
+					}
+				} catch (e) {
+					// 摘要拉取失败不影响列表：回退为“AI 评估”发起入口
+					console.error('[my-list] getEvaluationHistory failed:', e)
+				}
+				return map
+			},
+			onViewEval(item) {
+				const ev = item && item._eval
+				if (!ev || !ev.taskId) {
+					uni.showToast({ title: '暂无可查看的评估报告', icon: 'none' })
+					return
+				}
+				HostBridge.navigate('pages/ai-eval-detail/ai-eval-detail', {
+					taskId: ev.taskId,
+					achievementId: item.id
+				})
 			},
 			async onStartEval(item) {
 				if (!this.aiEnabled || item._evalLoading) return
@@ -627,6 +671,38 @@
 		font-size: 26rpx;
 		color: #444444;
 		line-height: 1.5;
+	}
+
+	/* AI 评估入口摘要：最近一次评估的总分 + 等级 */
+	.eval-summary {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 14rpx;
+		padding: 12rpx 18rpx;
+		background: rgba(43, 115, 248, 0.06);
+		border-radius: 10rpx;
+	}
+
+	.eval-summary__label {
+		font-size: 22rpx;
+		color: #2b73f8;
+		margin-right: 14rpx;
+	}
+
+	.eval-summary__score {
+		font-size: 28rpx;
+		font-weight: 700;
+		color: #2b73f8;
+	}
+
+	.eval-summary__rating {
+		margin-left: 14rpx;
+		font-size: 22rpx;
+		color: #1f9d63;
+		background: #e8f7f0;
+		border-radius: 8rpx;
+		padding: 2rpx 12rpx;
 	}
 
 	.card-foot {

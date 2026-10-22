@@ -92,6 +92,19 @@ export async function getEvaluationTask(taskId) {
   return apiRequest('GET', `/ai/evaluation-tasks/${taskId}`)
 }
 
+/**
+ * 评价历史记录：当前用户发起过的成果评价（分页倒序，列表不含 report 全文）。
+ * achievementId 传空则返回全部成果的历史；入口摘要与历史列表共用本接口。
+ * @returns {Promise<{list:Array<{evaluationId, taskId, achievementId, achievementTitle,
+ *   totalScore, rating, ratingLabel, starScore, conclusion, createdAt}>, total, page, pageSize}>}
+ */
+export async function getEvaluationHistory(achievementId, page = 1, pageSize = 20) {
+  assertAiRuntimeEnabled()
+  const query = { page, pageSize }
+  if (achievementId) query.achievementId = achievementId
+  return apiRequest('GET', '/ai/evaluations', query)
+}
+
 // ── 自然语言对话（nanshan-ai-agent demo）─────────────────────
 
 /**
