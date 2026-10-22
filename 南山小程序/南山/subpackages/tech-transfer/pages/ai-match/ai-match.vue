@@ -318,7 +318,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			waitingDemandPick: false,
 			queuePreviewCount: QUEUE_PREVIEW_COUNT,
 			inputFocus: false,
-			skillCursor: 0
+			skillCursor: 0,
+			showSkillMenu: false,
+			skillList: []
 		}
 	},
 	computed: {
@@ -826,6 +828,22 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		onInput(e) {
 			this.inputText = e.detail.value
 			this.skillCursor = 0
+			// 检测"/"触发命令菜单（支持手机输入法）
+			this._updateSkillMenu()
+		},
+		_updateSkillMenu() {
+			const text = String(this.inputText || '').trim()
+			if (text.startsWith('/')) {
+				const query = text.slice(1).toLowerCase()
+				this.skillList = SKILLS.filter(s => {
+					if (!query) return true
+					return s.cmd.includes(query) || (s.aliases && s.aliases.some(a => a.includes(query))) || (s.desc || '').includes(query)
+				})
+				this.showSkillMenu = this.skillList.length > 0
+			} else {
+				this.showSkillMenu = false
+				this.skillList = []
+			}
 		},
 			onSuggest(text) {
 				this.inputText = text
