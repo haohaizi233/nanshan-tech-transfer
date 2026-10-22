@@ -1,5 +1,5 @@
 <template>
-	<view class="page">
+	<view class="page aie-page">
 		<view v-if="!aiEnabled" class="coming-soon">
 			<text class="coming-soon__title">功能即将开放</text>
 			<text class="coming-soon__desc">智能评估正在建设中，敬请期待。</text>
@@ -82,8 +82,10 @@
 					<view class="section score-section">
 						<view class="total-wrap">
 							<text class="total-label">综合评分</text>
-							<text class="total-num" :class="{ 'total-num--pop': numPopped }">{{ totalDisplay }}</text>
-							<text class="total-unit">/ 100</text>
+							<view class="total-main">
+								<text class="total-num" :class="{ 'total-num--pop': numPopped }">{{ totalDisplay }}</text>
+								<text class="total-unit">/ 100</text>
+							</view>
 						</view>
 						<view class="score-badges">
 							<text v-if="evaluation.ratingLabel" class="rating-chip" :class="resultAnim ? 'aie-badge-pop' : ''">{{ evaluation.ratingLabel }}</text>
@@ -108,15 +110,18 @@
 						<text class="section-title">{{ dimsTitle }}</text>
 						<view class="dim-grid">
 							<view v-for="(dim, i) in dims" :key="dim.key" class="dim-card"
-								:class="resultAnim ? 'aie-card-in' : ''"
+								:class="['dim-card--' + scoreLevel(dim.value), resultAnim ? 'aie-card-in' : '']"
 								:style="resultAnim ? { animationDelay: (i * 80) + 'ms' } : null">
 								<view class="dim-card__head">
-									<text class="dim-card__label">{{ dim.label }}</text>
-									<text v-if="dim.weightText" class="dim-card__weight">{{ dim.weightText }}</text>
-								</view>
-								<view class="dim-card__score-row">
-									<text class="dim-card__score">{{ dimDisplays[i] != null ? dimDisplays[i] : dim.score }}</text>
-									<text v-if="dim.star != null" class="dim-card__star">{{ dim.star }} 星</text>
+									<view class="dim-card__left">
+										<text class="dim-card__label">{{ dim.label }}</text>
+										<text v-if="dim.weightText" class="dim-card__weight">{{ dim.weightText }}</text>
+									</view>
+									<view class="dim-card__right">
+										<text class="dim-card__score">{{ dimDisplays[i] != null ? dimDisplays[i] : dim.score }}</text>
+										<text class="dim-card__score-unit">分</text>
+										<text v-if="dim.star != null" class="dim-card__star">{{ dim.star }} 星</text>
+									</view>
 								</view>
 								<view class="bar-track">
 									<view class="bar-fill" :style="{ transform: 'scaleX(' + (barsRevealed ? dim.value / 100 : 0) + ')' }"></view>
@@ -457,6 +462,14 @@
 			this.stopRadarAnimation()
 		},
 		methods: {
+			// 评分分档（维度卡片/进度条配色）：优秀 / 良好 / 一般 / 偏弱
+			scoreLevel(value) {
+				const n = Number(value) || 0
+				if (n >= 85) return 'excellent'
+				if (n >= 70) return 'good'
+				if (n >= 60) return 'fair'
+				return 'weak'
+			},
 			dimLabel(key) {
 				const map = {
 					innovation: '创新性', techMaturity: '技术成熟度', marketProspect: '市场前景',
@@ -613,7 +626,7 @@
 						const h = rect.height
 						const cx = w / 2
 						const cy = h / 2
-						const R = Math.min(w, h) / 2 - 28
+						const R = Math.min(w, h) / 2 - 46
 						const n = dims.length
 						const angleAt = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / n
 						const ratioOf = (d) => Math.max(0, Math.min(1, d.value / 100))
@@ -624,7 +637,7 @@
 						// 静态层：网格 4 圈等比多边形 + 轴线（canvas 无分层，每帧都要画）
 						const drawGrid = () => {
 							ctx.setLineWidth(1)
-							ctx.setStrokeStyle('#e3e9f2')
+							ctx.setStrokeStyle('#e4ebf6')
 							;[0.25, 0.5, 0.75, 1].forEach((level) => {
 								ctx.beginPath()
 								for (let i = 0; i < n; i++) {
@@ -635,6 +648,7 @@
 								ctx.closePath()
 								ctx.stroke()
 							})
+							ctx.setStrokeStyle('#e8eef8')
 							for (let i = 0; i < n; i++) {
 								const p = pointAt(i, 1)
 								ctx.beginPath()
@@ -645,38 +659,51 @@
 						}
 						// 数据层：按进度 k ∈ [0,1] 从中心向外扩展，填充透明度同步渐入
 						const drawData = (k) => {
-							ctx.beginPath()
-							dims.forEach((d, i) => {
-								const p = pointAt(i, ratioOf(d) * k)   // 从中心向外生长
-								if (i === 0) ctx.moveTo(p[0], p[1])
-								else ctx.lineTo(p[0], p[1])
-							})
-							ctx.closePath()
-							ctx.setFillStyle('rgba(43, 115, 248, ' + (0.22 * k).toFixed(3) + ')')
+							const pts = dims.map((d, i) => pointAt(i, ratioOf(d) * k))   // 从中心向外生长
+							const tracePolygon = () => {
+								ctx.beginPath()
+								pts.forEach((p, i) => {
+									if (i === 0) ctx.moveTo(p[0], p[1])
+									else ctx.lineTo(p[0], p[1])
+								})
+								ctx.closePath()
+							}
+							ctx.setLineJoin('round')
+							// 外发光（低透明度粗描边）→ 半透明填充 → 主描边
+							tracePolygon()
+							ctx.setStrokeStyle('rgba(43, 115, 248, ' + (0.16 * k).toFixed(3) + ')')
+							ctx.setLineWidth(10)
+							ctx.stroke()
+							ctx.setFillStyle('rgba(43, 115, 248, ' + (0.2 * k).toFixed(3) + ')')
 							ctx.fill()
 							ctx.setStrokeStyle('#2b73f8')
 							ctx.setLineWidth(2)
 							ctx.stroke()
 							if (k > 0.55) {
-								// 顶点圆点后段出现
-								ctx.setFillStyle('#2b73f8')
-								dims.forEach((d, i) => {
-									const p = pointAt(i, ratioOf(d) * k)
+								// 顶点圆点（白底蓝环）后段出现
+								ctx.setStrokeStyle('#2b73f8')
+								ctx.setLineWidth(2)
+								pts.forEach((p) => {
 									ctx.beginPath()
-									ctx.arc(p[0], p[1], 2.5, 0, 2 * Math.PI)
+									ctx.arc(p[0], p[1], 4, 0, 2 * Math.PI)
+									ctx.setFillStyle('#ffffff')
 									ctx.fill()
+									ctx.stroke()
 								})
 							}
 							if (k > 0.75) {
-								// 维度标签最后出现（canvas 无 alpha 动画，用出现时机模拟）
-								ctx.setFillStyle('#666666')
-								ctx.setFontSize(11)
+								// 维度标签 + 分值最后出现（canvas 无 alpha 动画，用出现时机模拟）
 								ctx.setTextAlign('center')
 								ctx.setTextBaseline('middle')
 								dims.forEach((d, i) => {
-									const x = cx + (R + 18) * Math.cos(angleAt(i))
-									const y = cy + (R + 18) * Math.sin(angleAt(i))
-									ctx.fillText(d.label, x, y)
+									const x = cx + (R + 22) * Math.cos(angleAt(i))
+									const y = cy + (R + 22) * Math.sin(angleAt(i))
+									ctx.setFillStyle('#5b6b84')
+									ctx.setFontSize(11)
+									ctx.fillText(d.label, x, y - 7)
+									ctx.setFillStyle('#2b73f8')
+									ctx.setFontSize(10)
+									ctx.fillText(String(d.score), x, y + 8)
 								})
 							}
 							ctx.draw()
@@ -855,721 +882,870 @@
 </script>
 
 <style>
-	.page {
-		min-height: 100vh;
-		background: #f5f6f8;
-		padding: 24rpx;
-		padding-bottom: calc(60rpx + env(safe-area-inset-bottom));
-		box-sizing: border-box;
-	}
-
-	.coming-soon {
-		min-height: 70vh;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: 48rpx 24rpx;
-		box-sizing: border-box;
-	}
-
-	.coming-soon__title {
-		font-size: 36rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-	}
-
-	.coming-soon__desc {
-		margin-top: 16rpx;
-		font-size: 26rpx;
-		color: #888888;
-		line-height: 1.5;
-		text-align: center;
-	}
-
-	.page-mark {
-		margin-bottom: 20rpx;
-	}
-
-	.section {
-		background: #ffffff;
-		border-radius: 20rpx;
-		border: 1rpx solid #e8ecf2;
-		padding: 32rpx;
-		margin-bottom: 28rpx;
-		box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
-	}
-
-	.title {
-		display: block;
-		font-size: 34rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-		line-height: 1.4;
-		margin-bottom: 12rpx;
-	}
-
-	.task-meta {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.task-id {
-		font-size: 24rpx;
-		color: #888888;
-	}
-
-	.task-status {
-		font-size: 22rpx;
-		border-radius: 8rpx;
-		padding: 4rpx 12rpx;
-	}
-
-	.task-status--queued {
-		color: #c47b1a;
-		background: #fff4e5;
-	}
-
-	.task-status--running {
-		color: #2b73f8;
-		background: rgba(43, 115, 248, 0.1);
-	}
-
-	.task-status--succeeded {
-		color: #1f9d63;
-		background: #e8f7f0;
-	}
-
-	.task-status--failed {
-		color: #d9534f;
-		background: #fdecec;
-	}
-
-	.created-at {
-		display: block;
-		margin-top: 10rpx;
-		font-size: 22rpx;
-		color: #bbbbbb;
-	}
-
-	.state-section {
-		text-align: center;
-		padding: 60rpx 40rpx;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-
-	.state-title {
-		font-size: 32rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-	}
-
-	.state-desc {
-		margin-top: 14rpx;
-		font-size: 24rpx;
-		color: #888888;
-		line-height: 1.6;
-	}
-
-	.elapsed {
-		margin-top: 8rpx;
-		font-size: 22rpx;
-		color: #b0b6c0;
-		line-height: 1.5;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.fail-reason {
-		margin-top: 14rpx;
-		font-size: 26rpx;
-		color: #d9534f;
-		line-height: 1.6;
-	}
-
-	.score-section {
-		text-align: center;
-		padding: 36rpx 28rpx;
-	}
-
-	.total-wrap {
-		display: flex;
-		flex-direction: row;
-		align-items: baseline;
-		justify-content: center;
-	}
-
-	.total-label {
-		font-size: 28rpx;
-		color: #666666;
-		margin-right: 16rpx;
-	}
-
-	.total-num {
-		font-size: 72rpx;
-		font-weight: 700;
-		color: #2b73f8;
-		line-height: 1;
-		display: inline-block;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.total-unit {
-		margin-left: 8rpx;
-		font-size: 26rpx;
-		color: #999999;
-	}
-
-	.tip {
-		display: block;
-		margin-top: 16rpx;
-		font-size: 22rpx;
-		color: #bbbbbb;
-	}
-
-	.section-title {
-		display: block;
-		font-size: 30rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-		margin-bottom: 20rpx;
-	}
-
-	.section-head {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 20rpx;
-	}
-
-	.section-head .section-title {
-		margin-bottom: 0;
-	}
-
-	.score-badges {
-		display: flex;
-		flex-direction: row;
-		justify-content: center;
-		margin-top: 16rpx;
-	}
-
-	.rating-chip {
-		font-size: 24rpx;
-		font-weight: 600;
-		color: #1f9d63;
-		background: #e8f7f0;
-		border-radius: 8rpx;
-		padding: 4rpx 16rpx;
-		margin-right: 12rpx;
-	}
-
-	.star-chip {
-		font-size: 24rpx;
-		color: #c47b1a;
-		background: #fff4e5;
-		border-radius: 8rpx;
-		padding: 4rpx 16rpx;
-	}
-
-	.radar-wrap {
-		display: flex;
-		flex-direction: row;
-		justify-content: center;
-	}
-
-	.radar-canvas {
-		width: 100%;
-		height: 520rpx;
-	}
-
-	.dim-grid {
-		display: flex;
-		flex-direction: row;
-		flex-wrap: wrap;
-		justify-content: space-between;
-	}
-
-	.dim-card {
-		width: calc(50% - 10rpx);
-		box-sizing: border-box;
-		background: #f8fafc;
-		border: 1rpx solid #e8ecf2;
-		border-radius: 12rpx;
-		padding: 20rpx;
-		margin-bottom: 16rpx;
-	}
-
-	.dim-card__head {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 8rpx;
-	}
-
-	.dim-card__label {
-		font-size: 26rpx;
-		color: #555555;
-	}
-
-	.dim-card__weight {
-		font-size: 20rpx;
-		color: #999999;
-	}
-
-	.dim-card__score-row {
-		display: flex;
-		flex-direction: row;
-		align-items: baseline;
-		margin-bottom: 10rpx;
-	}
-
-	.dim-card__score {
-		font-size: 40rpx;
-		font-weight: 700;
-		color: #2b73f8;
-		line-height: 1.1;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.dim-card__star {
-		margin-left: 10rpx;
-		font-size: 20rpx;
-		color: #c47b1a;
-	}
-
-	.dim-card__comment {
-		display: block;
-		margin-top: 12rpx;
-		font-size: 22rpx;
-		color: #888888;
-		line-height: 1.5;
-	}
-
-	.report-sec {
-		margin-bottom: 24rpx;
-	}
-
-	.report-sec:last-child {
-		margin-bottom: 0;
-	}
-
-	.report-sec__heading {
-		display: block;
-		font-size: 26rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-		margin-bottom: 10rpx;
-	}
-
-	.report-sec__content {
-		display: block;
-		font-size: 26rpx;
-		color: #444444;
-		line-height: 1.7;
-	}
-
-	.bar-track {
-		height: 12rpx;
-		background: #eef2f7;
-		border-radius: 12rpx;
-		overflow: hidden;
-	}
-
-	.bar-fill {
-		height: 100%;
-		background: #2b73f8;
-		border-radius: 12rpx;
-		/* 入场填充：scaleX 从 0 过渡到目标比例（GPU 合成，不动 width） */
-		transform: scaleX(0);
-		transform-origin: left center;
-		transition: transform 800ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	.conclusion {
-		display: block;
-		font-size: 28rpx;
-		color: #333333;
-		line-height: 1.6;
-	}
-
-	.highlight {
-		display: flex;
-		flex-direction: row;
-		align-items: flex-start;
-		margin-bottom: 16rpx;
-	}
-
-	.highlight:last-child {
-		margin-bottom: 0;
-	}
-
-	.highlight__dot {
-		width: 36rpx;
-		height: 36rpx;
-		line-height: 36rpx;
-		text-align: center;
-		border-radius: 18rpx;
-		background: rgba(43, 115, 248, 0.12);
-		color: #2b73f8;
-		font-size: 22rpx;
-		font-weight: 600;
-		flex-shrink: 0;
-		margin-right: 14rpx;
-		margin-top: 2rpx;
-	}
-
-	.highlight__text {
-		flex: 1;
-		font-size: 26rpx;
-		color: #444444;
-		line-height: 1.5;
-	}
-
-	.primary-btn {
-		margin-top: 28rpx;
-		background: #2b73f8 !important;
-		color: #ffffff !important;
-		font-size: 26rpx !important;
-		border-radius: 8rpx !important;
-		display: inline-flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.actions {
-		margin-top: 24rpx;
-		display: flex;
-		flex-direction: column;
-		gap: 24rpx;
-	}
-
-	.btn {
-		background: #2b73f8 !important;
-		color: #ffffff !important;
-		border-radius: 12rpx;
-		font-size: 30rpx;
-		font-weight: 600;
-		height: 88rpx;
-		line-height: 88rpx;
-		margin: 0;
-		display: inline-flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-	}
-
-	/* 去 uni-button 默认描边 */
-	.btn::after, .primary-btn::after {
-		border: none;
-	}
-
-	.btn--ghost {
-		background: #ffffff !important;
-		color: #2b73f8 !important;
-		border: 2rpx solid #2b73f8;
-	}
-	/* 实时流式渲染区 */
-	.stream-scores {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 16rpx;
-		margin-bottom: 24rpx;
-	}
-
-	.stream-score-item {
-		display: flex;
-		align-items: center;
-		background: #f0f7ff;
-		border-radius: 8rpx;
-		padding: 8rpx 16rpx;
-	}
-
-	.stream-score__label {
-		font-size: 22rpx;
-		color: #666;
-		margin-right: 8rpx;
-	}
-
-	.stream-score__value {
-		font-size: 28rpx;
-		font-weight: 700;
-		color: #2b73f8;
-	}
-
-	.stream-conclusion {
-		font-size: 26rpx;
-		color: #333;
-		line-height: 1.8;
-		margin-bottom: 16rpx;
-		padding: 16rpx;
-		background: #fffbe6;
-		border-radius: 8rpx;
-		border-left: 4rpx solid #faad14;
-	}
-
-	.stream-highlights {
-		margin-bottom: 16rpx;
-	}
-
-	.stream-highlight {
-		font-size: 24rpx;
-		color: #52c41a;
-		line-height: 1.8;
-		display: block;
-	}
-
-	/* ===== AI 评估动效（aie- 前缀：本页 style 无 scoped，keyframes 必须防全局冲突） ===== */
-	/* —— 流式文字：词级渐现 + 呼吸光标 —— */
-	@keyframes aieWordIn {
-		from { opacity: 0; transform: translateY(6rpx); }
-		to   { opacity: 1; transform: translateY(0); }
-	}
-	.aie-word-in {
-		display: inline-block;
-		animation: aieWordIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
-	}
-	@keyframes aieFadeUp {
-		from { opacity: 0; transform: translateY(10rpx); }
-		to   { opacity: 1; transform: translateY(0); }
-	}
-	.aie-fade-up {
-		animation: aieFadeUp 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
-	}
-	@keyframes aieCaret {
-		0%, 100% { opacity: 1; }
-		50%      { opacity: 0; }
-	}
-	.aie-caret {
-		display: inline-block;
-		margin-left: 2rpx;
-		color: #2b73f8;
-		animation: aieCaret 900ms step-end infinite;
-	}
-
-	/* —— 评分入场：count-up 到达回弹 / 卡片 stagger / 徽章 pop —— */
-	@keyframes aieNumPop {
-		0%   { transform: scale(1); }
-		40%  { transform: scale(1.06); }
-		100% { transform: scale(1); }
-	}
-	.total-num--pop {
-		animation: aieNumPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
-	}
-	@keyframes aieBadgePop {
-		0%   { transform: scale(0.85); }
-		60%  { transform: scale(1.08); }
-		100% { transform: scale(1); }
-	}
-	.aie-badge-pop {
-		display: inline-block;
-		animation: aieBadgePop 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
-	}
-	@keyframes aieCardIn {
-		from { opacity: 0; transform: translateY(20rpx) scale(0.97); }
-		to   { opacity: 1; transform: translateY(0) scale(1); }
-	}
-	/* 逐卡错峰由模板 inline animation-delay 提供（80ms / 卡） */
-	.aie-card-in {
-		animation: aieCardIn 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
-	}
-	@keyframes aieBarGrow {
-		from { transform: scaleY(0); }
-		to   { transform: scaleY(1); }
-	}
-	.task-status {
-		transition: background-color 300ms ease, color 300ms ease;
-	}
-	.task-status--succeeded {
-		animation: aieBadgePop 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
-	}
-
-	/* —— 状态过渡：queued → running → succeeded/failed —— */
-	.aie-state-enter-active {
-		transition: opacity 260ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-	.aie-state-leave-active {
-		transition: opacity 140ms ease, transform 140ms ease;
-	}
-	.aie-state-enter-from {
-		opacity: 0;
-		transform: translateY(16rpx);
-	}
-	.aie-state-leave-to {
-		opacity: 0;
-		transform: translateY(-8rpx);
-	}
-	/* 阶段文案换挡（stageText） */
-	.aie-stage-enter-active {
-		transition: opacity 240ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-	.aie-stage-leave-active {
-		transition: opacity 120ms ease;
-	}
-	.aie-stage-enter-from {
-		opacity: 0;
-		transform: translateY(8rpx);
-	}
-	.aie-stage-leave-to {
-		opacity: 0;
-	}
-	.stage-line {
-		display: block;
-	}
-
-	/* —— 排队/评估中：呼吸灯 dots + 待机 shimmer 条 —— */
-	.aie-stage-dots {
-		display: flex;
-		flex-direction: row;
-		gap: 12rpx;
-		justify-content: center;
-		margin: 8rpx 0 20rpx;
-	}
-	.aie-dot {
-		width: 12rpx;
-		height: 12rpx;
-		border-radius: 50%;
-		background: #2b73f8;
-		animation: aieBreathe 1.2s ease-in-out infinite;
-	}
-	.aie-dot:nth-child(2) {
-		animation-delay: 0.16s;
-	}
-	.aie-dot:nth-child(3) {
-		animation-delay: 0.32s;
-	}
-	@keyframes aieBreathe {
-		0%, 100% { transform: scale(0.7); opacity: 0.35; }
-		50%      { transform: scale(1);   opacity: 1; }
-	}
-	.aie-progress-shimmer {
-		width: 60%;
-		height: 8rpx;
-		margin: 20rpx auto 0;
-		border-radius: 8rpx;
-		background: #eef1f6;
-		position: relative;
-		overflow: hidden;
+/* ==========================================================================
+   AI 评估结果页（ai-eval-detail）· 视觉重构
+   - 样式统一收敛在 .aie-page 作用域下，避免 .section/.btn 等通用类名
+     在 H5 打包下与其它页面互相污染
+   - 色板：主色 #2b73f8 / 深墨 #16233f / 正文 #4a5568 / 弱文 #98a4b8
+   - 动效统一 aie- 前缀（本页 style 无 scoped，keyframes 必须防全局冲突）
+   ========================================================================== */
+
+/* ---------- 1. 页面容器：顶部淡蓝渐晕 + 柔和底色 ---------- */
+.page.aie-page {
+	min-height: 100vh;
+	box-sizing: border-box;
+	padding: 24rpx;
+	padding-bottom: calc(60rpx + env(safe-area-inset-bottom));
+	background-color: #f2f6fd;
+	background-image: linear-gradient(180deg, #e4edff 0%, rgba(228, 237, 255, 0) 460rpx);
+}
+
+.aie-page .page-mark {
+	margin-bottom: 20rpx;
+}
+
+/* ---------- 2. 功能未开放兜底 ---------- */
+.aie-page .coming-soon {
+	min-height: 70vh;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 48rpx 24rpx;
+	box-sizing: border-box;
+}
+
+.aie-page .coming-soon__title {
+	font-size: 36rpx;
+	font-weight: 700;
+	color: #16233f;
+	letter-spacing: 1rpx;
+}
+
+.aie-page .coming-soon__desc {
+	margin-top: 16rpx;
+	font-size: 26rpx;
+	color: #98a4b8;
+	line-height: 1.6;
+	text-align: center;
+}
+
+/* ---------- 3. 通用卡片与区块标题 ---------- */
+.aie-page .section {
+	background: #ffffff;
+	border: 1rpx solid rgba(226, 234, 247, 0.9);
+	border-radius: 24rpx;
+	padding: 32rpx;
+	margin-bottom: 24rpx;
+	box-shadow: 0 10rpx 30rpx rgba(22, 60, 140, 0.06);
+	box-sizing: border-box;
+}
+
+/* 区块标题：左侧主色竖条 + 深墨加粗 */
+.aie-page .section-title {
+	display: block;
+	font-size: 30rpx;
+	font-weight: 700;
+	color: #16233f;
+	line-height: 1.35;
+	padding-left: 18rpx;
+	border-left: 6rpx solid #2b73f8;
+	margin-bottom: 24rpx;
+	letter-spacing: 1rpx;
+}
+
+.aie-page .section-head {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 24rpx;
+}
+
+.aie-page .section-head .section-title {
+	margin-bottom: 0;
+}
+
+/* ---------- 4. 任务头 ---------- */
+.aie-page .title {
+	display: block;
+	font-size: 38rpx;
+	font-weight: 700;
+	color: #16233f;
+	line-height: 1.5;
+	letter-spacing: 1rpx;
+	margin-bottom: 20rpx;
+}
+
+.aie-page .task-meta {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.aie-page .task-id {
+	font-size: 22rpx;
+	color: #8593a8;
+	background: #f1f5fc;
+	border-radius: 999rpx;
+	padding: 6rpx 20rpx;
+}
+
+.aie-page .task-status {
+	font-size: 22rpx;
+	font-weight: 600;
+	border-radius: 999rpx;
+	padding: 6rpx 22rpx;
+	transition: background-color 300ms ease, color 300ms ease;
+}
+
+.aie-page .task-status--queued {
+	color: #c47b1a;
+	background: rgba(245, 158, 11, 0.14);
+}
+
+.aie-page .task-status--running {
+	color: #2b73f8;
+	background: rgba(43, 115, 248, 0.12);
+}
+
+.aie-page .task-status--succeeded {
+	color: #0f9d63;
+	background: rgba(22, 179, 120, 0.14);
+	animation: aieBadgePop 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.aie-page .task-status--failed {
+	color: #d9534f;
+	background: rgba(239, 95, 76, 0.13);
+}
+
+.aie-page .task-status--stale {
+	color: #8a63d2;
+	background: rgba(138, 99, 210, 0.13);
+}
+
+.aie-page .created-at {
+	display: block;
+	margin-top: 16rpx;
+	font-size: 22rpx;
+	color: #a4afc0;
+}
+
+/* ---------- 5. 加载 / 失败 / 排队 / 处理中 ---------- */
+.aie-page .state-section {
+	text-align: center;
+	padding: 64rpx 40rpx;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.aie-page .state-title {
+	font-size: 32rpx;
+	font-weight: 700;
+	color: #16233f;
+}
+
+.aie-page .state-desc {
+	margin-top: 16rpx;
+	font-size: 25rpx;
+	color: #8593a8;
+	line-height: 1.7;
+}
+
+.aie-page .elapsed {
+	margin-top: 10rpx;
+	font-size: 22rpx;
+	color: #a4afc0;
+	line-height: 1.5;
+	font-variant-numeric: tabular-nums;
+}
+
+.aie-page .fail-reason {
+	margin-top: 16rpx;
+	font-size: 26rpx;
+	color: #d9534f;
+	line-height: 1.7;
+	padding: 18rpx 26rpx;
+	background: rgba(239, 95, 76, 0.07);
+	border-radius: 14rpx;
+}
+
+/* ---------- 6. 综合评分 hero：主色渐变卡 + 玻璃徽章 + 装饰光斑 ---------- */
+.aie-page .score-section {
+	position: relative;
+	overflow: hidden;
+	padding: 56rpx 32rpx 48rpx;
+	border: none;
+	border-radius: 28rpx;
+	background: linear-gradient(135deg, #2b73f8 0%, #3f83ff 52%, #5aa0ff 100%);
+	box-shadow: 0 18rpx 44rpx rgba(43, 115, 248, 0.28);
+	text-align: center;
+}
+
+/* 装饰光斑（玻璃质感） */
+.aie-page .score-section::before,
+.aie-page .score-section::after {
+	content: '';
+	position: absolute;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.12);
+	pointer-events: none;
+}
+
+.aie-page .score-section::before {
+	width: 320rpx;
+	height: 320rpx;
+	top: -140rpx;
+	right: -90rpx;
+}
+
+.aie-page .score-section::after {
+	width: 220rpx;
+	height: 220rpx;
+	bottom: -110rpx;
+	left: -60rpx;
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.aie-page .total-wrap {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.aie-page .total-label {
+	font-size: 26rpx;
+	color: rgba(255, 255, 255, 0.86);
+	letter-spacing: 8rpx;
+	margin-bottom: 12rpx;
+}
+
+.aie-page .total-main {
+	display: flex;
+	flex-direction: row;
+	align-items: baseline;
+	justify-content: center;
+}
+
+.aie-page .total-num {
+	font-size: 116rpx;
+	font-weight: 800;
+	color: #ffffff;
+	line-height: 1.05;
+	display: inline-block;
+	font-variant-numeric: tabular-nums;
+	text-shadow: 0 8rpx 24rpx rgba(15, 60, 150, 0.28);
+}
+
+.aie-page .total-unit {
+	margin-left: 12rpx;
+	font-size: 28rpx;
+	color: rgba(255, 255, 255, 0.75);
+}
+
+.aie-page .score-badges {
+	position: relative;
+	display: flex;
+	flex-direction: row;
+	justify-content: center;
+	margin-top: 28rpx;
+}
+
+/* 玻璃徽章 */
+.aie-page .rating-chip,
+.aie-page .star-chip {
+	font-size: 24rpx;
+	font-weight: 600;
+	color: #ffffff;
+	background: rgba(255, 255, 255, 0.2);
+	border: 1rpx solid rgba(255, 255, 255, 0.42);
+	border-radius: 999rpx;
+	padding: 8rpx 26rpx;
+	/* 毛玻璃：H5 生效，小程序端自动降级为半透明底色 */
+	backdrop-filter: blur(12rpx);
+	-webkit-backdrop-filter: blur(12rpx);
+}
+
+.aie-page .rating-chip {
+	margin-right: 16rpx;
+}
+
+.aie-page .tip {
+	position: relative;
+	display: block;
+	margin-top: 26rpx;
+	font-size: 22rpx;
+	color: rgba(255, 255, 255, 0.72);
+}
+
+/* ---------- 7. 能力雷达图：柔光底板 + 适度留白 ---------- */
+.aie-page .radar-wrap {
+	display: flex;
+	flex-direction: row;
+	justify-content: center;
+	border-radius: 20rpx;
+	background: radial-gradient(circle at 50% 42%, rgba(43, 115, 248, 0.08) 0%, rgba(43, 115, 248, 0) 72%);
+}
+
+.aie-page .radar-canvas {
+	width: 100%;
+	height: 600rpx;
+}
+
+/* ---------- 8. 维度评分卡片：全宽行卡 + 分档配色 + 渐变进度条 ---------- */
+.aie-page .dim-grid {
+	display: flex;
+	flex-direction: column;
+}
+
+.aie-page .dim-card {
+	width: 100%;
+	box-sizing: border-box;
+	background: linear-gradient(180deg, #fbfdff 0%, #f4f8fe 100%);
+	border: 1rpx solid #e6eefb;
+	border-radius: 20rpx;
+	padding: 26rpx 28rpx;
+	margin-bottom: 20rpx;
+}
+
+.aie-page .dim-card:last-child {
+	margin-bottom: 0;
+}
+
+.aie-page .dim-card__head {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 18rpx;
+}
+
+.aie-page .dim-card__left {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	min-width: 0;
+}
+
+.aie-page .dim-card__label {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #22314f;
+}
+
+.aie-page .dim-card__weight {
+	margin-left: 12rpx;
+	font-size: 20rpx;
+	color: #8593a8;
+	background: rgba(133, 147, 168, 0.12);
+	border-radius: 8rpx;
+	padding: 4rpx 12rpx;
+}
+
+.aie-page .dim-card__right {
+	display: flex;
+	flex-direction: row;
+	align-items: baseline;
+	flex-shrink: 0;
+}
+
+.aie-page .dim-card__score {
+	font-size: 46rpx;
+	font-weight: 800;
+	line-height: 1.1;
+	font-variant-numeric: tabular-nums;
+}
+
+.aie-page .dim-card__score-unit {
+	margin-left: 6rpx;
+	font-size: 20rpx;
+	color: #98a4b8;
+}
+
+.aie-page .dim-card__star {
+	margin-left: 14rpx;
+	font-size: 20rpx;
+	font-weight: 600;
+	color: #c47b1a;
+	background: rgba(245, 158, 11, 0.12);
+	border-radius: 8rpx;
+	padding: 4rpx 12rpx;
+}
+
+/* 分档配色：优秀 / 良好 / 一般 / 偏弱 */
+.aie-page .dim-card--excellent .dim-card__score { color: #16b378; }
+.aie-page .dim-card--good .dim-card__score { color: #2b73f8; }
+.aie-page .dim-card--fair .dim-card__score { color: #f59e0b; }
+.aie-page .dim-card--weak .dim-card__score { color: #ef5f4c; }
+
+.aie-page .dim-card__comment {
+	display: block;
+	margin-top: 18rpx;
+	padding-top: 18rpx;
+	border-top: 1rpx dashed rgba(133, 147, 168, 0.28);
+	font-size: 24rpx;
+	color: #66748c;
+	line-height: 1.75;
+	text-align: justify;
+}
+
+/* 进度条：胶囊轨道 + 分档渐变填充 */
+.aie-page .bar-track {
+	height: 14rpx;
+	background: rgba(43, 115, 248, 0.08);
+	border-radius: 999rpx;
+	overflow: hidden;
+}
+
+.aie-page .bar-fill {
+	height: 100%;
+	border-radius: 999rpx;
+	/* 入场填充：scaleX 从 0 过渡到目标比例（GPU 合成，不动 width） */
+	transform: scaleX(0);
+	transform-origin: left center;
+	transition: transform 800ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.aie-page .dim-card--excellent .bar-fill { background: linear-gradient(90deg, #34d399, #16b378); }
+.aie-page .dim-card--good .bar-fill { background: linear-gradient(90deg, #5b9bff, #2b73f8); }
+.aie-page .dim-card--fair .bar-fill { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.aie-page .dim-card--weak .bar-fill { background: linear-gradient(90deg, #f8837a, #ef5f4c); }
+
+/* ---------- 9. 简要结论：引用卡（首行缩进 + 左侧主色引条） ---------- */
+.aie-page .conclusion {
+	display: block;
+	font-size: 28rpx;
+	color: #2c3e5e;
+	line-height: 1.9;
+	text-indent: 2em;
+	text-align: justify;
+	padding: 26rpx 28rpx;
+	background: linear-gradient(90deg, rgba(43, 115, 248, 0.08), rgba(43, 115, 248, 0.02));
+	border-left: 6rpx solid #2b73f8;
+	border-radius: 0 16rpx 16rpx 0;
+}
+
+/* ---------- 10. 亮点优势：序号渐变徽标 + 淡蓝条目卡 ---------- */
+.aie-page .highlight {
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	margin-bottom: 16rpx;
+	padding: 20rpx 22rpx;
+	background: linear-gradient(90deg, rgba(43, 115, 248, 0.06), rgba(43, 115, 248, 0.015));
+	border-radius: 16rpx;
+}
+
+.aie-page .highlight:last-child {
+	margin-bottom: 0;
+}
+
+.aie-page .highlight__dot {
+	width: 40rpx;
+	height: 40rpx;
+	line-height: 40rpx;
+	text-align: center;
+	border-radius: 50%;
+	background: linear-gradient(135deg, #2b73f8, #5aa0ff);
+	box-shadow: 0 6rpx 14rpx rgba(43, 115, 248, 0.28);
+	color: #ffffff;
+	font-size: 22rpx;
+	font-weight: 700;
+	flex-shrink: 0;
+	margin-right: 16rpx;
+	margin-top: 2rpx;
+}
+
+.aie-page .highlight__text {
+	flex: 1;
+	font-size: 26rpx;
+	color: #3d4c66;
+	line-height: 1.7;
+	text-align: justify;
+}
+
+/* ---------- 11. AI 评价报告：章节式排版（标题 / 正文分层） ---------- */
+.aie-page .report-sec {
+	margin-bottom: 32rpx;
+}
+
+.aie-page .report-sec:last-child {
+	margin-bottom: 0;
+}
+
+.aie-page .report-sec__heading {
+	display: block;
+	font-size: 28rpx;
+	font-weight: 700;
+	color: #16233f;
+	line-height: 1.45;
+	margin-bottom: 14rpx;
+	padding-left: 18rpx;
+	border-left: 6rpx solid #2b73f8;
+	letter-spacing: 1rpx;
+}
+
+.aie-page .report-sec__content {
+	display: block;
+	font-size: 27rpx;
+	color: #4a5568;
+	line-height: 1.95;
+	letter-spacing: 0.8rpx;
+	text-indent: 2em;
+	text-align: justify;
+}
+
+/* ---------- 12. 历史评估记录 ---------- */
+.aie-page .history-count {
+	font-size: 22rpx;
+	color: #98a4b8;
+}
+
+.aie-page .history-item {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	background: #ffffff;
+	border: 1rpx solid #e6eefb;
+	border-radius: 20rpx;
+	padding: 24rpx 28rpx;
+	margin-bottom: 16rpx;
+}
+
+.aie-page .history-item:last-child {
+	margin-bottom: 0;
+}
+
+.aie-page .history-item__score-wrap {
+	display: flex;
+	flex-direction: row;
+	align-items: baseline;
+}
+
+.aie-page .history-item__score {
+	font-size: 52rpx;
+	font-weight: 800;
+	color: #2b73f8;
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+}
+
+.aie-page .history-item__unit {
+	margin-left: 8rpx;
+	font-size: 22rpx;
+	color: #98a4b8;
+}
+
+.aie-page .history-item__info {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+}
+
+.aie-page .history-item__rating {
+	font-size: 22rpx;
+	font-weight: 600;
+	color: #0f9d63;
+	background: rgba(22, 179, 120, 0.12);
+	border-radius: 8rpx;
+	padding: 4rpx 14rpx;
+	margin-bottom: 12rpx;
+}
+
+.aie-page .history-item__time {
+	font-size: 22rpx;
+	color: #a4afc0;
+}
+
+/* ---------- 13. 操作按钮 ---------- */
+.aie-page .actions {
+	margin-top: 28rpx;
+	display: flex;
+	flex-direction: column;
+	gap: 24rpx;
+}
+
+.aie-page .btn {
+	background: linear-gradient(135deg, #2b73f8, #4a8cff) !important;
+	color: #ffffff !important;
+	border: none;
+	border-radius: 18rpx;
+	font-size: 30rpx;
+	font-weight: 600;
+	height: 92rpx;
+	line-height: 92rpx;
+	margin: 0;
+	display: inline-flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: center;
+	box-shadow: 0 14rpx 30rpx rgba(43, 115, 248, 0.28);
+}
+
+/* 去 uni-button 默认描边 */
+.aie-page .btn::after,
+.aie-page .primary-btn::after {
+	border: none;
+}
+
+.aie-page .btn--ghost {
+	background: #ffffff !important;
+	color: #2b73f8 !important;
+	border: 2rpx solid rgba(43, 115, 248, 0.45);
+	box-shadow: 0 10rpx 24rpx rgba(43, 115, 248, 0.1);
+}
+
+.aie-page .primary-btn {
+	margin-top: 32rpx;
+	background: linear-gradient(135deg, #2b73f8, #4a8cff) !important;
+	color: #ffffff !important;
+	font-size: 26rpx !important;
+	font-weight: 600;
+	border-radius: 999rpx !important;
+	padding: 0 40rpx;
+	box-shadow: 0 12rpx 26rpx rgba(43, 115, 248, 0.26);
+	display: inline-flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: center;
+}
+
+/* ---------- 14. 流式打字机预览区 ---------- */
+.aie-page .stream-section {
+	border: 1rpx dashed rgba(43, 115, 248, 0.35);
+	background: linear-gradient(180deg, rgba(43, 115, 248, 0.04), rgba(43, 115, 248, 0.01));
+}
+
+/* ==========================================================================
+   AI 评估动效（aie- 前缀：本页 style 无 scoped，keyframes 必须防全局冲突）
+   ========================================================================== */
+
+/* —— 流式文字：词级渐现 + 呼吸光标 —— */
+@keyframes aieWordIn {
+	from { opacity: 0; transform: translateY(6rpx); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+
+.aie-word-in {
+	display: inline-block;
+	animation: aieWordIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes aieFadeUp {
+	from { opacity: 0; transform: translateY(12rpx); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+
+.aie-fade-up {
+	animation: aieFadeUp 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes aieCaret {
+	0%, 100% { opacity: 1; }
+	50%      { opacity: 0.3; }
+}
+
+.aie-caret {
+	display: inline-block;
+	margin-left: 2rpx;
+	color: #2b73f8;
+	animation: aieCaret 900ms ease-in-out infinite;
+}
+
+/* —— 评分入场：count-up 到达回弹 / 卡片 stagger / 徽章 pop —— */
+@keyframes aieNumPop {
+	0%   { transform: scale(1); }
+	40%  { transform: scale(1.06); }
+	100% { transform: scale(1); }
+}
+
+.total-num--pop {
+	animation: aieNumPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes aieBadgePop {
+	0%   { transform: scale(0.85); }
+	60%  { transform: scale(1.08); }
+	100% { transform: scale(1); }
+}
+
+.aie-badge-pop {
+	display: inline-block;
+	animation: aieBadgePop 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes aieCardIn {
+	from { opacity: 0; transform: translateY(20rpx) scale(0.97); }
+	to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 逐卡错峰由模板 inline animation-delay 提供（80ms / 卡） */
+.aie-card-in {
+	animation: aieCardIn 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* —— 状态过渡：queued → running → succeeded/failed —— */
+.aie-state-enter-active {
+	transition: opacity 260ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.aie-state-leave-active {
+	transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.aie-state-enter-from {
+	opacity: 0;
+	transform: translateY(16rpx);
+}
+
+.aie-state-leave-to {
+	opacity: 0;
+	transform: translateY(-8rpx);
+}
+
+/* 阶段文案换挡（stageText） */
+.aie-stage-enter-active {
+	transition: opacity 240ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.aie-stage-leave-active {
+	transition: opacity 120ms ease;
+}
+
+.aie-stage-enter-from {
+	opacity: 0;
+	transform: translateY(8rpx);
+}
+
+.aie-stage-leave-to {
+	opacity: 0;
+}
+
+.stage-line {
+	display: block;
+}
+
+/* —— 排队/评估中：呼吸灯 dots + 待机 shimmer 条 —— */
+.aie-stage-dots {
+	display: flex;
+	flex-direction: row;
+	gap: 12rpx;
+	justify-content: center;
+	margin: 8rpx 0 20rpx;
+}
+
+.aie-dot {
+	width: 12rpx;
+	height: 12rpx;
+	border-radius: 50%;
+	background: #2b73f8;
+	animation: aieBreathe 1.2s ease-in-out infinite;
+}
+
+.aie-dot:nth-child(2) {
+	animation-delay: 0.16s;
+}
+
+.aie-dot:nth-child(3) {
+	animation-delay: 0.32s;
+}
+
+@keyframes aieBreathe {
+	0%, 100% { transform: scale(0.7); opacity: 0.35; }
+	50%      { transform: scale(1);   opacity: 1; }
+}
+
+.aie-progress-shimmer {
+	width: 60%;
+	height: 8rpx;
+	margin: 20rpx auto 0;
+	border-radius: 999rpx;
+	background: rgba(43, 115, 248, 0.1);
+	position: relative;
+	overflow: hidden;
+}
+
+.aie-progress-shimmer::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	background: linear-gradient(90deg, transparent, #2b73f8, transparent);
+	transform: translateX(-100%);
+	animation: aieShimmer 1.6s ease infinite;
+}
+
+@keyframes aieShimmer {
+	to { transform: translateX(100%); }
+}
+
+/* —— 按钮 loading spinner —— */
+.aie-mini-spin {
+	width: 28rpx;
+	height: 28rpx;
+	margin-right: 10rpx;
+	border: 3rpx solid rgba(255, 255, 255, 0.35);
+	border-top-color: #ffffff;
+	border-radius: 50%;
+	box-sizing: border-box;
+	animation: aieSpin 0.8s linear infinite;
+}
+
+.aie-mini-spin--blue {
+	border-color: rgba(43, 115, 248, 0.25);
+	border-top-color: #2b73f8;
+}
+
+@keyframes aieSpin {
+	to { transform: rotate(360deg); }
+}
+
+/* —— 微交互：按下反馈（移动端 :active） —— */
+.aie-page .history-item,
+.aie-page .dim-card {
+	transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, background-color 150ms ease;
+}
+
+.aie-page .history-item:active,
+.aie-page .dim-card:active {
+	transform: scale(0.97);
+	opacity: 0.88;
+}
+
+.aie-page .btn:active,
+.aie-page .primary-btn:active {
+	transform: scale(0.96);
+}
+
+/* 桌面预览 hover（不影响移动端） */
+@media (hover: hover) {
+	.aie-page .history-item:hover {
+		background: #f4f8ff;
+		transform: translateY(-2rpx);
+		box-shadow: 0 8rpx 22rpx rgba(43, 115, 248, 0.12);
+	}
+	.aie-page .btn:hover {
+		filter: brightness(1.06);
+	}
+}
+
+/* —— 可访问性：减少动画偏好 → 全部降级为瞬时/静止（JS 侧同步走静态终态） —— */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
 	}
 	.aie-progress-shimmer::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		background: linear-gradient(90deg, transparent, #2b73f8, transparent);
-		transform: translateX(-100%);
-		animation: aieShimmer 1.6s ease infinite;
+		animation: none !important;
+		opacity: 0.5;
 	}
-	@keyframes aieShimmer {
-		to { transform: translateX(100%); }
-	}
-
-	/* —— 按钮 loading spinner —— */
-	.aie-mini-spin {
-		width: 28rpx;
-		height: 28rpx;
-		margin-right: 10rpx;
-		border: 3rpx solid rgba(255, 255, 255, 0.35);
-		border-top-color: #ffffff;
-		border-radius: 50%;
-		box-sizing: border-box;
-		animation: aieSpin 0.8s linear infinite;
-	}
-	.aie-mini-spin--blue {
-		border-color: rgba(43, 115, 248, 0.25);
-		border-top-color: #2b73f8;
-	}
-	@keyframes aieSpin {
-		to { transform: rotate(360deg); }
-	}
-
-	/* —— 微交互：按下反馈（移动端 :active） —— */
-	.history-item, .dim-card {
-		transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, background-color 150ms ease;
-	}
-	.history-item:active, .dim-card:active {
-		transform: scale(0.97);
-		opacity: 0.88;
-	}
-	.btn:active, .primary-btn:active {
-		transform: scale(0.96);
-	}
-	/* 桌面预览 hover（不影响移动端） */
-	@media (hover: hover) {
-		.history-item:hover {
-			background: #f4f8ff;
-			transform: translateY(-2rpx);
-			box-shadow: 0 6rpx 20rpx rgba(43, 115, 248, 0.1);
-		}
-		.btn:hover {
-			filter: brightness(1.06);
-		}
-	}
-
-	/* —— 可访问性：减少动画偏好 → 全部降级为瞬时/静止（JS 侧同步走静态终态） —— */
-	@media (prefers-reduced-motion: reduce) {
-		*, *::before, *::after {
-			animation-duration: 0.01ms !important;
-			animation-iteration-count: 1 !important;
-			transition-duration: 0.01ms !important;
-		}
-		.aie-progress-shimmer::after {
-			animation: none !important;
-			opacity: 0.5;
-		}
-	}
-	/* 渐进式评分进度条 */
-	.stream-score__bar {
-		width: 100%;
-		height: 6rpx;
-		background: #f0f2f5;
-		border-radius: 3rpx;
-		margin-top: 8rpx;
-		overflow: hidden;
-	}
-
-	.stream-score__bar-fill {
-		height: 100%;
-		background: linear-gradient(90deg, #2b73f8, #52c41a);
-		border-radius: 3rpx;
-		transition: width 1.5s ease-out;
-	}
-
-	/* partial标记（数字不完整时半透明） */
-	.aie-dim-partial {
-		opacity: 0.6;
-	}
-
-	/* 评分区块独立section */
-	.stream-scores-section {
-		border: 2rpx solid #e6f0ff;
-	}
-
-	/* 各区块淡入 */
-	.aie-fade-up {
-		animation: aieFadeUp 0.5s ease-out both;
-	}
-
-	@keyframes aieFadeUp {
-		from { opacity: 0; transform: translateY(12rpx); }
-		to { opacity: 1; transform: translateY(0); }
-	}
-
-	/* 呼吸光标 */
-	.aie-caret {
-		animation: aieCaretPulse 0.8s ease-in-out infinite;
-		color: #2b73f8;
-	}
-
-	@keyframes aieCaretPulse {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.3; }
-	}
+}
 </style>
