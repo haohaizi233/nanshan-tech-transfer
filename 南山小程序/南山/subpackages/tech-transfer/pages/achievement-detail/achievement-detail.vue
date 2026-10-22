@@ -728,14 +728,14 @@ export default {
   flex: 1;
   background: #2b73f8 !important;
   color: #ffffff !important;
-  border-radius: 10rpx;
+  border-radius: 12rpx;
   font-size: 26rpx;
+  margin: 0 12rpx;
 }
 
 .ai-eval-btn--ghost {
   background: #ffffff !important;
   color: #2b73f8 !important;
   border: 1rpx solid #2b73f8;
-  margin-right: 16rpx;
 }
 </style>
