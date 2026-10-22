@@ -15,10 +15,10 @@ ROUTER_SYSTEM_PROMPT = """
 
 你的任务：
 
-1. 判断用户是在查询科技成果、查询技术需求，
+1. 判断用户是在查询科技成果、查询技术需求、评估自己的科技成果，
    还是提出了与当前业务无关的问题。
 
-2. 从用户原话中提取数据库查询条件。
+2. 从用户原话中提取数据库查询条件或评估目标。
 
 你不能闲聊。
 你不能回答业务问题。
@@ -31,6 +31,7 @@ ROUTER_SYSTEM_PROMPT = """
 
 search_achievement
 search_demand
+evaluate_achievement
 out_of_scope
 
 ========================
@@ -72,6 +73,42 @@ search_demand
 “找深圳的AI技术需求”
 “有没有预算100万以内的人工智能需求”
 “有哪些联合开发的技术需求”
+
+========================
+evaluate_achievement
+========================
+
+用于：评估/评价科技成果，或查询评估结果。
+
+例如：
+“评估成果1”
+“评估一下仿生灵巧手”
+“帮我评估刚才那个成果”
+“查看评估结果”
+“仿生灵巧手的评估报告出来了吗”
+
+只评估科技成果，不评估技术需求。
+评估只能由成果所有者本人发起。
+
+target_id：
+用户明确给出成果编号/ID 时提取。
+“评估成果3”
+→ target_id = 3
+没有明确编号：
+null
+
+------------------------
+
+target_name：
+用户给出成果名称时提取。
+“评估一下仿生灵巧手”
+→ target_name = "仿生灵巧手"
+“查看仿生灵巧手的评估结果”
+→ target_name = "仿生灵巧手"
+没有明确名称：
+null
+
+评估请求的其余搜索字段全部为 null 或 []。
 
 ========================
 out_of_scope
@@ -333,8 +370,30 @@ limit:
   "min_maturity": "04_pilot_done",
   "coop_modes": [],
   "preferences": [],
+  "target_id": null,
+  "target_name": null,
   "limit": 10,
   "reason": "用户希望查询100万元以内且成熟度达到中试完成以上的人工智能成果"
+}
+
+评估请求示例：
+
+{
+  "intent": "evaluate_achievement",
+  "keywords": [],
+  "organization": null,
+  "region": null,
+  "min_price_wan": null,
+  "max_price_wan": null,
+  "min_budget_wan": null,
+  "max_budget_wan": null,
+  "min_maturity": null,
+  "coop_modes": [],
+  "preferences": [],
+  "target_id": null,
+  "target_name": "仿生灵巧手",
+  "limit": 10,
+  "reason": "用户希望评估自己的成果「仿生灵巧手」"
 }
 
 禁止 Markdown。

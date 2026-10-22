@@ -39,6 +39,7 @@ from routes.favorite import router as favorite_router
 from routes.file import router as file_router
 from routes.institution import router as institution_router
 from routes.institution_registration import router as institution_registration_router
+from routes.internal_ai import router as internal_ai_router
 from routes.me import router as me_router
 from routes.membership import router as membership_router
 from routes.notification import router as notification_router
@@ -117,6 +118,8 @@ app.include_router(admin_changes_router)
 app.include_router(admin_ops_router)
 app.include_router(file_router)
 app.include_router(membership_router)
+# 服务间内部 API（nanshan-ai-agent 调用，X-AI-Service-Key 鉴权，不走用户 JWT）
+app.include_router(internal_ai_router)
 
 
 # ── Vue 后台管理静态托管（nanshan-frontend/dist）────────────

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 IntentType = Literal[
     "search_achievement",
     "search_demand",
+    "evaluate_achievement",
     "out_of_scope",
 ]
 
@@ -69,6 +70,17 @@ class RouteResult(BaseModel):
     # 软偏好：只参与排序加权，不作为数据库硬性过滤条件
     preferences: list[PreferenceType] = []
 
+    # 评估目标（evaluate_achievement 专用）：
+    # target_id 为用户明确给出的成果编号/ID；target_name 为用户给出的成果名称。
+    target_id: int | None = Field(
+        default=None,
+        ge=1,
+    )
+    target_name: str | None = Field(
+        default=None,
+        max_length=80,
+    )
+
     limit: int = Field(
         default=10,
         ge=1,
@@ -83,6 +95,14 @@ class RouteResult(BaseModel):
             raise ValueError("成果查询不能包含需求专用条件")
         if self.intent == "search_demand" and (self.min_price_wan is not None or self.max_price_wan is not None or self.min_maturity is not None):
             raise ValueError("需求查询不能包含成果专用条件")
+        # 评估意图不走搜索管线：跳过搜索专用条件，只保留 target_id / target_name。
+        if self.intent == "evaluate_achievement" and (
+            self.min_price_wan is not None or self.max_price_wan is not None
+            or self.min_budget_wan is not None or self.max_budget_wan is not None
+            or self.min_maturity is not None or self.coop_modes
+            or self.organization or self.region
+        ):
+            raise ValueError("评估请求不能包含搜索专用条件")
         for lower, upper in [(self.min_price_wan, self.max_price_wan), (self.min_budget_wan, self.max_budget_wan)]:
             if lower is not None and upper is not None and lower > upper:
                 raise ValueError("最低金额不能超过最高金额")

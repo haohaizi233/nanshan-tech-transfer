@@ -42,6 +42,17 @@ class Settings:
     AI_CHAT_MAX_CONCURRENCY = int(os.getenv("AI_CHAT_MAX_CONCURRENCY", "4"))
     AI_RERANK_MAX_CHARS = int(os.getenv("AI_RERANK_MAX_CHARS", "24000"))
     AI_INTERNAL_SERVICE_KEY = os.getenv("AI_INTERNAL_SERVICE_KEY", "")
+    # 成果评估工具：对话内发起/查询评估时调用 tech-transfer-service 的内部 API。
+    # 异步 run 通道没有用户 JWT，不能调公共评估 API，走 service-key 鉴权的内部端点。
+    TECH_TRANSFER_API_URL = os.getenv("TECH_TRANSFER_API_URL", "http://127.0.0.1:8787").rstrip("/")
+    # 服务间密钥：留空时复用 AI_INTERNAL_SERVICE_KEY（与后端 settings.AI_INTERNAL_SERVICE_KEY 对齐）
+    TECH_TRANSFER_SERVICE_KEY = os.getenv("TECH_TRANSFER_SERVICE_KEY", "")
+    # 评估结果轮询预算（可选，不进 fail-fast 必填）：
+    # 评估 LLM 通常 >45s，同步轮询超预算时回「任务进行中，稍后查看评估结果」。
+    EVAL_POLL_INTERVAL_SECONDS = float(os.getenv("EVAL_POLL_INTERVAL_SECONDS", "2.0"))
+    EVAL_POLL_TIMEOUT_SECONDS = float(os.getenv("EVAL_POLL_TIMEOUT_SECONDS", "55"))
+    # 为收尾（组装回复/入库）预留的墙钟余量：剩余预算低于该值即停止轮询
+    EVAL_POLL_RESERVE_SECONDS = float(os.getenv("EVAL_POLL_RESERVE_SECONDS", "3"))
     # 零结果诊断：额外跑一次聚合查询，把库里客观事实带进"没找到"的说明里。
     # 离线评测 / 压测场景可关闭，避免额外 DB 往返。
     AI_EMPTY_DIAGNOSTICS = os.getenv("AI_EMPTY_DIAGNOSTICS", "1").strip().lower() not in (
@@ -79,6 +90,10 @@ class Settings:
             violations.append("AI_CHAT_TIMEOUT_SECONDS 必须为有限正数")
         if not math.isfinite(self.LLM_FALLBACK_BUDGET_SECONDS):
             violations.append("LLM_FALLBACK_BUDGET_SECONDS 必须为有限数值")
+        for _key in ("EVAL_POLL_INTERVAL_SECONDS", "EVAL_POLL_TIMEOUT_SECONDS", "EVAL_POLL_RESERVE_SECONDS"):
+            _value = getattr(self, _key)
+            if not math.isfinite(_value) or _value < 0:
+                violations.append(f"{_key} 必须为有限非负数")
         if self.LOG_LEVEL not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             violations.append(f"LOG_LEVEL 非法: {self.LOG_LEVEL}")
 

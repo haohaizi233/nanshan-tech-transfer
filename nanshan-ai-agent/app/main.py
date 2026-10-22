@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import BoundedSemaphore
@@ -37,10 +38,12 @@ from app.services.demand_service import (
 
 from app.services.amount_parser import find_amount_bounds
 from app.services.diagnostics import facts_for
+from app.services import evaluation_service
 
 from app.formatters import (
     format_achievement_card,
     format_demand_card,
+    number_text,
 )
 
 from app.reranker import rerank_results
@@ -255,6 +258,83 @@ def _clarification(message):
     return ChatResponse(success=True, intent="out_of_scope", message=message, data=[])
 
 
+# ── evaluate_achievement：对话内发起/查询成果评估 ──────────────────
+# 评估意图提到「成果」但不含比较措辞（比较仍走两卡片对比流程）。
+_EVAL_MENTION = re.compile(r"评估|评价")
+_EVAL_COMPARE = re.compile(r"比较|对比|选哪|哪个好|哪一个|哪个更")
+# 「查看评估结果 / 报告出来了吗」→ 先查已有结果，不重复发起耗时评估。
+_EVAL_VIEW_ONLY = re.compile(r"查看|看看|查一下|出来了吗|好了吗|进度|状态|评估报告|评估结果")
+_EVAL_TRIGGER = re.compile(r"重新|发起|再评|评估一下|帮我评估|评估[一二三四五六七八九十\d]|评估$")
+
+
+def _is_evaluation_request(text):
+    return bool(_EVAL_MENTION.search(text)) and not _EVAL_COMPARE.search(text)
+
+
+def _wants_existing_result(text):
+    return bool(_EVAL_VIEW_ONLY.search(text)) and not _EVAL_TRIGGER.search(text)
+
+
+def _evaluation_message(record, summary):
+    title = record.get("title") or "该成果"
+    score = number_text(summary.get("totalScore"))
+    label = summary.get("ratingLabel") or ""
+    conclusion = (summary.get("conclusion") or "").strip()
+    parts = [f"「{title}」评估完成：综合评分 {score or '—'} 分（{label}）。"]
+    if conclusion:
+        parts.append(conclusion[:160])
+    return "".join(parts)
+
+
+def _evaluation_reply(request, route=None, target_id=None, target_name=None, card_target=None, query_plan=None):
+    """evaluate_achievement 意图分发：定位成果 → 服务代用户发起/查询评估 → 组卡片回复。"""
+    emit_stage("retrieving")
+    user_id = request.exclude_owner_user_id
+    if not user_id:
+        return _clarification("请先登录后再发起成果评估。")
+    if card_target is not None and card_target.card_type != "achievement":
+        return _clarification("仅支持对科技成果发起评估，请选择成果卡片。")
+    try:
+        record = evaluation_service.resolve_target(
+            user_id,
+            target_id=card_target.id if card_target is not None else target_id,
+            target_name=None if card_target is not None else target_name,
+        )
+    except Exception as exc:
+        logger.error("evaluate_target_lookup_failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail={"message": "数据库暂时繁忙，请稍后重试。", "agentReason": "database_unavailable"}) from exc
+    if record is None:
+        return _clarification("没有找到可评估的成果，请确认成果名称或直接选择成果卡片。")
+    if record.get("owner_user_id") != user_id:
+        return _clarification("仅成果所有者可以发起评估，请确认该成果属于你。")
+    try:
+        outcome = evaluation_service.evaluate(
+            user_id, record["id"], prefer_existing=_wants_existing_result(request.message),
+        )
+    except evaluation_service.EvaluationError as exc:
+        logger.warning("evaluation_tool_failed code=%s status=%s", exc.code, exc.status_code)
+        return _clarification(exc.user_message)
+    summary = outcome.get("evaluation")
+    status = outcome.get("status")
+    if status == "succeeded":
+        message = _evaluation_message(record, summary)
+    elif status == "pending":
+        stage = outcome.get("progressStage")
+        message = f"评估任务进行中（{stage}），稍后查看评估结果。" if stage else "评估任务进行中，稍后查看评估结果。"
+    elif status == "missing":
+        message = "该成果暂无评估结果，可回复「评估」发起一次评估。"
+    else:
+        message = "评估未完成：" + (outcome.get("failReason") or "AI 服务暂时不可用，请稍后重试")
+    card = format_achievement_card(record)
+    card["evaluation"] = summary
+    emit_stage("formatting")
+    return ChatResponse(
+        success=True, intent="evaluate_achievement", message=message,
+        data=[card],
+        queryPlan=query_plan if query_plan is not None else (route.model_dump() if route else None),
+    )
+
+
 def _process_ai_chat(request: ChatRequest):
     emit_stage("context")
     reply = local_reply(request.message, resolve_references=False)
@@ -264,6 +344,16 @@ def _process_ai_chat(request: ChatRequest):
     if resolution.clarification:
         return _clarification(resolution.clarification)
     if resolution.targets:
+        if _is_evaluation_request(request.message):
+            # 「评估刚才那个成果」：指代解析先于意图分类拿到卡片目标，
+            # 评估走 owner 通道，不受搜索可见性过滤（自己的成果自己看不到）。
+            if len(resolution.targets) != 1:
+                return _clarification("一次只能评估一项成果，请选择一张成果卡片。")
+            return _evaluation_reply(
+                request,
+                card_target=resolution.targets[0],
+                query_plan=request.context.queryPlan if request.context and request.context.queryPlan else None,
+            )
         emit_stage("retrieving")
         records = []
         for target in resolution.targets:
@@ -289,10 +379,6 @@ def _process_ai_chat(request: ChatRequest):
     emit_stage("routing")
     try:
         route = resolution.route or classify_intent(request.message)
-        route = merge_route(request.message, route)
-        # 硬性条件 / 软偏好分离闸门：merge_route 会按原话重新解析条件，
-        # 必须在它之后再跑一次闸门，否则软偏好会被还原成硬过滤。
-        route = apply_condition_guards(route, request.message)
     except ValueError:
         return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
     except LLMError as exc:
@@ -300,6 +386,22 @@ def _process_ai_chat(request: ChatRequest):
         raise HTTPException(status_code=502, detail={"message": "AI服务暂时不可用，请稍后重试。", "layer": "llm", "llmReason": exc.reason}) from exc
     except Exception as exc:
         logger.warning("router_failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail={"message": "AI业务意图识别失败，请稍后重试。", "agentReason": "router_error"}) from exc
+    if route.intent == "evaluate_achievement":
+        # 评估意图不走搜索管线：merge_route/条件闸门只服务检索条件，
+        # 且会把「评估成果3」的编号误解析成金额条件，必须在它们之前分发。
+        return _evaluation_reply(
+            request, route=route, target_id=route.target_id, target_name=route.target_name,
+        )
+    try:
+        route = merge_route(request.message, route)
+        # 硬性条件 / 软偏好分离闸门：merge_route 会按原话重新解析条件，
+        # 必须在它之后再跑一次闸门，否则软偏好会被还原成硬过滤。
+        route = apply_condition_guards(route, request.message)
+    except ValueError:
+        return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
+    except Exception as exc:
+        logger.warning("route_guard_failed type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail={"message": "AI业务意图识别失败，请稍后重试。", "agentReason": "router_error"}) from exc
     if route.intent == "out_of_scope":
         return _clarification("我可以帮你查找、介绍科技成果和技术需求，说明依据并指导平台操作。请告诉我技术方向、成果名称或想完成的操作。")
