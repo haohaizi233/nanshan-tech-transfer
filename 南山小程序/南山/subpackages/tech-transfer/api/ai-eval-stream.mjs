@@ -241,20 +241,40 @@ export function extractStreamData(raw) {
   const base = extractStreamSections(raw)
   const text = String(raw || '')
   base.dimensions = []
-  // 兼容两种格式：{"key": {"score": N}} 和 {"key": N}
-  const dimObjRe = /"(\w+|\u4e00-\u9fa5]+)"\s*:\s*\{[^}]*?"score"\s*:\s*(\d+(?:\.\d+)?)/g
-  const dimFlatRe = /"((?:innovation|techMaturity|marketProspect|teamStrength|cooperation|riskAssessment|\u521b\u65b0\u6027|\u6280\u672f\u6210\u719f\u5ea6|\u5e02\u573a\u524d\u666f|\u56e2\u961f\u5b9e\u529b|\u5408\u4f5c\u53ef\u884c\u6027|\u98ce\u9669\u8bc4\u4f30))"\s*:\s*(?:\{[^}]*?"score"\s*:\s*)?(\d+(?:\.\d+)?)/g
+  // 渐进式解析：数字一出现就提取（不要等对象完整）
+  // 格式1: "innovation": {"score": 75 → 提取75
+  // 格式2: "创新性": 8.5 → 提取85
+  // 格式3: "innovation": {"score": 7 （部分数字也行）
+  const DIM_NAMES = '(?:innovation|techMaturity|marketProspect|teamStrength|cooperation|riskAssessment|\u521b\u65b0\u6027|\u6280\u672f\u6210\u719f\u5ea6|\u5e02\u573a\u524d\u666f|\u56e2\u961f\u5b9e\u529b|\u5408\u4f5c\u53ef\u884c\u6027|\u98ce\u9669\u8bc4\u4f30)'
+  // 格式1: key后有{"score":N
+  const re1 = new RegExp('"(' + DIM_NAMES + ')"\\s*:\\s*\\{[^}]*?"score"\\s*:\\s*(\\d+(?:\\.\\d+)?)', 'g')
+  // 格式2: key后直接跟数字
+  const re2 = new RegExp('"(' + DIM_NAMES + ')"\\s*:\\s*(\\d+(?:\\.\\d+)?)', 'g')
   const seen = new Set()
   let dm
-  while ((dm = dimFlatRe.exec(text)) !== null) {
+  // 先找格式1（优先，更精确）
+  while ((dm = re1.exec(text)) !== null) {
     const key = DIM_KEY_MAP[dm[1]] || dm[1]
     let score = parseFloat(dm[2])
-    if (score <= 10) score = score * 10  // 10分制转100分制
+    if (score <= 10) score = score * 10
     if (!seen.has(key)) {
       seen.add(key)
-      base.dimensions.push({ key, score: Math.round(score) })
+      base.dimensions.push({ key, score: Math.round(score), partial: false })
     }
   }
+  // 再找格式2（补漏）
+  while ((dm = re2.exec(text)) !== null) {
+    const key = DIM_KEY_MAP[dm[1]] || dm[1]
+    let score = parseFloat(dm[2])
+    if (score <= 10) score = score * 10
+    if (!seen.has(key)) {
+      seen.add(key)
+      base.dimensions.push({ key, score: Math.round(score), partial: true })
+    }
+  }
+  // 按标准顺序排列
+  const ORDER = ['innovation', 'techMaturity', 'marketProspect', 'teamStrength', 'cooperation', 'riskAssessment']
+  base.dimensions.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key))
   return base
 }
 

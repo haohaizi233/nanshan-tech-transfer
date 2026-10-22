@@ -1525,4 +1525,51 @@
 			opacity: 0.5;
 		}
 	}
+	/* 渐进式评分进度条 */
+	.stream-score__bar {
+		width: 100%;
+		height: 6rpx;
+		background: #f0f2f5;
+		border-radius: 3rpx;
+		margin-top: 8rpx;
+		overflow: hidden;
+	}
+
+	.stream-score__bar-fill {
+		height: 100%;
+		background: linear-gradient(90deg, #2b73f8, #52c41a);
+		border-radius: 3rpx;
+		transition: width 1.5s ease-out;
+	}
+
+	/* partial标记（数字不完整时半透明） */
+	.aie-dim-partial {
+		opacity: 0.6;
+	}
+
+	/* 评分区块独立section */
+	.stream-scores-section {
+		border: 2rpx solid #e6f0ff;
+	}
+
+	/* 各区块淡入 */
+	.aie-fade-up {
+		animation: aieFadeUp 0.5s ease-out both;
+	}
+
+	@keyframes aieFadeUp {
+		from { opacity: 0; transform: translateY(12rpx); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+
+	/* 呼吸光标 */
+	.aie-caret {
+		animation: aieCaretPulse 0.8s ease-in-out infinite;
+		color: #2b73f8;
+	}
+
+	@keyframes aieCaretPulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.3; }
+	}
 </style>
