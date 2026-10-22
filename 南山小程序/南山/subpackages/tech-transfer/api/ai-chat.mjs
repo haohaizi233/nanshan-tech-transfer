@@ -66,16 +66,22 @@ export function getChatSuggestions() {
 }
 
 export function createMessage(role, content, extra = {}) {
+  const text = String(content || '')
+  const isUser = role === 'user'
+  // 斜杠命令消息带视觉区分标记：气泡用 ⚡ 命令样式渲染（见 ai-match.vue）。
+  const slashCommand = isUser && text.trim().startsWith('/')
   return {
     id: extra.id || ('m_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)),
-    role: role === 'user' ? 'user' : 'assistant',
+    role: isUser ? 'user' : 'assistant',
     type: extra.type || 'text',
-    content: String(content || ''),
+    content: text,
     time: Date.now(),
     payload: extra.payload || null,
     serverMessageId: extra.serverMessageId || null,
     serverTurnId: extra.serverTurnId || null,
     serverGeneration: Number.isSafeInteger(extra.serverGeneration) ? extra.serverGeneration : null,
+    isCommand: isUser && (extra.isCommand === true || slashCommand),
+    commandText: isUser ? (extra.commandText || (slashCommand ? text.trim() : null)) : null,
   }
 }
 

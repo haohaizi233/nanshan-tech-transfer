@@ -138,6 +138,24 @@ def resolve_target(user_id: int, target_id: int | None = None, target_name: str 
     return dict(row) if row else None
 
 
+def list_owned_targets(user_id: int, limit: int = 10) -> list[dict]:
+    """用户名下成果列表（未删除，最新在前）。
+
+    评估请求没给出具体成果（无 ID/名称）时不盲猜目标，
+    返回本人名下成果供用户挑选；权限口径与 resolve_target 一致（owner 通道）。
+    """
+    sql = (
+        f"SELECT {_TARGET_COLUMNS} FROM achievement "
+        "WHERE owner_user_id = %s AND deleted_at IS NULL "
+        "ORDER BY id DESC LIMIT %s"
+    )
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id, limit))
+            rows = cur.fetchall()
+    return [dict(row) for row in rows]
+
+
 # ── 评估摘要 ──────────────────────────────────────────────────
 
 

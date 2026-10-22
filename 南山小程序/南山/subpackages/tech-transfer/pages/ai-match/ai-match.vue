@@ -39,8 +39,9 @@
 			>
 				<view v-if="msg.type === 'text'" :class="msg.role === 'user' ? 'msg msg--user' : 'msg msg--bot'">
 					<AiGeneratedMark v-if="msg.role !== 'user'" mode="badge" />
-					<view :class="msg.role === 'user' ? 'bubble bubble--user' : 'bubble bubble--bot'">
-						<text class="bubble__text">{{ msg.content }}</text>
+					<view :class="bubbleClass(msg)">
+						<text v-if="isCommandMessage(msg)" class="bubble__command-tag">⚡ 命令</text>
+						<text class="bubble__text">{{ displayText(msg) }}</text>
 					</view>
 				</view>
 
@@ -88,6 +89,7 @@
 								</view>
 								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
 								<button v-if="referenceForCard(msg, card)" size="mini" :disabled="typing" @click.stop="introduceCard(msg, card)">介绍这项</button>
+								<button v-if="card.pickAction === 'evaluate' || card.pickAction === 'view-evaluation'" size="mini" :disabled="typing" @click.stop="pickEvaluate(card)">{{ card.pickAction === 'view-evaluation' ? '查看评估' : '评估这个' }}</button>
 
 								<view v-if="card.card_type === 'achievement'" class="agent-card__meta">
 									<text v-if="card.maturity && card.maturity.label" class="meta-chip">成熟度：{{ card.maturity.label }}</text>
@@ -598,10 +600,10 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				return false
 			}
 		},
-		ensureLocalUserMessage(text) {
+		ensureLocalUserMessage(text, extra) {
 			const last = this.messages[this.messages.length - 1]
 			if (last && last.role === 'user' && last.content === text) return
-			this.messages.push(createMessage('user', text))
+			this.messages.push(createMessage('user', text, extra))
 			this.scrollToBottom()
 		},
 		async presentSavedTurn(turn) {
@@ -952,6 +954,28 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				this.messages.push(createMessage(role, content, extra))
 				this.scrollToBottom()
 			},
+			isCommandMessage(msg) {
+				// 斜杠命令（/评估、/搜索…）消息：气泡加 ⚡ 命令标签与特殊样式
+				return !!msg.isCommand || String(msg.content || '').trim().startsWith('/')
+			},
+			displayText(msg) {
+				// 命令消息回显用户输入的原始命令（改写后的自然语言只发给 agent）
+				if (msg.role === 'user' && this.isCommandMessage(msg)) return msg.commandText || msg.content
+				return msg.content
+			},
+			bubbleClass(msg) {
+				const base = msg.role === 'user' ? 'bubble bubble--user' : 'bubble bubble--bot'
+				return this.isCommandMessage(msg) ? base + ' bubble--command' : base
+			},
+			pickEvaluate(card) {
+				// 评估成果选择列表：点击卡片按钮后走斜杠命令通道发起/查看评估
+				if (!card || !card.id || this.typing) return
+				if (card.pickAction === 'view-evaluation') {
+					this.dispatchUserText('查看成果' + card.id + '的评估结果')
+				} else {
+					this.dispatchUserText('/评估 ' + card.id)
+				}
+			},
 			onSend() {
 				if (!this.aiEnabled) return
 				const text = (this.inputText || '').trim()
@@ -991,8 +1015,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					return
 				}
 				if (skill) {
-					// /评估、/搜索：改写为自然语言后交给 agent 意图路由执行
-					this.runAgentChat(buildSkillMessage(skill, text))
+					// /评估、/搜索：改写为自然语言后交给 agent 意图路由执行；
+					// 原始命令（command）随消息标记保留，气泡按 ⚡ 命令样式回显。
+					this.runAgentChat(buildSkillMessage(skill, text), null, text)
 					return
 				}
 				if (text.startsWith('/')) {
@@ -1004,7 +1029,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				}
 				this.runAgentChat(text)
 			},
-			async runAgentChat(text, reference) {
+			async runAgentChat(text, reference, command) {
 				const turnId = createTurnId()
 				const scope = this._scope
 				const version = this._chatRequestVersion || 0
@@ -1020,7 +1045,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				}
 				this.inflightText = text
 				this.inflightTurnId = turnId
-				this.ensureLocalUserMessage(text)
+				this.ensureLocalUserMessage(text, command ? { isCommand: true, commandText: command } : undefined)
 				this.persistQueue()
 				this.typing = true
 				this.waitNotice = ''
@@ -1308,6 +1333,28 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 
 	.bubble--user .bubble__text {
 		color: #ffffff;
+	}
+
+	/* 斜杠命令消息：⚡ 命令标签 + 淡蓝底 + 等宽字体，与普通文本气泡视觉区分 */
+	.bubble--command {
+		background: #eaf2ff;
+		border: 1rpx solid #b9d4ff;
+		font-family: Menlo, Consolas, 'Courier New', monospace;
+	}
+
+	.bubble--command .bubble__text {
+		color: #1d4ed8;
+		font-family: Menlo, Consolas, 'Courier New', monospace;
+		font-size: 26rpx;
+	}
+
+	.bubble__command-tag {
+		display: block;
+		margin-bottom: 6rpx;
+		font-size: 20rpx;
+		font-weight: 600;
+		letter-spacing: 1rpx;
+		color: #2b73f8;
 	}
 
 	.panel {

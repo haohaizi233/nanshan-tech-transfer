@@ -286,6 +286,57 @@ def _evaluation_message(record, summary):
     return "".join(parts)
 
 
+# 「评估成果」这类泛指词不算具体目标：清掉这些词后没有实义 → 列出成果供选择。
+_EVAL_GENERIC_TARGET_TOKENS = (
+    "帮我", "麻烦", "请", "一下", "看看", "查一下", "查看", "发起", "进行",
+    "评估", "评价", "分析",
+    "科技成果", "技术成果", "成果", "技术方案",
+    "我的", "我们", "我", "该", "这个", "这些", "哪项", "哪些", "什么",
+    "一个", "一项", "所有", "全部", "哪个", "的",
+)
+
+
+def _is_generic_target_name(name):
+    """True 表示没有给出可定位的具体成果名称（空或纯泛指词）。"""
+    rest = (name or "").strip()
+    while rest:
+        for token in _EVAL_GENERIC_TARGET_TOKENS:
+            if rest.startswith(token):
+                rest = rest[len(token):].strip()
+                break
+        else:
+            return False
+    return True
+
+
+def _evaluation_picker(request, user_id, route=None, query_plan=None):
+    """没给出具体成果：列出用户名下成果供选择，不盲猜评估目标。"""
+    try:
+        records = evaluation_service.list_owned_targets(user_id)
+    except Exception as exc:
+        logger.error("evaluate_target_list_failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail={"message": "数据库暂时繁忙，请稍后重试。", "agentReason": "database_unavailable"}) from exc
+    if not records:
+        return _clarification("你名下还没有可评估的科技成果。发布成果并通过审核后，再来发起 AI 评估。")
+    view_only = _wants_existing_result(request.message)
+    cards = []
+    for item in records:
+        card = format_achievement_card(item)
+        card["pickAction"] = "view-evaluation" if view_only else "evaluate"
+        cards.append(card)
+    message = (
+        "请选择要查看评估结果的成果（点卡片上的「查看评估」）："
+        if view_only else
+        "请选择要评估的成果（点卡片上的「评估这个」发起 AI 评估）："
+    )
+    emit_stage("formatting")
+    return ChatResponse(
+        success=True, intent="evaluate_achievement", message=message,
+        data=cards,
+        queryPlan=query_plan if query_plan is not None else (route.model_dump() if route else None),
+    )
+
+
 def _evaluation_reply(request, route=None, target_id=None, target_name=None, card_target=None, query_plan=None):
     """evaluate_achievement 意图分发：定位成果 → 服务代用户发起/查询评估 → 组卡片回复。"""
     emit_stage("retrieving")
@@ -294,11 +345,16 @@ def _evaluation_reply(request, route=None, target_id=None, target_name=None, car
         return _clarification("请先登录后再发起成果评估。")
     if card_target is not None and card_target.card_type != "achievement":
         return _clarification("仅支持对科技成果发起评估，请选择成果卡片。")
+    chosen_id = card_target.id if card_target is not None else target_id
+    chosen_name = None if card_target is not None else target_name
+    if chosen_id is None and _is_generic_target_name(chosen_name):
+        # 「评估成果」「查看评估结果」等没给具体目标：返回本人成果列表供选择。
+        return _evaluation_picker(request, user_id, route, query_plan)
     try:
         record = evaluation_service.resolve_target(
             user_id,
-            target_id=card_target.id if card_target is not None else target_id,
-            target_name=None if card_target is not None else target_name,
+            target_id=chosen_id,
+            target_name=chosen_name,
         )
     except Exception as exc:
         logger.error("evaluate_target_lookup_failed type=%s", type(exc).__name__)
