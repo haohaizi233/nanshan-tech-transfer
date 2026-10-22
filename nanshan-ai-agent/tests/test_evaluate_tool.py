@@ -147,26 +147,36 @@ class EvaluationServiceTests(unittest.TestCase):
                 evaluation_service.evaluate(7, 5)
         self.assertEqual(caught.exception.user_message, evaluation_service.GENERIC_ERROR)
 
-    def test_prefer_existing_without_result_row_reports_missing(self):
-        # prefer_existing 只查历史：有任务记录但尚无评估结果 → missing
-        payload = {"list": [dict(EVALUATION_VIEW, taskId=7, totalScore=None,
-                                 dimensions=None, highlights=None)], "total": 1}
+    def test_prefer_existing_returns_summarized_result(self):
+        # prefer_existing 只查历史：已有评估 → succeeded + 摘要，不再创建任务
+        payload = {"list": [dict(EVALUATION_VIEW, taskId=7)], "total": 1, "page": 1, "pageSize": 1}
         with patch.object(evaluation_service, "_api", return_value=payload) as api:
             outcome = evaluation_service.evaluate(7, 5, prefer_existing=True)
-        self.assertEqual(outcome["status"], "missing")
-        self.assertIsNone(outcome["taskId"])
-        self.assertIsNone(outcome["evaluation"])
+        self.assertEqual(outcome["status"], "succeeded")
+        self.assertEqual(outcome["taskId"], 7)
+        summary = outcome["evaluation"]
+        self.assertEqual(
+            set(summary),
+            {"totalScore", "rating", "ratingLabel", "conclusion", "highlights", "dimensions"},
+        )
+        self.assertEqual(summary["totalScore"], 87.5)
+        self.assertEqual(summary["ratingLabel"], "良好")
+        self.assertEqual(summary["highlights"], ["结构设计完整", "应用场景明确"])
+        self.assertEqual(len(summary["dimensions"]), 1)
         api.assert_called_once()  # 只查历史，不创建任务
+        self.assertEqual(api.call_args.args[:2], ("GET", "/internal/ai/evaluations"))
 
-    def test_poll_transient_error_falls_back_to_pending(self):
+    def test_evaluate_never_polls_after_create(self):
+        # 第二个响应是瞬时故障：若 evaluate 还会轮询就会消费它并受影响；
+        # 新行为只调创建接口，后续状态由前端 stream 获取。
         responses = [
             {"taskId": 7, "status": "queued", "isNew": True},
             evaluation_service.EvaluationError(evaluation_service.GENERIC_ERROR),
         ]
-        with patch.object(evaluation_service, "_api", side_effect=responses), \
-                patch.object(evaluation_service.settings, "EVAL_POLL_INTERVAL_SECONDS", 0.0):
+        with patch.object(evaluation_service, "_api", side_effect=responses) as api:
             outcome = evaluation_service.evaluate(7, 5)
         self.assertEqual(outcome["status"], "pending")
+        self.assertEqual(api.call_count, 1)
 
     def test_prefer_existing_skips_task_creation(self):
         payload = {"list": [dict(EVALUATION_VIEW, taskId=7)], "total": 1, "page": 1, "pageSize": 1}
