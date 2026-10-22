@@ -618,6 +618,16 @@ def try_heuristic_classify(user_message: str) -> RouteResult | None:
             reason="寒暄问候",
         )
 
+    # 评估意图优先（"评估成果"/"评价XX"等）
+    _EVAL_RE = re.compile(r"评估|评价")
+    _COMPARE_RE = re.compile(r"比较|对比|选哪|哪个好|哪一个|哪个更")
+    if _EVAL_RE.search(text) and not _COMPARE_RE.search(text):
+        return RouteResult(
+            intent="evaluate_achievement",
+            keywords=[],
+            reason="评估意图",
+        )
+
     has_achievement = bool(_ACHIEVEMENT_MARKERS.search(text))
     has_demand = bool(_DEMAND_MARKERS.search(text))
 
