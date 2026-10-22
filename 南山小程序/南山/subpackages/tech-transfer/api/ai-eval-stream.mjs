@@ -222,6 +222,19 @@ function emptySections() {
  * 返回 { conclusion, highlights: string[], sections: [{heading, content}] }。
  * 完整 JSON 直接解析；半截 JSON 先修复再解析；再不行按字段正则兜底。
  */
+export function extractStreamData(raw) {
+  const base = extractStreamSections(raw)
+  const text = String(raw || '')
+  // 增量解析dimensions评分
+  base.dimensions = []
+  const dimRe = /"(innovation|techMaturity|marketProspect|teamStrength|cooperation|riskAssessment)"\s*:\s*\{[^}]*?"score"\s*:\s*(\d+(?:\.\d+)?)/g
+  let dm
+  while ((dm = dimRe.exec(text)) !== null) {
+    base.dimensions.push({ key: dm[1], score: parseFloat(dm[2]) })
+  }
+  return base
+}
+
 export function extractStreamSections(raw) {
   const text = trimToJsonObject(stripFence(String(raw == null ? '' : raw)))
   if (!text.trim()) return emptySections()

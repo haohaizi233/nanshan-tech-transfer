@@ -273,7 +273,7 @@
 			},
 			// 流式原文（半截 JSON）容错解析出的可渲染分节
 			streamPreview() {
-				return extractStreamSections(this.streamText)
+				return extractStreamData(this.streamText)
 			},
 			// running/queued 且 SSE 流在推送时展示打字机
 			showStreamPreview() {
@@ -395,6 +395,13 @@
 			this.stopStream()
 		},
 		methods: {
+			dimLabel(key) {
+				const map = {
+					innovation: '创新性', techMaturity: '技术成熟度', marketProspect: '市场前景',
+					teamStrength: '团队实力', cooperation: '合作可行性', riskAssessment: '风险评估'
+				}
+				return map[key] || key
+			},
 			syncProgressTicker() {
 				if (this.task && (this.task.status === 'queued' || this.task.status === 'running')) {
 					if (!this.stageTimer) {
@@ -1058,5 +1065,54 @@
 		background: #ffffff !important;
 		color: #2b73f8 !important;
 		border: 2rpx solid #2b73f8;
+	}
+	/* 实时流式渲染区 */
+	.stream-scores {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 16rpx;
+		margin-bottom: 24rpx;
+	}
+
+	.stream-score-item {
+		display: flex;
+		align-items: center;
+		background: #f0f7ff;
+		border-radius: 8rpx;
+		padding: 8rpx 16rpx;
+	}
+
+	.stream-score__label {
+		font-size: 22rpx;
+		color: #666;
+		margin-right: 8rpx;
+	}
+
+	.stream-score__value {
+		font-size: 28rpx;
+		font-weight: 700;
+		color: #2b73f8;
+	}
+
+	.stream-conclusion {
+		font-size: 26rpx;
+		color: #333;
+		line-height: 1.8;
+		margin-bottom: 16rpx;
+		padding: 16rpx;
+		background: #fffbe6;
+		border-radius: 8rpx;
+		border-left: 4rpx solid #faad14;
+	}
+
+	.stream-highlights {
+		margin-bottom: 16rpx;
+	}
+
+	.stream-highlight {
+		font-size: 24rpx;
+		color: #52c41a;
+		line-height: 1.8;
+		display: block;
 	}
 </style>
