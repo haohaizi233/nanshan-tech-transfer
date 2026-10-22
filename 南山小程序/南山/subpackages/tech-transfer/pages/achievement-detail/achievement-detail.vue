@@ -34,6 +34,11 @@
           <view class="ai-spinner"></view>
           <text class="ai-eval-hint">正在获取评估结果…</text>
         </view>
+        <view v-else-if="evalRunning" class="ai-eval-loading">
+          <view class="ai-spinner"></view>
+          <text class="ai-eval-hint">评估进行中，点击查看进度 →</text>
+          <button class="ai-eval-btn ai-eval-btn--ghost" size="mini" @click="onViewRunning">查看进度</button>
+        </view>
         <block v-else-if="latestEval">
           <view class="ai-eval-summary">
             <text class="ai-eval-score">{{ latestEval.totalScore }}</text>
@@ -325,9 +330,29 @@ export default {
         achievementId: this.achId,
       })
     },
+    onViewRunning() {
+      if (this._runningTaskId) {
+        uni.navigateTo({
+          url: `/subpackages/tech-transfer/pages/ai-eval-detail/ai-eval-detail?taskId=${this._runningTaskId}&achievementId=${this.achId}`
+        })
+      }
+    },
     async onStartEval() {
       if (!this.showAiEval || this.evalSubmitting || !this.achId) return
       this.evalSubmitting = true
+      // 检查是否有进行中的任务，有则直接跳转，不创建新任务
+      try {
+        const { getEvaluationHistory } = await import('../../api/ai.js')
+        const history = await getEvaluationHistory(this.achId)
+        const running = (history.list || []).find(t => t.status === 'queued' || t.status === 'running')
+        if (running) {
+          this.evalSubmitting = false
+          uni.navigateTo({
+            url: `/subpackages/tech-transfer/pages/ai-eval-detail/ai-eval-detail?taskId=${running.taskId}&achievementId=${this.achId}`
+          })
+          return
+        }
+      } catch (e) {}
       try {
         // 服务端同成果 10 分钟去重：有进行中的任务会直接复用并跳转查看
         const task = await createEvaluationTask(this.achId)
