@@ -67,6 +67,7 @@ def _chat(messages: list[dict], timeout: int | None = None) -> str:
     key = settings.AI_PROVIDER_KEY.strip()
     if key:
         headers["Authorization"] = f"Bearer {key}"
+        headers["x-api-key"] = key
     req = urllib.request.Request(
         url,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
