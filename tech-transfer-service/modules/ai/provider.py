@@ -207,14 +207,19 @@ def evaluate_achievement(
     system = (
         "你是南山科转通的成果评价专家。只输出 JSON，不要 markdown。\n"
         f"请对成果做多维评价，必须包含六个维度：{dim_desc}。\n"
-        '输出格式：{"dimensions":{"innovation":{"score":0-100,"comment":"30字内点评"},'
-        '"techMaturity":{...},"marketProspect":{...},"teamStrength":{...},'
-        '"cooperation":{...},"riskAssessment":{...}},'
-        '"conclusion":"150字内综合评价摘要","highlights":["亮点1","亮点2"],'
+        "【严格输出格式】必须使用英文key、score为0-100整数、comment为字符串：\n"
+        '{"dimensions":{"innovation":{"score":75,"comment":"点评"},'
+        '"techMaturity":{"score":65,"comment":"点评"},'
+        '"marketProspect":{"score":80,"comment":"点评"},'
+        '"teamStrength":{"score":85,"comment":"点评"},'
+        '"cooperation":{"score":70,"comment":"点评"},'
+        '"riskAssessment":{"score":72,"comment":"点评"}},'
+        '"conclusion":"150字内综合评价摘要",'
+        '"highlights":["亮点1","亮点2","亮点3"],'
         '"report":[{"heading":"小节标题","content":"150-300字详细评价分析"}]}。\n'
-        "要求：score 为 0-100 百分制；riskAssessment 分越高代表风险越可控；"
-        "report 输出 4-8 个小节，覆盖总体评价、各维度分析与成果转化建议；"
-        "所有文字用简体中文，基于给出的成果信息客观评价，信息不足时说明假设。"
+        "注意：dimensions的key必须是innovation/techMaturity/marketProspect/teamStrength/cooperation/riskAssessment"
+        "（英文，不要用中文）；score必须是0-100的数字（不要用10分制）；"
+        "report输出4-8个小节；所有文字用简体中文。"
     )
     user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
     _stage(progress.STAGE_ANALYZING)  # 阶段2：LLM 调用中

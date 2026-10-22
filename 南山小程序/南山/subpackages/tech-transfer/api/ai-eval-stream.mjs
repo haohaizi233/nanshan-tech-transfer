@@ -222,15 +222,38 @@ function emptySections() {
  * 返回 { conclusion, highlights: string[], sections: [{heading, content}] }。
  * 完整 JSON 直接解析；半截 JSON 先修复再解析；再不行按字段正则兜底。
  */
+const DIM_KEY_MAP = {
+  '\u521b\u65b0\u6027': 'innovation',
+  '\u6280\u672f\u6210\u719f\u5ea6': 'techMaturity',
+  '\u5e02\u573a\u524d\u666f': 'marketProspect',
+  '\u56e2\u961f\u5b9e\u529b': 'teamStrength',
+  '\u5408\u4f5c\u53ef\u884c\u6027': 'cooperation',
+  '\u98ce\u9669\u8bc4\u4f30': 'riskAssessment',
+  innovation: 'innovation',
+  techMaturity: 'techMaturity',
+  marketProspect: 'marketProspect',
+  teamStrength: 'teamStrength',
+  cooperation: 'cooperation',
+  riskAssessment: 'riskAssessment',
+}
+
 export function extractStreamData(raw) {
   const base = extractStreamSections(raw)
   const text = String(raw || '')
-  // 增量解析dimensions评分
   base.dimensions = []
-  const dimRe = /"(innovation|techMaturity|marketProspect|teamStrength|cooperation|riskAssessment)"\s*:\s*\{[^}]*?"score"\s*:\s*(\d+(?:\.\d+)?)/g
+  // 兼容两种格式：{"key": {"score": N}} 和 {"key": N}
+  const dimObjRe = /"(\w+|\u4e00-\u9fa5]+)"\s*:\s*\{[^}]*?"score"\s*:\s*(\d+(?:\.\d+)?)/g
+  const dimFlatRe = /"((?:innovation|techMaturity|marketProspect|teamStrength|cooperation|riskAssessment|\u521b\u65b0\u6027|\u6280\u672f\u6210\u719f\u5ea6|\u5e02\u573a\u524d\u666f|\u56e2\u961f\u5b9e\u529b|\u5408\u4f5c\u53ef\u884c\u6027|\u98ce\u9669\u8bc4\u4f30))"\s*:\s*(?:\{[^}]*?"score"\s*:\s*)?(\d+(?:\.\d+)?)/g
+  const seen = new Set()
   let dm
-  while ((dm = dimRe.exec(text)) !== null) {
-    base.dimensions.push({ key: dm[1], score: parseFloat(dm[2]) })
+  while ((dm = dimFlatRe.exec(text)) !== null) {
+    const key = DIM_KEY_MAP[dm[1]] || dm[1]
+    let score = parseFloat(dm[2])
+    if (score <= 10) score = score * 10  // 10分制转100分制
+    if (!seen.has(key)) {
+      seen.add(key)
+      base.dimensions.push({ key, score: Math.round(score) })
+    }
   }
   return base
 }
