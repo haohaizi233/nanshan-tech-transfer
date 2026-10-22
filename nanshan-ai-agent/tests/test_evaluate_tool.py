@@ -107,71 +107,56 @@ class RouteSchemaTests(unittest.TestCase):
 
 
 class EvaluationServiceTests(unittest.TestCase):
-    """evaluation_service：创建 → 轮询 → 摘要（HTTP 层全部 mock）。"""
+    """evaluation_service：创建后立即返回 pending（不再同步轮询）；prefer_existing 查历史。"""
 
-    def test_poll_until_succeeded_returns_summary(self):
-        responses = [
-            {"taskId": 7, "status": "queued", "isNew": True},
-            {"taskId": 7, "status": "running", "progressStage": "AI正在分析技术内容"},
-            {"taskId": 7, "status": "succeeded", "evaluation": EVALUATION_VIEW},
-        ]
-        with patch.object(evaluation_service, "_api", side_effect=responses) as api, \
-                patch.object(evaluation_service.settings, "EVAL_POLL_INTERVAL_SECONDS", 0.0):
+    def test_create_returns_pending_immediately(self):
+        responses = [{"taskId": 7, "status": "queued", "isNew": True}]
+        with patch.object(evaluation_service, "_api", side_effect=responses) as api:
             outcome = evaluation_service.evaluate(7, 5)
-        self.assertEqual(outcome["status"], "succeeded")
+        self.assertEqual(outcome["status"], "pending")
         self.assertEqual(outcome["taskId"], 7)
-        summary = outcome["evaluation"]
-        self.assertEqual(
-            set(summary),
-            {"totalScore", "rating", "ratingLabel", "conclusion", "highlights", "dimensions"},
-        )
-        self.assertEqual(summary["totalScore"], 87.5)
-        self.assertEqual(summary["ratingLabel"], "良好")
-        self.assertEqual(summary["highlights"], ["结构设计完整", "应用场景明确"])
-        self.assertEqual(len(summary["dimensions"]), 1)
+        self.assertIsNone(outcome["evaluation"])
+        self.assertEqual(outcome["progressStage"], "排队中")  # 创建响应未带进度时的默认文案
+        self.assertEqual(api.call_count, 1)  # 只创建任务，不同步轮询等待结果
         self.assertEqual(api.call_args_list[0].args[:2], ("POST", "/internal/ai/evaluation-tasks"))
         self.assertEqual(api.call_args_list[0].kwargs["payload"], {"userId": 7, "achievementId": 5})
-        self.assertEqual(api.call_args_list[1].args[:2], ("GET", "/internal/ai/evaluation-tasks/7"))
-        self.assertEqual(api.call_args_list[1].kwargs["query"], {"userId": 7})
 
-    def test_poll_budget_exhausted_returns_pending_with_stage(self):
+    def test_pending_reports_created_progress_stage(self):
         responses = [
-            {"taskId": 7, "status": "queued", "isNew": True},
-            {"taskId": 7, "status": "running", "progressStage": "正在生成评价报告"},
+            {"taskId": 7, "status": "queued", "isNew": True, "progressStage": "正在生成评价报告"},
         ]
-        clock = SimpleNamespace(
-            monotonic=MagicMock(side_effect=[0.0, 0.0, 53.0]),
-            sleep=MagicMock(),
-        )
-        with patch.object(evaluation_service, "_api", side_effect=responses) as api, \
-                patch.object(evaluation_service, "time", clock):
+        with patch.object(evaluation_service, "_api", side_effect=responses) as api:
             outcome = evaluation_service.evaluate(7, 5)
         self.assertEqual(outcome["status"], "pending")
         self.assertEqual(outcome["taskId"], 7)
         self.assertEqual(outcome["progressStage"], "正在生成评价报告")
-        self.assertEqual(api.call_count, 2)  # 创建 + 一次轮询，不做无界等待
+        self.assertIsNone(outcome["evaluation"])
+        self.assertEqual(api.call_count, 1)  # 不做轮询，进度由前端 stream 获取
 
-    def test_failed_task_maps_fail_reason(self):
-        responses = [
-            {"taskId": 7, "status": "queued", "isNew": False},
-            {"taskId": 7, "status": "failed", "failReason": "AI 服务暂时不可用，请稍后重试"},
-        ]
-        with patch.object(evaluation_service, "_api", side_effect=responses), \
-                patch.object(evaluation_service.settings, "EVAL_POLL_INTERVAL_SECONDS", 0.0):
-            outcome = evaluation_service.evaluate(7, 5)
-        self.assertEqual(outcome["status"], "failed")
-        self.assertIn("AI 服务暂时不可用", outcome["failReason"])
+    def test_create_errors_raise_user_safe_error(self):
+        # 创建接口业务拒绝：错误原文（已脱敏文案）透传给调用方
+        error = evaluation_service.EvaluationError("AI 服务暂时不可用，请稍后重试")
+        with patch.object(evaluation_service, "_api", side_effect=error):
+            with self.assertRaises(evaluation_service.EvaluationError) as caught:
+                evaluation_service.evaluate(7, 5)
+        self.assertEqual(caught.exception.user_message, "AI 服务暂时不可用，请稍后重试")
 
-    def test_succeeded_without_result_row_reports_missing_result(self):
-        responses = [
-            {"taskId": 7, "status": "queued", "isNew": True},
-            {"taskId": 7, "status": "succeeded", "evaluation": None},
-        ]
-        with patch.object(evaluation_service, "_api", side_effect=responses), \
-                patch.object(evaluation_service.settings, "EVAL_POLL_INTERVAL_SECONDS", 0.0):
-            outcome = evaluation_service.evaluate(7, 5)
-        self.assertEqual(outcome["status"], "failed")
-        self.assertIn("评估结果暂未生成", outcome["failReason"])
+        # 创建响应缺少 taskId：无法追踪任务，报通用错误
+        with patch.object(evaluation_service, "_api", return_value={"status": "queued"}):
+            with self.assertRaises(evaluation_service.EvaluationError) as caught:
+                evaluation_service.evaluate(7, 5)
+        self.assertEqual(caught.exception.user_message, evaluation_service.GENERIC_ERROR)
+
+    def test_prefer_existing_without_result_row_reports_missing(self):
+        # prefer_existing 只查历史：有任务记录但尚无评估结果 → missing
+        payload = {"list": [dict(EVALUATION_VIEW, taskId=7, totalScore=None,
+                                 dimensions=None, highlights=None)], "total": 1}
+        with patch.object(evaluation_service, "_api", return_value=payload) as api:
+            outcome = evaluation_service.evaluate(7, 5, prefer_existing=True)
+        self.assertEqual(outcome["status"], "missing")
+        self.assertIsNone(outcome["taskId"])
+        self.assertIsNone(outcome["evaluation"])
+        api.assert_called_once()  # 只查历史，不创建任务
 
     def test_poll_transient_error_falls_back_to_pending(self):
         responses = [
