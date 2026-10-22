@@ -4,7 +4,7 @@
  */
 
 export const WELCOME =
-  '你好，我是南山科转通 AI 助手。本页回答由人工智能生成，仅供参考。\n\n我可以查找和介绍成果、结合场景推荐并说明依据，也能介绍平台功能、指导发布、收藏、认证和对接操作。你可以问「介绍机器视觉成果」「推荐用于工业质检的成果」「怎么发布需求」。信息不足时我会追问，不会编造成果或效果。也可输入 / 调用技能：/匹配（按我的已发布需求推荐技术成果）。'
+  '你好，我是南山科转通 AI 助手。本页回答由人工智能生成，仅供参考。\n\n我可以查找和介绍成果、结合场景推荐并说明依据，也能介绍平台功能、指导发布、收藏、认证和对接操作。你可以问「介绍机器视觉成果」「推荐用于工业质检的成果」「怎么发布需求」。信息不足时我会追问，不会编造成果或效果。也可输入 / 调用命令：/评估（AI 评估成果）、/搜索（找成果或需求）、/匹配（按我的已发布需求推荐技术成果）、/帮助（查看全部命令）。'
 
 export const SUGGESTIONS = [
   '/匹配',
@@ -16,11 +16,44 @@ export const SUGGESTIONS = [
 
 export const SKILLS = [
   {
+    id: 'evaluate',
+    cmd: '/评估',
+    aliases: ['/评估成果', '/evaluate', '/ai评估'],
+    icon: '📊',
+    label: 'AI 成果评估',
+    desc: '对指定成果发起 AI 多维度评估',
+    usage: '/评估 [成果ID/名称]',
+    takesArgs: true,
+  },
+  {
+    id: 'search',
+    cmd: '/搜索',
+    aliases: ['/查找', '/search'],
+    icon: '🔍',
+    label: '搜索成果/需求',
+    desc: '按关键词搜索科技成果或技术需求',
+    usage: '/搜索 [关键词]',
+    takesArgs: true,
+  },
+  {
+    id: 'help',
+    cmd: '/帮助',
+    aliases: ['/help', '/指令'],
+    icon: '💡',
+    label: '命令帮助',
+    desc: '查看全部可用命令与用法',
+    usage: '/帮助',
+    takesArgs: false,
+  },
+  {
     id: 'match',
     cmd: '/匹配',
     aliases: ['/需求匹配', '/match', '/ai匹配'],
+    icon: '🎯',
     label: 'AI 需求匹配',
     desc: '选择我的需求，推荐合适的技术成果',
+    usage: '/匹配',
+    takesArgs: false,
   },
 ]
 
@@ -114,6 +147,31 @@ export function resolveSkillCommand(text) {
   if (!t.startsWith('/')) return null
   const token = t.split(/\s+/)[0]
   return SKILLS.find((skill) => skill.cmd === token || (skill.aliases || []).indexOf(token) >= 0) || null
+}
+
+/**
+ * 将斜杠命令草稿改写为 agent 意图路由可识别的自然语言。
+ * 例：/评估 3 → 评估成果3（target_id）；/评估 仿生灵巧手 → 评估一下仿生灵巧手（target_name）。
+ */
+export function buildSkillMessage(skill, text) {
+  const t = String(text || '').trim()
+  if (!skill) return t
+  const token = t.split(/\s+/)[0]
+  const args = t.slice(token.length).trim()
+  if (skill.id === 'evaluate') {
+    if (!args) return '评估成果'
+    return /^\d+$/.test(args) ? '评估成果' + args : '评估一下' + args
+  }
+  if (skill.id === 'search') {
+    return args ? '帮我找' + args + '相关的科技成果或技术需求' : '帮我找相关的科技成果或技术需求'
+  }
+  return t
+}
+
+/** /帮助 命令的本地回复：列出全部可用命令与用法。 */
+export function buildHelpText() {
+  const lines = SKILLS.map((skill) => (skill.usage || skill.cmd) + ' — ' + skill.desc)
+  return '当前可用命令：\n' + lines.join('\n') + '\n\n也可以直接输入自然语言问题自由提问。'
 }
 
 export function formatMatchProgress(status, failReason) {

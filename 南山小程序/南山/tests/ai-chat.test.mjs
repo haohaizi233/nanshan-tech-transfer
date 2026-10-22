@@ -5,6 +5,8 @@ import test from 'node:test'
 import {
   SKILLS,
   buildDemoReply,
+  buildSkillMessage,
+  buildHelpText,
   filterSkills,
   isSlashDraft,
   resolveSkillCommand,
@@ -27,10 +29,42 @@ test('slash draft detection and skill filtering', () => {
   assert.equal(isSlashDraft('/'), true)
   assert.equal(isSlashDraft('/匹'), true)
   assert.equal(isSlashDraft('匹配'), false)
-  assert.equal(filterSkills('/').length, 1)
+  assert.equal(filterSkills('/').length, SKILLS.length)
   assert.equal(filterSkills('/匹配')[0].id, 'match')
-  assert.equal(filterSkills('/需求').length, 1)
+  assert.deepEqual(filterSkills('/需求').map((s) => s.id).sort(), ['match', 'search'])
   assert.equal(filterSkills('/zzzz').length, 0)
+})
+
+test('slash menu offers evaluate, search, help and match commands', () => {
+  assert.deepEqual(SKILLS.map((s) => s.cmd), ['/评估', '/搜索', '/帮助', '/匹配'])
+  assert.ok(SKILLS.every((s) => s.icon && s.desc && s.usage))
+  assert.equal(filterSkills('/评估')[0].id, 'evaluate')
+  assert.equal(filterSkills('/搜索')[0].id, 'search')
+  assert.equal(filterSkills('/帮助')[0].id, 'help')
+  assert.equal(resolveSkillCommand('/评估 3').id, 'evaluate')
+  assert.equal(resolveSkillCommand('/评估成果 仿生灵巧手').id, 'evaluate')
+  assert.equal(resolveSkillCommand('/search 机器视觉').id, 'search')
+  assert.equal(resolveSkillCommand('/help').id, 'help')
+})
+
+test('slash commands normalize to agent-friendly natural language', () => {
+  const evaluate = resolveSkillCommand('/评估')
+  assert.equal(buildSkillMessage(evaluate, '/评估 3'), '评估成果3')
+  assert.equal(buildSkillMessage(evaluate, '/评估 仿生灵巧手'), '评估一下仿生灵巧手')
+  assert.equal(buildSkillMessage(evaluate, '/评估'), '评估成果')
+  const search = resolveSkillCommand('/搜索')
+  assert.equal(buildSkillMessage(search, '/搜索 机器视觉'), '帮我找机器视觉相关的科技成果或技术需求')
+  assert.equal(buildSkillMessage(search, '/搜索'), '帮我找相关的科技成果或技术需求')
+  const match = resolveSkillCommand('/匹配')
+  assert.equal(buildSkillMessage(match, '/匹配'), '/匹配')
+})
+
+test('help text lists every command with usage', () => {
+  const help = buildHelpText()
+  assert.match(help, /\/评估 \[成果ID\/名称\]/)
+  assert.match(help, /\/搜索 \[关键词\]/)
+  assert.match(help, /\/帮助/)
+  assert.match(help, /\/匹配/)
 })
 
 test('resolves demand-matching as a slash skill', () => {
@@ -56,6 +90,12 @@ test('ai-match page restores the chat composer and slash skill sheet', () => {
   )
   assert.match(source, /class="composer"/)
   assert.match(source, /class="skill-sheet"/)
+  assert.match(source, /skill-item--active/)
+  assert.match(source, /buildSkillMessage\(skill, text\)/)
+  assert.match(source, /buildHelpText\(\)/)
+  assert.match(source, /skill\.cmd \+ ' '/)
+  assert.match(source, /ArrowDown/)
+  assert.match(source, /Escape/)
   assert.match(source, /runMatchSkill/)
   assert.match(source, /matchDemand/)
   assert.match(source, /AiGeneratedMark/)

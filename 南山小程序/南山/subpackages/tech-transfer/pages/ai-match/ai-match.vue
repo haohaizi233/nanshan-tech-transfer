@@ -142,18 +142,28 @@
 		</scroll-view>
 
 		<view v-if="skillOptions.length" class="skill-sheet">
-			<text class="skill-sheet__label">技能</text>
+			<view class="skill-sheet__head">
+				<text class="skill-sheet__label">斜杠命令</text>
+				<!-- #ifdef H5 -->
+				<text class="skill-sheet__hint">↑↓ 选择 · 回车确认 · Esc 清空</text>
+				<!-- #endif -->
+			</view>
 			<view
-				v-for="skill in skillOptions"
+				v-for="(skill, index) in skillOptions"
 				:key="skill.id"
-				class="skill-item"
+				:class="['skill-item', index === skillCursor ? 'skill-item--active' : '']"
 				@click="onPickSkill(skill)"
+				@mouseenter="skillCursor = index"
 			>
-				<text class="skill-item__cmd">{{ skill.cmd }}</text>
+				<text class="skill-item__icon">{{ skill.icon }}</text>
 				<view class="skill-item__meta">
-					<text class="skill-item__label">{{ skill.label }}</text>
+					<view class="skill-item__row">
+						<text class="skill-item__cmd">{{ skill.cmd }}</text>
+						<text class="skill-item__label">{{ skill.label }}</text>
+					</view>
 					<text class="skill-item__desc">{{ skill.desc }}</text>
 				</view>
+				<text v-if="skillArgHint(skill)" class="skill-item__usage">{{ skillArgHint(skill) }}</text>
 			</view>
 		</view>
 
@@ -195,9 +205,11 @@
 				class="composer__input"
 				type="text"
 				:value="inputText"
-				placeholder="输入问题，或 / 调用技能"
+				:placeholder="composerPlaceholder"
+				:focus="inputFocus"
 				confirm-type="send"
 				@input="onInput"
+				@blur="inputFocus = false"
 				@confirm="onSend"
 			/>
 			<button class="composer__btn" size="mini" :disabled="!canSend" @click="onSend">{{ sendLabel }}</button>
@@ -228,6 +240,8 @@
 		isSlashDraft,
 		filterSkills,
 		resolveSkillCommand,
+		buildSkillMessage,
+		buildHelpText,
 		formatAgentReply,
 		cardNavigateTarget
 	} from '../../api/ai-chat.mjs'
@@ -302,7 +316,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			queueExpanded: false,
 			historyExpanded: false,
 			waitingDemandPick: false,
-			queuePreviewCount: QUEUE_PREVIEW_COUNT
+			queuePreviewCount: QUEUE_PREVIEW_COUNT,
+			inputFocus: false,
+			skillCursor: 0
 		}
 	},
 	computed: {
@@ -313,7 +329,17 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			return !this.typing && this.messages.length <= 1 && !this.pendingQueue.length
 		},
 		skillOptions() {
-			return isSlashDraft(this.inputText) ? filterSkills(this.inputText) : []
+			const raw = String(this.inputText || '')
+			if (!isSlashDraft(raw)) return []
+			// 命令后已开始输入参数（出现空白）时收起菜单
+			if (/\s/.test(raw.slice(1))) return []
+			return filterSkills(raw)
+		},
+		composerPlaceholder() {
+			const raw = String(this.inputText || '').trim()
+			const skill = raw ? resolveSkillCommand(raw) : null
+			if (skill && skill.usage) return '用法：' + skill.usage
+			return '输入问题，或 / 调用命令'
 		},
 		canSend() {
 			return !!(this.inputText || '').trim()
@@ -354,6 +380,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		this._requestInFlight = false
 		this._recovering = false
 		this._recoveryTimer = null
+		this.bindSlashMenuKeys()
 		if (!this.aiEnabled) {
 			uni.setNavigationBarTitle({ title: '南山科转通' })
 			return
@@ -407,6 +434,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	onUnload() {
 		this._alive = false
 		this._visible = false
+		this.unbindSlashMenuKeys()
 		this.stopTurnPolling()
 		this.stopCardStatsRefresh()
 		if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
@@ -756,7 +784,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				return
 			}
 			const interruptedText = this.inflightText
-			if (resolveSkillCommand(interruptedText)?.id === 'match') {
+			if (resolveSkillCommand(interruptedText)) {
 				this.inflightText = ''
 				this.persistQueue()
 				this.dispatchUserText(interruptedText)
@@ -797,15 +825,74 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		},
 		onInput(e) {
 			this.inputText = e.detail.value
+			this.skillCursor = 0
 		},
 			onSuggest(text) {
 				this.inputText = text
 				this.onSend()
 			},
 			onPickSkill(skill) {
-				this.inputText = skill.cmd
-				this.onSend()
-			},
+			if (!skill) return
+			this.skillCursor = 0
+			if (skill.takesArgs) {
+				// 自动填充命令并聚焦，等待补充参数后发送
+				this.inputText = skill.cmd + ' '
+				this.focusComposer()
+				return
+			}
+			// 无参数命令：填充后立即执行
+			this.inputText = skill.cmd
+			this.onSend()
+		},
+		focusComposer() {
+			this.inputFocus = false
+			this.$nextTick(() => {
+				this.inputFocus = true
+			})
+		},
+		moveSkillCursor(delta) {
+			const count = this.skillOptions.length
+			if (!count) return
+			this.skillCursor = (this.skillCursor + delta + count) % count
+		},
+		skillArgHint(skill) {
+			if (!skill || !skill.usage) return ''
+			return skill.usage.slice(skill.cmd.length).trim()
+		},
+		bindSlashMenuKeys() {
+			// #ifdef H5
+			if (this._slashKeyHandler || typeof document === 'undefined') return
+			this._slashKeyHandler = (e) => {
+				if (!this.skillOptions.length) return
+				if (e.key === 'ArrowDown') {
+					e.preventDefault()
+					this.moveSkillCursor(1)
+				} else if (e.key === 'ArrowUp') {
+					e.preventDefault()
+					this.moveSkillCursor(-1)
+				} else if (e.key === 'Enter') {
+					const skill = this.skillOptions[this.skillCursor]
+					if (skill) {
+						e.preventDefault()
+						this.onPickSkill(skill)
+					}
+				} else if (e.key === 'Escape') {
+					e.preventDefault()
+					this.skillCursor = 0
+					this.inputText = ''
+				}
+			}
+			document.addEventListener('keydown', this._slashKeyHandler, true)
+			// #endif
+		},
+		unbindSlashMenuKeys() {
+			// #ifdef H5
+			if (this._slashKeyHandler && typeof document !== 'undefined') {
+				document.removeEventListener('keydown', this._slashKeyHandler, true)
+			}
+			this._slashKeyHandler = null
+			// #endif
+		},
 			restoreScrollPosition() {
 			// P0-B: 精确恢复滚动位置（无动画，瞬时定位）
 			this.scrollAnimation = false
@@ -877,10 +964,23 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					this.runMatchSkill()
 					return
 				}
+				if (skill && skill.id === 'help') {
+					// 本地即时回复，不请求后端
+					this.ensureLocalUserMessage(text)
+					this.inflightText = text
+					this.pushMessage('assistant', buildHelpText())
+					this.finishTurn()
+					return
+				}
+				if (skill) {
+					// /评估、/搜索：改写为自然语言后交给 agent 意图路由执行
+					this.runAgentChat(buildSkillMessage(skill, text))
+					return
+				}
 				if (text.startsWith('/')) {
 					this.ensureLocalUserMessage(text)
 					this.inflightText = text
-					this.pushMessage('assistant', '未识别的技能。输入 / 查看可用技能，当前支持 /匹配。')
+					this.pushMessage('assistant', '未识别的命令。输入 / 查看可用命令：/评估、/搜索、/匹配、/帮助。')
 					this.finishTurn()
 					return
 				}
@@ -1559,17 +1659,33 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	.skill-sheet {
 		flex: 0 0 auto;
 		margin: 0 20rpx 8rpx;
-		background: #ffffff;
-		border: 1rpx solid #e8ecf2;
-		border-radius: 16rpx;
+		max-height: 520rpx;
+		overflow-y: auto;
+		background: rgba(255, 255, 255, 0.92);
+		backdrop-filter: blur(20rpx);
+		border: 1rpx solid rgba(232, 236, 242, 0.9);
+		border-radius: 24rpx;
 		padding: 12rpx 8rpx;
+		box-shadow: 0 12rpx 40rpx rgba(31, 41, 55, 0.14);
+	}
+
+	.skill-sheet__head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8rpx 16rpx 4rpx;
 	}
 
 	.skill-sheet__label {
 		display: block;
-		padding: 8rpx 16rpx 4rpx;
 		font-size: 22rpx;
 		color: #999999;
+	}
+
+	.skill-sheet__hint {
+		font-size: 20rpx;
+		color: #b0b6c0;
 	}
 
 	.skill-item {
@@ -1577,6 +1693,24 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		flex-direction: row;
 		align-items: center;
 		padding: 16rpx 16rpx;
+		border-radius: 16rpx;
+	}
+
+	.skill-item--active {
+		background: rgba(43, 115, 248, 0.08);
+	}
+
+	.skill-item--active .skill-item__cmd {
+		color: #1e5fd6;
+	}
+
+	.skill-item__icon {
+		flex-shrink: 0;
+		margin-right: 16rpx;
+		padding: 10rpx;
+		font-size: 30rpx;
+		background: rgba(43, 115, 248, 0.08);
+		border-radius: 14rpx;
 	}
 
 	.skill-item__cmd {
@@ -1585,6 +1719,12 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		font-weight: 600;
 		color: #2b73f8;
 		margin-right: 16rpx;
+	}
+
+	.skill-item__row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
 	}
 
 	.skill-item__meta {
@@ -1603,6 +1743,14 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		margin-top: 4rpx;
 		font-size: 22rpx;
 		color: #999999;
+	}
+
+	.skill-item__usage {
+		flex-shrink: 0;
+		margin-left: 12rpx;
+		font-size: 20rpx;
+		color: #9aa3b1;
+		white-space: nowrap;
 	}
 
 	.composer {

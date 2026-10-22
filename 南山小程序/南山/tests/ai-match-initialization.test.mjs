@@ -53,8 +53,36 @@ test('AI match initializes welcome content and composer without a memory cache',
   assert.equal(page.showSuggestions, true)
   assert.equal(page.canSend, false)
   page.onInput({ detail: { value: '/' } })
-  assert.equal(page.skillOptions[0].cmd, '/匹配')
+  assert.deepEqual(page.skillOptions.map((s) => s.cmd), ['/评估', '/搜索', '/帮助', '/匹配'])
   assert.equal(page.canSend, true)
+})
+
+test('slash menu fills argument commands and executes no-arg commands', () => {
+  const { page } = createPage()
+  page.onInput({ detail: { value: '/' } })
+  const evaluate = page.skillOptions[0]
+  assert.equal(evaluate.takesArgs, true)
+  page.onPickSkill(evaluate)
+  assert.equal(page.inputText, '/评估 ')
+  assert.equal(page.inputFocus, true)
+  assert.equal(page.skillOptions.length, 0, 'menu hides while typing arguments')
+
+  const help = { cmd: '/帮助', id: 'help', takesArgs: false }
+  page.onPickSkill(help)
+  assert.equal(page.messages[page.messages.length - 1].content.includes('当前可用命令'), true)
+})
+
+test('slash commands dispatch to the agent as natural language and help answers locally', () => {
+  const { page } = createPage()
+  const sent = []
+  page.runAgentChat = (text) => { sent.push(text) }
+  page.dispatchUserText('/评估 3')
+  page.dispatchUserText('/搜索 机器视觉')
+  assert.deepEqual(sent, ['评估成果3', '帮我找机器视觉相关的科技成果或技术需求'])
+  page.dispatchUserText('/帮助')
+  assert.ok(page.messages[page.messages.length - 1].content.includes('/评估 [成果ID/名称]'))
+  page.dispatchUserText('/不存在的命令')
+  assert.ok(page.messages[page.messages.length - 1].content.includes('未识别的命令'))
 })
 
 test('AI match keeps rendering and restores the account draft when history fails', async () => {
