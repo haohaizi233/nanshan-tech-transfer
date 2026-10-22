@@ -576,10 +576,11 @@
 
 	.section {
 		background: #ffffff;
-		border-radius: 16rpx;
+		border-radius: 20rpx;
 		border: 1rpx solid #e8ecf2;
-		padding: 28rpx;
-		margin-bottom: 20rpx;
+		padding: 32rpx;
+		margin-bottom: 28rpx;
+		box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
 	}
 
 	.title {
