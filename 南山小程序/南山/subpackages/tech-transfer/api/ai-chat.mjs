@@ -170,8 +170,8 @@ export function buildSkillMessage(skill, text) {
 
 /** /帮助 命令的本地回复：列出全部可用命令与用法。 */
 export function buildHelpText() {
-  const lines = SKILLS.map((skill) => (skill.usage || skill.cmd) + ' — ' + skill.desc)
-  return '当前可用命令：\n' + lines.join('\n') + '\n\n也可以直接输入自然语言问题自由提问。'
+  const lines = SKILLS.map((skill) => '  ' + (skill.icon || '') + ' ' + (skill.usage || skill.cmd) + '\n    ' + skill.desc)
+  return '📋 可用命令\n\n' + lines.join('\n\n') + '\n\n💡 也可以直接输入自然语言问题自由提问。'
 }
 
 export function formatMatchProgress(status, failReason) {

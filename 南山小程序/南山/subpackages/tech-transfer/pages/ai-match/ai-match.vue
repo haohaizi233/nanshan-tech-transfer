@@ -1697,11 +1697,14 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	}
 
 	.skill-item--active {
-		background: rgba(43, 115, 248, 0.08);
+		background: rgba(43, 115, 248, 0.06) !important;
+		border-color: rgba(43, 115, 248, 0.2) !important;
+
+		background: rgba(43, 115, 248, 0.04);
 	}
 
 	.skill-item--active .skill-item__cmd {
-		color: #1e5fd6;
+		color: #4a6fa5;
 	}
 
 	.skill-item__icon {
@@ -1709,7 +1712,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		margin-right: 16rpx;
 		padding: 10rpx;
 		font-size: 30rpx;
-		background: rgba(43, 115, 248, 0.08);
+		background: rgba(43, 115, 248, 0.04);
 		border-radius: 14rpx;
 	}
 
