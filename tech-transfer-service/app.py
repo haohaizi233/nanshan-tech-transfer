@@ -270,10 +270,15 @@ def _h5_from_dev(full_path: str, query: str):
 @app.api_route("/h5/", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/h5/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def mini_program_h5(request: Request, full_path: str = ""):
+    # 性能修复：优先返回静态构建产物（生产模式），
+    # Vite dev server 仅在静态文件不存在时兜底（开发模式）。
+    # Vite 代理会导致几百个按需编译模块请求，每个 ~50ms(frp)，累积14-17s。
+    disted = _h5_from_dist(full_path)
+    if disted is not None:
+        return disted
     proxied = _h5_from_dev(full_path, request.url.query)
     if proxied is not None:
         return proxied
-    disted = _h5_from_dist(full_path)
     if disted is not None:
         return disted
     return JSONResponse(
