@@ -189,6 +189,11 @@ if (_admin_dist / "index.html").is_file():
 
 
 # ── 小程序 H5（/h5/）────────────────────────────────────────
+# 性能优化：直接StaticFiles挂载hash资源目录（绕过Python路由）
+_H5_ASSETS_DIR = Path(__file__).resolve().parent.parent / "南山小程序" / "南山" / "dist" / "build" / "h5" / "assets"
+if _H5_ASSETS_DIR.is_dir():
+    app.mount("/h5/assets", StaticFiles(directory=str(_H5_ASSETS_DIR)), name="h5-assets")
+
 # 公网 Caddy 把 /h5 转到本服务（与 /api 同一上游），再反代本机 :5173。
 # VPS 上没有 HBuilder 进程；不能把 /h5 直接打到 127.0.0.1:5173。
 _H5_DEV_ORIGIN = "http://127.0.0.1:5173"

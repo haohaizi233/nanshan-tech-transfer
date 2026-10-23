@@ -49,4 +49,10 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
         # 添加性能响应头（可选，用于DevTools查看）
         response.headers["X-Response-Time"] = f"{elapsed_ms:.1f}ms"
         
+        # hash静态资源：长缓存immutable（文件名含内容hash）
+        path = request.url.path
+        if "/assets/" in path and "." in path.rsplit("/", 1)[-1]:
+            if "cache-control" not in response.headers:
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        
         return response

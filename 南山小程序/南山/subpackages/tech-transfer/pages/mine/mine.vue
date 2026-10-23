@@ -198,7 +198,7 @@
 			</view>
 
 			<view :class="'org-card org-card-' + certification.status">
-      <image class="org-card-bg" src="/static/images/mine/org-certification-bg.png" mode="aspectFit"></image>
+      <image class="org-card-bg" src="/static/images/mine/org-certification-bg.jpg" mode="aspectFit"></image>
 				<view class="org-card-content">
 					<image class="org-card-icon" src="/static/icons/mine/org-certification.png" mode="aspectFit"></image>
 					<view :class="certification.canApply ? 'org-card-main org-card-main-actionable' : 'org-card-main'">
