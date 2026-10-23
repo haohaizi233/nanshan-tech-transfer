@@ -1,7 +1,7 @@
 """性能监控端点：慢SQL查询 + 系统指标。"""
 from fastapi import APIRouter, Depends
 
-from core.auth import identity
+from core.middleware import identity
 from core.response import success
 from db import get_cursor
 
