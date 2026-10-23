@@ -34,6 +34,7 @@ from routes.admin_ops import router as admin_ops_router
 from routes.ai import router as ai_router
 from routes.auth import router as auth_router
 from routes.capital import router as capital_router
+from routes.perf import router as perf_router
 from routes.cooperation import router as cooperation_router
 from routes.demand import router as demand_router
 from routes.favorite import router as favorite_router
@@ -118,6 +119,7 @@ app.include_router(achievement_router)
 app.include_router(demand_router)
 app.include_router(favorite_router)
 app.include_router(cooperation_router)
+app.include_router(perf_router, prefix=settings.API_PREFIX)
 app.include_router(capital_router)
 app.include_router(institution_router)
 app.include_router(ai_router)
