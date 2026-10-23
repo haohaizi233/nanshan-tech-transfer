@@ -208,17 +208,25 @@
 				<text class="composer__command-text">{{ displayCommandText }}</text>
 			</view>
 			<view class="composer__row">
-			<input
-				class="composer__input"
-				type="text"
-				:value="inputText"
-				:placeholder="composerPlaceholder"
-				:focus="inputFocus"
-				confirm-type="send"
-				@input="onInput"
-				@blur="inputFocus = false"
-				@confirm="onSend"
-			/>
+			<!-- 输入框容器：透明input + 高亮覆盖层 -->
+			<view class="composer__input-wrap">
+				<input
+					class="composer__input composer__input--transparent"
+					type="text"
+					:value="inputText"
+					:placeholder="composerPlaceholder"
+					:focus="inputFocus"
+					confirm-type="send"
+					@input="onInput"
+					@blur="inputFocus = false"
+					@confirm="onSend"
+				/>
+				<!-- 高亮覆盖层：模拟富文本效果 -->
+				<view v-if="isCommandInput" class="composer__highlight" @click="focusComposer">
+					<text class="composer__highlight-cmd">{{ commandPrefix }}</text>
+					<text class="composer__highlight-args">{{ commandArgs }}</text>
+				</view>
+			</view>
 			<button class="composer__btn" size="mini" :disabled="!canSend" @click="onSend">{{ sendLabel }}</button>
 			</view>
 		</view>
@@ -339,6 +347,16 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		},
 		isCommandInput() {
 			return String(this.inputText || '').trim().startsWith('/')
+		},
+		commandPrefix() {
+			const text = String(this.inputText || '').trim()
+			const spaceIdx = text.indexOf(' ')
+			return spaceIdx > 0 ? text.slice(0, spaceIdx) : text
+		},
+		commandArgs() {
+			const text = String(this.inputText || '')
+			const spaceIdx = text.trim().indexOf(' ')
+			return spaceIdx > 0 ? text.slice(text.indexOf(' ')) : ''
 		},
 		displayCommandText() {
 			const text = String(this.inputText || '').trim()
@@ -1900,6 +1918,41 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	.agent-cards-scroll::-webkit-scrollbar-track {
 		background: transparent;
 	}
+	/* 输入框高亮覆盖层 */
+	.composer__input-wrap {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.composer__input--transparent {
+		color: transparent !important;
+		caret-color: #2b73f8 !important;
+	}
+
+	.composer__highlight {
+		position: absolute;
+		top: 0;
+		left: 20rpx;
+		right: 20rpx;
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		pointer-events: none;
+		overflow: hidden;
+	}
+
+	.composer__highlight-cmd {
+		color: #2b73f8;
+		font-weight: 700;
+		font-size: 28rpx;
+	}
+
+	.composer__highlight-args {
+		color: #4a6fa5;
+		font-size: 28rpx;
+	}
+
 	/* 命令高亮标签 */
 	.composer__command-tag {
 		display: inline-flex;
