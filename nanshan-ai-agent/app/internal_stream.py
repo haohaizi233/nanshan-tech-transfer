@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import json
 import queue
+import threading
 import time
 from threading import Event
 
@@ -34,6 +35,14 @@ def prepare_stream(body, request, *, slots, executor, run, timeout_seconds):
     execution_id = body.executionId
     deadline_at = time.monotonic() + timeout_seconds
     sequence = [0]
+    # 终结事件（result / error）单独存放，不与阶段事件抢队列容量。
+    #
+    # 原因：阶段事件是有损的（丢一两个不影响结论），而终结事件是唯一的。
+    # 原实现把两者放进同一个有界队列，消费端一旦变慢触发 queue.Full，
+    # 终结事件会被连带丢弃——用户拿到的不是结果，而是一个「溢出」错误。
+    terminal = []
+    terminal_lock = threading.Lock()
+    overflow = Event()
 
     def publish(event):
         if stopped.is_set():
@@ -42,7 +51,18 @@ def prepare_stream(body, request, *, slots, executor, run, timeout_seconds):
         try:
             events.put_nowait(event)
         except queue.Full:
+            # 阶段事件可丢：记录溢出并停止继续投递，避免内存无界增长。
+            overflow.set()
             stopped.set()
+
+    def publish_terminal(event):
+        """投递唯一的终结事件。永不丢弃，且保证至多一个。"""
+        event["executionId"] = execution_id
+        with terminal_lock:
+            if terminal:
+                return
+            terminal.append(event)
+        stopped.set()
 
     def observer(stage):
         sequence[0] += 1
@@ -57,13 +77,13 @@ def prepare_stream(body, request, *, slots, executor, run, timeout_seconds):
             encoded = (json.dumps(final, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
             if len(encoded) > MAX_EVENT_BYTES:
                 observer("failed")
-                publish({"type": "error", "reason": "stream_limit"})
+                publish_terminal({"type": "error", "reason": "stream_limit"})
             else:
-                publish(final)
+                publish_terminal(final)
         except Exception as exc:
             observer("failed")
             reason = "timeout" if isinstance(exc, TimeoutError) else "execution_failed"
-            publish({"type": "error", "reason": reason})
+            publish_terminal({"type": "error", "reason": reason})
 
     try:
         worker = executor.submit(execute)
@@ -78,19 +98,30 @@ def prepare_stream(body, request, *, slots, executor, run, timeout_seconds):
         try:
             while True:
                 now = time.monotonic()
-                if now >= deadline_at:
-                    event = {"type": "error", "executionId": execution_id, "reason": "timeout"}
-                else:
-                    try:
-                        event = events.get_nowait()
-                    except queue.Empty:
-                        if stopped.is_set():
-                            event = {"type": "error", "executionId": execution_id, "reason": "stream_overflow"}
-                        elif now - last_output >= HEARTBEAT_SECONDS:
-                            event = {"type": "heartbeat", "executionId": execution_id}
-                        else:
-                            await asyncio.sleep(min(0.05, max(0.001, deadline_at - now)))
-                            continue
+                # 1) 先把队列里的阶段事件排空——终结事件必须排在所有阶段事件之后，
+                #    否则消费端会先收到终结、再收到阶段，触发「终结后仍有事件」。
+                event = None
+                try:
+                    event = events.get_nowait()
+                except queue.Empty:
+                    pass
+                if event is None:
+                    # 2) 队列已空：若执行已完成，交付唯一的终结事件。
+                    with terminal_lock:
+                        pending = terminal[0] if terminal else None
+                    if pending is not None:
+                        event = pending
+                    elif now >= deadline_at:
+                        # 3) 执行未在时限内完成：交付超时终结事件。
+                        event = {"type": "error", "executionId": execution_id, "reason": "timeout"}
+                    elif overflow.is_set():
+                        # 4) 阶段事件队列溢出（消费端过慢）：显式失败而非静默丢事件。
+                        event = {"type": "error", "executionId": execution_id, "reason": "stream_overflow"}
+                    elif now - last_output >= HEARTBEAT_SECONDS:
+                        event = {"type": "heartbeat", "executionId": execution_id}
+                    else:
+                        await asyncio.sleep(min(0.05, max(0.001, deadline_at - now)))
+                        continue
                 try:
                     line = (json.dumps(event, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
                     result_size = len(json.dumps(event.get("result"), ensure_ascii=False).encode("utf-8")) if event["type"] == "result" else 0

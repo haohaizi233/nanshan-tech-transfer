@@ -51,6 +51,7 @@ from app.advisor import enrich_cards, local_reply, result_message
 from app.runtime_budget import reset_deadline, set_deadline
 from app.runtime_trace import emit_stage, request_trace, stage_observer, trace_count, trace_degradation, trace_stage
 from app.internal_stream import authorize_internal, prepare_stream
+from app.auth import authorize_service_call
 
 
 app = FastAPI(
@@ -119,6 +120,12 @@ def chat_timeout_seconds(value: str | None) -> float:
 
 @app.post("/api/ai/chat", response_model=ChatResponse)
 async def ai_chat(body: ChatRequest, http_request: Request):
+    # 服务间鉴权：后端 → Agent 必须携带共享密钥；
+    # 未配置密钥时仅接受本机回环调用，避免 Agent 被当成公开模型代理。
+    authorize_service_call(
+        http_request.headers.get("X-AI-Service-Key"),
+        getattr(http_request.client, "host", None),
+    )
     if not _chat_slots.acquire(blocking=False):
         raise HTTPException(
             status_code=503,
@@ -383,6 +390,12 @@ def _evaluation_reply(request, route=None, target_id=None, target_name=None, car
         message = "评估未完成：" + (outcome.get("failReason") or "AI 服务暂时不可用，请稍后重试")
     card = format_achievement_card(record)
     card["evaluation"] = summary
+    if type(outcome.get("taskId")) is int and outcome["taskId"] > 0:
+        card["evaluationTask"] = {
+            "taskId": outcome["taskId"],
+            "status": status,
+            "progressStage": outcome.get("progressStage"),
+        }
     emit_stage("formatting")
     return ChatResponse(
         success=True, intent="evaluate_achievement", message=message,
@@ -393,6 +406,19 @@ def _evaluation_reply(request, route=None, target_id=None, target_name=None, car
 
 def _process_ai_chat(request: ChatRequest):
     emit_stage("context")
+    command = re.fullmatch(r"/(?:评估|评估成果|evaluate|ai评估)(?:\s+(.*))?", request.message.strip(), re.IGNORECASE)
+    if command:
+        argument = (command.group(1) or "").strip()
+        identifier = re.fullmatch(r"(?:成果\s*|#)?([1-9]\d*)", argument)
+        if len(argument) > 80:
+            return _clarification("成果名称不能超过80字，请缩短名称或使用成果编号。")
+        route = RouteResult(
+            intent="evaluate_achievement",
+            target_id=int(identifier.group(1)) if identifier else None,
+            target_name=argument if argument and not identifier else None,
+        )
+        emit_stage("routing")
+        return _evaluation_reply(request, route=route, target_id=route.target_id, target_name=route.target_name)
     reply = local_reply(request.message, resolve_references=False)
     if reply is not None:
         return _clarification(reply)
@@ -434,11 +460,15 @@ def _process_ai_chat(request: ChatRequest):
         return response
     emit_stage("routing")
     try:
-        route = resolution.route or classify_intent(request.message)
+        if resolution.route is not None:
+            route = resolution.route
+        else:
+            route = classify_intent(request.message)
     except ValueError:
         return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
     except LLMError as exc:
         logger.warning("router_failed llm_status=%s reason=%s", exc.status_code, exc.reason)
+        trace_degradation("llm_degraded")
         raise HTTPException(status_code=502, detail={"message": "AI服务暂时不可用，请稍后重试。", "layer": "llm", "llmReason": exc.reason}) from exc
     except Exception as exc:
         logger.warning("router_failed type=%s", type(exc).__name__)
@@ -450,10 +480,11 @@ def _process_ai_chat(request: ChatRequest):
             request, route=route, target_id=route.target_id, target_name=route.target_name,
         )
     try:
-        route = merge_route(request.message, route)
+        if resolution.route is None:
+            route = merge_route(request.message, route)
         # 硬性条件 / 软偏好分离闸门：merge_route 会按原话重新解析条件，
         # 必须在它之后再跑一次闸门，否则软偏好会被还原成硬过滤。
-        route = apply_condition_guards(route, request.message)
+            route = apply_condition_guards(route, request.message)
     except ValueError:
         return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
     except Exception as exc:
@@ -498,10 +529,12 @@ def _process_ai_chat(request: ChatRequest):
         selected = _final_records(selected, request, route)
     except Exception as exc:
         logger.error("retrieval_failed type=%s", type(exc).__name__)
+        trace_degradation("retrieval_degraded")
         raise HTTPException(status_code=503, detail={"message": "数据库暂时繁忙，请稍后重试。", "agentReason": "database_unavailable"}) from exc
     facts = None
     if not selected and settings.AI_EMPTY_DIAGNOSTICS:
         # 零结果时补一次轻量聚合查询，把库里的客观事实带进说明里，
         # 避免把"库里没有"说成"你条件不合适"。
         facts = facts_for(route.intent)
+        trace_degradation("empty_diagnostics")
     return _respond(route, request, selected, facts)

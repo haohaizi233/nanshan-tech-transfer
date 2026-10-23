@@ -10,7 +10,7 @@ import requests
 from app.config import settings
 from app.llm_log import enqueue_llm_log, parse_error_fields
 from app.runtime_budget import remaining_seconds
-from app.runtime_trace import current_trace_id, trace_stage
+from app.runtime_trace import current_trace_id, trace_count, trace_stage
 
 
 class LLMError(Exception):
@@ -28,16 +28,51 @@ class LLMError(Exception):
         self.status_code = status_code
         self.body = body
         self.reason = reason
+        # 错误分类：transient（可降级/可重试）/ permanent（不可重试）/ overload（并发饱和）。
+        self.category = classify_llm_error(status_code, reason)
 
 
 # 网关偶发 502/503/429 时重试：远端 LLM 网关在模型冷启动 / 并发时会短暂返回 502，
 # 单次失败不代表模型不可用，退避重试可把瞬时抖动吸收掉。
 _RETRY_STATUS = {502, 503, 504, 429}
-_RETRY_TIMES = 2
-_RETRY_BACKOFF = (0.25, 0.5)
+_RETRY_TIMES = 3
+_RETRY_BACKOFF = (0.25, 0.5, 1.0)
 _UPSTREAM_BODY_LIMIT = 800
 _LLM_SLOTS = threading.BoundedSemaphore(4)
 _logger = logging.getLogger(__name__)
+
+# 错误分类：决定「是否值得重试」以及「失败后能否降级」。
+#
+# - transient：瞬时故障（网关抖动、限流、超时、连接重置）→ 值得退避重试；
+# - permanent：请求本身有问题（鉴权失败、参数非法）→ 重试无意义，立即失败；
+# - overload：并发槽位耗尽 → 由上层降级，不占用重试预算。
+_RETRYABLE_REASONS = frozenset({
+    "timeout", "connection_reset", "connection_refused", "unreachable", "http_error",
+})
+_PERMANENT_STATUS = frozenset({400, 401, 403, 404, 405, 422})
+
+
+def classify_llm_error(status_code: int | None, reason: str) -> str:
+    """把上游失败归类为 transient / permanent / overload。
+
+    分类错误会导致两类真实故障：
+    1. 把永久性失败当瞬时故障重试 → 白白烧掉时间预算与上游配额；
+    2. 把瞬时故障当永久性失败直接抛 → 一次 502 就让整轮对话失败。
+    """
+    if reason == "overloaded":
+        return "overload"
+    if status_code is not None:
+        if status_code in _PERMANENT_STATUS:
+            return "permanent"
+        if status_code == 429 or status_code in _RETRY_STATUS:
+            return "transient"
+        if 500 <= status_code < 600:
+            # 5xx（含未列入 _RETRY_STATUS 的 500/501 等）都视为瞬时服务端故障。
+            return "transient"
+        return "permanent"
+    if reason in _RETRYABLE_REASONS:
+        return "transient"
+    return "permanent"
 
 # ── LLM Provider 轮询 fallback ──────────────────────────────────────────
 # 主 Provider 不可用时自动切换到备用 Provider。
@@ -124,6 +159,22 @@ def _log_upstream_error(response, attempt: int) -> str:
     return snippet
 
 
+def _trace_usage(usage: dict) -> None:
+    """把本次调用的 Token 用量上报到请求级指标面。"""
+    if not usage:
+        return
+    prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+    completion = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+    total = usage.get("total_tokens") or (prompt + completion)
+    for name, value in (
+        ("prompt_tokens", prompt),
+        ("completion_tokens", completion),
+        ("total_tokens", total),
+    ):
+        if isinstance(value, int) and value >= 0:
+            trace_count(name, value)
+
+
 @trace_stage("llm")
 def chat_completion(
     messages: list[dict],
@@ -132,6 +183,7 @@ def chat_completion(
     response_format: dict | None = None,
     timeout: int = 60,
 ) -> str:
+    trace_count("llm_call_count", 1)
     remaining = remaining_seconds()
     if remaining is not None and remaining <= 0:
         raise LLMError("AI 请求已超过总时限", reason="timeout")
@@ -177,7 +229,11 @@ def _chat_completion(
             messages, max_tokens, temperature, response_format, timeout,
         )
     except LLMError as primary_err:
-        if primary_err.status_code is not None and primary_err.status_code >= 400 and primary_err.status_code not in _RETRY_STATUS:
+        trace_count("llm_error_count", 1)
+        # 只有瞬时故障才值得切换备用 Provider：
+        # 鉴权失败 / 参数非法这类永久性错误，换 Provider 一样会失败，
+        # 切过去只是白白多花一份时间预算和配额。
+        if primary_err.category != "transient":
             raise
         if _FALLBACK_URL and _FALLBACK_KEY:
             # N5: 主 + 备 Provider 共享墙钟总超时预算，防止主 Provider 重试耗尽
@@ -189,7 +245,10 @@ def _chat_completion(
                     max(remaining, 0.0), primary_err.reason,
                 )
                 raise
-            _logger.warning("LLM 主 Provider 不可用（%s），切换到备用 Provider", primary_err.reason)
+            _logger.warning(
+                "LLM 主 Provider 不可用（%s status=%s），切换到备用 Provider",
+                primary_err.reason, primary_err.status_code,
+            )
             return _call_llm(
                 _FALLBACK_URL,
                 _FALLBACK_KEY,
@@ -267,7 +326,7 @@ def _call_llm(
                 verify=settings.LLM_VERIFY_SSL,
             )
             last_status = response.status_code
-            # 网关瞬时错误（502/503/504/429）退避重试；其余 4xx/5xx 直接抛出
+            # 网关瞬时错误（5xx/429）退避重试；4xx 属请求本身有问题，重试无意义。
             if response.status_code >= 400:
                 last_upstream = _log_upstream_error(response, attempt)
                 last_reason = "http_error"
@@ -281,7 +340,12 @@ def _call_llm(
                     error_message=f"HTTP {response.status_code}",
                     body=last_upstream,
                 )
-            if response.status_code in _RETRY_STATUS and attempt < _RETRY_TIMES - 1 and _sleep_before_retry(attempt):
+            if (
+                response.status_code >= 400
+                and classify_llm_error(response.status_code, last_reason) == "transient"
+                and attempt < _RETRY_TIMES - 1
+                and _sleep_before_retry(attempt)
+            ):
                 continue
             response.raise_for_status()
             break
@@ -317,7 +381,7 @@ def _call_llm(
             else:
                 last_status = response.status_code
                 last_reason = "http_error"
-            retryable = isinstance(exc, (requests.Timeout, requests.ConnectionError))
+            retryable = classify_llm_error(last_status, last_reason) == "transient"
             if retryable and attempt < _RETRY_TIMES - 1 and _sleep_before_retry(attempt):
                 continue
             extra = f" upstream={last_upstream!r}" if last_upstream else ""
@@ -341,6 +405,8 @@ def _call_llm(
 
         content = result["choices"][0]["message"]["content"]
         content = strip_thinking(content)
+        usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+        _trace_usage(usage)
         _write_call_log(
             ok=True,
             input_payload=input_payload,
@@ -488,11 +554,12 @@ def _write_call_log(
             event["usage"] = usage
     else:
         event["reason"] = reason
+        # 上游原始 body 永不进入事件对象：它可能回显用户输入、联系方式，
+        # 甚至内部路径。落盘面只保留 status / type / 结构化字段。
         event["error"] = {
             "type": error_type,
             "message": error_message,
             "status": status,
-            "body": body,
             "fields": parse_error_fields(body),
         }
         if extra_fields:

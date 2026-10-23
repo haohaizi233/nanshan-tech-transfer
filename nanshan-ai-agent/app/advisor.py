@@ -105,6 +105,27 @@ def _source_text(value, depth=0) -> str:
     return str(value)[:100]
 
 
+def _normalize_analysis(value) -> str | None:
+    """把模型返回的 analysis 归一化成一段文本。
+
+    模型可能返回字符串、单元素列表或多元素列表（不同模型 / 不同版本
+    提示词的输出形态不一致）。旧实现只在 ``isinstance(value, str)`` 时
+    才放行，列表形态会被**静默丢弃**——用户看不到解读，系统也不报错。
+    这里统一归一化，再交给同一套幻觉校验。
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [
+            str(entry).strip()
+            for entry in value[:3]
+            if isinstance(entry, (str, int, float)) and str(entry).strip()
+        ]
+        if parts:
+            return "；".join(parts)
+    return None
+
+
 def grounded_explanation(ranking: dict, item: dict) -> tuple[list[str], str]:
     """校验模型给出的原文引用与解读，只放行可追溯的部分。
 
@@ -125,10 +146,9 @@ def grounded_explanation(ranking: dict, item: dict) -> tuple[list[str], str]:
         quote = quote.strip()
         if quote in _source_text(item.get(entry["field"])) and quote not in evidence:
             evidence.append(quote)
-    analysis = ranking.get("analysis")
-    if not evidence or not isinstance(analysis, str) or len(analysis) > 180:
+    analysis = _normalize_analysis(ranking.get("analysis"))
+    if not evidence or analysis is None or len(analysis) > 180:
         return evidence, ""
-    analysis = analysis.strip()
     if _UNSUPPORTED_PATTERNS.search(analysis):
         return evidence, ""
     source = " ".join(_source_text(item.get(field)) for field in _EVIDENCE_FIELDS)

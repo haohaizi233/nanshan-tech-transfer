@@ -97,25 +97,32 @@ def _trim(value, limit: int = _BODY_LIMIT):
 
 
 def parse_error_fields(body: str) -> dict:
-    """从上游错误正文抽出常见字段，方便按状态码对照。"""
+    """从上游错误正文抽出常见字段，方便按状态码对照。
+
+    解析阶段即做 PII 脱敏：上游错误体可能回显用户输入中的手机号 / 邮箱，
+    这些片段即使只保留几百字，也不该以明文形式进入日志或内存事件对象。
+    """
     text = (body or "").strip()
     if not text:
         return {}
     try:
         payload = json.loads(text)
     except (ValueError, TypeError):
-        return {"raw": _trim(text, 800)}
+        return {"raw": mask_pii(_trim(text, 800))}
     if not isinstance(payload, dict):
-        return {"raw": _trim(payload, 800)}
+        return {"raw": mask_pii(_trim(payload, 800))}
     fields = {}
     for key in (
         "error", "message", "detail", "code", "type", "status",
         "status_code", "object", "param",
     ):
         if key in payload:
-            fields[key] = _trim(payload[key], 800)
+            fields[key] = mask_pii(_trim(payload[key], 800))
     if not fields:
-        fields = {key: _trim(val, 400) for key, val in list(payload.items())[:12]}
+        fields = {
+            key: mask_pii(_trim(val, 400))
+            for key, val in list(payload.items())[:12]
+        }
     return fields
 
 

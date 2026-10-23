@@ -53,6 +53,9 @@ class Settings:
     EVAL_POLL_TIMEOUT_SECONDS = float(os.getenv("EVAL_POLL_TIMEOUT_SECONDS", "55"))
     # 为收尾（组装回复/入库）预留的墙钟余量：剩余预算低于该值即停止轮询
     EVAL_POLL_RESERVE_SECONDS = float(os.getenv("EVAL_POLL_RESERVE_SECONDS", "3"))
+    # 同步对话通道（后端 → /api/ai/chat）的服务间密钥。
+    # 留空时复用 AI_INTERNAL_SERVICE_KEY；两者都为空时仅接受本机回环调用。
+    AI_PUBLIC_API_KEY = os.getenv("AI_PUBLIC_API_KEY", "")
     # 零结果诊断：额外跑一次聚合查询，把库里客观事实带进"没找到"的说明里。
     # 离线评测 / 压测场景可关闭，避免额外 DB 往返。
     AI_EMPTY_DIAGNOSTICS = os.getenv("AI_EMPTY_DIAGNOSTICS", "1").strip().lower() not in (

@@ -17,21 +17,26 @@ class AgentSlotTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(main, "_chat_slots", slots),
             patch.object(main._chat_executor, "submit", side_effect=RuntimeError("executor closed")),
+            patch.object(main.settings, "AI_PUBLIC_API_KEY", "unit-test-key", create=True),
         ):
             with self.assertRaises(RuntimeError):
-                await main.ai_chat(ChatRequest(message="test"), Mock(headers={}))
+                await main.ai_chat(
+                    ChatRequest(message="test"),
+                    Mock(headers={"X-AI-Service-Key": "unit-test-key"}),
+                )
         self.assertTrue(slots.acquire(blocking=False))
         self.assertFalse(slots.acquire(blocking=False))
 
     async def test_queued_worker_is_cancelled_and_returns_capacity_on_timeout(self):
         worker = Future()
         slots = BoundedSemaphore(1)
-        request = Mock(headers={})
+        request = Mock(headers={"X-AI-Service-Key": "unit-test-key"})
         request.is_disconnected = AsyncMock(return_value=False)
         with (
             patch.object(main, "_chat_slots", slots),
             patch.object(main._chat_executor, "submit", return_value=worker),
             patch.object(main.settings, "AI_CHAT_TIMEOUT_SECONDS", 0.01),
+            patch.object(main.settings, "AI_PUBLIC_API_KEY", "unit-test-key", create=True),
         ):
             with self.assertRaises(HTTPException):
                 await main.ai_chat(ChatRequest(message="test"), request)
@@ -44,12 +49,13 @@ class AgentSlotTests(unittest.IsolatedAsyncioTestCase):
         worker = Future()
         worker.set_running_or_notify_cancel()
         slots = BoundedSemaphore(1)
-        request = Mock(headers={})
+        request = Mock(headers={"X-AI-Service-Key": "unit-test-key"})
         request.is_disconnected = AsyncMock(return_value=False)
         with (
             patch.object(main, "_chat_slots", slots),
             patch.object(main._chat_executor, "submit", return_value=worker),
             patch.object(main.settings, "AI_CHAT_TIMEOUT_SECONDS", 0.01),
+            patch.object(main.settings, "AI_PUBLIC_API_KEY", "unit-test-key", create=True),
         ):
             try:
                 with self.assertRaises(HTTPException) as error:

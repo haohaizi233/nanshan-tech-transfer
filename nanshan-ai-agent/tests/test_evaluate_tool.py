@@ -109,6 +109,14 @@ class RouteSchemaTests(unittest.TestCase):
 class EvaluationServiceTests(unittest.TestCase):
     """evaluation_service：创建后立即返回 pending（不再同步轮询）；prefer_existing 查历史。"""
 
+    def test_slash_evaluation_routes_without_intent_model(self):
+        with patch.object(main, "classify_intent", side_effect=AssertionError("no model")), \
+                patch.object(evaluation_service, "resolve_target", return_value=record(identifier=3)) as resolve, \
+                patch.object(evaluation_service, "evaluate", return_value={"status": "pending", "taskId": 7}):
+            result = main._process_ai_chat(ChatRequest(message="/评估 成果3", exclude_owner_user_id=7))
+        self.assertEqual(result.intent, "evaluate_achievement")
+        resolve.assert_called_once_with(7, target_id=3, target_name=None)
+
     def test_create_returns_pending_immediately(self):
         responses = [{"taskId": 7, "status": "queued", "isNew": True}]
         with patch.object(evaluation_service, "_api", side_effect=responses) as api:
@@ -324,6 +332,7 @@ class EvaluateDispatchTests(unittest.TestCase):
         self.assertIn("任务进行中", result.message)
         self.assertIn("正在生成评价报告", result.message)
         self.assertIsNone(result.data[0]["evaluation"])
+        self.assertEqual(result.data[0]["evaluationTask"]["taskId"], 7)
 
     def test_failed_reply_surfaces_desensitized_reason(self):
         route = self.evaluate_route(target_name="仿生灵巧手")

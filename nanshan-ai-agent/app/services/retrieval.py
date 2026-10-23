@@ -76,16 +76,21 @@ def relevance_expression(kind: str, plan: TermPlan) -> tuple[str, list[str]]:
     """构造相关度表达式（SQL 片段 + 参数）。
 
     相关度 = Σ_词条 系数 × (标题命中×TITLE_WEIGHT + 正文命中×BODY_WEIGHT)
+
+    标题与正文都改为引用 CTE 物化出来的检索列（``_searchable``），
+    避免 PostgreSQL 对每行重复拼接多字段字符串。
     """
-    fields = taxonomy.fields_for(kind)
     parts: list[str] = []
     params: list[str] = []
+    searchable = taxonomy.SEARCHABLE_COLUMN
+    title_expr = taxonomy.collate("title")
+    body_expr = taxonomy.collate(searchable)
     for term, multiplier in plan.weighted():
         like_value = f"%{escape_like_term(term)}%"
         parts.append(
-            f"((CASE WHEN {fields.title_sql} ILIKE %s ESCAPE E'\\\\' "
+            f"((CASE WHEN {title_expr} ILIKE %s ESCAPE E'\\\\' "
             f"THEN {taxonomy.TITLE_WEIGHT} ELSE 0 END)"
-            f" + (CASE WHEN {fields.body_sql} ILIKE %s ESCAPE E'\\\\' "
+            f" + (CASE WHEN {body_expr} ILIKE %s ESCAPE E'\\\\' "
             f"THEN {taxonomy.BODY_WEIGHT} ELSE 0 END)) * {multiplier}"
         )
         params.extend([like_value, like_value])
@@ -98,7 +103,7 @@ def keyword_condition(kind: str, plan: TermPlan) -> tuple[str, list[str]]:
     """构造关键词命中条件（各词条之间是 OR）。"""
     if not plan.all_terms:
         return "", []
-    expression = taxonomy.combined_expression(kind)
+    expression = taxonomy.collate(taxonomy.SEARCHABLE_COLUMN)
     parts: list[str] = []
     params: list[str] = []
     for term in plan.all_terms:
@@ -154,8 +159,9 @@ def coop_mode_condition(modes: list[str]) -> tuple[str, list[str]]:
         return "", []
     parts = []
     params: list[str] = []
+    coop_expr = taxonomy.collate("coop_mode::text")
     for spelling in spellings:
-        parts.append("coop_mode::text ILIKE %s ESCAPE E'\\\\'")
+        parts.append(f"{coop_expr} ILIKE %s ESCAPE E'\\\\'")
         params.append(f"%{escape_like_term(spelling)}%")
     return "(" + " OR ".join(parts) + ")", params
 
