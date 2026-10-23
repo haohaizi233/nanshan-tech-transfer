@@ -208,6 +208,11 @@
 				<text class="composer__command-text">{{ displayCommandText }}</text>
 			</view>
 			<view class="composer__row">
+			<!-- 命令高亮标签：输入/开头时在输入框上方显示 -->
+			<view v-if="isCommandInput" class="composer__cmd-badge">
+				<text class="composer__cmd-badge__icon">⚡</text>
+				<text class="composer__cmd-badge__text">{{ displayCommandText }}</text>
+			</view>
 			<input
 				class="composer__input"
 				type="text"
@@ -347,6 +352,14 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		},
 		isCommandInput() {
 			return String(this.inputText || '').trim().startsWith('/')
+		},
+		displayCommandText() {
+			const text = String(this.inputText || '').trim()
+			const token = text.split(/\s+/)[0]
+			const skills = this._inlineSkills || []
+			const found = skills.find(s => s.cmd === token || (s.aliases || []).includes(token))
+			if (found) return found.label
+			return '命令'
 		},
 		commandPrefix() {
 			const text = String(this.inputText || '').trim()
@@ -890,7 +903,8 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			},
 			onHelpCommand(cmd) {
 			if (!cmd) return
-			this.inputText = cmd.sample || cmd.cmd
+			// 填充命令前缀+空格，让用户追加参数后发送
+			this.inputText = cmd.cmd + ' '
 			this.focusComposer()
 		},
 		onPickSkill(skill) {
@@ -2020,5 +2034,26 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		font-size: 24rpx;
 		color: #999;
 		margin-top: 12rpx;
+	}
+	/* 命令高亮标签 */
+	.composer__cmd-badge {
+		display: inline-flex;
+		align-items: center;
+		background: linear-gradient(135deg, #2b73f8, #5aa0ff);
+		color: #fff;
+		border-radius: 20rpx;
+		padding: 6rpx 20rpx;
+		margin-bottom: 12rpx;
+		gap: 8rpx;
+	}
+
+	.composer__cmd-badge__icon {
+		font-size: 22rpx;
+	}
+
+	.composer__cmd-badge__text {
+		font-size: 22rpx;
+		font-weight: 600;
+		color: #fff;
 	}
 </style>
