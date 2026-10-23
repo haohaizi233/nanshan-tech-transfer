@@ -245,6 +245,7 @@
 		getChatSuggestions,
 		createMessage,
 		isSlashDraft,
+		SKILLS,
 		filterSkills,
 		resolveSkillCommand,
 		buildSkillMessage,
@@ -327,7 +328,14 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			inputFocus: false,
 			skillCursor: 0,
 			showSkillMenu: false,
-			skillList: []
+			skillList: [],
+			// 内联命令定义（避免SKILLS导入被tree-shaking丢弃）
+			_inlineSkills: [
+				{ id: 'evaluate', cmd: '/评估', label: '评估成果', icon: '📊', usage: '/评估 [成果ID/名称]', desc: '发起AI成果评估', aliases: ['/评估成果', '/evaluate'] },
+				{ id: 'search', cmd: '/搜索', label: '搜索', icon: '🔍', usage: '/搜索 [关键词]', desc: '搜索成果/需求', aliases: ['/查找', '/search'] },
+				{ id: 'help', cmd: '/帮助', label: '帮助', icon: '❓', usage: '/帮助', desc: '显示可用命令', aliases: ['/help', '/指令'] },
+				{ id: 'match', cmd: '/匹配', label: '匹配', icon: '🤝', usage: '/匹配', desc: 'AI智能匹配', aliases: [] }
+			]
 		}
 	},
 	computed: {
@@ -358,10 +366,15 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		},
 		skillOptions() {
 			const raw = String(this.inputText || '')
-			if (!isSlashDraft(raw)) return []
+			if (!raw.startsWith('/')) return []
 			// 命令后已开始输入参数（出现空白）时收起菜单
 			if (/\s/.test(raw.slice(1))) return []
-			return filterSkills(raw)
+			const q = raw.slice(1).trim().toLowerCase()
+			if (!q) return this._inlineSkills
+			return this._inlineSkills.filter(s => {
+				const hay = (s.cmd + ' ' + s.label + ' ' + (s.aliases || []).join(' ')).toLowerCase()
+				return hay.indexOf(q) >= 0 || s.cmd.slice(1).toLowerCase().indexOf(q) >= 0
+			})
 		},
 		composerPlaceholder() {
 			const raw = String(this.inputText || '').trim()
@@ -861,7 +874,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			const text = String(this.inputText || '').trim()
 			if (text.startsWith('/')) {
 				const query = text.slice(1).toLowerCase()
-				this.skillList = SKILLS.filter(s => {
+				this.skillList = this._inlineSkills.filter(s => {
 					if (!query) return true
 					return s.cmd.includes(query) || (s.aliases && s.aliases.some(a => a.includes(query))) || (s.desc || '').includes(query)
 				})
