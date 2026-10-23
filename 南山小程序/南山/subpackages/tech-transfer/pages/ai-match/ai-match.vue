@@ -48,7 +48,7 @@
 				<view v-else class="msg msg--bot msg--block">
 					<AiGeneratedMark mode="badge" />
 					<view class="panel">
-						<text v-if="msg.content" class="panel__text">{{ msg.content }}</text>
+						<text v-if="msg.content && msg.type !== 'help-commands'" class="panel__text">{{ msg.content }}</text>
 
 						<view v-if="msg.type === 'demand-empty'" class="panel__actions">
 							<button class="primary-btn" size="mini" @click="goPostDemand">去发布需求</button>
@@ -64,6 +64,25 @@
 								<text class="pick-item__title">{{ d.title }}</text>
 								<text class="pick-item__meta">{{ d.statusLabel }} · {{ d.demandDesc || '无需求说明' }}</text>
 							</view>
+						</view>
+
+						<view v-else-if="msg.type === 'help-commands'" class="help-commands">
+							<text class="help-commands__title">当前可用命令</text>
+							<view
+								v-for="cmd in (msg.payload && msg.payload.commands) || []"
+								:key="cmd.id"
+								class="help-cmd-card"
+								@click="onHelpCommand(cmd)"
+							>
+								<view class="help-cmd-card__row">
+									<text class="help-cmd-card__icon">{{ cmd.icon }}</text>
+									<text class="help-cmd-card__label">{{ cmd.label }}</text>
+									<text class="help-cmd-card__try">点击填入</text>
+								</view>
+								<text class="help-cmd-card__desc">{{ cmd.desc }}</text>
+								<text class="help-cmd-card__sample">{{ cmd.usage }}</text>
+							</view>
+							<text class="help-commands__hint">点击命令卡片填入输入框，补充参数后发送</text>
 						</view>
 
 						<view v-else-if="msg.type === 'agent-cards'" class="agent-cards-scroll">
@@ -202,16 +221,17 @@
 
 		<view class="composer">
 			<text class="composer__hint">{{ composerHint }}</text>
-			<!-- 命令高亮标签：输入/开头时显示 -->
-			<view v-if="isCommandInput" class="composer__command-tag">
-				<text class="composer__command-icon">⚡</text>
-				<text class="composer__command-text">{{ displayCommandText }}</text>
-			</view>
 			<view class="composer__row">
-			<!-- 输入框容器：命令时透明input+高亮覆盖层，普通文字正常 -->
+			<!-- 输入框容器：命令标签放在输入框内部上方；input 本身正常显示文字，保证光标位置正确 -->
 			<view class="composer__input-wrap">
+				<!-- 命令高亮标签：仅命令完全匹配时显示蓝色命令名，参数仍在输入框内以黑字显示 -->
+				<view v-if="commandHighlightSkill" class="composer__command-tag">
+					<text class="composer__command-icon">⚡</text>
+					<text class="composer__command-cmd">{{ commandHighlightSkill.cmd }}</text>
+					<text class="composer__command-text">{{ commandHighlightSkill.label }}</text>
+				</view>
 				<input
-					:class="['composer__input', isCommandInput ? 'composer__input--hidden' : '']"
+					class="composer__input"
 					type="text"
 					:value="inputText"
 					:placeholder="composerPlaceholder"
@@ -221,10 +241,6 @@
 					@blur="inputFocus = false"
 					@confirm="onSend"
 				/>
-				<!-- 命令高亮覆盖层：与聊天气泡同样式 -->
-				<view v-if="isCommandInput" class="composer__overlay" @click="focusComposer">
-					<text class="composer__overlay-text">{{ inputText }}</text>
-				</view>
 			</view>
 			<button class="composer__btn" size="mini" :disabled="!canSend" @click="onSend">{{ sendLabel }}</button>
 			</view>
@@ -257,6 +273,7 @@
 		resolveSkillCommand,
 		buildSkillMessage,
 		buildHelpText,
+		buildHelpCommands,
 		formatAgentReply,
 		cardNavigateTarget
 	} from '../../api/ai-chat.mjs'
@@ -278,6 +295,7 @@
 	import {
 		acknowledgeTurn,
 		beginTurn,
+		clearTurns,
 		loadActiveTurn,
 		saveTurnResult,
 		saveTurnProgress
@@ -295,6 +313,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	const SUBPACKAGE_ROOT = '/subpackages/tech-transfer/'
 
 	const ACTIVE_STATUSES = ['published', 'matched']
+	// pending 轮次恢复的连续追问上限：每轮都会真查一次服务端（约 2 分钟），
+	// 超过上限仍无终态就本地判失败并清理 WAL，避免永远卡在"生成中/结果未知"
+	const MAX_TURN_RECOVERY_ROUNDS = 3
 
 	function createTurnId() {
 		return 'ai_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 12)
@@ -334,15 +355,6 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			queuePreviewCount: QUEUE_PREVIEW_COUNT,
 			inputFocus: false,
 			skillCursor: 0,
-			showSkillMenu: false,
-			skillList: [],
-			// 内联命令定义（避免SKILLS导入被tree-shaking丢弃）
-			_inlineSkills: [
-				{ id: 'evaluate', cmd: '/评估', label: '评估成果', icon: '📊', usage: '/评估 [成果ID/名称]', desc: '发起AI成果评估', aliases: ['/评估成果', '/evaluate'] },
-				{ id: 'search', cmd: '/搜索', label: '搜索', icon: '🔍', usage: '/搜索 [关键词]', desc: '搜索成果/需求', aliases: ['/查找', '/search'] },
-				{ id: 'help', cmd: '/帮助', label: '帮助', icon: '❓', usage: '/帮助', desc: '显示可用命令', aliases: ['/help', '/指令'] },
-				{ id: 'match', cmd: '/匹配', label: '匹配', icon: '🤝', usage: '/匹配', desc: 'AI智能匹配', aliases: [] }
-			]
 		}
 	},
 	computed: {
@@ -352,16 +364,11 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		showSuggestions() {
 			return !this.typing && this.messages.length <= 1 && !this.pendingQueue.length
 		},
-		isCommandInput() {
-			return String(this.inputText || '').trim().startsWith('/')
-		},
-		displayCommandText() {
+		// 命令完全匹配时返回对应技能（用于输入框内的蓝色命令标签）：
+		// "/评估 成果3" → 命令部分高亮；"/评" 等部分匹配返回 null，文字保持黑色。
+		commandHighlightSkill() {
 			const text = String(this.inputText || '').trim()
-			const token = text.split(/\s+/)[0]
-			const skills = this._inlineSkills || []
-			const found = skills.find(s => s.cmd === token || (s.aliases || []).includes(token))
-			if (found) return found.label
-			return '命令'
+			return text ? resolveSkillCommand(text) : null
 		},
 		commandPrefix() {
 			const text = String(this.inputText || '').trim()
@@ -373,23 +380,13 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			const spaceIdx = text.trim().indexOf(' ')
 			return spaceIdx > 0 ? text.slice(text.indexOf(' ')) : ''
 		},
-		displayCommandText() {
-			const text = String(this.inputText || '').trim()
-			const skill = resolveSkillCommand(text)
-			if (skill) return (skill.icon || '⚡') + ' ' + (skill.label || skill.cmd)
-			return '⚡ 命令'
-		},
 		skillOptions() {
 			const raw = String(this.inputText || '')
 			if (!raw.startsWith('/')) return []
 			// 命令后已开始输入参数（出现空白）时收起菜单
 			if (/\s/.test(raw.slice(1))) return []
-			const q = raw.slice(1).trim().toLowerCase()
-			if (!q) return this._inlineSkills
-			return this._inlineSkills.filter(s => {
-				const hay = (s.cmd + ' ' + s.label + ' ' + (s.aliases || []).join(' ')).toLowerCase()
-				return hay.indexOf(q) >= 0 || s.cmd.slice(1).toLowerCase().indexOf(q) >= 0
-			})
+			// 模糊匹配（子串 + 拼音首字母，如 /pg → /评估），匹配逻辑统一在 filterSkills
+			return filterSkills(raw)
 		},
 		composerPlaceholder() {
 			const raw = String(this.inputText || '').trim()
@@ -708,6 +705,28 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			if (!saved) return false
 			return this.presentSavedTurn(loadActiveTurn(uni, this._scope))
 		},
+		presentOrphanTurn(turn, message) {
+			// WAL 丢失（本地暂存失败/被清理）时的兜底展示：终态结果不能丢，也不能卡住后续提问
+			if (!this._alive || this._scope !== getPageStateScope(uni)) return
+			const alreadyShown = turn && turn.messageId
+				? this.messages.some(m => String(m.serverMessageId) === String(turn.messageId))
+				: false
+			if (!alreadyShown) {
+				this.ensureLocalUserMessage(message)
+				const result = turn && turn.status === 'failed'
+					? { content: String(turn.errorMessage || turn.reply || 'AI 助手暂时不可用，请稍后重试。'), type: 'text', payload: null }
+					: formatAgentReply({ success: true, message: (turn && turn.reply) || '', data: Array.isArray(turn && turn.cards) ? turn.cards : [] })
+				this.pushMessage('assistant', result.content, {
+					type: result.type,
+					payload: result.payload,
+					serverMessageId: (turn && turn.messageId) || null,
+					serverTurnId: (turn && turn.turnId) || null,
+					serverGeneration: turn ? (turn.generation ?? null) : null,
+				})
+			}
+			if (turn && turn.turnId) acknowledgeTurn(turn.turnId, uni, this._scope)
+			this.finishTurn()
+		},
 		async waitForTurnStatus(turnId, message) {
 			const scope = this._scope
 			const version = this._chatRequestVersion || 0
@@ -729,11 +748,16 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				try {
 					const turn = await getChatTurn(turnId)
 					if (!this.isCurrentChatRequest(version, scope) || !this._visible) return 'left'
-					if (this.acceptChatProgress(turn, turnId) && ['succeeded', 'failed'].includes(turn.status)) {
+					this.acceptChatProgress(turn, turnId)
+					if (['succeeded', 'failed'].includes(turn.status)) {
 						this.inflightText = message
 						this.inflightTurnId = turnId
 						this.ensureLocalUserMessage(message)
 						if (await this.saveServerTurn(turn)) return 'done'
+						// 终态结果写不进 WAL（本地暂存丢失）时的兜底：直接展示并收尾，
+						// 不能因为落盘失败就继续空转轮询、让用户一直等
+						this.presentOrphanTurn(turn, message)
+						return 'done'
 					}
 				} catch (e) {
 					if (!this.isCurrentChatRequest(version, scope)) return 'left'
@@ -882,22 +906,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		onInput(e) {
 			this.inputText = e.detail.value
 			this.skillCursor = 0
-			// 检测"/"触发命令菜单（支持手机输入法）
-			this._updateSkillMenu()
-		},
-		_updateSkillMenu() {
-			const text = String(this.inputText || '').trim()
-			if (text.startsWith('/')) {
-				const query = text.slice(1).toLowerCase()
-				this.skillList = this._inlineSkills.filter(s => {
-					if (!query) return true
-					return s.cmd.includes(query) || (s.aliases && s.aliases.some(a => a.includes(query))) || (s.desc || '').includes(query)
-				})
-				this.showSkillMenu = this.skillList.length > 0
-			} else {
-				this.showSkillMenu = false
-				this.skillList = []
-			}
+			// 命令菜单由 skillOptions 计算属性实时模糊过滤（支持手机输入法逐字输入）
 		},
 			onSuggest(text) {
 				this.inputText = text
@@ -905,22 +914,18 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			},
 			onHelpCommand(cmd) {
 			if (!cmd) return
-			// 填充命令前缀+空格，让用户追加参数后发送
+			// 只填充命令前缀+空格并聚焦（绝不直接发送），让用户追加参数后手动发送
 			this.inputText = cmd.cmd + ' '
+			this.skillCursor = 0
 			this.focusComposer()
 		},
 		onPickSkill(skill) {
 			if (!skill) return
 			this.skillCursor = 0
-			if (skill.takesArgs) {
-				// 自动填充命令并聚焦，等待补充参数后发送
-				this.inputText = skill.cmd + ' '
-				this.focusComposer()
-				return
-			}
-			// 无参数命令：填充后立即执行
-			this.inputText = skill.cmd
-			this.onSend()
+			// 点击命令选项只填充到输入框并聚焦，绝不直接发送（用户可能还要追加参数）：
+			// 带参数命令补一个空格，方便追加参数后手动发送
+			this.inputText = skill.takesArgs ? skill.cmd + ' ' : skill.cmd
+			this.focusComposer()
 		},
 		focusComposer() {
 			this.inputFocus = false
@@ -1065,17 +1070,18 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					return
 				}
 				if (skill && skill.id === 'help') {
-					// 本地即时回复，不请求后端
+					// 本地即时回复，不请求后端；命令卡片点击只填充输入框（onHelpCommand）
 					this.ensureLocalUserMessage(text)
 					this.inflightText = text
-					this.pushMessage('assistant', buildHelpText())
+					this.pushMessage('assistant', buildHelpText(), { type: 'help-commands', payload: { commands: buildHelpCommands() } })
 					this.finishTurn()
 					return
 				}
 				if (skill) {
 					// /评估、/搜索：改写为自然语言后交给 agent 意图路由执行；
-					// 原始命令（command）随消息标记保留，气泡按 ⚡ 命令样式回显。
-					this.runAgentChat(buildSkillMessage(skill, text), null, text)
+					// 原始命令经 _commandEcho 随消息标记保留，气泡按 ⚡ 命令样式回显。
+					this._commandEcho = text
+					this.runAgentChat(buildSkillMessage(skill, text), null)
 					return
 				}
 				if (text.startsWith('/')) {
@@ -1087,17 +1093,23 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				}
 				this.runAgentChat(text)
 			},
-			async runAgentChat(text, reference, command) {
+			async runAgentChat(text, reference) {
+				// _commandEcho：斜杠命令的原始输入（如 /评估 3），仅用于气泡回显；
+				// text 是改写后发给 agent 的自然语言
+				const command = this._commandEcho || ''
+				this._commandEcho = ''
 				const turnId = createTurnId()
 				const scope = this._scope
 				const version = this._chatRequestVersion || 0
 				if (this._scope !== getPageStateScope(uni)) return
 				if (!beginTurn({ turnId, message: text, reference, generation: this.chatGeneration }, uni, this._scope)) {
-					// WAL中有pending turn阻塞：强制清理旧turn后重试
-					acknowledgeTurn(uni, this._scope)
+					// WAL 中有未确认的 pending 轮次阻塞新提问：清理旧占位后重试一次
+					// （此前误用 acknowledgeTurn(uni, scope) 传参，清理无效导致消息发不出去）
+					clearTurns(uni, this._scope)
 					if (!beginTurn({ turnId, message: text, reference, generation: this.chatGeneration }, uni, this._scope)) {
-						this.inputText = text
-						uni.showToast({ title: '本地暂存失败，请刷新重试', icon: 'none' })
+						// 失败时把用户原话（命令原文）放回输入框，避免丢失
+						this.inputText = command || text
+						uni.showToast({ title: '本地暂存失败，请稍后重试', icon: 'none' })
 						return
 					}
 				}
@@ -1113,14 +1125,23 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				try {
 					const res = await chatWithAgent(text, turnId, reference)
 					if (!this.isCurrentChatRequest(version, scope)) return
-					if (!this.acceptChatProgress(res, turnId)) return
 					if (res && res.status === 'running') {
+						this.acceptChatProgress(res, turnId)
 						const pollResult = await this.waitForTurnStatus(turnId, text)
 						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 						return
 					}
-					if (res.status === 'succeeded' || res.status === 'failed') {
-						await this.saveServerTurn(res)
+					if (res && (res.status === 'succeeded' || res.status === 'failed')) {
+						this.acceptChatProgress(res, turnId)
+						if (await this.saveServerTurn(res)) return
+						// 终态结果写不进 WAL 时的兜底：直接展示并收尾，不能一直卡在"生成中"
+						this.presentOrphanTurn(res, text)
+						return
+					}
+					if (!this.acceptChatProgress(res, turnId)) {
+						// 进度被判为过期/无变化时也不能干等：转入轮询确认终态
+						const pollResult = await this.waitForTurnStatus(turnId, text)
+						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 						return
 					}
 					const reply = formatAgentReply(res)

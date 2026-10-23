@@ -24,6 +24,7 @@ export const SKILLS = [
     desc: '对指定成果发起 AI 多维度评估',
     usage: '/评估 [成果ID/名称]',
     takesArgs: true,
+    pinyin: 'pg pgcg aipg',
   },
   {
     id: 'search',
@@ -34,6 +35,7 @@ export const SKILLS = [
     desc: '按关键词搜索科技成果或技术需求',
     usage: '/搜索 [关键词]',
     takesArgs: true,
+    pinyin: 'ss cz',
   },
   {
     id: 'help',
@@ -44,6 +46,7 @@ export const SKILLS = [
     desc: '查看全部可用命令与用法',
     usage: '/帮助',
     takesArgs: false,
+    pinyin: 'bz zl',
   },
   {
     id: 'match',
@@ -54,6 +57,7 @@ export const SKILLS = [
     desc: '选择我的需求，推荐合适的技术成果',
     usage: '/匹配',
     takesArgs: false,
+    pinyin: 'pp xqpp aipp',
   },
 ]
 
@@ -143,8 +147,14 @@ export function filterSkills(input) {
   const q = raw.slice(1).trim().toLowerCase()
   if (!q) return SKILLS.slice()
   return SKILLS.filter((skill) => {
-    const hay = (skill.cmd + ' ' + skill.label + ' ' + (skill.aliases || []).join(' ')).toLowerCase()
-    return hay.indexOf(q) >= 0 || skill.cmd.slice(1).toLowerCase().indexOf(q) >= 0
+    // 模糊匹配：命令/别名/描述子串命中，或拼音首字母前缀命中（如 /pg → /评估）
+    const names = [skill.cmd, skill.cmd.slice(1), skill.label, skill.desc || '', ...(skill.aliases || [])]
+      .map((value) => String(value || '').toLowerCase())
+    if (names.some((value) => value.includes(q))) return true
+    return String(skill.pinyin || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .some((value) => value && value.startsWith(q))
   })
 }
 
@@ -176,19 +186,23 @@ export function buildSkillMessage(skill, text) {
 
 /** /帮助 命令的本地回复：列出全部可用命令与用法。 */
 export function buildHelpText() {
-  return {
-    type: 'help-commands',
-    content: '📋 可用命令',
-    commands: SKILLS.map(s => ({
-      id: s.id,
-      icon: s.icon || '⚡',
-      cmd: s.cmd,
-      label: s.label || s.cmd,
-      usage: s.usage || s.cmd,
-      desc: s.desc || '',
-      sample: s.id === 'evaluate' ? '/评估 成果3' : s.id === 'search' ? '/搜索 人工智能' : s.cmd
-    }))
-  }
+  const lines = SKILLS.map((s) => [s.usage || s.cmd, s.label ? s.label + '：' + (s.desc || '') : (s.desc || '')]
+    .filter(Boolean)
+    .join(' — '))
+  return '当前可用命令（点击下方命令卡片可填入输入框）：\n' + lines.join('\n')
+}
+
+/** /帮助 回复中的可点击命令卡片数据：点击只填入输入框，不直接发送。 */
+export function buildHelpCommands() {
+  return SKILLS.map(s => ({
+    id: s.id,
+    icon: s.icon || '⚡',
+    cmd: s.cmd,
+    label: s.label || s.cmd,
+    usage: s.usage || s.cmd,
+    desc: s.desc || '',
+    sample: s.id === 'evaluate' ? '/评估 成果3' : s.id === 'search' ? '/搜索 人工智能' : s.cmd
+  }))
 }
 
 export function formatMatchProgress(status, failReason) {
