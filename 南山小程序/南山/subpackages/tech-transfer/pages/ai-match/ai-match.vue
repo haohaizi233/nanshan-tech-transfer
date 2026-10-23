@@ -208,22 +208,24 @@
 				<text class="composer__command-text">{{ displayCommandText }}</text>
 			</view>
 			<view class="composer__row">
-			<!-- 命令高亮标签：输入/开头时在输入框上方显示 -->
-			<view v-if="isCommandInput" class="composer__cmd-badge">
-				<text class="composer__cmd-badge__icon">⚡</text>
-				<text class="composer__cmd-badge__text">{{ displayCommandText }}</text>
+			<!-- 输入框容器：命令时透明input+高亮覆盖层，普通文字正常 -->
+			<view class="composer__input-wrap">
+				<input
+					:class="['composer__input', isCommandInput ? 'composer__input--hidden' : '']"
+					type="text"
+					:value="inputText"
+					:placeholder="composerPlaceholder"
+					:focus="inputFocus"
+					confirm-type="send"
+					@input="onInput"
+					@blur="inputFocus = false"
+					@confirm="onSend"
+				/>
+				<!-- 命令高亮覆盖层：与聊天气泡同样式 -->
+				<view v-if="isCommandInput" class="composer__overlay" @click="focusComposer">
+					<text class="composer__overlay-text">{{ inputText }}</text>
+				</view>
 			</view>
-			<input
-				class="composer__input"
-				type="text"
-				:value="inputText"
-				:placeholder="composerPlaceholder"
-				:focus="inputFocus"
-				confirm-type="send"
-				@input="onInput"
-				@blur="inputFocus = false"
-				@confirm="onSend"
-			/>
 			<button class="composer__btn" size="mini" :disabled="!canSend" @click="onSend">{{ sendLabel }}</button>
 			</view>
 		</view>
@@ -1943,6 +1945,42 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		background: transparent;
 	}
 	/* 输入框高亮覆盖层 */
+	/* 输入框包裹层 */
+	.composer__input-wrap {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+	}
+
+	/* 命令模式：input文字透明（覆盖层显示），光标蓝色 */
+	.composer__input--hidden {
+		color: transparent !important;
+		caret-color: #2b73f8 !important;
+	}
+
+	/* 命令高亮覆盖层：与聊天气泡.bubble--command同款蓝色 */
+	.composer__overlay {
+		position: absolute;
+		top: 0;
+		left: 24rpx;
+		right: 24rpx;
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		pointer-events: none;
+		overflow: hidden;
+	}
+
+	.composer__overlay-text {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #2b73f8;
+		background: rgba(43, 115, 248, 0.08);
+		padding: 4rpx 16rpx;
+		border-radius: 10rpx;
+		white-space: nowrap;
+	}
+
 	/* 命令高亮标签 */
 	.composer__command-tag {
 		display: inline-flex;
@@ -2035,6 +2073,42 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		color: #999;
 		margin-top: 12rpx;
 	}
+	/* 输入框包裹层 */
+	.composer__input-wrap {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+	}
+
+	/* 命令模式：input文字透明（覆盖层显示），光标蓝色 */
+	.composer__input--hidden {
+		color: transparent !important;
+		caret-color: #2b73f8 !important;
+	}
+
+	/* 命令高亮覆盖层：与聊天气泡.bubble--command同款蓝色 */
+	.composer__overlay {
+		position: absolute;
+		top: 0;
+		left: 24rpx;
+		right: 24rpx;
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		pointer-events: none;
+		overflow: hidden;
+	}
+
+	.composer__overlay-text {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #2b73f8;
+		background: rgba(43, 115, 248, 0.08);
+		padding: 4rpx 16rpx;
+		border-radius: 10rpx;
+		white-space: nowrap;
+	}
+
 	/* 命令高亮标签 */
 	.composer__cmd-badge {
 		display: inline-flex;
