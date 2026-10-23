@@ -202,6 +202,11 @@
 
 		<view class="composer">
 			<text class="composer__hint">{{ composerHint }}</text>
+			<!-- 命令高亮标签：输入/开头时显示 -->
+			<view v-if="isCommandInput" class="composer__command-tag">
+				<text class="composer__command-icon">⚡</text>
+				<text class="composer__command-text">{{ displayCommandText }}</text>
+			</view>
 			<view class="composer__row">
 			<input
 				class="composer__input"
@@ -331,6 +336,15 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		},
 		showSuggestions() {
 			return !this.typing && this.messages.length <= 1 && !this.pendingQueue.length
+		},
+		isCommandInput() {
+			return String(this.inputText || '').trim().startsWith('/')
+		},
+		displayCommandText() {
+			const text = String(this.inputText || '').trim()
+			const skill = resolveSkillCommand(text)
+			if (skill) return (skill.icon || '⚡') + ' ' + (skill.label || skill.cmd)
+			return '⚡ 命令'
 		},
 		skillOptions() {
 			const raw = String(this.inputText || '')
@@ -1885,5 +1899,26 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 
 	.agent-cards-scroll::-webkit-scrollbar-track {
 		background: transparent;
+	}
+	/* 命令高亮标签 */
+	.composer__command-tag {
+		display: inline-flex;
+		align-items: center;
+		background: linear-gradient(135deg, #eaf2ff, #f0f7ff);
+		border: 1rpx solid rgba(43, 115, 248, 0.2);
+		border-radius: 8rpx;
+		padding: 4rpx 16rpx;
+		margin-bottom: 12rpx;
+		gap: 8rpx;
+	}
+
+	.composer__command-icon {
+		font-size: 22rpx;
+	}
+
+	.composer__command-text {
+		font-size: 22rpx;
+		color: #2b73f8;
+		font-weight: 600;
 	}
 </style>
