@@ -1035,13 +1035,13 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				const version = this._chatRequestVersion || 0
 				if (this._scope !== getPageStateScope(uni)) return
 				if (!beginTurn({ turnId, message: text, reference, generation: this.chatGeneration }, uni, this._scope)) {
-					this.inputText = text
-					const active = loadActiveTurn(uni, this._scope)
-					uni.showToast({
-						title: active ? '上一条问答仍在恢复，当前问题未发送' : '本地暂存失败，问题未发送',
-						icon: 'none',
-					})
-					return
+					// WAL中有pending turn阻塞：强制清理旧turn后重试
+					acknowledgeTurn(uni, this._scope)
+					if (!beginTurn({ turnId, message: text, reference, generation: this.chatGeneration }, uni, this._scope)) {
+						this.inputText = text
+						uni.showToast({ title: '本地暂存失败，请刷新重试', icon: 'none' })
+						return
+					}
 				}
 				this.inflightText = text
 				this.inflightTurnId = turnId
