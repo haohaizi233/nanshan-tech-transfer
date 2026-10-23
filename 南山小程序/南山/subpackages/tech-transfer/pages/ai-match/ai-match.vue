@@ -888,7 +888,12 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				this.inputText = text
 				this.onSend()
 			},
-			onPickSkill(skill) {
+			onHelpCommand(cmd) {
+			if (!cmd) return
+			this.inputText = cmd.sample || cmd.cmd
+			this.focusComposer()
+		},
+		onPickSkill(skill) {
 			if (!skill) return
 			this.skillCursor = 0
 			if (skill.takesArgs) {
@@ -1944,5 +1949,76 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		font-size: 22rpx;
 		color: #2b73f8;
 		font-weight: 600;
+	}
+	/* 帮助命令卡片 */
+	.help-commands {
+		padding: 20rpx;
+	}
+
+	.help-commands__title {
+		font-size: 32rpx;
+		font-weight: 600;
+		color: #333;
+		margin-bottom: 20rpx;
+	}
+
+	.help-cmd-card {
+		background: #f8faff;
+		border: 1rpx solid #e4edff;
+		border-radius: 16rpx;
+		padding: 24rpx;
+		margin-bottom: 16rpx;
+		transition: all 0.2s;
+	}
+
+	.help-cmd-card:active {
+		background: #e8f0ff;
+		transform: scale(0.98);
+	}
+
+	.help-cmd-card__row {
+		display: flex;
+		align-items: center;
+		margin-bottom: 8rpx;
+	}
+
+	.help-cmd-card__icon {
+		font-size: 32rpx;
+		margin-right: 12rpx;
+	}
+
+	.help-cmd-card__label {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #2b73f8;
+		flex: 1;
+	}
+
+	.help-cmd-card__try {
+		font-size: 22rpx;
+		color: #2b73f8;
+		opacity: 0.7;
+	}
+
+	.help-cmd-card__desc {
+		font-size: 24rpx;
+		color: #666;
+		margin-bottom: 8rpx;
+	}
+
+	.help-cmd-card__sample {
+		font-size: 22rpx;
+		color: #4a6fa5;
+		font-family: monospace;
+		background: #eef2ff;
+		padding: 6rpx 16rpx;
+		border-radius: 8rpx;
+		display: inline-block;
+	}
+
+	.help-commands__hint {
+		font-size: 24rpx;
+		color: #999;
+		margin-top: 12rpx;
 	}
 </style>

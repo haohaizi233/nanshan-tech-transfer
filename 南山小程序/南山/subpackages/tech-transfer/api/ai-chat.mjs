@@ -176,8 +176,19 @@ export function buildSkillMessage(skill, text) {
 
 /** /帮助 命令的本地回复：列出全部可用命令与用法。 */
 export function buildHelpText() {
-  const lines = SKILLS.map((skill) => '  ' + (skill.icon || '') + ' ' + (skill.usage || skill.cmd) + '\n    ' + skill.desc)
-  return '📋 可用命令\n\n' + lines.join('\n\n') + '\n\n💡 也可以直接输入自然语言问题自由提问。'
+  return {
+    type: 'help-commands',
+    content: '📋 可用命令',
+    commands: SKILLS.map(s => ({
+      id: s.id,
+      icon: s.icon || '⚡',
+      cmd: s.cmd,
+      label: s.label || s.cmd,
+      usage: s.usage || s.cmd,
+      desc: s.desc || '',
+      sample: s.id === 'evaluate' ? '/评估 成果3' : s.id === 'search' ? '/搜索 人工智能' : s.cmd
+    }))
+  }
 }
 
 export function formatMatchProgress(status, failReason) {
