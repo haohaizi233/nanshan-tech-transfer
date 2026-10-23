@@ -622,9 +622,20 @@ def try_heuristic_classify(user_message: str) -> RouteResult | None:
     _EVAL_RE = re.compile(r"评估|评价")
     _COMPARE_RE = re.compile(r"比较|对比|选哪|哪个好|哪一个|哪个更")
     if _EVAL_RE.search(text) and not _COMPARE_RE.search(text):
+        # 提取成果ID（数字）或名称
+        _id_match = re.search(r"(?:评估|评价|成果)\s*(\d+)", text)
+        _name_match = re.search(r"(?:评估|评价)\s*一下?\s*(.+)$", text)
+        target_id = int(_id_match.group(1)) if _id_match else None
+        # 提取名称：去掉"成果"前缀和数字ID
+        raw_name = _name_match.group(1).strip() if _name_match else None
+        if raw_name and not target_id:
+            raw_name = re.sub(r"^成果", "", raw_name).strip()
+        target_name = raw_name if raw_name and not target_id else None
         return RouteResult(
             intent="evaluate_achievement",
             keywords=[],
+            target_id=target_id,
+            target_name=target_name,
             reason="评估意图",
         )
 

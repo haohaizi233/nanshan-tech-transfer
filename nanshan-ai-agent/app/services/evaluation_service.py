@@ -138,7 +138,7 @@ def resolve_target(user_id: int, target_id: int | None = None, target_name: str 
     return dict(row) if row else None
 
 
-def list_owned_targets(user_id: int, limit: int = 10) -> list[dict]:
+def list_owned_targets(user_id: int, limit: int = 20) -> list[dict]:
     """用户名下成果列表（未删除，最新在前）。
 
     评估请求没给出具体成果（无 ID/名称）时不盲猜目标，
