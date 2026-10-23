@@ -89,6 +89,7 @@ const LocalAdapter = {
     }
 
     return new Promise((resolve, reject) => {
+      const _perfStart = Date.now()
       uni.request({
         url,
         method: method.toUpperCase(),
@@ -96,6 +97,10 @@ const LocalAdapter = {
         header: headers,
         timeout,
         success: (res) => {
+          const _perfElapsed = Date.now() - _perfStart
+          if (_perfElapsed > 2000) {
+            console.warn('[perf] 慢请求', method, url, _perfElapsed + 'ms', 'rid=' + requestId)
+          }
           resolve(res.data)
         },
         fail: (err) => {

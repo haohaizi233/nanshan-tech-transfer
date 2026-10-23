@@ -19,6 +19,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -75,6 +76,15 @@ app = FastAPI(
 
 # CORS 白名单来自 Settings（CORS_ORIGINS）；
 # 开发环境额外用 regex 放行本机/局域网/隧道 H5 dev server（见 config.cors_origin_regex）
+# 性能埋点：慢请求告警+响应头
+from core.perf_middleware import PerformanceMiddleware
+app.add_middleware(PerformanceMiddleware)
+
+# GZip压缩：减少响应体积（Content Download优化）
+# minimum_size=512：只压缩>512B的响应，小响应不浪费CPU
+# compresslevel=6：平衡压缩率和CPU占用
+app.add_middleware(GZipMiddleware, minimum_size=512, compresslevel=6)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
