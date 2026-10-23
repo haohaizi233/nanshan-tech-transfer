@@ -11,7 +11,9 @@ from core.errors import bad_request
 
 class QueryPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    intent: Literal["search_achievement", "search_demand", "out_of_scope"]
+    intent: Literal["search_achievement", "search_demand", "evaluate_achievement", "out_of_scope"]
+    target_id: int | None = Field(None, ge=1)
+    target_name: str | None = Field(None, max_length=80)
     keywords: list[str] = Field(default_factory=list, max_length=20)
     organization: str | None = None
     region: str | None = None

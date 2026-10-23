@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import logging
 import socket
 import threading
 import time
@@ -252,6 +253,7 @@ def execute_run(run):
         persisted = chat_runs.get_run(run["user_id"], run["turn_id"])
         return persisted["status"] if persisted else "ownership_lost"
     except Exception:
+        logging.getLogger("nanshan.ai.chat").exception("chat execution failed turn=%s", run["turn_id"])
         chat_runs.finish_run(run, error="本轮执行已中断，结果未知，请重新发起提问")
         return "failed"
     finally:
