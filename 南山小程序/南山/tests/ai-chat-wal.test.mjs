@@ -21,6 +21,21 @@ function memoryStorage(initial = {}) {
   }
 }
 
+test('fallback storage quota failure is reported before submission', () => {
+  const previous = globalThis.localStorage
+  globalThis.localStorage = { getItem() { return null }, setItem() { throw new Error('quota') }, removeItem() {} }
+  try {
+    assert.equal(beginTurn({ turnId: 'quota-test', message: '评估' }, undefined, '7'), false)
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = previous
+  }
+})
+
+test('WAL byte budget counts UTF-8 rather than UTF-16 characters', () => {
+  assert.equal(beginTurn({ turnId: 'oversized', message: '成'.repeat(180000) }, memoryStorage(), '7'), false)
+})
+
 function accountStorage(userId, initial = {}) {
   return memoryStorage({
     tt_auth_mode: 'account',

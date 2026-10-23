@@ -12,13 +12,13 @@ function createLocalStorageAdapter() {
   if (typeof localStorage === 'undefined') return null
   return {
     getStorageSync: (key) => {
-      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : '' } catch { return '' }
+      return localStorage.getItem(key) || ''
     },
     setStorageSync: (key, value) => {
-      try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+      localStorage.setItem(key, JSON.stringify(value))
     },
     removeStorageSync: (key) => {
-      try { localStorage.removeItem(key) } catch {}
+      localStorage.removeItem(key)
     }
   }
 }
@@ -103,7 +103,7 @@ function writeEntry(storage, scope, turn) {
   try {
     const entry = { version: AI_CHAT_WAL_VERSION, scope: String(scope), turn }
     const serialized = JSON.stringify(entry)
-    if (!serialized || serialized.length > AI_CHAT_WAL_MAX_BYTES) return false
+    if (!serialized || encodeURIComponent(serialized).replace(/%[0-9A-F]{2}/g, 'x').length > AI_CHAT_WAL_MAX_BYTES) return false
     api.setStorageSync(keyFor(scope), JSON.parse(serialized))
     return true
   } catch {

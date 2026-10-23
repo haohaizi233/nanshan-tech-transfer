@@ -43,6 +43,22 @@ function createPage(storage = {}, overrides = {}) {
   return { component, page }
 }
 
+test('recovery exhaustion keeps the pending turn instead of acknowledging uncertain execution', async () => {
+  const storage = {}
+  const { page } = createPage(storage)
+  page._scope = '7'
+  page._alive = true
+  page._visible = true
+  page._recoverAttempts = 3
+  wal.beginTurn({ turnId: 'pending-recovery', message: '评估成果' }, pageStorage(storage), '7')
+  page.waitForTurnStatus = async () => 'pending'
+  page.scheduleTurnRecovery = () => {}
+  await page.recoverActiveTurn(wal.loadActiveTurn(pageStorage(storage), '7'))
+  assert.equal(wal.loadActiveTurn(pageStorage(storage), '7')?.status, 'pending')
+  assert.ok(page.waitNotice.includes('确认'))
+})
+
+
 test('AI match initializes welcome content and composer without a memory cache', () => {
   const { page } = createPage()
   assert.equal(page.aiEnabled, true)
@@ -57,7 +73,7 @@ test('AI match initializes welcome content and composer without a memory cache',
   assert.equal(page.canSend, true)
 })
 
-test('slash menu fills argument commands and executes no-arg commands', () => {
+test('slash menu fills commands without submitting until the user sends', () => {
   const { page } = createPage()
   page.onInput({ detail: { value: '/' } })
   const evaluate = page.skillOptions[0]
@@ -69,6 +85,8 @@ test('slash menu fills argument commands and executes no-arg commands', () => {
 
   const help = { cmd: '/帮助', id: 'help', takesArgs: false }
   page.onPickSkill(help)
+  assert.equal(page.inputText, '/帮助')
+  page.onSend()
   assert.equal(page.messages[page.messages.length - 1].content.includes('当前可用命令'), true)
 })
 
@@ -78,7 +96,7 @@ test('slash commands dispatch to the agent as natural language and help answers 
   page.runAgentChat = (text) => { sent.push(text) }
   page.dispatchUserText('/评估 3')
   page.dispatchUserText('/搜索 机器视觉')
-  assert.deepEqual(sent, ['评估成果3', '帮我找机器视觉相关的科技成果或技术需求'])
+  assert.deepEqual(sent, ['/评估 3', '帮我找机器视觉相关的科技成果或技术需求'])
   page.dispatchUserText('/帮助')
   assert.ok(page.messages[page.messages.length - 1].content.includes('/评估 [成果ID/名称]'))
   page.dispatchUserText('/不存在的命令')

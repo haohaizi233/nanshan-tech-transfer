@@ -129,6 +129,9 @@ export function formatAgentReply(res) {
 export function cardNavigateTarget(card) {
   if (!card || !card.id) return null
   if (card.card_type === 'achievement') {
+    if (Number.isSafeInteger(card.evaluationTask?.taskId) && card.evaluationTask.taskId > 0) {
+      return { path: 'pages/ai-eval-detail/ai-eval-detail', query: { taskId: card.evaluationTask.taskId, achievementId: card.id } }
+    }
     return { path: 'pages/achievement-detail/achievement-detail', query: { id: card.id } }
   }
   if (card.card_type === 'demand') {
@@ -176,7 +179,8 @@ export function buildSkillMessage(skill, text) {
   const args = t.slice(token.length).trim()
   if (skill.id === 'evaluate') {
     if (!args) return '评估成果'
-    return /^\d+$/.test(args) ? '评估成果' + args : '评估一下' + args
+    const identifier = args.match(/^(?:成果\s*|#)?([1-9]\d*)$/)
+    return identifier ? '评估成果' + identifier[1] : '评估一下' + args
   }
   if (skill.id === 'search') {
     return args ? '帮我找' + args + '相关的科技成果或技术需求' : '帮我找相关的科技成果或技术需求'

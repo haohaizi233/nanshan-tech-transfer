@@ -1,5 +1,27 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+
+test('mini-program SSE preserves split UTF-8, replays snapshots and closes silently', async () => {
+  const { openMiniEvalStream } = await import('../subpackages/tech-transfer/api/ai-eval-stream.mjs')
+  let chunkHandler
+  let options
+  let aborted = 0
+  const events = []
+  const api = { request(value) {
+    options = value
+    return { onChunkReceived(handler) { chunkHandler = handler }, abort() { aborted++ } }
+  } }
+  const handle = openMiniEvalStream('https://example.com/stream', { Authorization: 'Bearer test' }, frame => events.push(frame), reason => events.push(reason), api)
+  assert.equal(options.enableChunked, true)
+  const bytes = new TextEncoder().encode('data: {"type":"snapshot","text":"成果"}\n\ndata: {"type":"done","status":"succeeded"}\n\n')
+  for (const byte of bytes) chunkHandler({ data: Uint8Array.of(byte).buffer })
+  assert.equal(events[0].text, '成果')
+  assert.equal(events[1].type, 'done')
+  handle.close()
+  options.fail({ errMsg: 'abort' })
+  assert.equal(events.length, 2)
+  assert.ok(aborted >= 1)
+})
 import {
   buildEvalStreamUrl,
   canUseEvalStream,

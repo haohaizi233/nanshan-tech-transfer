@@ -26,13 +26,13 @@ function createLocalStorageAdapter() {
   if (typeof localStorage === 'undefined') return null
   return {
     getStorageSync: (key) => {
-      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : '' } catch { return '' }
+      return localStorage.getItem(key) || ''
     },
     setStorageSync: (key, value) => {
-      try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+      localStorage.setItem(key, JSON.stringify(value))
     },
     removeStorageSync: (key) => {
-      try { localStorage.removeItem(key) } catch {}
+      localStorage.removeItem(key)
     }
   }
 }

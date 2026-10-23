@@ -107,6 +107,7 @@
 									<text class="agent-card__advice-text">{{ card.advisorInsight }}</text>
 								</view>
 								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
+								<text v-if="card.evaluationTask" class="meta-chip">{{ card.evaluationTask.status === 'pending' ? '评估进行中 · 点击查看实时进度' : '查看评估报告' }}</text>
 								<button v-if="referenceForCard(msg, card)" size="mini" :disabled="typing" @click.stop="introduceCard(msg, card)">介绍这项</button>
 								<button v-if="card.pickAction === 'evaluate' || card.pickAction === 'view-evaluation'" size="mini" :disabled="typing" @click.stop="pickEvaluate(card)">{{ card.pickAction === 'view-evaluation' ? '查看评估' : '评估这个' }}</button>
 
@@ -768,19 +769,6 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 						await this.loadHistory()
 						return 'done'
 					}
-					if (e && e.code === 'TT_AI_40401') {
-						// 服务端不存在该轮次（提问请求未送达/轮次丢失）：
-						// 永远轮询不到结果，本地判失败并清理 WAL，放行后续提问。
-						this.inflightText = message
-						this.inflightTurnId = turnId
-						this.ensureLocalUserMessage(message)
-						await this.saveServerTurn({
-							turnId,
-							status: 'failed',
-							errorMessage: '上一条问答未送达，请重新提问。',
-						})
-						return 'done'
-					}
 				}
 				nextPollAt = Date.now() + INFLIGHT_POLL_MS
 			}
@@ -796,7 +784,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				if (!this._alive || !this._visible || this._requestInFlight || this._recovering) return
 				const active = loadActiveTurn(uni, this._scope)
 				if (active) this.recoverActiveTurn(active)
-			}, INFLIGHT_POLL_MS)
+			}, Math.min(30000, INFLIGHT_POLL_MS * 2 ** Math.min(this._recoverAttempts || 0, 4)))
 		},
 		async recoverActiveTurn(turn) {
 			if (!turn || !this._alive || !this._visible || this._recovering || this._requestInFlight) return
@@ -806,22 +794,11 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				await this.presentSavedTurn(turn)
 				return
 			}
-			// 容灾：最多恢复3轮，避免无限循环
+			if (this._recoveryTurnId !== turn.turnId) this._recoverAttempts = 0
+			this._recoveryTurnId = turn.turnId
 			this._recoverAttempts = (this._recoverAttempts || 0) + 1
-			if (this._recoverAttempts > 3) {
-				// 超过重试上限：标记失败，清理状态
-				this._recoverAttempts = 0
-				acknowledgeTurn(uni, this._scope)
-				this.pushMessage('assistant', '抱歉，AI 回复等待超时。请重新发送你的问题。')
-				this.typing = false
-				this.recoveringTurn = false
-				this.inflightText = ''
-				this.inflightTurnId = ''
-				this.finishTurn()
-				return
-			}
 			this._recovering = true
-			this.waitNotice = ''
+			this.waitNotice = '正在确认原任务状态，不会重复提交。'
 			this.recoveringTurn = true
 			this.typing = true
 			this.inflightText = turn.message
@@ -1096,7 +1073,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					// /评估、/搜索：改写为自然语言后交给 agent 意图路由执行；
 					// 原始命令经 _commandEcho 随消息标记保留，气泡按 ⚡ 命令样式回显。
 					this._commandEcho = text
-					this.runAgentChat(buildSkillMessage(skill, text), null)
+					this.runAgentChat(skill.id === 'evaluate' ? text : buildSkillMessage(skill, text), null)
 					return
 				}
 				if (text.startsWith('/')) {

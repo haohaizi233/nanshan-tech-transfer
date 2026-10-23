@@ -23,11 +23,86 @@ const ACCESS_TOKEN_KEY = 'tt_access_token'
 /** SSE 流式能力检测：仅 H5（浏览器 fetch + ReadableStream）可用，其余降级轮询。 */
 export function canUseEvalStream() {
   return (
+    typeof globalThis.wx?.request === 'function' ||
+    (
     typeof fetch === 'function' &&
     typeof ReadableStream !== 'undefined' &&
     typeof AbortController === 'function' &&
     typeof TextDecoder === 'function'
+    )
   )
+}
+
+export function openMiniEvalStream(url, headers, dispatch, fallback, api = globalThis.wx) {
+  if (typeof api?.request !== 'function') return null
+  let closed = false
+  let finished = false
+  let buffer = ''
+  let carry = []
+  let received = 0
+  let request
+  const fail = reason => {
+    if (closed || finished) return
+    finished = true
+    fallback(reason)
+  }
+  try {
+    request = api.request({
+      url, method: 'GET', header: headers, enableChunked: true,
+      responseType: 'arraybuffer', timeout: 150000,
+      success(response) {
+        fail(response.statusCode === 200 ? 'stream-closed' : 'HTTP ' + response.statusCode)
+      },
+      fail() { fail('stream-error') },
+    })
+    if (typeof request?.onChunkReceived !== 'function') {
+      closed = true
+      request?.abort?.()
+      return null
+    }
+    request.onChunkReceived(event => {
+      if (closed || finished) return
+      const incoming = new Uint8Array(event.data)
+      received += incoming.length
+      if (received > 2 * 1024 * 1024) {
+        fail('stream-limit')
+        request.abort()
+        return
+      }
+      const bytes = [...carry, ...incoming]
+      carry = []
+      let offset = 0
+      while (offset < bytes.length) {
+        const first = bytes[offset]
+        const size = first < 128 ? 1 : first >= 194 && first <= 223 ? 2 : first >= 224 && first <= 239 ? 3 : first >= 240 && first <= 244 ? 4 : 0
+        if (!size) { buffer += '\uFFFD'; offset++; continue }
+        if (offset + size > bytes.length) { carry = bytes.slice(offset); break }
+        let code = first & (size === 1 ? 127 : (1 << (7 - size)) - 1)
+        let valid = true
+        for (let index = 1; index < size; index++) {
+          const next = bytes[offset + index]
+          if ((next & 192) !== 128) valid = false
+          code = (code << 6) | (next & 63)
+        }
+        if (code > 0x10ffff || code >= 0xd800 && code <= 0xdfff || size > 1 && code < [0, 0, 128, 2048, 65536][size]) valid = false
+        buffer += valid ? String.fromCodePoint(code) : '\uFFFD'
+        offset += valid ? size : 1
+      }
+      const parsed = parseSseFrames(buffer)
+      buffer = parsed.rest
+      for (const frame of parsed.frames) {
+        if (closed || finished) break
+        if (['done', 'error', 'timeout'].includes(frame.type)) finished = true
+        dispatch(frame)
+      }
+      if (finished) request.abort()
+    })
+  } catch {
+    closed = true
+    request?.abort?.()
+    return null
+  }
+  return { close() { closed = true; request.abort() } }
 }
 
 /** SSE 端点绝对/相对 URL：与请求层同构（apiBase + apiPrefix + path）。 */
@@ -91,7 +166,7 @@ export function openEvalTaskStream(taskId, handlers = {}) {
     return null
   }
 
-  const controller = new AbortController()
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
   let closed = false // close() 主动关闭：静默退出
   let finished = false // done/timeout/error 已交代终态：不再触发 onFallback
 
@@ -194,6 +269,13 @@ export function openEvalTaskStream(taskId, handlers = {}) {
     }
   }
 
+  if (typeof globalThis.wx?.request === 'function') {
+    let token = ''
+    try { token = HostBridge.getStorage(ACCESS_TOKEN_KEY) || '' } catch {}
+    return openMiniEvalStream(buildEvalStreamUrl(env, id), {
+      Accept: 'text/event-stream', ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    }, dispatch, reason => safeCall(handlers.onFallback, reason))
+  }
   run()
 
   return {

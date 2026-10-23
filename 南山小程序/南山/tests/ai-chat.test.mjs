@@ -2,6 +2,19 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
+test('evaluation command accepts the displayed achievement identifier', async () => {
+  const chat = await import('../subpackages/tech-transfer/api/ai-chat.mjs')
+  const skill = chat.resolveSkillCommand('/评估 成果3')
+  assert.equal(chat.buildSkillMessage(skill, '/评估 成果3'), '评估成果3')
+})
+
+test('evaluation task cards navigate to the resumable report rather than the achievement', async () => {
+  const chat = await import('../subpackages/tech-transfer/api/ai-chat.mjs')
+  assert.deepEqual(chat.cardNavigateTarget({ card_type: 'achievement', id: 3, evaluationTask: { taskId: 7, status: 'pending' } }), {
+    path: 'pages/ai-eval-detail/ai-eval-detail', query: { taskId: 7, achievementId: 3 },
+  })
+})
+
 import {
   SKILLS,
   buildDemoReply,
