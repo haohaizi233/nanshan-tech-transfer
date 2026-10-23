@@ -227,7 +227,18 @@ def _h5_from_dist(full_path: str):
     if relative:
         candidate = (dist / relative).resolve()
         if candidate.is_file() and dist in candidate.parents:
+            # hash资源：长缓存（文件名含内容hash，内容变了名字就变）
+            is_hashed = any(ch in relative for ch in ("assets/",)) and "." in relative
+            if is_hashed:
+                return FileResponse(candidate, headers={
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                })
             return FileResponse(candidate)
+        # 带扩展名的文件不存在 → 返回404（不兜底HTML）
+        if "." in relative.rsplit("/", 1)[-1]:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404)
+    # SPA路由（无扩展名）→ 返回index.html
     return FileResponse(dist / "index.html", headers={"Cache-Control": "no-cache"})
 
 
