@@ -806,6 +806,20 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				await this.presentSavedTurn(turn)
 				return
 			}
+			// 容灾：最多恢复3轮，避免无限循环
+			this._recoverAttempts = (this._recoverAttempts || 0) + 1
+			if (this._recoverAttempts > 3) {
+				// 超过重试上限：标记失败，清理状态
+				this._recoverAttempts = 0
+				acknowledgeTurn(uni, this._scope)
+				this.pushMessage('assistant', '抱歉，AI 回复等待超时。请重新发送你的问题。')
+				this.typing = false
+				this.recoveringTurn = false
+				this.inflightText = ''
+				this.inflightTurnId = ''
+				this.finishTurn()
+				return
+			}
 			this._recovering = true
 			this.waitNotice = ''
 			this.recoveringTurn = true
@@ -816,6 +830,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.persistQueue()
 			try {
 				const result = await this.waitForTurnStatus(turn.turnId, turn.message)
+				if (result === 'done') this._recoverAttempts = 0
 				if (result === 'pending' && this._alive) this.scheduleTurnRecovery()
 			} finally {
 				if (!this.isCurrentChatRequest(version, scope)) return
