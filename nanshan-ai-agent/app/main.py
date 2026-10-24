@@ -228,12 +228,35 @@ def _visible(item, owner):
     )
 
 
-def _final_records(results, request, route):
+def _reference_visible(item, kind, user_id):
+    return item.get("deleted_at") is None and (
+        _visible(item, None)
+        or (kind == "achievement" and user_id is not None and item.get("owner_user_id") == user_id)
+    )
+
+
+def get_reference_records(kind, ids, user_id):
+    records = [item for item in get_visible_records(kind, ids, None) if item.get("id") in ids and _visible(item, None)]
+    found = {item["id"] for item in records}
+    if kind == "achievement" and user_id is not None:
+        for identifier in ids:
+            if identifier in found:
+                continue
+            item = evaluation_service.resolve_target(user_id, target_id=identifier)
+            if item and item.get("id") == identifier and item.get("owner_user_id") == user_id and item.get("deleted_at") is None:
+                records.append(item)
+    return records
+
+
+def _final_records(results, request, route, reference=False):
     if not results:
         return []
     kind = "achievement" if route.intent == "search_achievement" else "demand"
-    current = get_visible_records(kind, [item["id"] for item in results], request.exclude_owner_user_id)
-    by_id = {item["id"]: item for item in current if _visible(item, request.exclude_owner_user_id)}
+    loader = get_reference_records if reference else get_visible_records
+    current = loader(kind, [item["id"] for item in results], request.exclude_owner_user_id)
+    by_id = {item["id"]: item for item in current if (
+        _reference_visible(item, kind, request.exclude_owner_user_id) if reference else _visible(item, request.exclude_owner_user_id)
+    )}
     records = []
     for item in results:
         latest = by_id.get(item["id"])
@@ -439,8 +462,8 @@ def _process_ai_chat(request: ChatRequest):
         emit_stage("retrieving")
         records = []
         for target in resolution.targets:
-            current = get_visible_records(target.card_type, [target.id], request.exclude_owner_user_id)
-            matches = [item for item in current if item.get("id") == target.id and _visible(item, request.exclude_owner_user_id)]
+            current = get_reference_records(target.card_type, [target.id], request.exclude_owner_user_id)
+            matches = [item for item in current if item.get("id") == target.id and _reference_visible(item, target.card_type, request.exclude_owner_user_id)]
             if not matches:
                 return _clarification("所选成果或需求已不可用，请重新选择当前可见的卡片。")
             records.append(matches[0])
@@ -451,7 +474,7 @@ def _process_ai_chat(request: ChatRequest):
             intent="search_" + resolution.targets[0].card_type,
             keywords=[], limit=len(records),
         )
-        records = _final_records(records, request, route)
+        records = _final_records(records, request, route, reference=True)
         if len(records) != len(resolution.targets):
             return _clarification("所选成果或需求已不可用，请重新选择当前可见的卡片。")
         response = _respond(route, request, records)
