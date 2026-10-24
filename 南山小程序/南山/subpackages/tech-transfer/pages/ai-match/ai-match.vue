@@ -33,7 +33,7 @@
 				<text class="history-fold__text">收起较早对话</text>
 			</view>
 			<view
-				v-for="msg in visibleMessages"
+				v-for="msg in renderMessages"
 				:id="'msg-' + msg.id"
 				:key="msg.id"
 			>
@@ -107,7 +107,20 @@
 									<text class="agent-card__advice-text">{{ card.advisorInsight }}</text>
 								</view>
 								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
-								<text v-if="card.evaluationTask" class="meta-chip">{{ card.evaluationTask.status === 'pending' ? '评估进行中 · 点击查看实时进度' : '查看评估报告' }}</text>
+								<view v-if="card.evaluationView" class="chat-evaluation" @click.stop>
+									<text class="chat-evaluation__status">{{ card.evaluationView.label }}</text>
+									<text v-if="card.evaluationView.totalScore != null" class="chat-evaluation__score">综合评分：{{ card.evaluationView.totalScore }} 分</text>
+									<view v-if="card.evaluationView.dimensions.length" class="agent-card__meta">
+										<text v-for="dimension in card.evaluationView.dimensions" :key="dimension.key" class="meta-chip">{{ dimension.label || dimensionLabel(dimension.key) }}：{{ dimension.score }}</text>
+									</view>
+									<text v-if="card.evaluationView.conclusion" class="chat-evaluation__text">{{ card.evaluationView.conclusion }}</text>
+									<text v-for="(highlight, index) in card.evaluationView.highlights" :key="'highlight-' + index" class="chat-evaluation__text">· {{ highlight }}</text>
+									<view v-for="(section, index) in card.evaluationView.sections" :key="'section-' + index" class="chat-evaluation__section">
+										<text class="chat-evaluation__heading">{{ section.heading }}</text>
+										<text class="chat-evaluation__text">{{ section.content }}</text>
+									</view>
+									<button size="mini" @click.stop="openCard(card)">查看完整评估</button>
+								</view>
 								<button v-if="referenceForCard(msg, card)" size="mini" :disabled="typing" @click.stop="introduceCard(msg, card)">介绍这项</button>
 								<button v-if="card.pickAction === 'evaluate' || card.pickAction === 'view-evaluation'" size="mini" :disabled="typing" @click.stop="pickEvaluate(card)">{{ card.pickAction === 'view-evaluation' ? '查看评估' : '评估这个' }}</button>
 
@@ -261,6 +274,7 @@
 		matchDemand,
 		getChatHistory,
 		getCardViewCounts,
+		getEvaluationTask,
 		getChatTurn,
 		clearChatHistory
 	} from '../../api/ai.js'
@@ -302,6 +316,8 @@
 		saveTurnProgress
 	} from '../../api/ai-chat-wal.mjs'
 	import { createChatProgress, mergeChatProgress, chatProgressText, cardReference } from '../../api/ai-chat-progress.mjs'
+	import { createChatEvaluationMonitor, readChatEvaluationTask } from '../../api/ai-chat-evaluations.mjs'
+	import { openEvalTaskStream, extractStreamData } from '../../api/ai-eval-stream.mjs'
 	import { getPageStateScope, createPageStateMixin } from '../../api/page-state-cache.mjs'
 
 // P0-A: 模块级内存缓存（跨页面切换保持数据）
@@ -337,6 +353,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			messages: [createWelcomeMessage()],
 			suggestions: getChatSuggestions(),
 			cardViewCounts: {},
+			evaluationUpdates: {},
 			inputText: '',
 			typing: false,
 			scrollIntoView: '',
@@ -417,6 +434,18 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		visibleMessages() {
 			return this.chatPreview.visible
 		},
+		renderMessages() {
+			return this.visibleMessages.map(message => {
+				if (message.type !== 'agent-cards') return message
+				const cards = (message.payload?.cards || []).map(card => ({ ...card, evaluationView: this.evaluationForCard(card) }))
+				const evaluations = cards.map(card => card.evaluationView).filter(Boolean)
+				let content = message.content
+				if (/^评估任务进行中/.test(content || '') && evaluations.length && evaluations.every(item => item.terminal)) {
+					content = evaluations.every(item => item.status === 'succeeded') ? '评估已完成，结果如下。' : '评估任务已结束，请查看下方任务状态。'
+				}
+				return { ...message, content, payload: { ...message.payload, cards } }
+			})
+		},
 		queuePreview() {
 			return previewQueue(this.pendingQueue, this.queueExpanded)
 		}
@@ -424,6 +453,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	watch: {
 		visibleMessages() {
 			this.refreshCardViewCounts()
+			this.syncEvaluationTasks()
 		}
 	},
 	onLoad() {
@@ -447,6 +477,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		const currentScope = getPageStateScope(uni)
 		this.startCardStatsRefresh()
 		if (currentScope !== this._scope) {
+			this.stopEvaluationTasks(true)
 			this.stopTurnPolling()
 			this._scope = currentScope
 			this.chatGeneration = null
@@ -465,6 +496,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.resumeSession()
 			return
 		}
+		this.syncEvaluationTasks()
 		if (this._clearingHistory || this._recovering) return
 		if (this._requestInFlight) this.stopTurnPolling()
 		if (!this._sessionReady) {
@@ -480,6 +512,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	},
 	onHide() {
 		this._visible = false
+		this.stopEvaluationTasks()
 		this.stopTurnPolling(false)
 		this.stopCardStatsRefresh()
 		if (!this.aiEnabled) return
@@ -488,6 +521,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	onUnload() {
 		this._alive = false
 		this._visible = false
+		this.stopEvaluationTasks(true)
 		this.unbindSlashMenuKeys()
 		this.stopTurnPolling()
 		this.stopCardStatsRefresh()
@@ -496,6 +530,71 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		this.persistQueue()
 	},
 	methods: {
+		stopEvaluationTasks(clear = false) {
+			this._evaluationMonitor?.dispose()
+			this._evaluationMonitor = null
+			if (clear) this.evaluationUpdates = {}
+		},
+		syncEvaluationTasks() {
+			const scope = this._scope
+			const generation = this.chatGeneration
+			if (!this.aiEnabled || !this._alive || !this._visible || this._clearingHistory || scope !== getPageStateScope(uni)) {
+				this.stopEvaluationTasks()
+				return
+			}
+			if (this._evaluationScope !== scope || this._evaluationGeneration !== generation) this.stopEvaluationTasks(true)
+			if (!this._evaluationMonitor) {
+				this._evaluationScope = scope
+				this._evaluationGeneration = generation
+				const isCurrent = () => this._alive && this._visible && this._scope === scope && getPageStateScope(uni) === scope && this.chatGeneration === generation && this._evaluationMonitor === monitor
+				const monitor = createChatEvaluationMonitor({
+					openStream: openEvalTaskStream,
+					getTask: taskId => readChatEvaluationTask(() => {
+						if (!isCurrent()) throw new Error('Conversation changed')
+						return getEvaluationTask(taskId)
+					}),
+					parsePreview: extractStreamData,
+					onUpdate: (taskId, state) => {
+						if (isCurrent()) this.evaluationUpdates = { ...this.evaluationUpdates, [taskId]: state }
+					},
+				})
+				this._evaluationMonitor = monitor
+			}
+			const ids = []
+			for (const message of this.visibleMessages) {
+				if (message.serverGeneration != null && generation != null && message.serverGeneration !== generation) continue
+				for (const card of message.payload?.cards || []) {
+					if (card.evaluationTask?.taskId) ids.push(card.evaluationTask.taskId)
+				}
+			}
+			const visibleIds = new Set(ids.map(Number))
+			this.evaluationUpdates = Object.fromEntries(Object.entries(this.evaluationUpdates).filter(([id]) => visibleIds.has(Number(id))))
+			this._evaluationMonitor.sync(ids.filter(id => !['succeeded', 'failed', 'stale'].includes(this.evaluationUpdates[id]?.status)))
+		},
+		evaluationForCard(card) {
+			if (!card.evaluationTask?.taskId) return null
+			const task = card.evaluationTask
+			const update = this.evaluationUpdates[task.taskId] || {}
+			const status = update.status && update.status !== 'pending' ? update.status : task.status
+			const terminal = ['succeeded', 'failed', 'stale'].includes(status)
+			const evaluation = update.evaluation || (status === 'succeeded' ? card.evaluation : null) || {}
+			const preview = terminal ? {} : update.preview || {}
+			let label = update.progressStage || task.progressStage || '评估进行中'
+			if (update.syncError && !terminal) label = '连接恢复中，正在查询任务状态'
+			if (status === 'succeeded') label = '评估已完成'
+			if (status === 'failed' || status === 'stale') label = update.failReason || (status === 'stale' ? '评估排队超时' : '评估失败，请查看详情')
+			return {
+				status, terminal, label,
+				totalScore: evaluation.totalScore ?? null,
+				conclusion: evaluation.conclusion || preview.conclusion || '',
+				dimensions: evaluation.dimensions || preview.dimensions || [],
+				highlights: evaluation.highlights || preview.highlights || [],
+				sections: evaluation.report || preview.sections || [],
+			}
+		},
+		dimensionLabel(key) {
+			return { innovation: '创新性', techMaturity: '技术成熟度', marketProspect: '市场前景', teamStrength: '团队实力', cooperation: '合作可行性', riskAssessment: '风险评估' }[key] || key
+		},
 		stopTurnPolling(invalidate = true) {
 			if (invalidate) this._chatRequestVersion = (this._chatRequestVersion || 0) + 1
 			if (this._recoveryTimer) clearTimeout(this._recoveryTimer)
@@ -520,7 +619,9 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			if (next === this.chatProgress) return false
 			this.chatProgress = next
 			this.referenceSupported = response.referenceSupported === true
+			const generationChanged = this.chatGeneration !== next.generation
 			this.chatGeneration = next.generation
+			if (generationChanged) this.syncEvaluationTasks()
 			saveTurnProgress(turnId, next, uni, this._scope)
 			return true
 		},
@@ -535,6 +636,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		},
 		async clearConversation() {
 			if (this._clearingHistory) return
+			this.stopEvaluationTasks(true)
 			this.stopTurnPolling()
 			this._clearingHistory = true
 			this._sessionReady = false
@@ -561,6 +663,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				}
 			} finally {
 				this._clearingHistory = false
+				this.syncEvaluationTasks()
 			}
 		},
 		cardViewCount(card) {
@@ -643,6 +746,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					})
 				})
 				this.messages = [createWelcomeMessage(), ...restored]
+				this.syncEvaluationTasks()
 				if (restored.length) this.scrollToBottom()
 				return true
 			} catch (e) {
@@ -1007,6 +1111,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			},
 			pushMessage(role, content, extra) {
 				this.messages.push(createMessage(role, content, extra))
+				this.syncEvaluationTasks()
 				this.scrollToBottom()
 			},
 			isCommandMessage(msg) {
@@ -2016,6 +2121,27 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		font-weight: 600;
 	}
 	/* 帮助命令卡片 */
+	.chat-evaluation {
+		margin: 16rpx 0;
+		padding: 20rpx;
+		border: 1rpx solid #dce8ff;
+		border-radius: 12rpx;
+		background: #fff;
+		overflow-wrap: anywhere;
+	}
+	.chat-evaluation__status, .chat-evaluation__score, .chat-evaluation__heading, .chat-evaluation__text {
+		display: block;
+		margin-bottom: 12rpx;
+		font-size: 24rpx;
+		line-height: 1.6;
+		white-space: pre-wrap;
+	}
+	.chat-evaluation__status, .chat-evaluation__score {
+		color: #2b73f8;
+	}
+	.chat-evaluation__heading, .chat-evaluation__score {
+		font-weight: 600;
+	}
 	.help-commands {
 		padding: 20rpx;
 	}

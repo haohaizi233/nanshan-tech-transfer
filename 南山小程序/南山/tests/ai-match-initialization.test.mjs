@@ -7,6 +7,9 @@ import * as queue from '../subpackages/tech-transfer/api/ai-chat-queue.mjs'
 import * as wal from '../subpackages/tech-transfer/api/ai-chat-wal.mjs'
 import * as pageState from '../subpackages/tech-transfer/api/page-state-cache.mjs'
 import * as progress from '../subpackages/tech-transfer/api/ai-chat-progress.mjs'
+import { createChatEvaluationMonitor, createChatEvaluationReader } from '../subpackages/tech-transfer/api/ai-chat-evaluations.mjs'
+import { extractStreamData, openEvalTaskStream } from '../subpackages/tech-transfer/api/ai-eval-stream.mjs'
+import HostBridge from '../host/host-bridge.js'
 import { AI_FEATURE_ENABLED } from '../config/feature-flags.js'
 
 function createPage(storage = {}, overrides = {}) {
@@ -20,6 +23,11 @@ function createPage(storage = {}, overrides = {}) {
     ...wal,
     ...pageState,
     ...progress,
+    createChatEvaluationMonitor,
+    readChatEvaluationTask: createChatEvaluationReader(),
+    extractStreamData,
+    openEvalTaskStream() { return null },
+    getEvaluationTask() { return new Promise(() => {}) },
     AI_FEATURE_ENABLED,
     AppTabbar: {},
     AiGeneratedMark: {},
@@ -42,6 +50,124 @@ function createPage(storage = {}, overrides = {}) {
   }
   return { component, page }
 }
+
+test('AI conversation renders streamed evaluation reports without mutating stored card snapshots', async () => {
+  let handlers
+  let closed = false
+  const { page, component } = createPage({}, {
+    openEvalTaskStream(taskId, callbacks) {
+      assert.equal(taskId, 204)
+      handlers = callbacks
+      return { close() { closed = true } }
+    },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page.chatGeneration = 1
+  const card = { id: 9, card_type: 'achievement', title: '成果', evaluationTask: { taskId: 204, status: 'pending' } }
+  page.pushMessage('assistant', '评估任务进行中，稍后查看评估结果。', { type: 'agent-cards', payload: { cards: [card] } })
+  handlers.onSnapshot('{"conclusion":"实时结论')
+  assert.equal(page.renderMessages.at(-1).payload.cards[0].evaluationView.conclusion, '实时结论')
+  handlers.onDone({ status: 'succeeded', result: { taskId: 204, status: 'succeeded', evaluation: { totalScore: 88, conclusion: '已完成结论', report: [{ heading: '分析', content: '完整报告' }] } } })
+  const rendered = page.renderMessages.at(-1)
+  assert.equal(rendered.payload.cards[0].evaluationView.totalScore, 88)
+  assert.equal(rendered.payload.cards[0].evaluationView.sections[0].content, '完整报告')
+  assert.match(rendered.content, /评估已完成/)
+  assert.equal(card.evaluationTask.status, 'pending')
+  assert.equal(card.evaluation, undefined)
+  assert.equal(closed, true)
+  component.onHide.call(page)
+  page._visible = true
+  page.syncEvaluationTasks()
+  assert.equal(page.renderMessages.at(-1).payload.cards[0].evaluationView.totalScore, 88)
+  component.onUnload.call(page)
+})
+
+test('conversation task subscriptions stop on hide, resume on show and fence account changes', () => {
+  const storage = {}
+  const streams = []
+  const { page, component } = createPage(storage, {
+    openEvalTaskStream(taskId, handlers) {
+      const stream = { handlers, closed: false, close() { this.closed = true } }
+      streams.push(stream)
+      return stream
+    },
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page.chatGeneration = 1
+  page._sessionReady = true
+  page.startCardStatsRefresh = () => {}
+  page.restoreScrollPosition = () => {}
+  page.pushMessage('assistant', '评估中', { type: 'agent-cards', payload: { cards: [{ evaluationTask: { taskId: 204, status: 'pending' } }] } })
+  component.onHide.call(page)
+  assert.equal(streams[0].closed, true)
+  streams[0].handlers.onStage('隐藏后旧事件')
+  assert.notEqual(page.evaluationUpdates[204]?.progressStage, '隐藏后旧事件')
+  component.onShow.call(page)
+  assert.equal(streams.length, 2)
+  storage.tt_auth_mode = 'account'; storage.tt_current_user = { userId: 7 }
+  streams[1].handlers.onStage('旧账号事件')
+  assert.notEqual(page.evaluationUpdates[204]?.progressStage, '旧账号事件')
+  component.onUnload.call(page)
+})
+
+test('mini-program SSE bytes flow through the real transport into the conversation report', context => {
+  const originalWx = globalThis.wx
+  let receive
+  let requestOptions
+  context.mock.method(HostBridge, 'getEnvironment', () => ({ apiBase: 'https://example.test', apiPrefix: '/api/tech-transfer/v1' }))
+  context.mock.method(HostBridge, 'getStorage', () => 'test-token')
+  globalThis.wx = { request(options) {
+    requestOptions = options
+    return { onChunkReceived(callback) { receive = callback }, abort() {} }
+  } }
+  const { page, component } = createPage({}, { openEvalTaskStream })
+  try {
+    page._scope = 'anonymous'; page._alive = true; page._visible = true
+    page.pushMessage('assistant', '评估任务进行中，稍后查看评估结果。', { type: 'agent-cards', payload: { cards: [{ evaluationTask: { taskId: 204, status: 'pending' } }] } })
+    assert.match(requestOptions.url, /\/ai\/evaluation-tasks\/204\/stream$/)
+    assert.equal(requestOptions.header.Authorization, 'Bearer test-token')
+    const send = frame => {
+      const bytes = new TextEncoder().encode('data: ' + JSON.stringify(frame) + '\n\n')
+      for (const byte of bytes) receive({ data: Uint8Array.of(byte).buffer })
+    }
+    send({ type: 'snapshot', text: '{"conclusion":"分片中文' })
+    assert.equal(page.renderMessages.at(-1).payload.cards[0].evaluationView.conclusion, '分片中文')
+    send({ type: 'content_delta', text: '实时显示"}' })
+    assert.equal(page.renderMessages.at(-1).payload.cards[0].evaluationView.conclusion, '分片中文实时显示')
+    send({ type: 'done', status: 'succeeded', result: { taskId: 204, status: 'succeeded', evaluation: { totalScore: 91, conclusion: '最终报告' } } })
+    assert.equal(page.renderMessages.at(-1).payload.cards[0].evaluationView.totalScore, 91)
+    assert.match(page.renderMessages.at(-1).content, /评估已完成/)
+  } finally {
+    component.onUnload.call(page)
+    if (originalWx === undefined) delete globalThis.wx
+    else globalThis.wx = originalWx
+  }
+})
+
+test('clearing a conversation and changing generation invalidate late task events', async () => {
+  const streams = []
+  const { page, component } = createPage({}, {
+    openEvalTaskStream(taskId, handlers) {
+      const stream = { handlers, closed: false, close() { this.closed = true } }
+      streams.push(stream)
+      return stream
+    },
+    clearChatHistory: async () => ({ generation: 3 }),
+  })
+  page._scope = 'anonymous'; page._alive = true; page._visible = true; page.chatGeneration = 1
+  page.pushMessage('assistant', '评估中', { type: 'agent-cards', serverGeneration: 1, payload: { cards: [{ evaluationTask: { taskId: 204, status: 'pending' } }] } })
+  page.chatGeneration = 2
+  streams[0].handlers.onDone({ result: { taskId: 204, status: 'succeeded', evaluation: { conclusion: '旧代际报告' } } })
+  assert.deepEqual(page.evaluationUpdates, {})
+  page.syncEvaluationTasks()
+  assert.equal(streams[0].closed, true)
+  assert.equal(streams.length, 1)
+  page.pushMessage('assistant', '评估中', { type: 'agent-cards', serverGeneration: 2, payload: { cards: [{ evaluationTask: { taskId: 205, status: 'pending' } }] } })
+  await page.clearConversation()
+  streams[1].handlers.onStage('清空后的迟到事件')
+  assert.equal(streams[1].closed, true)
+  assert.deepEqual(page.evaluationUpdates, {})
+  assert.equal(page.messages.length, 1)
+  component.onUnload.call(page)
+})
 
 test('recovery exhaustion keeps the pending turn instead of acknowledging uncertain execution', async () => {
   const storage = {}
