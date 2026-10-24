@@ -129,7 +129,8 @@ def validate_result(result):
     if not isinstance(result.get("intent"), str) or not isinstance(result.get("message"), str):
         raise StreamError("invalid result text")
     cards = result.get("data")
-    if not isinstance(cards, list) or len(cards) > 10:
+    card_limit = 20 if result["intent"] == "evaluate_achievement" else 10
+    if not isinstance(cards, list) or len(cards) > card_limit:
         raise StreamError("invalid result cards")
     for card in cards:
         if (
