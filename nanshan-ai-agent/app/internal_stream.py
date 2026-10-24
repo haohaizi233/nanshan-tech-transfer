@@ -82,6 +82,7 @@ def prepare_stream(body, request, *, slots, executor, run, timeout_seconds):
                 publish_terminal(final)
         except Exception as exc:
             observer("failed")
+            logging.getLogger("nanshan.ai.agent").exception("chat execution failed reason=execution_failed")
             reason = "timeout" if isinstance(exc, TimeoutError) else "execution_failed"
             publish_terminal({"type": "error", "reason": reason})
 
