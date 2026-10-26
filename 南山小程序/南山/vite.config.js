@@ -1,4 +1,5 @@
 import path from 'node:path'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
@@ -13,9 +14,27 @@ ensureLocalEnv()
 const root = path.dirname(fileURLToPath(import.meta.url))
 process.env.UNI_INPUT_DIR = root
 
+function removeEmptyWechatMiniProgramAllowlist() {
+  return {
+    name: 'remove-empty-wechat-mini-program-allowlist',
+    apply: 'build',
+    writeBundle(outputOptions) {
+      if (path.basename(outputOptions.dir || '') !== 'mp-weixin') return
+      const appJsonPath = path.join(outputOptions.dir, 'app.json')
+      if (!fs.existsSync(appJsonPath)) return
+
+      const appConfig = JSON.parse(fs.readFileSync(appJsonPath, 'utf8'))
+      if (Array.isArray(appConfig.navigateToMiniProgramAppIdList) && appConfig.navigateToMiniProgramAppIdList.length === 0) {
+        delete appConfig.navigateToMiniProgramAppIdList
+        fs.writeFileSync(appJsonPath, `${JSON.stringify(appConfig, null, 2)}\n`)
+      }
+    },
+  }
+}
+
 export default defineConfig({
   base: '/h5/',
-  plugins: [uni()],
+  plugins: [uni(), removeEmptyWechatMiniProgramAllowlist()],
   server: {
     host: true,
     port: 5173,

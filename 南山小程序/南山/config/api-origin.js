@@ -6,23 +6,11 @@ const SAME_ORIGIN_PORTS = new Set(['', '80', '443', '8025'])
 const LOCALHOST_HOSTNAMES = ['localhost', '127.0.0.1', '::1', '[::1]']
 const DEFAULT_LOCAL_API_BASE = 'http://127.0.0.1:8787'
 
-function readUniSystemInfo() {
-  try {
-    if (typeof uni !== 'undefined' && typeof uni.getSystemInfoSync === 'function') {
-      return uni.getSystemInfoSync()
-    }
-  } catch (e) {
-    // ignore
-  }
-  return null
-}
-
 function isWeixinMiniProgram(systemInfo) {
-  if (!systemInfo) return false
   // uni-app 在 H5 下同样注入 wx 全局别名，只看 typeof wx 会把本地 H5
-  // 误判成小程序并把请求打到公网 HTTPS，因此先按 uniPlatform 判定平台。
-  if (systemInfo.uniPlatform) return systemInfo.uniPlatform === 'mp-weixin'
-  // uniPlatform 缺失时沿用旧探测，但浏览器里一律不算小程序。
+  // 误判成小程序并把请求打到公网 HTTPS，因此优先按 uniPlatform 判定。
+  if (systemInfo && systemInfo.uniPlatform) return systemInfo.uniPlatform === 'mp-weixin'
+  // 避免调用已弃用的 getSystemInfoSync。浏览器里的 wx 别名由 window 判断排除。
   if (typeof window !== 'undefined') return false
   return typeof wx !== 'undefined'
 }
@@ -40,6 +28,12 @@ export function resolveH5ApiBase({
   pageLocation = globalThis.location,
   systemInfo,
 } = {}) {
+  const info = systemInfo
+  const weixinBase = weixinApiBase || deviceApiBase
+  if (isWeixinMiniProgram(info) && weixinBase) {
+    return weixinBase
+  }
+
   if (PRODUCTION_ENVS.includes(appEnv)) return ''
 
   if (pageLocation && pageLocation.hostname) {
@@ -50,12 +44,6 @@ export function resolveH5ApiBase({
     if (!LOCALHOST_HOSTNAMES.includes(pageLocation.hostname)) {
       return `${protocol}//${pageLocation.hostname}:${LOCAL_API_PORT}`
     }
-  }
-
-  const info = systemInfo || readUniSystemInfo()
-  const weixinBase = weixinApiBase || deviceApiBase
-  if (isWeixinMiniProgram(info) && weixinBase) {
-    return weixinBase
   }
 
   return localApiBase || DEFAULT_LOCAL_API_BASE

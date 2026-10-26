@@ -2,6 +2,21 @@ import HostBridge from '../host/host-bridge.js'
 
 let timer = null
 let inFlight = false
+const NOTIFICATION_BADGE_EVENT = 'notification-badge-change'
+const NOTIFICATION_BADGE_STORAGE_KEY = 'nanshan_notification_badge_count'
+
+function publishNotificationBadge(total) {
+  const count = Math.max(0, Number(total) || 0)
+  uni.setStorageSync(NOTIFICATION_BADGE_STORAGE_KEY, count)
+  uni.$emit(NOTIFICATION_BADGE_EVENT, count)
+}
+
+export function subscribeNotificationBadge(listener) {
+  const onChange = (count) => listener(Math.max(0, Number(count) || 0))
+  onChange(uni.getStorageSync(NOTIFICATION_BADGE_STORAGE_KEY))
+  uni.$on(NOTIFICATION_BADGE_EVENT, onChange)
+  return () => uni.$off(NOTIFICATION_BADGE_EVENT, onChange)
+}
 
 function getExpiresAt() {
   return Number(HostBridge.getStorage('tt_token_expires_at')) || 0
@@ -27,7 +42,7 @@ function isUnauthorized(error) {
 }
 
 function removeNotificationBadge() {
-  uni.removeTabBarBadge({ index: 1 })
+  publishNotificationBadge(0)
 }
 
 // 主包不能引用分包资源；通知角标在 App 生命周期中执行，因此在此通过宿主桥接直接请求。
@@ -89,8 +104,7 @@ export async function refreshNotificationBadge() {
   try {
     const data = await getNotificationSummary()
     const total = Number(data && data.total) || 0
-    if (total > 0) uni.setTabBarBadge({ index: 1, text: formatNotificationBadge(total) })
-    else removeNotificationBadge()
+    publishNotificationBadge(total)
   } catch (e) {
     if (isUnauthorized(e)) {
       // 飞行中 401：刷新一次后重试；仍失败则清理会话并停止轮询。
@@ -99,8 +113,7 @@ export async function refreshNotificationBadge() {
         try {
           const data = await getNotificationSummary()
           const total = Number(data && data.total) || 0
-          if (total > 0) uni.setTabBarBadge({ index: 1, text: formatNotificationBadge(total) })
-          else removeNotificationBadge()
+          publishNotificationBadge(total)
           return
         } catch (e2) {
           // fall through to clear
