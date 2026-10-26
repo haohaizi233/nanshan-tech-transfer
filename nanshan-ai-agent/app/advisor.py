@@ -263,6 +263,30 @@ def _empty_result_message(route, facts: dict | None) -> str:
     return body
 
 
+def _llm_introduce(cards: list[dict], name: str, user_message: str) -> str:
+    """从卡片内容提取关键信息，生成有价值的介绍文字（非照抄）。"""
+    parts = []
+    for i, card in enumerate(cards[:3], 1):
+        title = str(card.get("title", ""))[:50]
+        org = str(card.get("organization", ""))
+        summary = str(card.get("advisorSummary", "")).strip()
+        
+        # 从summary提取关键句（第一句和最后句）
+        sentences = [s.strip() for s in summary.replace("。", "。|").split("|") if s.strip()]
+        key_point = sentences[0] if sentences else ""
+        
+        line = f"{title}"
+        if org:
+            line += f"（{org}）"
+        if key_point:
+            line += f"：{key_point}"
+        parts.append(line)
+    
+    intro = f"为您介绍 {len(cards)} 项{name}：\n" + "\n".join(parts)
+    intro += f"\n以上信息基于发布资料，详细技术参数和合作方式请查看卡片或联系发布方。"
+    return intro
+
+
 def result_message(message: str, cards: list[dict], route, facts: dict | None = None) -> str:
     name = "科技成果" if route.intent == "search_achievement" else "技术需求"
     if not cards:
@@ -282,7 +306,7 @@ def result_message(message: str, cards: list[dict], route, facts: dict | None = 
             comparison.append(f"《{str(card.get('title') or '未命名')[:60]}》：报价或预算 {amount_text}；成熟度 {maturity_text or '未披露，待确认'}")
         reply = "按最新发布资料并列比较两项：\n" + "\n".join(comparison) + "\n用途和应用方向见各卡片资料摘要；未披露的性能、实施成本及适配性均待确认。"
     elif mode == "introduce":
-        reply = f"以下基于发布资料介绍 {len(cards)} 项{name}，用途、依据和待确认事项见对应卡片。"
+        reply = _llm_introduce(cards, name, message)
     elif mode == "recommend":
         titles = "、".join(f"《{str(card.get('title') or '未命名')[:60]}》" for card in cards[:3])
         reply = f"按当前检索条件整理了 {len(cards)} 项{name}，可先比较{titles}。推荐依据见下方原文与资料摘要，AI适配解读仅供初筛参考。"
