@@ -221,8 +221,10 @@
 		"navigationBarTitleText": "南山科转通",
 		"navigationBarBackgroundColor": "#FFFFFF",
 		"backgroundColor": "#F5F6F8",
+		// #ifdef H5
 		"rpxCalcMaxDeviceWidth": 414,
 		"rpxCalcBaseDeviceWidth": 414
+		// #endif
 	},
 	"tabBar": {
 		"custom": true,

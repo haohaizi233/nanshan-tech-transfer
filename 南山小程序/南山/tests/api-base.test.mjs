@@ -11,7 +11,7 @@ test('uses the paired public API port when the H5 page is served through the tun
       localApiBase: 'http://127.0.0.1:8787',
       pageLocation: new URL('http://43.138.138.200:8077/#/pages/index/index'),
     }),
-    'http://43.138.138.200:8076',
+    'http://43.138.138.200:8025',
   )
 })
 
@@ -123,6 +123,19 @@ test('WeChat mini program uses the public HTTPS API in devtools', () => {
   )
 })
 
+test('staging WeChat mini program still uses the public HTTPS API', () => {
+  assert.equal(
+    resolveH5ApiBase({
+      appEnv: 'staging',
+      localApiBase: 'http://127.0.0.1:8787',
+      weixinApiBase: 'https://inanshan.sjhcip.com',
+      pageLocation: null,
+      systemInfo: { uniPlatform: 'mp-weixin', platform: 'devtools' },
+    }),
+    'https://inanshan.sjhcip.com',
+  )
+})
+
 test('WeChat mini program uses the public HTTPS API on a real phone', () => {
   assert.equal(
     resolveH5ApiBase({
@@ -178,6 +191,37 @@ test('mini-program without uniPlatform still resolves through the wx probe', () 
   } finally {
     if (hadWx) globalThis.wx = prevWx
     else delete globalThis.wx
+  }
+})
+
+test('WeChat platform fallback does not call deprecated getSystemInfoSync', () => {
+  const hadWx = 'wx' in globalThis
+  const hadUni = 'uni' in globalThis
+  const hadWindow = 'window' in globalThis
+  const prevWx = globalThis.wx
+  const prevUni = globalThis.uni
+  globalThis.wx = {}
+  globalThis.uni = {
+    getSystemInfoSync() {
+      throw new Error('deprecated API must not be called')
+    },
+  }
+  if (hadWindow) delete globalThis.window
+  try {
+    assert.equal(
+      resolveH5ApiBase({
+        appEnv: 'staging',
+        weixinApiBase: 'https://inanshan.sjhcip.com',
+        pageLocation: null,
+      }),
+      'https://inanshan.sjhcip.com',
+    )
+  } finally {
+    if (hadWx) globalThis.wx = prevWx
+    else delete globalThis.wx
+    if (hadUni) globalThis.uni = prevUni
+    else delete globalThis.uni
+    if (hadWindow) globalThis.window = prevWindow
   }
 })
 
