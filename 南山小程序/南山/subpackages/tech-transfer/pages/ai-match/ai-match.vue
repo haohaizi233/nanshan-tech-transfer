@@ -86,6 +86,7 @@
 						</view>
 
 						<view v-else-if="msg.type === 'agent-cards'" class="agent-cards-scroll">
+							<text v-if="msg.content" class="agent-cards__intro">{{ msg.content }}</text>
 							<view
 								v-for="(card, i) in (msg.payload && msg.payload.cards) || []"
 								:key="i"
@@ -2042,6 +2043,14 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		opacity: 0.45;
 	}
 	/* 卡片列表滚动容器：超过3个卡片时限制高度内滚动 */
+	.agent-cards__intro {
+		display: block;
+		font-size: 28rpx;
+		color: #333333;
+		line-height: 1.55;
+		margin-bottom: 20rpx;
+	}
+
 	.agent-cards-scroll {
 		max-height: 60vh;
 		overflow-y: auto;
