@@ -4,11 +4,14 @@
 		<view class="app-tabbar-spacer"></view>
 		<view class="app-tabbar">
 			<view v-for="item in visibleTabs" :key="item.key" class="tabbar-item" @click="go(item)">
-				<image
-					class="tabbar-icon"
-					:src="active === item.key ? item.activeIcon : item.icon"
-					mode="aspectFit"
-				></image>
+				<view class="tabbar-icon-wrap">
+					<image
+						class="tabbar-icon"
+						:src="active === item.key ? item.activeIcon : item.icon"
+						mode="aspectFit"
+					></image>
+					<text v-if="item.key === 'ai' && notificationBadge" class="tabbar-badge">{{ notificationBadgeText }}</text>
+				</view>
 				<text :class="active === item.key ? 'tabbar-text tabbar-text-active' : 'tabbar-text'">{{ item.label }}</text>
 			</view>
 		</view>
@@ -17,6 +20,7 @@
 
 <script>
 	import { SHOW_AI_MATCH_ENTRY } from '../../../config/feature-flags.js'
+	import { subscribeNotificationBadge } from '../../../utils/notification-poller.js'
 
 	const SUBPACKAGE_ROOT = '/subpackages/tech-transfer/'
 
@@ -31,6 +35,8 @@
 		},
 		data() {
 			return {
+				notificationBadge: 0,
+				unsubscribeNotificationBadge: null,
 				tabs: [
 					{
 						key: 'home',
@@ -61,6 +67,17 @@
 			visibleTabs() {
 				return this.tabs.filter((item) => !item.hidden)
 			},
+			notificationBadgeText() {
+				return this.notificationBadge > 99 ? '99+' : String(this.notificationBadge)
+			},
+		},
+		created() {
+			this.unsubscribeNotificationBadge = subscribeNotificationBadge((count) => {
+				this.notificationBadge = count
+			})
+		},
+		beforeUnmount() {
+			if (this.unsubscribeNotificationBadge) this.unsubscribeNotificationBadge()
 		},
 		methods: {
 			go(item) {
@@ -112,6 +129,27 @@
 	.tabbar-icon {
 		width: 48rpx;
 		height: 48rpx;
+	}
+
+	.tabbar-icon-wrap {
+		position: relative;
+		width: 48rpx;
+		height: 48rpx;
+	}
+
+	.tabbar-badge {
+		position: absolute;
+		top: -8rpx;
+		right: -30rpx;
+		min-width: 30rpx;
+		height: 30rpx;
+		padding: 0 8rpx;
+		border-radius: 15rpx;
+		background: #e5484d;
+		color: #ffffff;
+		font-size: 18rpx;
+		line-height: 30rpx;
+		text-align: center;
 	}
 
 	.tabbar-text {

@@ -1724,6 +1724,7 @@
 	transform: scale(0.96);
 }
 
+/* #ifdef H5 */
 /* 桌面预览 hover（不影响移动端） */
 @media (hover: hover) {
 	.aie-page .history-item:hover {
@@ -1748,4 +1749,5 @@
 		opacity: 0.5;
 	}
 }
+/* #endif */
 </style>
