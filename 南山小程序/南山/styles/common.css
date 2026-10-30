@@ -1,0 +1,122 @@
+/**
+ * 南山科转通公共组件样式
+ * 解决 .btn/.section 等通用类名跨页面污染问题
+ * 
+ * 使用方式：<style scoped> 中 @import '../../styles/common.css';
+ * 或在页面根元素上加 .page-wrapper 类名统一作用域
+ */
+
+/* ── 通用按钮 ── */
+.btn {
+	background: #2b73f8;
+	color: #ffffff;
+	border: none;
+	border-radius: 12rpx;
+	font-size: 28rpx;
+	font-weight: 500;
+	height: 72rpx;
+	line-height: 72rpx;
+	padding: 0 32rpx;
+	text-align: center;
+	box-sizing: border-box;
+	transition: opacity 0.2s;
+}
+
+.btn:active {
+	opacity: 0.85;
+}
+
+.btn--primary {
+	background: linear-gradient(135deg, #2b73f8, #4a8cff);
+}
+
+.btn--ghost {
+	background: #ffffff;
+	color: #2b73f8;
+	border: 1rpx solid #2b73f8;
+}
+
+.btn--danger {
+	background: #f56c6c;
+	color: #ffffff;
+}
+
+.btn--small {
+	height: 56rpx;
+	line-height: 56rpx;
+	font-size: 24rpx;
+	padding: 0 24rpx;
+	border-radius: 10rpx;
+}
+
+.btn--large {
+	height: 88rpx;
+	line-height: 88rpx;
+	font-size: 30rpx;
+	padding: 0 48rpx;
+	border-radius: 16rpx;
+}
+
+/* ── 通用卡片区块 ── */
+.section {
+	background: #ffffff;
+	border-radius: 16rpx;
+	border: 1rpx solid #e8ecf2;
+	padding: 28rpx;
+	margin-bottom: 24rpx;
+	box-sizing: border-box;
+}
+
+.section--flat {
+	border: none;
+	box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
+}
+
+.section--no-margin {
+	margin-bottom: 0;
+}
+
+/* ── 通用标签 ── */
+.chip {
+	display: inline-block;
+	padding: 4rpx 16rpx;
+	border-radius: 8rpx;
+	font-size: 22rpx;
+	line-height: 1.5;
+}
+
+.chip--primary {
+	background: rgba(43, 115, 248, 0.1);
+	color: #2b73f8;
+}
+
+.chip--success {
+	background: rgba(76, 217, 100, 0.1);
+	color: #4cd964;
+}
+
+.chip--warning {
+	background: rgba(240, 173, 78, 0.1);
+	color: #f0ad4e;
+}
+
+/* ── 通用文本 ── */
+.text-primary {
+	color: #2b73f8;
+}
+
+.text-gray {
+	color: #999999;
+}
+
+.text-bold {
+	font-weight: 600;
+}
+
+/* ── 通用间距 ── */
+.mt-sm { margin-top: 16rpx; }
+.mt-md { margin-top: 24rpx; }
+.mt-lg { margin-top: 32rpx; }
+.mb-sm { margin-bottom: 16rpx; }
+.mb-md { margin-bottom: 24rpx; }
+.mb-lg { margin-bottom: 32rpx; }

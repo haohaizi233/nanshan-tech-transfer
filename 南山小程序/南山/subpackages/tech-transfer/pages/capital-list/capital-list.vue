@@ -266,6 +266,8 @@
 </script>
 
 <style scoped>
+	@import '../../../../styles/common.css';
+
 	.page {
 		min-height: 100vh;
 		background: #f5f6f8;
@@ -460,12 +462,6 @@
 		font-size: 24rpx;
 		color: #666666;
 		padding-right: 12rpx;
-	}
-
-	.btn {
-		margin: 0;
-		background: #2b73f8 !important;
-		color: #ffffff !important;
 	}
 
 	.retry-btn {

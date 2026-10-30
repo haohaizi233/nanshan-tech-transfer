@@ -244,6 +244,8 @@ export default {
 </script>
 
 <style scoped>
+	@import '../../../../styles/common.css';
+
 .page {
   min-height: 100vh;
   background: #f5f6f8;
@@ -277,14 +279,6 @@ export default {
   margin-top: 24rpx;
   background: #2b73f8 !important;
   color: #fff !important;
-}
-
-.section {
-  background: #ffffff;
-  border-radius: 16rpx;
-  border: 1rpx solid #e8ecf2;
-  padding: 28rpx;
-  margin-bottom: 24rpx;
 }
 
 .main-title {

@@ -935,19 +935,13 @@
 </script>
 
 <style>
+	@import '../../../../styles/common.css';
+
 	.page {
 		min-height: 100vh;
 		background-color: #f5f6f8;
 		padding: 24rpx;
 		padding-bottom: 60rpx;
-	}
-
-	.section {
-		background-color: #ffffff;
-		border-radius: 16rpx;
-		border: 1rpx solid #e8ecf2;
-		padding: 28rpx;
-		margin-bottom: 24rpx;
 	}
 
 	.section-head {

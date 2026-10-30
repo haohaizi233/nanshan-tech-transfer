@@ -408,19 +408,13 @@
 </script>
 
 <style>
+	@import '../../../../styles/common.css';
+
 	.page {
 		min-height: 100vh;
 		background-color: #f5f6f8;
 		padding: 24rpx;
 		padding-bottom: calc(80rpx + env(safe-area-inset-bottom));
-	}
-
-	.section {
-		background-color: #ffffff;
-		border-radius: 16rpx;
-		border: 1rpx solid #e8ecf2;
-		padding: 28rpx;
-		margin-bottom: 24rpx;
 	}
 
 		.section-title {

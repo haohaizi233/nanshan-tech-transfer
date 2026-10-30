@@ -458,6 +458,8 @@
 </script>
 
 <style>
+	@import '../../../../styles/common.css';
+
 	.page {
 		min-height: 100vh;
 		background: #f5f6f8;
@@ -709,12 +711,6 @@
 		margin-top: 16rpx;
 		display: flex;
 		justify-content: flex-end;
-	}
-
-	.btn {
-		background: #2b73f8 !important;
-		color: #ffffff !important;
-		margin: 0 0 0 16rpx;
 	}
 
 	.btn.ghost {
