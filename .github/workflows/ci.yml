@@ -83,6 +83,11 @@ jobs:
         working-directory: nanshan-ai-agent
         env:
           PYTHONPATH: .
+          # app/config.py validate() fail-fast 要求 LLM 配置非空；
+          # 测试全部 mock 网络调用，给占位值即可（真实值在本地 .env，不入库）
+          LLM_API_URL: http://127.0.0.1:9
+          LLM_API_KEY: ci-dummy-key
+          LLM_MODEL: ci-dummy-model
         run: |
           python -m pytest -q
 
