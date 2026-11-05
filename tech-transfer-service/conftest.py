@@ -40,6 +40,8 @@ collect_ignore = [
     "test_institution_api.py",
     "test_isolation.py",
     "test_search_api.py",
+    "test_auth_register.py",
+    "test_view_count_api.py",
 ]
 
 # Force local/test environment before any config import

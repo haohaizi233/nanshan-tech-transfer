@@ -61,7 +61,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov flake8 ruff mypy
+          pip install pytest pytest-cov flake8 ruff mypy requests httpx2 python-dotenv pytest-asyncio
 
       - name: Run database migrations
         working-directory: tech-transfer-service
