@@ -44,7 +44,10 @@ _MAX_VALIDATION_DETAILS = 20
 # L8: 上游错误正文外发前脱敏（屏蔽内部 URL/堆栈/密钥等）
 _SENSITIVE_PATTERNS = [
     (re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE), "[REDACTED_URL]"),
-    (re.compile(r"(?:password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*\S+", re.IGNORECASE), "[REDACTED_CREDENTIAL]"),
+    (
+        re.compile(r"(?:password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*\S+", re.IGNORECASE),
+        "[REDACTED_CREDENTIAL]",
+    ),
     (re.compile(r"Traceback \(most recent call last\).*", re.DOTALL), "[REDACTED_TRACEBACK]"),
     (re.compile(r'File "[^"]+", line \d+.*', re.DOTALL), "[REDACTED_FRAME]"),
     (re.compile(r"(?:postgresql|mysql|redis)://[^\s\"'<>]+", re.IGNORECASE), "[REDACTED_CONN_STRING]"),
@@ -76,9 +79,7 @@ class _DropNotFoundAccessLog(logging.Filter):
             return False
         # 角标按产品要求高频轮询。成功响应不携带诊断价值，保留 4xx/5xx 便于排障。
         path = full_path.split("?", 1)[0]
-        is_notification_summary = path.endswith(
-            ("/me/notifications/summary", "/admin/notifications/summary")
-        )
+        is_notification_summary = path.endswith(("/me/notifications/summary", "/admin/notifications/summary"))
         return not (method == "GET" and is_notification_summary and 200 <= status < 300)
 
 
@@ -106,6 +107,7 @@ def configure_logging() -> None:
         if log_dir:
             from logging.handlers import RotatingFileHandler
             from pathlib import Path as _Path
+
             log_path = _Path(log_dir)
             log_path.mkdir(parents=True, exist_ok=True)
             file_handler = RotatingFileHandler(
@@ -128,20 +130,25 @@ def _log_error(request: Request, status: int, code: str, *, exc: bool = False) -
     # 公网服务不可避免会收到大量扫描器对 /.env、/.git、WordPress 等路径的探测。
     # 404 是预期的客户端结果，不应与真正的服务端故障混在业务错误日志中；
     # 需要排查时仍可将 nanshan.error 日志级别调为 DEBUG 查看。
-    if status == 404:
-        log = logger.debug
-    else:
-        log = logger.error if (exc or status >= 500) else logger.info
+    log = logger.debug if status == 404 else logger.error if exc or status >= 500 else logger.info
     if exc:
         log(
             "unhandled exception request_id=%s method=%s path=%s status=%s code=%s",
-            get_request_id(), request.method, request.url.path, status, code,
+            get_request_id(),
+            request.method,
+            request.url.path,
+            status,
+            code,
             exc_info=True,
         )
     else:
         log(
             "request error request_id=%s method=%s path=%s status=%s code=%s",
-            get_request_id(), request.method, request.url.path, status, code,
+            get_request_id(),
+            request.method,
+            request.url.path,
+            status,
+            code,
         )
 
 
@@ -161,9 +168,7 @@ def _safe_validation_details(errors: list[dict]) -> list[dict]:
 def _is_path_param_error(errors: list[dict]) -> bool:
     """Flask `<int:>` 转换器行为兼容：路径参数类型不匹配（如 /demands/abc）
     视为「接口不存在」→ 404 TT_COMMON_40401（203 项 API 测试锁定的既有约定）。"""
-    return bool(errors) and all(
-        err.get("loc") and err["loc"][0] == "path" for err in errors
-    )
+    return bool(errors) and all(err.get("loc") and err["loc"][0] == "path" for err in errors)
 
 
 # 非 404 的 StarletteHTTPException 状态码 → 统一错误码映射
@@ -202,8 +207,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             safe_details = {**e.details, "upstreamBody": _desensitize_upstream_body(str(e.details["upstreamBody"]))}
         if isinstance(e.details, dict) and e.details.get("layer"):
             logger.error(
-                "upstream error request_id=%s method=%s path=%s layer=%s "
-                "upstream_status=%s reason=%s body=%s",
+                "upstream error request_id=%s method=%s path=%s layer=%s upstream_status=%s reason=%s body=%s",
                 get_request_id(),
                 request.method,
                 request.url.path,

@@ -7,6 +7,7 @@
 依赖：后端已启动，演示数据已导入（成果≥223 published）
 契约：GET /search?q=&type=achievement|demand|all 返回 {achievements:{...}, demands:{...}}
 """
+
 import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
@@ -25,8 +26,7 @@ def check(name, condition, detail=""):
 
 
 # ── 0. 获取 token ──────────────────────────────────────────
-resp = requests.post(f"{BASE}/auth/bootstrap",
-    json={"hostCredential": "local-dev-ticket-test-search-user"}, timeout=10)
+resp = requests.post(f"{BASE}/auth/bootstrap", json={"hostCredential": "local-dev-ticket-test-search-user"}, timeout=10)
 token = resp.json()["data"]["accessToken"]
 headers = {"Authorization": f"Bearer {token}"}
 print("[0] Bootstrap OK\n")
@@ -54,7 +54,10 @@ check("type=all返回200", resp.status_code == 200)
 data = resp.json()["data"]
 check("响应含achievements", "achievements" in data)
 check("响应含demands", "demands" in data)
-check("achievements有分页结构", all(k in data["achievements"] for k in ("total", "page", "pageSize", "totalPages", "list")))
+check(
+    "achievements有分页结构",
+    all(k in data["achievements"] for k in ("total", "page", "pageSize", "totalPages", "list")),
+)
 check("demands有分页结构", all(k in data["demands"] for k in ("total", "page", "pageSize", "totalPages", "list")))
 # Excel 真实数据 223 条中 15 条标题/简介/来源机构含"电池"
 check("成果命中'电池'（1~15）", 0 < data["achievements"]["total"] <= 15, f"got {data['achievements']['total']}")

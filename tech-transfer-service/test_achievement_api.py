@@ -21,8 +21,7 @@ def check(name, condition, detail=""):
 
 
 # ── 0. 获取 token ──────────────────────────────────────────
-resp = requests.post(f"{BASE}/auth/bootstrap",
-    json={"hostCredential": "local-dev-ticket-test-user"}, timeout=10)
+resp = requests.post(f"{BASE}/auth/bootstrap", json={"hostCredential": "local-dev-ticket-test-user"}, timeout=10)
 token = resp.json()["data"]["accessToken"]
 headers = {"Authorization": f"Bearer {token}"}
 print("[0] Bootstrap OK, token acquired\n")
@@ -47,7 +46,13 @@ data = resp.json()["data"]
 check("第2页page=2", data["page"] == 2)
 check("pageSize=20", data["pageSize"] == 20)
 check("第2页list长度=20", len(data["list"]) == 20)
-check("第2页与第1页不同", data["list"][0]["id"] != requests.get(f"{BASE}/achievements?page=1&pageSize=20", headers=headers, timeout=10).json()["data"]["list"][0]["id"])
+check(
+    "第2页与第1页不同",
+    data["list"][0]["id"]
+    != requests.get(f"{BASE}/achievements?page=1&pageSize=20", headers=headers, timeout=10).json()["data"]["list"][0][
+        "id"
+    ],
+)
 print()
 
 # ── 3. 关键词搜索 ───────────────────────────────────────────

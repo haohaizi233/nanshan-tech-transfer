@@ -1,9 +1,9 @@
 """清理 test_auth_register.py 固定手机号的残留账号（重跑前的标准清理）。"""
+
 import psycopg2
 import psycopg2.extras
 
-DB = dict(host="127.0.0.1", port=5432, user="postgres", password="postgres123",
-          dbname="tech_transfer")
+DB = {"host": "127.0.0.1", "port": 5432, "user": "postgres", "password": "postgres123", "dbname": "tech_transfer"}
 PHONES = ("13911111111", "13922222222", "13933333333")
 
 conn = psycopg2.connect(**DB)

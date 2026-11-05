@@ -4,6 +4,7 @@
 Architecture source: openapi.yaml paths /achievements, /achievements/{id},
                      /achievements/{id}/submit|offline；06-api-design.md §7、§5.1
 """
+
 from fastapi import APIRouter, Depends, Request
 
 from core.errors import bad_request
@@ -61,7 +62,9 @@ def achievements_create(request: Request, body: AchievementCreateRequest, user: 
     if replay is not None:
         return replay
     detail = create_achievement(
-        user["userId"], user.get("userNo", ""), body.as_dict(),
+        user["userId"],
+        user.get("userNo", ""),
+        body.as_dict(),
         request_id=get_request_id(),
     )
     result = success(detail, "创建成功")
@@ -72,7 +75,10 @@ def achievements_create(request: Request, body: AchievementCreateRequest, user: 
 @router.patch("/achievements/{ach_id}", summary="编辑成果（owner + 乐观锁 + draft/rejected）")
 def achievement_update(ach_id: int, body: AchievementUpdateRequest, user: dict = Depends(identity)):
     detail = update_achievement(
-        user["userId"], user.get("userNo", ""), ach_id, body.as_dict(),
+        user["userId"],
+        user.get("userNo", ""),
+        ach_id,
+        body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail)
@@ -89,7 +95,10 @@ def _version_body(body: dict):
 def achievement_submit(ach_id: int, body: VersionBody, user: dict = Depends(identity)):
     payload = body.as_dict()
     result = submit_achievement(
-        user["userId"], user.get("userNo", ""), ach_id, _version_body(payload),
+        user["userId"],
+        user.get("userNo", ""),
+        ach_id,
+        _version_body(payload),
         request_id=get_request_id(),
     )
     return success(result)
@@ -99,7 +108,10 @@ def achievement_submit(ach_id: int, body: VersionBody, user: dict = Depends(iden
 def achievement_offline(ach_id: int, body: AchievementOfflineRequest, user: dict = Depends(identity)):
     payload = body.as_dict()
     result = offline_achievement(
-        user["userId"], user.get("userNo", ""), ach_id, _version_body(payload),
+        user["userId"],
+        user.get("userNo", ""),
+        ach_id,
+        _version_body(payload),
         reason=payload.get("reason"),
         reason_code=payload.get("reasonCode"),
         request_id=get_request_id(),

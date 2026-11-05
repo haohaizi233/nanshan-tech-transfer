@@ -18,6 +18,7 @@ AI 成果评价增强 —— 多维评价模型 / 评分算法 / 结果规范化
 兼容映射（LEGACY_SCORE_MAP）：013 四列由多维 1:1 派生写入，保证旧读取方
 （含旧前端）拿到的仍是真实评分，不做假数据回填。
 """
+
 from __future__ import annotations
 
 import json
@@ -26,18 +27,37 @@ from typing import Any
 # ── 维度注册表（顺序即前端展示顺序）────────────────────────────
 # weight 权重和必须为 1.0（有单测守护）；comment 由 LLM 按维生成。
 DIMENSIONS: tuple[dict, ...] = (
-    {"key": "innovation", "label": "创新性", "weight": 0.18,
-     "hint": "技术/模式创新程度、与现有方案的差异化、知识产权布局"},
-    {"key": "techMaturity", "label": "技术成熟度", "weight": 0.22,
-     "hint": "研发阶段、中试/量产可行性、技术指标先进性与稳定性"},
-    {"key": "marketProspect", "label": "市场前景", "weight": 0.20,
-     "hint": "市场规模、应用场景广度、商业化路径与竞争格局"},
-    {"key": "teamStrength", "label": "团队实力", "weight": 0.15,
-     "hint": "团队背景、研发能力、成果转化经验与组织保障"},
-    {"key": "cooperation", "label": "合作可行性", "weight": 0.12,
-     "hint": "合作方式灵活度、转化门槛、投入产出与落地周期"},
-    {"key": "riskAssessment", "label": "风险评估", "weight": 0.13,
-     "hint": "技术/市场/合规/实施风险的可控程度（分越高风险越可控）"},
+    {
+        "key": "innovation",
+        "label": "创新性",
+        "weight": 0.18,
+        "hint": "技术/模式创新程度、与现有方案的差异化、知识产权布局",
+    },
+    {
+        "key": "techMaturity",
+        "label": "技术成熟度",
+        "weight": 0.22,
+        "hint": "研发阶段、中试/量产可行性、技术指标先进性与稳定性",
+    },
+    {
+        "key": "marketProspect",
+        "label": "市场前景",
+        "weight": 0.20,
+        "hint": "市场规模、应用场景广度、商业化路径与竞争格局",
+    },
+    {"key": "teamStrength", "label": "团队实力", "weight": 0.15, "hint": "团队背景、研发能力、成果转化经验与组织保障"},
+    {
+        "key": "cooperation",
+        "label": "合作可行性",
+        "weight": 0.12,
+        "hint": "合作方式灵活度、转化门槛、投入产出与落地周期",
+    },
+    {
+        "key": "riskAssessment",
+        "label": "风险评估",
+        "weight": 0.13,
+        "hint": "技术/市场/合规/实施风险的可控程度（分越高风险越可控）",
+    },
 )
 
 DIMENSION_KEYS: tuple[str, ...] = tuple(d["key"] for d in DIMENSIONS)
@@ -47,10 +67,10 @@ DIMENSION_WEIGHTS: dict[str, float] = {d["key"]: d["weight"] for d in DIMENSIONS
 # 013 Phase C 四列 ← 新维度 1:1 派生（score_tech/score_application/
 # score_maturity/score_feasibility）。列语义见 013 迁移注释。
 LEGACY_SCORE_MAP: dict[str, str] = {
-    "techFeature": "innovation",       # 技术特点 ← 创新性
-    "applyScope": "marketProspect",    # 应用范围 ← 市场前景
-    "maturity": "techMaturity",        # 成熟度 ← 技术成熟度
-    "cooperation": "cooperation",      # 合作可行性 ← 合作可行性
+    "techFeature": "innovation",  # 技术特点 ← 创新性
+    "applyScope": "marketProspect",  # 应用范围 ← 市场前景
+    "maturity": "techMaturity",  # 成熟度 ← 技术成熟度
+    "cooperation": "cooperation",  # 合作可行性 ← 合作可行性
 }
 
 # 等级分档（下界 → (code, label)）
@@ -132,13 +152,15 @@ def _normalize_dimensions(data: dict) -> list[dict]:
                 item = {"score": item}
             else:
                 raise EvaluationDataError(f"dimension missing: {key}")
-        dims.append({
-            "key": key,
-            "label": DIMENSION_LABELS[key],
-            "score": clamp_score(item.get("score")),
-            "weight": DIMENSION_WEIGHTS[key],
-            "comment": _clip(item.get("comment"), MAX_COMMENT_CHARS),
-        })
+        dims.append(
+            {
+                "key": key,
+                "label": DIMENSION_LABELS[key],
+                "score": clamp_score(item.get("score")),
+                "weight": DIMENSION_WEIGHTS[key],
+                "comment": _clip(item.get("comment"), MAX_COMMENT_CHARS),
+            }
+        )
     return dims
 
 
@@ -201,10 +223,7 @@ def assemble_result(normalized: dict) -> dict:
     scores = {d["key"]: d["score"] for d in dimensions}
     total = compute_total(scores)
     rating, rating_label = rating_for(total)
-    legacy = {
-        legacy_key: scores[dim_key]
-        for legacy_key, dim_key in LEGACY_SCORE_MAP.items()
-    }
+    legacy = {legacy_key: scores[dim_key] for legacy_key, dim_key in LEGACY_SCORE_MAP.items()}
     return {
         "dimensions": dimensions,
         "totalScore": total,
@@ -271,14 +290,16 @@ def build_evaluation_view(row: dict) -> dict:
             if not isinstance(item, dict) or item.get("key") not in DIMENSION_LABELS:
                 continue
             score = clamp_score(item.get("score"))
-            dims.append({
-                "key": item["key"],
-                "label": item.get("label") or DIMENSION_LABELS[item["key"]],
-                "score": score,
-                "weight": DIMENSION_WEIGHTS[item["key"]],
-                "starScore": star_for(score),
-                "comment": _clip(item.get("comment"), MAX_COMMENT_CHARS),
-            })
+            dims.append(
+                {
+                    "key": item["key"],
+                    "label": item.get("label") or DIMENSION_LABELS[item["key"]],
+                    "score": score,
+                    "weight": DIMENSION_WEIGHTS[item["key"]],
+                    "starScore": star_for(score),
+                    "comment": _clip(item.get("comment"), MAX_COMMENT_CHARS),
+                }
+            )
         view["dimensions"] = dims
         view["report"] = [s for s in report if isinstance(s, dict)] if isinstance(report, list) else []
     else:

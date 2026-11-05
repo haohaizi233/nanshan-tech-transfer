@@ -9,6 +9,7 @@
 
 内存护栏（M7）：桶按惰性修剪 + 定期全局清扫 + 硬上限，防止大量 IP/key 时无限增长。
 """
+
 import os
 import threading
 import time
@@ -48,6 +49,7 @@ def _is_trusted_proxy(host: str) -> bool:
         if "/" in proxy:
             try:
                 import ipaddress
+
                 if ipaddress.ip_address(normalized) in ipaddress.ip_network(proxy, strict=False):
                     return True
             except ValueError:
@@ -75,7 +77,7 @@ def _check(key: str, limit: int, window_s: int):
         while q and q[0] < cutoff:
             q.popleft()
         if len(q) >= limit:
-            code, message, status = TT_COMMON_42901
+            code, _message, status = TT_COMMON_42901
             raise BizError(code, "操作过于频繁，请稍后再试", status)
         q.append(now)
         _check_counter += 1

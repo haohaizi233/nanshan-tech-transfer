@@ -1,4 +1,4 @@
-﻿"""
+"""
 capital routes — 资本对接只读接口（legacy 兼容层）
 
 DEPRECATED since 2026-09-08: 前端已切统一机构接口 /api/tech-transfer/v1/institutions
@@ -25,6 +25,7 @@ router = APIRouter(tags=["capital"])
 def _deprecated_response(payload: dict, request: Request) -> JSONResponse:
     """legacy 路径响应：附加 Deprecation/Sunset 头，并在服务端日志告警。"""
     import logging
+
     logging.getLogger("nanshan.deprecation").warning(
         "legacy capital route called path=%s ua=%s",
         request.url.path,

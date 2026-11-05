@@ -1,8 +1,9 @@
 """独立进程运行 AI worker，不加载 FastAPI、不占用 8787。
 
-  python tools/run_ai_worker.py --once
-  python tools/run_ai_worker.py
+python tools/run_ai_worker.py --once
+python tools/run_ai_worker.py
 """
+
 from __future__ import annotations
 
 import argparse

@@ -7,16 +7,12 @@ from modules.admin.service import can_claim_unassigned_content, organization_con
 
 
 def main():
-    single, single_params = organization_content_scope(
-        {"isPlatformAdmin": False, "orgId": 17, "userId": 8}, "a"
-    )
+    single, single_params = organization_content_scope({"isPlatformAdmin": False, "orgId": 17, "userId": 8}, "a")
     assert "a.org_id IN (%s)" in single
     assert "organization_membership" in single
     assert single_params == [17, 17]
 
-    predicate, params = organization_content_scope(
-        {"isPlatformAdmin": False, "orgIds": [17, 19], "userId": 8}, "a"
-    )
+    predicate, params = organization_content_scope({"isPlatformAdmin": False, "orgIds": [17, 19], "userId": 8}, "a")
     assert "a.org_id IN (%s,%s)" in predicate
     assert params == [17, 19, 17, 19]
 
@@ -73,7 +69,9 @@ def main():
     try:
         claimed = admin_service.claim_unassigned_content(
             {"isPlatformAdmin": False, "orgId": 17, "userId": 8, "userNo": "U8"},
-            "achievement", 41, 3,
+            "achievement",
+            41,
+            3,
         )
     finally:
         admin_service.get_cursor = original_cursor

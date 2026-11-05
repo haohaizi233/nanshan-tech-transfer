@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Quick smoke test for core modules."""
+
 import sys
 
 sys.path.insert(0, ".")
@@ -11,10 +12,13 @@ with _lock:
     _cache.clear()
 
 call_count = 0
+
+
 def fn():
     global call_count
     call_count += 1
     return "value"
+
 
 r1 = cached(("user", 1), fn)
 r2 = cached(("user", 1), fn)
@@ -44,7 +48,7 @@ for _ in range(3):
     check_user_rate(999, "test", limit=3, window_s=60)
 try:
     check_user_rate(999, "test", limit=3, window_s=60)
-    assert False, "should have raised"
+    raise AssertionError("should have raised")
 except BizError:
     pass
 print("rate_limit: PASSED")

@@ -1,9 +1,10 @@
-﻿"""
+"""
 需求路由 —— /demands CRUD + 状态机
 
 Architecture source: openapi.yaml paths /demands, /demands/{id},
                      /demands/{id}/submit|cancel|close；06-api-design.md §8
 """
+
 from fastapi import APIRouter, Depends, Request
 
 from core.errors import bad_request
@@ -40,7 +41,9 @@ def demands_create(request: Request, body: DemandCreateRequest, user: dict = Dep
     if replay is not None:
         return replay
     detail = create_demand(
-        user["userId"], user.get("userNo", ""), body.as_dict(),
+        user["userId"],
+        user.get("userNo", ""),
+        body.as_dict(),
         request_id=get_request_id(),
     )
     result = success(detail, "创建成功")
@@ -56,7 +59,10 @@ def demand_detail(demand_id: int, user: dict = Depends(optional_identity)):
 @router.patch("/demands/{demand_id}")
 def demand_update(demand_id: int, body: DemandUpdateRequest, user: dict = Depends(identity)):
     detail = update_demand(
-        user["userId"], user.get("userNo", ""), demand_id, body.as_dict(),
+        user["userId"],
+        user.get("userNo", ""),
+        demand_id,
+        body.as_dict(),
         request_id=get_request_id(),
     )
     return success(detail)
@@ -73,7 +79,10 @@ def _version_body(body: dict):
 def demand_submit(demand_id: int, body: VersionBody, user: dict = Depends(identity)):
     payload = body.as_dict()
     result = submit_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(payload),
+        user["userId"],
+        user.get("userNo", ""),
+        demand_id,
+        _version_body(payload),
         request_id=get_request_id(),
     )
     return success(result)
@@ -83,7 +92,12 @@ def demand_submit(demand_id: int, body: VersionBody, user: dict = Depends(identi
 def demand_cancel(demand_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
     payload = body.as_dict()
     result = cancel_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(payload), payload.get("reasonCode"), payload.get("reasonNote"),
+        user["userId"],
+        user.get("userNo", ""),
+        demand_id,
+        _version_body(payload),
+        payload.get("reasonCode"),
+        payload.get("reasonNote"),
         request_id=get_request_id(),
     )
     return success(result)
@@ -93,7 +107,12 @@ def demand_cancel(demand_id: int, body: ReasonVersionBody, user: dict = Depends(
 def demand_close(demand_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
     payload = body.as_dict()
     result = close_demand(
-        user["userId"], user.get("userNo", ""), demand_id, _version_body(payload), payload.get("reasonCode"), payload.get("reasonNote"),
+        user["userId"],
+        user.get("userNo", ""),
+        demand_id,
+        _version_body(payload),
+        payload.get("reasonCode"),
+        payload.get("reasonNote"),
         request_id=get_request_id(),
     )
     return success(result)

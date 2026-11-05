@@ -23,8 +23,7 @@ import psycopg2.extras
 import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
-DB = dict(host="127.0.0.1", port=5432, user="postgres", password="postgres123",
-          dbname="tech_transfer")
+DB = {"host": "127.0.0.1", "port": 5432, "user": "postgres", "password": "postgres123", "dbname": "tech_transfer"}
 PASS = 0
 FAIL = 0
 
@@ -80,10 +79,13 @@ h_b = {"Authorization": f"Bearer {token_b}"}
 print(f"[0] admin={user_admin['userId']} A={user_a['userId']} B={user_b['userId']}\n")
 
 # 对接发起方的联系方式来自用户资料快照；为可重复验证，给测试账号补齐资料。
-profile_b_before = db_one(
-    "SELECT display_name, phone, email, wechat, org_title FROM user_profile WHERE user_id=%s",
-    (user_b["userId"],),
-) or {}
+profile_b_before = (
+    db_one(
+        "SELECT display_name, phone, email, wechat, org_title FROM user_profile WHERE user_id=%s",
+        (user_b["userId"],),
+    )
+    or {}
+)
 db_exec(
     """
     UPDATE user_profile
@@ -124,14 +126,25 @@ print(f"[0] org_id={org_id} cat_id={cat_id}\n")
 
 
 # ══ 1. Admin 代发布（成果，owner 留空） ════════════════════════
-resp = requests.post(f"{BASE}/admin/achievements", headers=h_admin, json={
-    "title": ACH_TITLES[0], "categoryId": cat_id, "orgId": org_id,
-    "maturityLevel": "03_pilot_ready", "pricingMode": "negotiable",
-    "techIntro": "平台代录成果简介", "sourceOrgName": ORG_NAME,
-    "contactName": "机构联系人", "contactTitle": "技术转移办主任",
-    "contactPhone": "13911112222", "contactEmail": "org-assist@example.com",
-    "cooperationPolicy": "exclusive",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/achievements",
+    headers=h_admin,
+    json={
+        "title": ACH_TITLES[0],
+        "categoryId": cat_id,
+        "orgId": org_id,
+        "maturityLevel": "03_pilot_ready",
+        "pricingMode": "negotiable",
+        "techIntro": "平台代录成果简介",
+        "sourceOrgName": ORG_NAME,
+        "contactName": "机构联系人",
+        "contactTitle": "技术转移办主任",
+        "contactPhone": "13911112222",
+        "contactEmail": "org-assist@example.com",
+        "cooperationPolicy": "exclusive",
+    },
+    timeout=10,
+)
 check("代录成果=201", resp.status_code == 201, f"got {resp.status_code} {resp.text[:150]}")
 ach = resp.json()["data"]
 ach_id = ach["id"]
@@ -140,20 +153,22 @@ check("ownerUserId=null", ach.get("ownerUserId") is None, str(ach.get("ownerUser
 
 row = db_one("SELECT owner_user_id, created_by_user_id, status FROM achievement WHERE id=%s", (ach_id,))
 check("DB owner=NULL", row["owner_user_id"] is None, str(row["owner_user_id"]))
-check("DB created_by=admin", row["created_by_user_id"] == user_admin["userId"],
-      f"created_by={row['created_by_user_id']} admin={user_admin['userId']}")
+check(
+    "DB created_by=admin",
+    row["created_by_user_id"] == user_admin["userId"],
+    f"created_by={row['created_by_user_id']} admin={user_admin['userId']}",
+)
 check("初始状态=draft", row["status"] == "draft", row["status"])
 
 # admin submit（代无账号内容提交审核）→ approve → published
-resp = requests.post(f"{BASE}/admin/achievements/{ach_id}/submit", headers=h_admin,
-                     json={"version": ach["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/achievements/{ach_id}/submit", headers=h_admin, json={"version": ach["version"]}, timeout=10
+)
 check("admin submit=200", resp.status_code == 200, f"got {resp.status_code} {resp.text[:150]}")
-check("submit后=pending_review", resp.json()["data"]["status"] == "pending_review",
-      resp.text[:100])
+check("submit后=pending_review", resp.json()["data"]["status"] == "pending_review", resp.text[:100])
 
 v = requests.get(f"{BASE}/admin/achievements/{ach_id}", headers=h_admin, timeout=10).json()["data"]["version"]
-resp = requests.post(f"{BASE}/admin/achievements/{ach_id}/approve", headers=h_admin,
-                     json={"version": v}, timeout=10)
+resp = requests.post(f"{BASE}/admin/achievements/{ach_id}/approve", headers=h_admin, json={"version": v}, timeout=10)
 check("approve=200", resp.status_code == 200, resp.text[:150])
 check("approve后=published", resp.json()["data"]["status"] == "published", resp.text[:100])
 print()
@@ -169,16 +184,32 @@ check("未接受前姓名脱敏", pub.get("contactName") == "机**", str(pub.get
 print()
 
 # ══ 2. 用户发起对接 → 自动 assisted ═══════════════════════════
-resp = requests.post(f"{BASE}/cooperations", headers=h_b, json={
-    "targetType": "achievement", "targetId": ach_id, "intentType": "purchase",
-    "message": "希望购买该成果", "contactShareConsent": False,
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations",
+    headers=h_b,
+    json={
+        "targetType": "achievement",
+        "targetId": ach_id,
+        "intentType": "purchase",
+        "message": "希望购买该成果",
+        "contactShareConsent": False,
+    },
+    timeout=10,
+)
 check("拒绝联系方式共享=400", resp.status_code == 400, f"got {resp.status_code} {resp.text[:100]}")
 
-resp = requests.post(f"{BASE}/cooperations", headers=h_a, json={
-    "targetType": "achievement", "targetId": ach_id, "intentType": "purchase",
-    "message": "协助对接测试意向", "contactShareConsent": True,
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations",
+    headers=h_a,
+    json={
+        "targetType": "achievement",
+        "targetId": ach_id,
+        "intentType": "purchase",
+        "message": "协助对接测试意向",
+        "contactShareConsent": True,
+    },
+    timeout=10,
+)
 check("发起意向=201", resp.status_code == 201, f"got {resp.status_code} {resp.text[:150]}")
 intent_a = resp.json()["data"]
 intent_id_a = intent_a["id"]
@@ -186,13 +217,14 @@ check("handlingMode=assisted", intent_a.get("handlingMode") == "assisted", str(i
 check("assistStatus=queued", intent_a.get("assistStatus") == "queued", str(intent_a.get("assistStatus")))
 check("acceptMode=null", intent_a.get("acceptMode") is None, str(intent_a.get("acceptMode")))
 check("platformAssisted=true", intent_a.get("platformAssisted") is True)
-check("对方展示=机构名", intent_a.get("counterpartDisplayName") == ORG_NAME,
-      str(intent_a.get("counterpartDisplayName")))
+check(
+    "对方展示=机构名", intent_a.get("counterpartDisplayName") == ORG_NAME, str(intent_a.get("counterpartDisplayName"))
+)
 check("targetOwnerUserId=null", intent_a.get("targetOwnerUserId") is None)
 
 row = db_one(
-    "SELECT initiator_contact_snapshot, contact_share_consent_at, target_org_id "
-    "FROM cooperation_intent WHERE id=%s", (intent_id_a,)
+    "SELECT initiator_contact_snapshot, contact_share_consent_at, target_org_id FROM cooperation_intent WHERE id=%s",
+    (intent_id_a,),
 )
 snap = row["initiator_contact_snapshot"]
 check("联系方式快照已落库", isinstance(snap, dict) and "displayName" in snap, str(snap)[:100])
@@ -201,64 +233,112 @@ check("target_org_id=机构", row["target_org_id"] == org_id, str(row["target_or
 print()
 
 # B 也发起（auto-reject 测试素材）
-resp = requests.post(f"{BASE}/cooperations", headers=h_b, json={
-    "targetType": "achievement", "targetId": ach_id, "intentType": "license",
-    "message": "B 的协助意向", "contactShareConsent": True,
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations",
+    headers=h_b,
+    json={
+        "targetType": "achievement",
+        "targetId": ach_id,
+        "intentType": "license",
+        "message": "B 的协助意向",
+        "contactShareConsent": True,
+    },
+    timeout=10,
+)
 intent_b = resp.json()["data"]
 intent_id_b = intent_b["id"]
 check("B 发起=201（同目标多意向允许）", resp.status_code == 201, resp.text[:150])
 
 # ══ 3. 普通用户无法代目标方操作（防探测 404） ═════════════════
-resp = requests.post(f"{BASE}/cooperations/{intent_id_a}/accept", headers=h_a,
-                     json={"version": intent_a["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations/{intent_id_a}/accept", headers=h_a, json={"version": intent_a["version"]}, timeout=10
+)
 check("发起方A尝试accept=404", resp.status_code == 404, f"got {resp.status_code}")
 check("错误码TT_COOP_40401", resp.json().get("code") == "TT_COOP_40401", resp.text[:100])
 
-resp = requests.post(f"{BASE}/cooperations/{intent_id_a}/reject", headers=h_b,
-                     json={"version": 1, "reason": "x"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations/{intent_id_a}/reject", headers=h_b, json={"version": 1, "reason": "x"}, timeout=10
+)
 check("无关用户B尝试reject=404", resp.status_code == 404, f"got {resp.status_code}")
 print()
 
 # ══ 4. assist_status 流转校验 ═════════════════════════════════
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-status", headers=h_admin,
-                     json={"assistStatus": "target_agreed"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "target_agreed"},
+    timeout=10,
+)
 check("queued跳步target_agreed=409", resp.status_code == 409, f"got {resp.status_code} {resp.text[:120]}")
 
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-status", headers=h_admin,
-                     json={"assistStatus": "bad_value"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "bad_value"},
+    timeout=10,
+)
 check("非法assistStatus=400", resp.status_code == 400, f"got {resp.status_code}")
 
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-status", headers=h_admin,
-                     json={"assistStatus": "contacting", "note": "电话已接通"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "contacting", "note": "电话已接通"},
+    timeout=10,
+)
 check("queued→contacting=200", resp.status_code == 200, f"got {resp.status_code} {resp.text[:120]}")
 
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-status", headers=h_admin,
-                     json={"assistStatus": "waiting_reply"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "waiting_reply"},
+    timeout=10,
+)
 check("contacting→waiting_reply=200", resp.status_code == 200, resp.text[:120])
 
 # ══ 5. 代 accept 前置校验 ═════════════════════════════════════
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition", headers=h_admin,
-                     json={"action": "accept", "version": intent_a["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition",
+    headers=h_admin,
+    json={"action": "accept", "version": intent_a["version"]},
+    timeout=10,
+)
 check("未target_agreed代accept=400", resp.status_code == 400, f"got {resp.status_code} {resp.text[:150]}")
 
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-status", headers=h_admin,
-                     json={"assistStatus": "target_agreed", "note": "机构邮件确认同意"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "target_agreed", "note": "机构邮件确认同意"},
+    timeout=10,
+)
 check("waiting_reply→target_agreed=200", resp.status_code == 200, resp.text[:120])
 
 # target_agreed 但没带 confirmationNote → 400（强制确认依据）
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition", headers=h_admin,
-                     json={"action": "accept", "version": intent_a["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition",
+    headers=h_admin,
+    json={"action": "accept", "version": intent_a["version"]},
+    timeout=10,
+)
 check("target_agreed无confirmationNote=400", resp.status_code == 400, f"got {resp.status_code} {resp.text[:150]}")
 check("错误码TT_COMMON_40001", resp.json().get("code") == "TT_COMMON_40001", resp.text[:100])
 
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition", headers=h_admin,
-                     json={"action": "accept", "version": intent_a["version"],
-                           "confirmationNote": "2026-09-07 电话联系李老师，对方确认愿意进一步对接"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition",
+    headers=h_admin,
+    json={
+        "action": "accept",
+        "version": intent_a["version"],
+        "confirmationNote": "2026-09-07 电话联系李老师，对方确认愿意进一步对接",
+    },
+    timeout=10,
+)
 check("代accept=200", resp.status_code == 200, f"got {resp.status_code} {resp.text[:150]}")
 check("代accept后status=accepted", resp.json()["data"]["status"] == "accepted", resp.text[:100])
-check("acceptMode=platform_assisted", resp.json()["data"]["acceptMode"] == "platform_assisted",
-      str(resp.json()["data"].get("acceptMode")))
+check(
+    "acceptMode=platform_assisted",
+    resp.json()["data"]["acceptMode"] == "platform_assisted",
+    str(resp.json()["data"].get("acceptMode")),
+)
 
 row = db_one("SELECT handled_by_user_id, accepted_at FROM cooperation_intent WHERE id=%s", (intent_id_a,))
 check("handled_by=admin", row["handled_by_user_id"] == user_admin["userId"], str(row["handled_by_user_id"]))
@@ -279,8 +359,10 @@ check("A详情assistStatus=target_agreed", detail.get("assistStatus") == "target
 # ══ 7. auto-reject 副作用 ═════════════════════════════════════
 detail_b = requests.get(f"{BASE}/cooperations/{intent_id_b}", headers=h_b, timeout=10).json()["data"]
 check("B 意向被自动拒绝", detail_b.get("status") == "rejected", str(detail_b.get("status")))
-ev_types = [e["eventType"] for e in requests.get(
-    f"{BASE}/cooperations/{intent_id_b}/events", headers=h_b, timeout=10).json()["data"]["list"]]
+ev_types = [
+    e["eventType"]
+    for e in requests.get(f"{BASE}/cooperations/{intent_id_b}/events", headers=h_b, timeout=10).json()["data"]["list"]
+]
 check("B 事件含auto_rejected", "auto_rejected" in ev_types, str(ev_types))
 print()
 
@@ -295,47 +377,84 @@ check("platform_admin操作留痕>=3", len(admin_events) >= 3, f"got {len(admin_
 print()
 
 # ══ 9. 协助驳回路径（需求侧） ═════════════════════════════════
-resp = requests.post(f"{BASE}/admin/demands", headers=h_admin, json={
-    "title": DMD_TITLES[0], "categoryId": 1, "orgId": org_id,
-    "description": "代录需求描述", "contactPhone": "13733334444", "contactName": "需求联系人",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/demands",
+    headers=h_admin,
+    json={
+        "title": DMD_TITLES[0],
+        "categoryId": 1,
+        "orgId": org_id,
+        "description": "代录需求描述",
+        "contactPhone": "13733334444",
+        "contactName": "需求联系人",
+    },
+    timeout=10,
+)
 check("代录需求=201", resp.status_code == 201, f"got {resp.status_code} {resp.text[:150]}")
 dmd = resp.json()["data"]
 dmd_id = dmd["id"]
 check("代录需求platformAssisted=true", dmd.get("platformAssisted") is True)
 
-resp = requests.post(f"{BASE}/admin/demands/{dmd_id}/submit", headers=h_admin,
-                     json={"version": dmd["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/demands/{dmd_id}/submit", headers=h_admin, json={"version": dmd["version"]}, timeout=10
+)
 check("需求admin submit=200", resp.status_code == 200, resp.text[:120])
 v = requests.get(f"{BASE}/admin/demands/{dmd_id}", headers=h_admin, timeout=10).json()["data"]["version"]
-resp = requests.post(f"{BASE}/admin/demands/{dmd_id}/approve", headers=h_admin,
-                     json={"version": v}, timeout=10)
-check("需求approve=published", resp.status_code == 200 and resp.json()["data"]["status"] == "published",
-      resp.text[:120])
+resp = requests.post(f"{BASE}/admin/demands/{dmd_id}/approve", headers=h_admin, json={"version": v}, timeout=10)
+check(
+    "需求approve=published", resp.status_code == 200 and resp.json()["data"]["status"] == "published", resp.text[:120]
+)
 
-resp = requests.post(f"{BASE}/cooperations", headers=h_a, json={
-    "targetType": "demand", "targetId": dmd_id, "intentType": "provide_solution",
-    "message": "提供方案", "contactShareConsent": True,
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations",
+    headers=h_a,
+    json={
+        "targetType": "demand",
+        "targetId": dmd_id,
+        "intentType": "provide_solution",
+        "message": "提供方案",
+        "contactShareConsent": True,
+    },
+    timeout=10,
+)
 d_intent = resp.json()["data"]
 d_intent_id = d_intent["id"]
-check("需求侧assisted=queued", d_intent.get("handlingMode") == "assisted"
-      and d_intent.get("assistStatus") == "queued", str(d_intent.get("assistStatus")))
+check(
+    "需求侧assisted=queued",
+    d_intent.get("handlingMode") == "assisted" and d_intent.get("assistStatus") == "queued",
+    str(d_intent.get("assistStatus")),
+)
 
 # 代 reject：无需 target_rejected 前置但必填 reason
-resp = requests.post(f"{BASE}/admin/cooperations/{d_intent_id}/assist-transition", headers=h_admin,
-                     json={"action": "reject", "version": d_intent["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{d_intent_id}/assist-transition",
+    headers=h_admin,
+    json={"action": "reject", "version": d_intent["version"]},
+    timeout=10,
+)
 check("代reject缺reason=400", resp.status_code == 400, f"got {resp.status_code}")
 
-resp = requests.post(f"{BASE}/admin/cooperations/{d_intent_id}/assist-status", headers=h_admin,
-                     json={"assistStatus": "contacting"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{d_intent_id}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "contacting"},
+    timeout=10,
+)
 check("queued→contacting=200", resp.status_code == 200, resp.text[:100])
-resp = requests.post(f"{BASE}/admin/cooperations/{d_intent_id}/assist-status", headers=h_admin,
-                     json={"assistStatus": "target_rejected", "note": "机构暂无对接意愿"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{d_intent_id}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "target_rejected", "note": "机构暂无对接意愿"},
+    timeout=10,
+)
 check("contacting→target_rejected=200", resp.status_code == 200, resp.text[:100])
 
-resp = requests.post(f"{BASE}/admin/cooperations/{d_intent_id}/assist-transition", headers=h_admin,
-                     json={"action": "reject", "version": d_intent["version"], "reason": "机构明确拒绝"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{d_intent_id}/assist-transition",
+    headers=h_admin,
+    json={"action": "reject", "version": d_intent["version"], "reason": "机构明确拒绝"},
+    timeout=10,
+)
 check("代reject=200", resp.status_code == 200, f"got {resp.status_code} {resp.text[:150]}")
 check("代reject后status=rejected", resp.json()["data"]["status"] == "rejected", resp.text[:100])
 
@@ -344,23 +463,46 @@ pub = requests.get(f"{BASE}/demands/{dmd_id}", headers=h_a, timeout=10).json()["
 check("驳回后电话仍脱敏", pub.get("contactPhone") == "137****4444", str(pub.get("contactPhone")))
 
 # 驳回后（终态）可重新发起 + 发起方可主动撤回
-resp = requests.post(f"{BASE}/cooperations", headers=h_a, json={
-    "targetType": "demand", "targetId": dmd_id, "intentType": "provide_service",
-    "message": "重新发起", "contactShareConsent": True,
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations",
+    headers=h_a,
+    json={
+        "targetType": "demand",
+        "targetId": dmd_id,
+        "intentType": "provide_service",
+        "message": "重新发起",
+        "contactShareConsent": True,
+    },
+    timeout=10,
+)
 check("终态后可重新发起", resp.status_code == 201, f"got {resp.status_code} {resp.text[:120]}")
 d2 = resp.json()["data"]
-resp = requests.post(f"{BASE}/cooperations/{d2['id']}/cancel", headers=h_a,
-                     json={"version": d2["version"], "reason": "我方计划变更"}, timeout=10)
-check("发起方撤回=200", resp.status_code == 200 and resp.json()["data"]["status"] == "cancelled",
-      f"got {resp.status_code} {resp.text[:120]}")
+resp = requests.post(
+    f"{BASE}/cooperations/{d2['id']}/cancel",
+    headers=h_a,
+    json={"version": d2["version"], "reason": "我方计划变更"},
+    timeout=10,
+)
+check(
+    "发起方撤回=200",
+    resp.status_code == 200 and resp.json()["data"]["status"] == "cancelled",
+    f"got {resp.status_code} {resp.text[:120]}",
+)
 print()
 
 # ══ 10. direct 模式回归 ═══════════════════════════════════════
-resp = requests.post(f"{BASE}/demands", headers=h_a, json={
-    "title": DMD_TITLES[1], "description": "直连需求",
-    "orgName": ORG_NAME, "contactPhone": "13855556666", "contactName": "A",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=h_a,
+    json={
+        "title": DMD_TITLES[1],
+        "description": "直连需求",
+        "orgName": ORG_NAME,
+        "contactPhone": "13855556666",
+        "contactName": "A",
+    },
+    timeout=10,
+)
 d_direct = resp.json()["data"]
 d_direct_id = d_direct["id"]
 v = requests.get(f"{BASE}/demands/{d_direct_id}", headers=h_a, timeout=10).json()["data"]["version"]
@@ -368,10 +510,18 @@ requests.post(f"{BASE}/demands/{d_direct_id}/submit", headers=h_a, json={"versio
 v = requests.get(f"{BASE}/demands/{d_direct_id}", headers=h_a, timeout=10).json()["data"]["version"]
 requests.post(f"{BASE}/admin/demands/{d_direct_id}/approve", headers=h_admin, json={"version": v}, timeout=10)
 
-resp = requests.post(f"{BASE}/cooperations", headers=h_b, json={
-    "targetType": "demand", "targetId": d_direct_id, "intentType": "provide_achievement",
-    "message": "直连模式", "contactShareConsent": True,
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations",
+    headers=h_b,
+    json={
+        "targetType": "demand",
+        "targetId": d_direct_id,
+        "intentType": "provide_achievement",
+        "message": "直连模式",
+        "contactShareConsent": True,
+    },
+    timeout=10,
+)
 direct = resp.json()["data"]
 check("direct意向handlingMode=direct", direct.get("handlingMode") == "direct", str(direct.get("handlingMode")))
 check("direct意向assistStatus=null", direct.get("assistStatus") is None, str(direct.get("assistStatus")))
@@ -379,60 +529,93 @@ check("direct意向assistStatus=null", direct.get("assistStatus") is None, str(d
 # pending：接收方可直接联系发起方；发起方仍不可见发布方明文
 pending_target = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_a, timeout=10).json()["data"]
 pending_initiator = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_b, timeout=10).json()["data"]
-check("pending接收方可见发起方联系人", pending_target.get("counterpartContact", {}).get("masked") is False
-      and "*" not in (pending_target.get("counterpartContact", {}).get("phone") or ""),
-      str(pending_target.get("counterpartContact")))
-check("pending发起方联系人仍脱敏", pending_initiator.get("counterpartContact", {}).get("masked") is True
-      and "*" in (pending_initiator.get("counterpartContact", {}).get("phone") or ""),
-      str(pending_initiator.get("counterpartContact")))
+check(
+    "pending接收方可见发起方联系人",
+    pending_target.get("counterpartContact", {}).get("masked") is False
+    and "*" not in (pending_target.get("counterpartContact", {}).get("phone") or ""),
+    str(pending_target.get("counterpartContact")),
+)
+check(
+    "pending发起方联系人仍脱敏",
+    pending_initiator.get("counterpartContact", {}).get("masked") is True
+    and "*" in (pending_initiator.get("counterpartContact", {}).get("phone") or ""),
+    str(pending_initiator.get("counterpartContact")),
+)
 
 # pending 阶段目标方不可撤回他人申请（应使用 reject）
-resp = requests.post(f"{BASE}/cooperations/{direct['id']}/cancel", headers=h_a,
-                     json={"version": direct["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations/{direct['id']}/cancel", headers=h_a, json={"version": direct["version"]}, timeout=10
+)
 check("pending目标方cancel=403", resp.status_code == 403, f"got {resp.status_code} {resp.text[:120]}")
 
 # 目标方（A）自行 accept → acceptMode=self
-resp = requests.post(f"{BASE}/cooperations/{direct['id']}/accept", headers=h_a,
-                     json={"version": direct["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/cooperations/{direct['id']}/accept", headers=h_a, json={"version": direct["version"]}, timeout=10
+)
 check("A 自行accept=200", resp.status_code == 200, f"got {resp.status_code} {resp.text[:120]}")
-check("acceptMode=self", resp.json()["data"].get("acceptMode") == "self",
-      str(resp.json()["data"].get("acceptMode")))
+check("acceptMode=self", resp.json()["data"].get("acceptMode") == "self", str(resp.json()["data"].get("acceptMode")))
 
 accepted_target = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_a, timeout=10).json()["data"]
 accepted_initiator = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_b, timeout=10).json()["data"]
-check("accepted双方联系人解锁", accepted_target.get("counterpartContact", {}).get("masked") is False
-      and accepted_initiator.get("counterpartContact", {}).get("masked") is False,
-      f"target={accepted_target.get('counterpartContact')} initiator={accepted_initiator.get('counterpartContact')}")
+check(
+    "accepted双方联系人解锁",
+    accepted_target.get("counterpartContact", {}).get("masked") is False
+    and accepted_initiator.get("counterpartContact", {}).get("masked") is False,
+    f"target={accepted_target.get('counterpartContact')} initiator={accepted_initiator.get('counterpartContact')}",
+)
 
-resp = requests.post(f"{BASE}/cooperations/{direct['id']}/cancel", headers=h_b,
-                     json={"version": accepted_initiator["version"], "reason": "验证终态重新脱敏"}, timeout=10)
-check("accepted发起方取消=200", resp.status_code == 200 and resp.json()["data"]["status"] == "cancelled",
-      f"got {resp.status_code} {resp.text[:120]}")
+resp = requests.post(
+    f"{BASE}/cooperations/{direct['id']}/cancel",
+    headers=h_b,
+    json={"version": accepted_initiator["version"], "reason": "验证终态重新脱敏"},
+    timeout=10,
+)
+check(
+    "accepted发起方取消=200",
+    resp.status_code == 200 and resp.json()["data"]["status"] == "cancelled",
+    f"got {resp.status_code} {resp.text[:120]}",
+)
 cancelled_target = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_a, timeout=10).json()["data"]
 cancelled_initiator = requests.get(f"{BASE}/cooperations/{direct['id']}", headers=h_b, timeout=10).json()["data"]
-check("cancelled双方联系人重新脱敏", cancelled_target.get("counterpartContact", {}).get("masked") is True
-      and cancelled_initiator.get("counterpartContact", {}).get("masked") is True,
-      f"target={cancelled_target.get('counterpartContact')} initiator={cancelled_initiator.get('counterpartContact')}")
+check(
+    "cancelled双方联系人重新脱敏",
+    cancelled_target.get("counterpartContact", {}).get("masked") is True
+    and cancelled_initiator.get("counterpartContact", {}).get("masked") is True,
+    f"target={cancelled_target.get('counterpartContact')} initiator={cancelled_initiator.get('counterpartContact')}",
+)
 
 # admin 对 direct 意向代操作=400
-resp = requests.post(f"{BASE}/admin/cooperations/{direct['id']}/assist-status", headers=h_admin,
-                     json={"assistStatus": "contacting"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{direct['id']}/assist-status",
+    headers=h_admin,
+    json={"assistStatus": "contacting"},
+    timeout=10,
+)
 check("admin对direct意向改阶段=400", resp.status_code == 400, f"got {resp.status_code} {resp.text[:120]}")
 
 # ══ 11. admin submit 边界：有归属用户的内容不可代提交 ═════════
-resp = requests.post(f"{BASE}/demands", headers=h_a, json={
-    "title": DMD_TITLES[2], "description": "归属用户草稿",
-    "contactPhone": "13677778888", "contactName": "A",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=h_a,
+    json={
+        "title": DMD_TITLES[2],
+        "description": "归属用户草稿",
+        "contactPhone": "13677778888",
+        "contactName": "A",
+    },
+    timeout=10,
+)
 d_own = resp.json()["data"]
-resp = requests.post(f"{BASE}/admin/demands/{d_own['id']}/submit", headers=h_admin,
-                     json={"version": d_own["version"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/demands/{d_own['id']}/submit", headers=h_admin, json={"version": d_own["version"]}, timeout=10
+)
 check("有归属用户内容代submit=400", resp.status_code == 400, f"got {resp.status_code} {resp.text[:120]}")
 print()
 
 # ══ 12. admin 列表筛选 + 详情 assist 字段 ═════════════════════
-resp = requests.get(f"{BASE}/admin/cooperations", headers=h_admin,
-                    params={"handlingMode": "assisted", "pageSize": 50}, timeout=10)
+resp = requests.get(
+    f"{BASE}/admin/cooperations", headers=h_admin, params={"handlingMode": "assisted", "pageSize": 50}, timeout=10
+)
 check("handlingMode=assisted筛选=200", resp.status_code == 200)
 items = resp.json()["data"]["list"]
 match = next((i for i in items if i["id"] == intent_id_a), None)
@@ -443,38 +626,48 @@ if match:
     check("列表项含assistNote", match.get("assistNote") is not None)
     check("列表项含contactShareConsentAt", match.get("contactShareConsentAt") is not None)
 
-resp = requests.get(f"{BASE}/admin/cooperations", headers=h_admin,
-                    params={"handlingMode": "direct", "pageSize": 50}, timeout=10)
+resp = requests.get(
+    f"{BASE}/admin/cooperations", headers=h_admin, params={"handlingMode": "direct", "pageSize": 50}, timeout=10
+)
 check("direct筛选不含A意向", all(i["id"] != intent_id_a for i in resp.json()["data"]["list"]))
 
 resp = requests.get(f"{BASE}/admin/cooperations/{intent_id_a}", headers=h_admin, timeout=10)
 check("admin详情=200", resp.status_code == 200)
 cd = resp.json()["data"]
 check("详情含handledByUserId", cd.get("handledByUserId") == user_admin["userId"])
-check("详情快照含displayName", isinstance(cd.get("initiatorContact"), dict)
-      and "displayName" in cd["initiatorContact"])
+check("详情快照含displayName", isinstance(cd.get("initiatorContact"), dict) and "displayName" in cd["initiatorContact"])
 
 # ══ 13. 审计留痕 ═════════════════════════════════════════════
-resp = requests.get(f"{BASE}/admin/audit-logs", headers=h_admin,
-                    params={"targetType": "cooperation_intent", "pageSize": 50}, timeout=10)
+resp = requests.get(
+    f"{BASE}/admin/audit-logs", headers=h_admin, params={"targetType": "cooperation_intent", "pageSize": 50}, timeout=10
+)
 actions = {i["action"] for i in resp.json()["data"]["list"]}
 check("审计含cooperation.assist_status", "cooperation.assist_status" in actions, str(actions))
 check("审计含cooperation.admin_accept", "cooperation.admin_accept" in actions, str(actions))
 check("审计含cooperation.admin_reject", "cooperation.admin_reject" in actions, str(actions))
 
-resp = requests.get(f"{BASE}/admin/audit-logs", headers=h_admin,
-                    params={"targetType": "achievement", "pageSize": 50}, timeout=10)
+resp = requests.get(
+    f"{BASE}/admin/audit-logs", headers=h_admin, params={"targetType": "achievement", "pageSize": 50}, timeout=10
+)
 actions = {i["action"] for i in resp.json()["data"]["list"]}
 check("审计含achievement.admin_submit", "achievement.admin_submit" in actions, str(actions))
 check("审计含achievement.admin_create", "achievement.admin_create" in actions, str(actions))
 print()
 
 # ══ 14. 非管理员不可操作协助接口 ══════════════════════════════
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-status", headers=h_a,
-                     json={"assistStatus": "contacting"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-status",
+    headers=h_a,
+    json={"assistStatus": "contacting"},
+    timeout=10,
+)
 check("普通用户assist-status=403", resp.status_code == 403, f"got {resp.status_code}")
-resp = requests.post(f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition", headers=h_a,
-                     json={"action": "cancel", "version": 99}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/cooperations/{intent_id_a}/assist-transition",
+    headers=h_a,
+    json={"action": "cancel", "version": 99},
+    timeout=10,
+)
 check("普通用户assist-transition=403", resp.status_code == 403, f"got {resp.status_code}")
 
 # ── 清理（事件→意向→需求/成果→机构；audit_log 为追加型证据保留） ──
@@ -496,9 +689,14 @@ db_exec(
     SET display_name=%s, phone=%s, email=%s, wechat=%s, org_title=%s
     WHERE user_id=%s
     """,
-    (profile_b_before.get("display_name"), profile_b_before.get("phone"),
-     profile_b_before.get("email"), profile_b_before.get("wechat"),
-     profile_b_before.get("org_title"), user_b["userId"]),
+    (
+        profile_b_before.get("display_name"),
+        profile_b_before.get("phone"),
+        profile_b_before.get("email"),
+        profile_b_before.get("wechat"),
+        profile_b_before.get("org_title"),
+        user_b["userId"],
+    ),
 )
 
 row = db_one(

@@ -15,6 +15,7 @@ queued（前端"排队中"）。本模块把执行接入服务进程本身：
    - 后台清理线程定时巡检 + 任务创建/查询路径上的机会式清理双保险；
    - GET 轮询对未过期的 queued 任务补偿提交（进程重启后遗留任务可被重新唤起）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -71,7 +72,9 @@ def ensure_started() -> None:
             return
         for index in range(MAX_WORKERS):
             threading.Thread(
-                target=_worker_loop, name=f"ai-eval-executor-{index}", daemon=True,
+                target=_worker_loop,
+                name=f"ai-eval-executor-{index}",
+                daemon=True,
             ).start()
         threading.Thread(target=_reap_loop, name="ai-eval-reaper", daemon=True).start()
         _started = True
@@ -130,7 +133,9 @@ def _execute(task_id: int) -> None:
         if done.is_set():
             return
         logger.warning(
-            "ai evaluation task=%s timed out after %ss", task_id, EXECUTION_TIMEOUT_SECONDS,
+            "ai evaluation task=%s timed out after %ss",
+            task_id,
+            EXECUTION_TIMEOUT_SECONDS,
         )
         try:
             worker._fail(task_id, TIMEOUT_REASON)

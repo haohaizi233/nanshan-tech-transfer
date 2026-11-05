@@ -6,6 +6,7 @@ Provides:
 - Auth token generation helpers
 - Common test data factories
 """
+
 import os
 import sys
 import time
@@ -16,6 +17,30 @@ import pytest
 
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.dirname(__file__))
+
+# 以下脚本是需要本地启动后端(127.0.0.1:8787)+数据库的集成/联调脚本，
+# 在 import 阶段就会建真实连接，pytest 收集即失败，故不纳入自动收集：
+# - test_interaction_api.py 另含清理 SQL，永久停用（见文件内保护）
+# 其余脚本请在本地环境手动运行。
+collect_ignore = [
+    "test_interaction_api.py",
+    "test_achievement_api.py",
+    "test_achievement_write_api.py",
+    "test_admin_api.py",
+    "test_ai_api.py",
+    "test_ai_chat_history.py",
+    "test_assisted_cooperation.py",
+    "test_chain.py",
+    "test_db_hardening.py",
+    "test_db_session.py",
+    "test_demand_api.py",
+    "test_error_contract.py",
+    "test_evaluation_api.py",
+    "test_identity_flexibility.py",
+    "test_institution_api.py",
+    "test_isolation.py",
+    "test_search_api.py",
+]
 
 # Force local/test environment before any config import
 os.environ.setdefault("APP_ENV", "local")
@@ -78,6 +103,7 @@ def mock_get_conn(mock_conn):
 @pytest.fixture
 def make_token():
     """Factory fixture: generate a valid JWT access token."""
+
     def _make(user_id=1, user_no="U001", roles=None, token_type="access", expired=False):
         if roles is None:
             roles = ["user"]
@@ -91,15 +117,18 @@ def make_token():
             "exp": now - 3600 if expired else now + settings.ACCESS_TOKEN_EXPIRES,
         }
         return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
     return _make
 
 
 @pytest.fixture
 def auth_headers(make_token):
     """Factory fixture: produce Authorization headers for a given user."""
+
     def _make(user_id=1, user_no="U001", roles=None):
         token = make_token(user_id=user_id, user_no=user_no, roles=roles)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
 
 
@@ -116,11 +145,12 @@ def app_client():
     from fastapi.testclient import TestClient
 
     # Mock DB pool init to avoid real connections
-    with patch("db.init_pool"), \
-         patch("db.close_pool"), \
-         patch("db.get_cursor") as mock_gc, \
-         patch("db.get_conn") as mock_gconn:
-
+    with (
+        patch("db.init_pool"),
+        patch("db.close_pool"),
+        patch("db.get_cursor") as mock_gc,
+        patch("db.get_conn") as mock_gconn,
+    ):
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
         mock_cursor.fetchall.return_value = []
@@ -132,5 +162,6 @@ def app_client():
         mock_gconn.return_value.__exit__ = MagicMock(return_value=False)
 
         from app import app
+
         client = TestClient(app, raise_server_exceptions=False)
         yield client

@@ -86,13 +86,17 @@ def main():
     assert traditional_mapped["title"] == "基于nfc进行数据传输的方法及移动设备"
     assert traditional_mapped["applicant"] == "华为技术有限公司"
     assert "相关情景信息" in traditional_mapped["snippet"]
-    traditional_info = map_patent_info({
-        **INFO_RAW,
-        "title": "三座標測量儀",
-        "abstract": "一種實用新型。",
-        "claims": "1. 一種裝置。",
-        "description": "說明書正文。\n第二行。",
-    }, "CN217384194U", None)
+    traditional_info = map_patent_info(
+        {
+            **INFO_RAW,
+            "title": "三座標測量儀",
+            "abstract": "一種實用新型。",
+            "claims": "1. 一種裝置。",
+            "description": "說明書正文。\n第二行。",
+        },
+        "CN217384194U",
+        None,
+    )
     assert traditional_info["title"] == "三座标测量仪"
     assert traditional_info["abstract"] == "一种实用新型。"
     assert traditional_info["claims"] == "1. 一种设备。"
@@ -106,7 +110,10 @@ def main():
         "具体执行过程可以表示为：TSN(T\n1\n,T\n2\n,��,T\nK\n)=H(G(F(T\n1\n；W)))。其中，T\n1\n表示第一个视频分片。"
     )
     assert blocks == [
-        {"type": "paragraph", "text": "具体执行过程可以表示为：TSN(T₁,T₂,��,Tₖ)=H(G(F(T₁；W)))。其中，T₁表示第一个视频分片。"},
+        {
+            "type": "paragraph",
+            "text": "具体执行过程可以表示为：TSN(T₁,T₂,��,Tₖ)=H(G(F(T₁；W)))。其中，T₁表示第一个视频分片。",
+        },
     ]
 
     # 正文可能混用 Markdown/LaTeX、HTML 角标及代码围栏；代码不得被公式修复器改写。
@@ -150,7 +157,10 @@ def main():
         "网格块的中心满足：x\ni\n＝(x\ni+1/2\n+x\ni-1/2\n)/2，Δx\ni\n＝x\ni+1/2\n-x\ni-1/2\n；Δx\ni\n,Δy\nj\n分别为网格步长。"
     )
     assert [block["type"] for block in inline_equation] == ["paragraph"]
-    assert inline_equation[0]["text"] == "网格块的中心满足：xᵢ＝(xᵢ+1/2+xᵢ-1/2)/2，Δxᵢ＝xᵢ+1/2-xᵢ-1/2；Δxᵢ,Δyⱼ分别为网格步长。"
+    assert (
+        inline_equation[0]["text"]
+        == "网格块的中心满足：xᵢ＝(xᵢ+1/2+xᵢ-1/2)/2，Δxᵢ＝xᵢ+1/2-xᵢ-1/2；Δxᵢ,Δyⱼ分别为网格步长。"
+    )
 
     greek_index = format_patent_content_blocks("式中，C\nφ\n—孔隙压缩系数，无量纲。")
     assert greek_index[0]["text"] == "式中，Cφ—孔隙压缩系数，无量纲。"
@@ -266,8 +276,7 @@ def _assert_http_json_retries_then_succeeds():
             raise _http_error(503, b"upstream busy")
         return _FakeHttpResponse(json.dumps({"ok": True}).encode("utf-8"))
 
-    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), \
-            patch.object(provider.time, "sleep"):
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), patch.object(provider.time, "sleep"):
         data = provider._http_json("/patent_search", {"q": "x"}, 5)
     assert data == {"ok": True}
     assert calls["n"] == 2
@@ -302,8 +311,7 @@ def _assert_http_json_502_exposes_upstream_status():
         calls["n"] += 1
         raise _http_error(502, b"Bad Gateway")
 
-    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), \
-            patch.object(provider.time, "sleep"):
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), patch.object(provider.time, "sleep"):
         try:
             provider._http_json("/patent_search", {"q": "x"}, 5)
             raise AssertionError("expected 502 to map to patent provider failed")
@@ -323,8 +331,7 @@ def _assert_http_json_connection_reset_is_503():
     def fake_urlopen(req, timeout=0):
         raise URLError(RemoteDisconnected("Remote end closed connection without response"))
 
-    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), \
-            patch.object(provider.time, "sleep"):
+    with patch.object(provider.urllib.request, "urlopen", fake_urlopen), patch.object(provider.time, "sleep"):
         try:
             provider._http_json("/patent_search", {"q": "x"}, 5)
             raise AssertionError("expected connection reset to map to unavailable")

@@ -42,6 +42,7 @@ def get_file(file_id: str, request: Request):
         code, _msg, status = _FILE_ERROR_MAP.get(e.http_status, TT_FILE_50201)
         raise BizError(code, e.msg, status)
     import logging
+
     logging.getLogger("nanshan.deprecation").warning(
         "legacy file route called path=%s ua=%s",
         request.url.path,
@@ -57,11 +58,16 @@ def get_file(file_id: str, request: Request):
 async def upload_file(file: UploadFile = File(...), user: dict = Depends(identity)):
     # M5: 按用户日配额（50 个/天）+ 突发频控（20 次/5 分钟），防磁盘耗尽
     from core.rate_limit import check_user_daily_quota, check_user_rate
+
     check_user_rate(user["userId"], "file_upload", limit=20, window_s=300)
     check_user_daily_quota(user["userId"], "file_upload", limit=50)
     # E3: Content-Type 白名单校验，防止上传可执行文件/XSS
     _ALLOWED_CONTENT_TYPES = {
-        "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -69,19 +75,23 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(identit
         "application/msword",
         "application/vnd.ms-excel",
         "application/vnd.ms-powerpoint",
-        "video/mp4", "video/quicktime",
-        "audio/mpeg", "audio/wav",
+        "video/mp4",
+        "video/quicktime",
+        "audio/mpeg",
+        "audio/wav",
         "text/plain",
     }
     content_type = (file.content_type or "").split(";")[0].strip().lower()
     if content_type not in _ALLOWED_CONTENT_TYPES:
         from core.errors import bad_request
+
         raise bad_request(f"不支持的文件类型: {content_type}")
     # UploadFile 不调用 read() 无上限后直接落盘，先受限读取，拒绝大文件以防内存耗尽。
     max_bytes = __import__("config").settings.MAX_UPLOAD_BYTES
     data = await file.read(max_bytes + 1)
     if len(data) > max_bytes:
         from core.errors import bad_request
+
         raise bad_request(f"文件不能超过 {max_bytes // 1024 // 1024}MB")
     result = create_uploaded_file(user["userId"], file.filename or "upload", file.content_type or "", data)
     return success(result, "上传成功")
@@ -106,6 +116,7 @@ def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict =
     can_review_import_media = False
     if actor_id is not None:
         from db import get_cursor
+
         with get_cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM user_role WHERE user_id = %s AND role_code = 'admin'",
@@ -120,6 +131,7 @@ def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict =
     if variant:
         if variant != "thumbnail":
             from core.errors import bad_request
+
             raise bad_request("不支持的文件变体")
         path, mime = get_uploaded_thumbnail(path, mime, file_id)
     # access_token 经 query 串传递是小程序 <image> 无法设置请求头的折中方案。

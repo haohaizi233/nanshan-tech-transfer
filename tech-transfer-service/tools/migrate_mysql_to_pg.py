@@ -7,20 +7,29 @@ MySQL(tech_transfer) → PostgreSQL(tech_transfer) 一次性数据迁移
 - 可重复执行：先清空目标表再复制（仅用于 PG 尚无真实数据的初始化阶段）
 用法：python tools/migrate_mysql_to_pg.py
 """
+
 import os
 
 import psycopg2
 import psycopg2.extras
 import pymysql
 
-MY = dict(host="127.0.0.1", port=3306, user="root", password="123456",
-          database="tech_transfer", charset="utf8mb4",
-          cursorclass=pymysql.cursors.DictCursor)
-PG = dict(host=os.environ.get("DB_HOST", "127.0.0.1"),
-          port=int(os.environ.get("DB_PORT", "5432")),
-          user=os.environ.get("DB_USER", "postgres"),
-          password=os.environ.get("DB_PASSWORD", "postgres123"),
-          dbname=os.environ.get("DB_NAME", "tech_transfer"))
+MY = {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "password": "123456",
+    "database": "tech_transfer",
+    "charset": "utf8mb4",
+    "cursorclass": pymysql.cursors.DictCursor,
+}
+PG = {
+    "host": os.environ.get("DB_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("DB_PORT", "5432")),
+    "user": os.environ.get("DB_USER", "postgres"),
+    "password": os.environ.get("DB_PASSWORD", "postgres123"),
+    "dbname": os.environ.get("DB_NAME", "tech_transfer"),
+}
 
 TABLES = [
     "app_user",
@@ -105,9 +114,7 @@ def main():
                 seq = pcur.fetchone()[0]
                 if not seq:
                     continue
-                pcur.execute(
-                    f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)"
-                )
+                pcur.execute(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)")
             print("sequences reset")
         pg.commit()
         print("=== MySQL → PG 数据迁移完成 ===")

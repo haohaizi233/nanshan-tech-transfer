@@ -11,14 +11,21 @@ from psycopg2 import IntegrityError
 from config import settings
 from core.contact_validation import validate_phone
 from core.errors import (
-    TT_AUTH_40106, TT_AUTH_40902, TT_AUTH_40903, BizError, bad_request, forbidden,
+    TT_AUTH_40106,
+    TT_AUTH_40902,
+    TT_AUTH_40903,
+    BizError,
+    bad_request,
+    forbidden,
 )
 from db import get_cursor
 from modules.audit.service import record as audit_record
 from modules.identity.service import (
-    _get_roles, _issue_session, build_user_response, create_password_account,
+    _get_roles,
+    _issue_session,
+    build_user_response,
+    create_password_account,
 )
-
 
 _token_lock = Lock()
 _token_cache = {}
@@ -38,7 +45,8 @@ def _wechat_json(path: str, *, query=None, body=None) -> dict:
     if query:
         url += "?" + urllib.parse.urlencode(query)
     request = urllib.request.Request(
-        url, data=json.dumps(body).encode() if body is not None else None,
+        url,
+        data=json.dumps(body).encode() if body is not None else None,
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -52,10 +60,15 @@ def _wechat_json(path: str, *, query=None, body=None) -> dict:
 
 
 def exchange_login_code(code: str) -> str:
-    data = _wechat_json("sns/jscode2session", query={
-        "appid": settings.WECHAT_APPID, "secret": settings.WECHAT_APP_SECRET,
-        "js_code": code, "grant_type": "authorization_code",
-    })
+    data = _wechat_json(
+        "sns/jscode2session",
+        query={
+            "appid": settings.WECHAT_APPID,
+            "secret": settings.WECHAT_APP_SECRET,
+            "js_code": code,
+            "grant_type": "authorization_code",
+        },
+    )
     openid = data.get("openid")
     if not isinstance(openid, str) or not openid or len(openid) > 128:
         raise BizError("TT_AUTH_40103", "微信身份校验失败，请重试", 401)
@@ -68,9 +81,14 @@ def _access_token() -> str:
         cached = _token_cache.get(key)
         if cached and cached[1] > time.monotonic():
             return cached[0]
-        data = _wechat_json("cgi-bin/stable_token", body={
-            "grant_type": "client_credential", "appid": key[0], "secret": key[1],
-        })
+        data = _wechat_json(
+            "cgi-bin/stable_token",
+            body={
+                "grant_type": "client_credential",
+                "appid": key[0],
+                "secret": key[1],
+            },
+        )
         token = data.get("access_token")
         expires = data.get("expires_in")
         if not isinstance(token, str) or not token or type(expires) is not int or expires <= 0:
@@ -81,8 +99,11 @@ def _access_token() -> str:
 
 
 def exchange_phone_code(code: str, openid: str) -> str:
-    data = _wechat_json("wxa/business/getuserphonenumber", query={"access_token": _access_token()},
-                        body={"code": code, "openid": openid})
+    data = _wechat_json(
+        "wxa/business/getuserphonenumber",
+        query={"access_token": _access_token()},
+        body={"code": code, "openid": openid},
+    )
     info = data.get("phone_info")
     if not isinstance(info, dict) or not isinstance(info.get("watermark"), dict):
         raise bad_request("微信手机号校验失败，请重新授权")

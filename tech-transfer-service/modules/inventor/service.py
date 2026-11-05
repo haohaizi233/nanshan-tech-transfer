@@ -1,4 +1,4 @@
-﻿"""inventor service — NOT IMPLEMENTED
+"""inventor service — NOT IMPLEMENTED
 
 Architecture source: 04-backend-domain-design.md
 Target: Phase B/C

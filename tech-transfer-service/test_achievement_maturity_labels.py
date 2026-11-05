@@ -1,4 +1,5 @@
 """Maturity enum should persist and display Chinese labels, not raw codes."""
+
 from pathlib import Path
 
 from modules.achievement.maturity import resolve_maturity_desc

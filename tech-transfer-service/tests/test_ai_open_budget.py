@@ -21,7 +21,11 @@ def test_absolute_budget_includes_slow_response_headers_and_connection_close_bod
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             received.set()
             try:
-                event = {"type": "result", "executionId": "headers-budget", "result": {"success": True, "intent": "out_of_scope", "message": "done", "data": []}}
+                event = {
+                    "type": "result",
+                    "executionId": "headers-budget",
+                    "result": {"success": True, "intent": "out_of_scope", "message": "done", "data": []},
+                }
                 body = (json.dumps(event) + "\n").encode()
                 if phase == "headers":
                     self.connection.sendall(b"HTTP/1.1 200 OK\r\n")
@@ -44,7 +48,13 @@ def test_absolute_budget_includes_slow_response_headers_and_connection_close_bod
     try:
         started = time.monotonic()
         with pytest.raises(Exception) as captured:
-            post_agent(f"http://127.0.0.1:{server.server_port}/internal/ai/chat/stream", "test-only", {"executionId": "headers-budget", "message": "hello"}, 0.3, lambda *_args: True)
+            post_agent(
+                f"http://127.0.0.1:{server.server_port}/internal/ai/chat/stream",
+                "test-only",
+                {"executionId": "headers-budget", "message": "hello"},
+                0.3,
+                lambda *_args: True,
+            )
         elapsed = time.monotonic() - started
     finally:
         server.shutdown()

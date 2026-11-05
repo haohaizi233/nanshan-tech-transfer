@@ -185,7 +185,11 @@ def test_match_history_uses_the_generation_captured_before_forward(cleared_durin
 
     demand_cursor = MagicMock()
     demand_cursor.fetchone.return_value = {
-        "id": 12, "title": "水处理", "description": "技术需求", "owner_user_id": 7, "status": "published",
+        "id": 12,
+        "title": "水处理",
+        "description": "技术需求",
+        "owner_user_id": 7,
+        "status": "published",
     }
     history_cursor = MagicMock()
     generation = [4]
@@ -208,7 +212,9 @@ def test_match_history_uses_the_generation_captured_before_forward(cleared_durin
         response = ai_match(AiMatchRequest(demandId=12), {"userId": 7})
 
     assert response["data"]["cards"][0]["id"] == 3
-    writes = [call.args for call in history_cursor.execute.call_args_list if "INSERT INTO ai_chat_message" in call.args[0]]
+    writes = [
+        call.args for call in history_cursor.execute.call_args_list if "INSERT INTO ai_chat_message" in call.args[0]
+    ]
     if cleared_during_forward:
         assert writes == []
     else:

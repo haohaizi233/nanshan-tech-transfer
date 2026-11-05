@@ -12,6 +12,7 @@ AI 域 API 测试 —— /ai/match（同步需求-成果匹配）边界契约
 依赖：后端已启动；routes/ai.py 中 AI_FEATURE_ENABLED=True。
 成功路径（返回 cards）需要 ai-agent 可达，本测试对 ai-agent 不可达时降级为边界校验。
 """
+
 import time
 
 import requests
@@ -47,10 +48,18 @@ h_b = {"Authorization": f"Bearer {token_b}"}
 print(f"[0] A={user_a['userId']} B={user_b['userId']}\n")
 
 # A 创建一个需求（默认 draft 状态，用于触发「状态不支持匹配」边界）
-resp = requests.post(f"{BASE}/demands", headers=h_a, json={
-    "title": "AI匹配测试需求", "description": "测试AI匹配任务边界",
-    "orgName": "测试组织-AI", "contactPhone": "13600009999", "contactName": "测试A",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=h_a,
+    json={
+        "title": "AI匹配测试需求",
+        "description": "测试AI匹配任务边界",
+        "orgName": "测试组织-AI",
+        "contactPhone": "13600009999",
+        "contactName": "测试A",
+    },
+    timeout=10,
+)
 demand_id = resp.json()["data"]["id"]
 print(f"[0] demand={demand_id}\n")
 

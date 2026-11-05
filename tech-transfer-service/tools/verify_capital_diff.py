@@ -3,6 +3,7 @@
 基线：legacy_capital_baseline.json（tools_baseline_capture.py 于 MySQL 版捕获）
 忽略 requestId（每次请求必然不同）。任何字段/顺序差异都算 FAIL。
 """
+
 import json
 import sys
 import urllib.request
@@ -38,7 +39,7 @@ def diff(a, b, path, out):
     elif isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             out.append(f"{path}: 列表长度 基线={len(b)} 现在={len(a)}")
-        for i, (x, y) in enumerate(zip(a, b)):
+        for i, (x, y) in enumerate(zip(a, b, strict=False)):
             diff(x, y, f"{path}[{i}]", out)
     elif a != b:
         out.append(f"{path}: 基线={b!r:.200} -> 现在={a!r:.200}")
@@ -48,19 +49,22 @@ total_cases = len(CASES)
 failed = 0
 for name, case in sorted(CASES.items()):
     path = case["body"].get("_path") or None
-    url = BASE + {
-        "platform_base_default": "/api/platform-base",
-        "platform_base_poc": "/api/platform-base?type=poc",
-        "platform_base_pilot": "/api/platform-base?type=pilot",
-        "platform_base_other": "/api/platform-base?type=other",
-        "platform_base_p2": "/api/platform-base?page=2&pageSize=7",
-        "platform_base_kw": "/api/platform-base?keyword=%E5%B0%81%E8%A3%85",
-        "invest_orgs_default": "/api/invest-orgs",
-        "invest_orgs_p2": "/api/invest-orgs?page=2&pageSize=5",
-        "invest_orgs_kw": "/api/invest-orgs?keyword=%E6%8A%95%E8%B5%84",
-        "service_orgs_default": "/api/service-orgs",
-        "service_orgs_kw": "/api/service-orgs?keyword=%E5%92%A8%E8%AF%A2",
-    }[name]
+    url = (
+        BASE
+        + {
+            "platform_base_default": "/api/platform-base",
+            "platform_base_poc": "/api/platform-base?type=poc",
+            "platform_base_pilot": "/api/platform-base?type=pilot",
+            "platform_base_other": "/api/platform-base?type=other",
+            "platform_base_p2": "/api/platform-base?page=2&pageSize=7",
+            "platform_base_kw": "/api/platform-base?keyword=%E5%B0%81%E8%A3%85",
+            "invest_orgs_default": "/api/invest-orgs",
+            "invest_orgs_p2": "/api/invest-orgs?page=2&pageSize=5",
+            "invest_orgs_kw": "/api/invest-orgs?keyword=%E6%8A%95%E8%B5%84",
+            "service_orgs_default": "/api/service-orgs",
+            "service_orgs_kw": "/api/service-orgs?keyword=%E5%92%A8%E8%AF%A2",
+        }[name]
+    )
     with _OPENER.open(url, timeout=10) as resp:
         current = {"status": resp.status, "body": json.loads(resp.read().decode("utf-8"))}
     print(f"[GET ] {name} {url}")

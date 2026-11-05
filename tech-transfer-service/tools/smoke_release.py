@@ -8,6 +8,7 @@
 - 路径参数替换：{xxx} 数值型 → 1，其余 → achievement
 运行：python tools/smoke_release.py（后端需已启动，APP_ENV=local）
 """
+
 import json
 import sys
 import urllib.error
@@ -69,16 +70,20 @@ def sub_params(path):
 print("[1] 健康检查与文档端点")
 st, body = request("GET", "/api/health")
 check("GET /api/health = 200 code=0", st == 200 and body.get("code") == 0, f"{st} {body}")
-check("  data.status=ok db=ok", body.get("data", {}).get("status") == "ok"
-      and body.get("data", {}).get("database") == "ok", body.get("data"))
+check(
+    "  data.status=ok db=ok",
+    body.get("data", {}).get("status") == "ok" and body.get("data", {}).get("database") == "ok",
+    body.get("data"),
+)
 st, _ = request("GET", "/docs")
 check("GET /docs = 200", st == 200, f"got {st}")
 st, _ = request("GET", "/openapi.json")
 check("GET /openapi.json = 200", st == 200, f"got {st}")
 
 print("\n[2] 登录获取 token（dev-user-002）")
-st, body = request("POST", "/api/tech-transfer/v1/auth/bootstrap",
-                   body={"hostCredential": "local-dev-ticket-dev-user-002"})
+st, body = request(
+    "POST", "/api/tech-transfer/v1/auth/bootstrap", body={"hostCredential": "local-dev-ticket-dev-user-002"}
+)
 check("bootstrap = 200", st == 200, f"{st} {body}")
 token = body.get("data", {}).get("accessToken", "")
 
@@ -112,16 +117,20 @@ for path, item in sorted(spec["paths"].items()):
         check(f"{m.upper():6} {path}", ok, f"{st} {resp.get('message', '')[:80]}（预期 {expect}）")
 
 print("\n[4] CORS 预检（模拟 H5 dev server http://localhost:5173）")
-st, _ = request("OPTIONS", "/api/tech-transfer/v1/achievements",
-                headers={
-                    "Origin": "http://localhost:5173",
-                    "Access-Control-Request-Method": "GET",
-                    "Access-Control-Request-Headers": "authorization,content-type",
-                })
+st, _ = request(
+    "OPTIONS",
+    "/api/tech-transfer/v1/achievements",
+    headers={
+        "Origin": "http://localhost:5173",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization,content-type",
+    },
+)
 # urllib 不回显响应头，预检失败会以 HTTPError 4xx 暴露；200 即通过
 check("OPTIONS 预检 = 200（放行 localhost:5173）", st == 200, f"got {st}")
-st, resp = request("GET", "/api/tech-transfer/v1/achievements", token=token,
-                   headers={"Origin": "http://localhost:5173"})
+st, resp = request(
+    "GET", "/api/tech-transfer/v1/achievements", token=token, headers={"Origin": "http://localhost:5173"}
+)
 check("带 Origin 的实际请求 = 200", st == 200, f"{st}")
 
 print()

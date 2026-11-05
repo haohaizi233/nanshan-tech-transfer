@@ -20,6 +20,7 @@ Architecture source: 04-backend-domain-design.md §4.8, 05-data-model-design.md 
   机构明确同意（target_agreed）后 Admin 才能以 platform_assisted 模式代为 accept，
   accepted 后联系方式才向申请人解锁（脱敏逻辑不变，凭 status 判断）。
 """
+
 import json
 
 from core.errors import (
@@ -45,42 +46,72 @@ ACCEPTED_STATUSES = ("accepted", "confirmed", "completed")
 # （主体类型/画像仅用于推荐，见 user_profile.subject_type / business_capabilities）
 INTENT_TYPES = {
     "demand": (
-        "provide_solution",     # 提供技术方案
+        "provide_solution",  # 提供技术方案
         "provide_achievement",  # 提供现有成果
-        "joint_rnd",            # 联合研发
-        "provide_service",      # 提供技术服务
-        "investment",           # 投融资支持
-        "other",                # 其他
+        "joint_rnd",  # 联合研发
+        "provide_service",  # 提供技术服务
+        "investment",  # 投融资支持
+        "other",  # 其他
     ),
     "achievement": (
-        "purchase",             # 技术购买
-        "license",              # 技术许可
-        "joint_rnd",            # 联合研发
-        "commercialization",    # 成果转化
-        "pilot_validation",     # 场景验证
-        "investment",           # 投融资
-        "other",                # 其他
+        "purchase",  # 技术购买
+        "license",  # 技术许可
+        "joint_rnd",  # 联合研发
+        "commercialization",  # 成果转化
+        "pilot_validation",  # 场景验证
+        "investment",  # 投融资
+        "other",  # 其他
     ),
 }
 
 # op → (允许的前置状态, 目标状态, 允许角色, 时间戳列, 事件类型)
 TRANSITIONS = {
-    "accept":   {"from": ("pending",),              "to": "accepted",  "roles": ("target_owner",), "ts": "accepted_at",  "event": "accepted"},
-    "reject":   {"from": ("pending",),              "to": "rejected",  "roles": ("target_owner",), "ts": "closed_at",    "event": "rejected"},
-    "confirm":  {"from": ("accepted",),             "to": "confirmed", "roles": ("initiator", "target_owner"), "ts": "confirmed_at", "event": "confirmed"},
-    "cancel":   {"from": ("pending", "accepted", "confirmed"), "to": "cancelled", "roles": ("initiator", "target_owner"), "ts": "closed_at", "event": "cancelled"},
-    "complete": {"from": ("confirmed",),            "to": "completed", "roles": ("initiator", "target_owner"), "ts": "completed_at", "event": "completed"},
+    "accept": {
+        "from": ("pending",),
+        "to": "accepted",
+        "roles": ("target_owner",),
+        "ts": "accepted_at",
+        "event": "accepted",
+    },
+    "reject": {
+        "from": ("pending",),
+        "to": "rejected",
+        "roles": ("target_owner",),
+        "ts": "closed_at",
+        "event": "rejected",
+    },
+    "confirm": {
+        "from": ("accepted",),
+        "to": "confirmed",
+        "roles": ("initiator", "target_owner"),
+        "ts": "confirmed_at",
+        "event": "confirmed",
+    },
+    "cancel": {
+        "from": ("pending", "accepted", "confirmed"),
+        "to": "cancelled",
+        "roles": ("initiator", "target_owner"),
+        "ts": "closed_at",
+        "event": "cancelled",
+    },
+    "complete": {
+        "from": ("confirmed",),
+        "to": "completed",
+        "roles": ("initiator", "target_owner"),
+        "ts": "completed_at",
+        "event": "completed",
+    },
 }
 
 # ── 平台协助对接（assisted）──────────────────────────────────
 # 运营处理阶段（与主状态分离；unreachable 等仍属 status=pending）
 ASSIST_STATUSES = (
-    "queued",           # 已入队，待运营跟进
-    "contacting",       # 运营正在联系真实机构
-    "waiting_reply",    # 已联系，等待机构回复
-    "target_agreed",    # 机构明确同意 —— Admin 代为 accept 的强制前置
+    "queued",  # 已入队，待运营跟进
+    "contacting",  # 运营正在联系真实机构
+    "waiting_reply",  # 已联系，等待机构回复
+    "target_agreed",  # 机构明确同意 —— Admin 代为 accept 的强制前置
     "target_rejected",  # 机构明确拒绝
-    "unreachable",      # 联系不上
+    "unreachable",  # 联系不上
 )
 
 # assist_status 流转表（仅 assisted 意向、主状态 pending 期间）
@@ -93,11 +124,35 @@ ASSIST_STATUS_TRANSITIONS = {
 
 # Admin 代目标机构操作的状态机（仅 assisted；event/operator_role=platform_admin 留痕）
 ADMIN_TRANSITIONS = {
-    "accept":   {"from": ("pending",),              "to": "accepted",  "ts": "accepted_at",  "event": "accepted",  "require_assist": "target_agreed"},
-    "reject":   {"from": ("pending",),              "to": "rejected",  "ts": "closed_at",    "event": "rejected",  "require_assist": None},
-    "confirm":  {"from": ("accepted",),             "to": "confirmed", "ts": "confirmed_at", "event": "confirmed", "require_assist": None},
-    "cancel":   {"from": ("accepted", "confirmed"), "to": "cancelled", "ts": "closed_at",    "event": "cancelled", "require_assist": None},
-    "complete": {"from": ("confirmed",),            "to": "completed", "ts": "completed_at", "event": "completed", "require_assist": None},
+    "accept": {
+        "from": ("pending",),
+        "to": "accepted",
+        "ts": "accepted_at",
+        "event": "accepted",
+        "require_assist": "target_agreed",
+    },
+    "reject": {"from": ("pending",), "to": "rejected", "ts": "closed_at", "event": "rejected", "require_assist": None},
+    "confirm": {
+        "from": ("accepted",),
+        "to": "confirmed",
+        "ts": "confirmed_at",
+        "event": "confirmed",
+        "require_assist": None,
+    },
+    "cancel": {
+        "from": ("accepted", "confirmed"),
+        "to": "cancelled",
+        "ts": "closed_at",
+        "event": "cancelled",
+        "require_assist": None,
+    },
+    "complete": {
+        "from": ("confirmed",),
+        "to": "completed",
+        "ts": "completed_at",
+        "event": "completed",
+        "require_assist": None,
+    },
 }
 
 
@@ -113,9 +168,7 @@ def _validate_intent_type(target_type: str, intent_type):
     intent_type = str(intent_type).strip()
     allowed = INTENT_TYPES[target_type]
     if intent_type not in allowed:
-        raise bad_request(
-            f"intentType 必须是 {'/'.join(allowed)}（目标为 {target_type}）"
-        )
+        raise bad_request(f"intentType 必须是 {'/'.join(allowed)}（目标为 {target_type}）")
     return intent_type
 
 
@@ -212,10 +265,8 @@ def _fmt(dt):
 
 def _counterpart_display(cur, row, user_id: int):
     """对接对方展示名：direct=对方账号 display_name；assisted=目标机构名（无平台账号）。"""
-    if row["initiator_user_id"] == user_id:
-        counterpart_id = row["target_owner_user_id"]  # assisted 时为 None
-    else:
-        counterpart_id = row["initiator_user_id"]
+    # assisted 时 target_owner_user_id 为 None
+    counterpart_id = row["target_owner_user_id"] if row["initiator_user_id"] == user_id else row["initiator_user_id"]
     if counterpart_id is None:
         if row.get("target_org_id"):
             cur.execute("SELECT name FROM institution WHERE id=%s", (row["target_org_id"],))
@@ -273,9 +324,15 @@ def _target_contact(cur, target_type: str, target_id: int):
 
 def _contact_response(contact, *, masked: bool, reason=None):
     """将原始联系人缩小为客户端可展示的、安全的响应对象。"""
-    if not contact or not any(contact.get(key) for key in (
-        "contactName", "contactPhone", "contactEmail", "contactWechat",
-    )):
+    if not contact or not any(
+        contact.get(key)
+        for key in (
+            "contactName",
+            "contactPhone",
+            "contactEmail",
+            "contactWechat",
+        )
+    ):
         return {
             "available": False,
             "masked": True,
@@ -364,8 +421,9 @@ def _get_intent_row(cur, intent_id: int):
     return cur.fetchone()
 
 
-def _insert_event(cur, intent_id: int, event_type: str, from_status, to_status,
-                  operator_user_id: int, operator_role: str, remark=None):
+def _insert_event(
+    cur, intent_id: int, event_type: str, from_status, to_status, operator_user_id: int, operator_role: str, remark=None
+):
     cur.execute(
         """
         INSERT INTO cooperation_event
@@ -373,8 +431,7 @@ def _insert_event(cur, intent_id: int, event_type: str, from_status, to_status,
              operator_user_id, operator_role, remark)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (intent_id, event_type, from_status, to_status,
-         operator_user_id, operator_role, remark),
+        (intent_id, event_type, from_status, to_status, operator_user_id, operator_role, remark),
     )
 
 
@@ -424,6 +481,7 @@ def _require_role(row, user_id: int):
 
 
 # ── 发起意向 ─────────────────────────────────────────────────
+
 
 def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
     if not isinstance(body, dict):
@@ -512,40 +570,59 @@ def create_intent(user_id: int, user_no: str, body: dict, request_id=None):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
-                (user_id, target_type, target_id, target["owner_user_id"],
-                 intent_type, message, handling_mode,
-                 "queued" if handling_mode == "assisted" else None,
-                 target.get("org_id"), contact_snapshot),
+                (
+                    user_id,
+                    target_type,
+                    target_id,
+                    target["owner_user_id"],
+                    intent_type,
+                    message,
+                    handling_mode,
+                    "queued" if handling_mode == "assisted" else None,
+                    target.get("org_id"),
+                    contact_snapshot,
+                ),
             )
         except Exception as exc:
             # 并发创建同一 (initiator, target) 可撞 uk_coop_active 唯一约束；
             # 转为业务 409 而非 500，与 check-then-insert 的 coop_active_exists 语义一致。
             from psycopg2.errors import UniqueViolation
+
             if isinstance(exc, UniqueViolation):
                 raise coop_active_exists()
             raise
         intent_id = cur.fetchone()["id"]
-        _insert_event(cur, intent_id, "created", None, "pending",
-                      user_id, "initiator", message)
+        _insert_event(cur, intent_id, "created", None, "pending", user_id, "initiator", message)
         if target.get("owner_user_id"):
-            emit_notification(cur, recipient_user_id=target["owner_user_id"], category="cooperation",
-                event_type="cooperation.created", source_type="cooperation", source_id=intent_id,
-                title="收到新的对接申请", body=message,
-                target_path=f"/subpackages/tech-transfer/pages/dock-detail/dock-detail?type={target_type}&id={target_id}&intentId={intent_id}")
+            emit_notification(
+                cur,
+                recipient_user_id=target["owner_user_id"],
+                category="cooperation",
+                event_type="cooperation.created",
+                source_type="cooperation",
+                source_id=intent_id,
+                title="收到新的对接申请",
+                body=message,
+                target_path=f"/subpackages/tech-transfer/pages/dock-detail/dock-detail?type={target_type}&id={target_id}&intentId={intent_id}",
+            )
 
         # 审计与状态变更同事务（cur=cur），避免提交后审计静默失败
         audit_record(
-            "cooperation.create", "cooperation_intent", resource_id=intent_id,
-            actor_user_id=user_id, actor_user_no=user_no,
-            details={"targetType": target_type, "targetId": target_id,
-                     "handlingMode": handling_mode},
-            request_id=request_id, cur=cur,
+            "cooperation.create",
+            "cooperation_intent",
+            resource_id=intent_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            details={"targetType": target_type, "targetId": target_id, "handlingMode": handling_mode},
+            request_id=request_id,
+            cur=cur,
         )
 
     return get_intent_detail(intent_id, user_id)
 
 
 # ── 查询 ─────────────────────────────────────────────────────
+
 
 def get_intent_detail(intent_id: int, user_id: int):
     with get_cursor() as cur:
@@ -686,6 +763,7 @@ def list_events(intent_id: int, user_id: int, args):
 
 # ── 状态机 ───────────────────────────────────────────────────
 
+
 def _auto_reject_other_pending(cur, row, intent_id: int, operator_user_id: int):
     """accept 副作用：同一目标的其他 pending 意向自动拒绝（同一事务）"""
     cur.execute(
@@ -705,12 +783,14 @@ def _auto_reject_other_pending(cur, row, intent_id: int, operator_user_id: int):
             """,
             (loser["id"],),
         )
-        _insert_event(cur, loser["id"], "auto_rejected", "pending", "rejected",
-                      operator_user_id, "system", "对方已接受其他意向")
+        _insert_event(
+            cur, loser["id"], "auto_rejected", "pending", "rejected", operator_user_id, "system", "对方已接受其他意向"
+        )
 
 
-def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
-                remark=None, request_id=None, outcome=None):
+def _transition(
+    user_id: int, user_no: str, intent_id: int, version, op: str, remark=None, request_id=None, outcome=None
+):
     rule = TRANSITIONS[op]
     if version is None:
         raise bad_request(f"{op} 必须携带 version（乐观锁）")
@@ -724,15 +804,12 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
         role = _require_role(row, user_id)
         # assisted 意向的目标方动作（accept/reject）只能由平台代为执行
         # （assist-transition），普通用户（含发起方）一律 404 防探测
-        if (row.get("handling_mode") or "direct") == "assisted" \
-                and set(rule["roles"]) == {"target_owner"}:
+        if (row.get("handling_mode") or "direct") == "assisted" and set(rule["roles"]) == {"target_owner"}:
             raise coop_not_found()
         if role not in rule["roles"]:
             raise coop_forbidden(f"仅 {'/'.join(rule['roles'])} 可执行 {op}")
         if row["status"] not in rule["from"]:
-            raise coop_conflict(
-                f"当前状态 {row['status']} 不允许 {op}（要求 {'/'.join(rule['from'])}）"
-            )
+            raise coop_conflict(f"当前状态 {row['status']} 不允许 {op}（要求 {'/'.join(rule['from'])}）")
         # pending 阶段撤回是发起方专属动作；目标方此时应使用 reject
         if op == "cancel" and row["status"] == "pending" and role != "initiator":
             raise coop_forbidden("仅发起方可撤回待响应的对接申请")
@@ -741,11 +818,18 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
         outcome_params = []
         if outcome:
             outcome_set = ", outcome_status=%s, outcome_cooperation_mode=%s, outcome_signed=%s, outcome_amount_wan=%s, outcome_failure_reason=%s, outcome_note=%s"
-            outcome_params = [outcome["status"], outcome["cooperationMode"], outcome["signed"], outcome["amountWan"], outcome["failureReason"], outcome["note"]]
+            outcome_params = [
+                outcome["status"],
+                outcome["cooperationMode"],
+                outcome["signed"],
+                outcome["amountWan"],
+                outcome["failureReason"],
+                outcome["note"],
+            ]
         cur.execute(
             f"""
             UPDATE cooperation_intent
-            SET status=%s, version=version+1, {rule['ts']}=NOW(){outcome_set}
+            SET status=%s, version=version+1, {rule["ts"]}=NOW(){outcome_set}
             WHERE id=%s AND version=%s
             """,
             [rule["to"]] + outcome_params + [intent_id, version],
@@ -760,15 +844,21 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
                 (intent_id,),
             )
 
-        _insert_event(cur, intent_id, rule["event"], row["status"], rule["to"],
-                      user_id, role, remark)
+        _insert_event(cur, intent_id, rule["event"], row["status"], rule["to"], user_id, role, remark)
         recipient = row["initiator_user_id"] if role == "target_owner" else row["target_owner_user_id"]
         if recipient:
-            emit_notification(cur, recipient_user_id=recipient, category="cooperation",
-                event_type=f"cooperation.{rule['event']}", source_type="cooperation", source_id=intent_id,
-                title=f"对接状态更新：{rule['to']}", body=remark,
+            emit_notification(
+                cur,
+                recipient_user_id=recipient,
+                category="cooperation",
+                event_type=f"cooperation.{rule['event']}",
+                source_type="cooperation",
+                source_id=intent_id,
+                title=f"对接状态更新：{rule['to']}",
+                body=remark,
                 target_path=f"/subpackages/tech-transfer/pages/dock-detail/dock-detail?type={row['target_type']}&id={row['target_id']}&intentId={intent_id}",
-                dedupe_key=f"cooperation:{intent_id}:{rule['event']}:{rule['to']}")
+                dedupe_key=f"cooperation:{intent_id}:{rule['event']}:{rule['to']}",
+            )
 
         if op == "accept":
             slot = _reserve_target_slot(cur, row, intent_id)
@@ -785,18 +875,26 @@ def _transition(user_id: int, user_no: str, intent_id: int, version, op: str,
             )
             # demand 状态变更也需审计留痕（同事务）
             audit_record(
-                "demand.auto_matched", "demand", resource_id=row["target_id"],
-                actor_user_id=user_id, actor_user_no=user_no,
+                "demand.auto_matched",
+                "demand",
+                resource_id=row["target_id"],
+                actor_user_id=user_id,
+                actor_user_no=user_no,
                 details={"from": "published", "to": "matched", "trigger": f"cooperation.{op}", "intentId": intent_id},
-                request_id=request_id, cur=cur,
+                request_id=request_id,
+                cur=cur,
             )
 
         # 审计与状态变更同事务（cur=cur），避免提交后审计静默失败
         audit_record(
-            f"cooperation.{op}", "cooperation_intent", resource_id=intent_id,
-            actor_user_id=user_id, actor_user_no=user_no,
+            f"cooperation.{op}",
+            "cooperation_intent",
+            resource_id=intent_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
             details={"from": row["status"], "to": rule["to"]},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return get_intent_detail(intent_id, user_id)
@@ -809,8 +907,7 @@ def accept_intent(user_id: int, user_no: str, intent_id: int, version, request_i
 def reject_intent(user_id: int, user_no: str, intent_id: int, version, reason, request_id=None):
     if not reason or not str(reason).strip():
         raise bad_request("reject 必须携带 reason")
-    return _transition(user_id, user_no, intent_id, version, "reject",
-                       remark=reason, request_id=request_id)
+    return _transition(user_id, user_no, intent_id, version, "reject", remark=reason, request_id=request_id)
 
 
 def confirm_intent(user_id: int, user_no: str, intent_id: int, version, request_id=None):
@@ -818,8 +915,7 @@ def confirm_intent(user_id: int, user_no: str, intent_id: int, version, request_
 
 
 def cancel_intent(user_id: int, user_no: str, intent_id: int, version, reason, request_id=None):
-    return _transition(user_id, user_no, intent_id, version, "cancel",
-                       remark=reason, request_id=request_id)
+    return _transition(user_id, user_no, intent_id, version, "cancel", remark=reason, request_id=request_id)
 
 
 def complete_intent(user_id: int, user_no: str, intent_id: int, version, remark, outcome=None, request_id=None):
@@ -847,11 +943,13 @@ def complete_intent(user_id: int, user_no: str, intent_id: int, version, remark,
             "failureReason": str(failure_reason or "").strip()[:64] or None,
             "note": str(outcome.get("note") or "").strip()[:1000] or None,
         }
-    return _transition(user_id, user_no, intent_id, version, "complete",
-                       remark=remark, outcome=outcome, request_id=request_id)
+    return _transition(
+        user_id, user_no, intent_id, version, "complete", remark=remark, outcome=outcome, request_id=request_id
+    )
 
 
 # ── 平台协助对接：Admin 运营操作 ──────────────────────────────
+
 
 def update_assist_status(admin_user: dict, intent_id: int, body: dict, request_id=None):
     """POST /admin/cooperations/{id}/assist-status —— 运营处理阶段流转（仅 assisted + pending）。
@@ -898,14 +996,26 @@ def update_assist_status(admin_user: dict, intent_id: int, body: dict, request_i
             raise conflict("处理阶段已被其他运营更新，请刷新后重试")
 
         event_remark = f"处理阶段 {current} → {to_status}" + (f"：{note}" if note else "")
-        _insert_event(cur, intent_id, "assist_status_change", row["status"], row["status"],
-                      admin_user["userId"], "platform_admin", event_remark)
+        _insert_event(
+            cur,
+            intent_id,
+            "assist_status_change",
+            row["status"],
+            row["status"],
+            admin_user["userId"],
+            "platform_admin",
+            event_remark,
+        )
 
         audit_record(
-            "cooperation.assist_status", "cooperation_intent", resource_id=intent_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "cooperation.assist_status",
+            "cooperation_intent",
+            resource_id=intent_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"from": current, "to": to_status, "note": note, "nextFollowupAt": next_followup_at},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"id": intent_id, "status": row["status"], "assistStatus": to_status}
 
@@ -944,18 +1054,14 @@ def admin_assist_transition(admin_user: dict, intent_id: int, body: dict, reques
         if (row.get("handling_mode") or "direct") != "assisted":
             raise bad_request("仅平台协助（assisted）意向可由平台代为操作")
         if row["status"] not in rule["from"]:
-            raise coop_conflict(
-                f"当前状态 {row['status']} 不允许 {action}（要求 {'/'.join(rule['from'])}）"
-            )
+            raise coop_conflict(f"当前状态 {row['status']} 不允许 {action}（要求 {'/'.join(rule['from'])}）")
         if rule["require_assist"] and row.get("assist_status") != rule["require_assist"]:
-            raise coop_conflict(
-                f"须先将处理阶段更新为 {rule['require_assist']}（真实机构明确同意）才能代为 {action}"
-            )
+            raise coop_conflict(f"须先将处理阶段更新为 {rule['require_assist']}（真实机构明确同意）才能代为 {action}")
 
         cur.execute(
             f"""
             UPDATE cooperation_intent
-            SET status=%s, version=version+1, {rule['ts']}=NOW(),
+            SET status=%s, version=version+1, {rule["ts"]}=NOW(),
                 handled_by_user_id=%s,
                 accept_mode=CASE WHEN %s='accept' THEN 'platform_assisted' ELSE accept_mode END
             WHERE id=%s AND version=%s
@@ -969,8 +1075,16 @@ def admin_assist_transition(admin_user: dict, intent_id: int, body: dict, reques
         event_remark = reason
         if action == "accept" and confirmation_note:
             event_remark = f"确认依据：{confirmation_note}"
-        _insert_event(cur, intent_id, rule["event"], row["status"], rule["to"],
-                      admin_user["userId"], "platform_admin", event_remark)
+        _insert_event(
+            cur,
+            intent_id,
+            rule["event"],
+            row["status"],
+            rule["to"],
+            admin_user["userId"],
+            "platform_admin",
+            event_remark,
+        )
 
         if action == "accept":
             slot = _reserve_target_slot(cur, row, intent_id)
@@ -984,22 +1098,34 @@ def admin_assist_transition(admin_user: dict, intent_id: int, body: dict, reques
                 (row["target_id"],),
             )
             audit_record(
-                "demand.auto_matched", "demand", resource_id=row["target_id"],
-                actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
-                details={"from": "published", "to": "matched", "trigger": f"cooperation.admin_{action}", "intentId": intent_id},
-                request_id=request_id, cur=cur,
+                "demand.auto_matched",
+                "demand",
+                resource_id=row["target_id"],
+                actor_user_id=admin_user["userId"],
+                actor_user_no=admin_user.get("userNo", ""),
+                details={
+                    "from": "published",
+                    "to": "matched",
+                    "trigger": f"cooperation.admin_{action}",
+                    "intentId": intent_id,
+                },
+                request_id=request_id,
+                cur=cur,
             )
 
-        audit_details = {"from": row["status"], "to": rule["to"],
-                         "onBehalfOf": "target_org", "reason": reason or None}
+        audit_details = {"from": row["status"], "to": rule["to"], "onBehalfOf": "target_org", "reason": reason or None}
         if action == "accept":
             audit_details["confirmationNote"] = confirmation_note
 
         audit_record(
-            f"cooperation.admin_{action}", "cooperation_intent", resource_id=intent_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            f"cooperation.admin_{action}",
+            "cooperation_intent",
+            resource_id=intent_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details=audit_details,
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {

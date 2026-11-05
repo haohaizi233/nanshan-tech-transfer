@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request
 
 from core.middleware import identity
 from core.request_schemas import ChangePasswordRequest, ProfileUpdateRequest

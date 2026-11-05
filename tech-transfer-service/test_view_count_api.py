@@ -1,9 +1,10 @@
 """真实浏览量：详情访问应原子累加，测试结束后还原计数。"""
+
 import psycopg2
 import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
-DB = dict(host="127.0.0.1", port=5432, user="postgres", password="postgres123", dbname="tech_transfer")
+DB = {"host": "127.0.0.1", "port": 5432, "user": "postgres", "password": "postgres123", "dbname": "tech_transfer"}
 
 
 def reset_counts():

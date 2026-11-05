@@ -28,6 +28,7 @@ class ReasonVersionBody(VersionBody):
 
 # ── auth ────────────────────────────────────────────────────
 
+
 class LoginRequest(RequestBody):
     model_config = ConfigDict(
         extra="allow",
@@ -67,6 +68,7 @@ class WechatBindRequest(WechatLoginRequest):
 
 # ── me ──────────────────────────────────────────────────────
 
+
 class ProfileUpdateRequest(RequestBody):
     version: int = Field(..., ge=1)
     avatarFileId: int | None = Field(None, ge=1, strict=True)
@@ -87,6 +89,7 @@ class ChangePasswordRequest(RequestBody):
 
 
 # ── achievement / demand 内容 ───────────────────────────────
+
 
 class InventorRef(RequestBody):
     name: str
@@ -192,6 +195,7 @@ class DemandUpdateRequest(DemandWriteRequest):
 
 # ── cooperation ─────────────────────────────────────────────
 
+
 class CooperationCreateRequest(RequestBody):
     targetType: str = Field(..., description="achievement 或 demand")
     targetId: int = Field(..., ge=1)
@@ -207,6 +211,7 @@ class CooperationCompleteRequest(VersionBody):
 
 # ── institution registration ────────────────────────────────
 
+
 class InstitutionRegistrationRequest(RequestBody):
     kind: str = Field(..., description="university/institute/enterprise/invest/service/other")
     name: str = Field(..., min_length=1, max_length=128)
@@ -221,6 +226,7 @@ class InstitutionRegistrationRequest(RequestBody):
 
 
 # ── notification / ai / patent ──────────────────────────────
+
 
 class NotificationReadRequest(RequestBody):
     category: str | None = Field(None, description="按分类标记已读，如 cooperation")
@@ -270,6 +276,7 @@ class PatentSearchHistoryRequest(RequestBody):
 
 # ── admin ───────────────────────────────────────────────────
 
+
 class ReviewRejectRequest(VersionBody):
     reason: str = Field(..., min_length=1, description="驳回原因")
 
@@ -283,7 +290,9 @@ class InstitutionImportRequest(RequestBody):
 
 
 class AssistStatusRequest(RequestBody):
-    assistStatus: str = Field(..., description="queued/contacting/waiting_reply/target_agreed/target_rejected/unreachable")
+    assistStatus: str = Field(
+        ..., description="queued/contacting/waiting_reply/target_agreed/target_rejected/unreachable"
+    )
     note: str | None = None
     nextFollowupAt: str | None = None
 

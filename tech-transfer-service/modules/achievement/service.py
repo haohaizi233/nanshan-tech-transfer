@@ -8,6 +8,7 @@ Architecture source: 04-backend-domain-design.md §4.5, 05-data-model-design.md 
   published        → offline          (offline)
 编辑允许 draft / rejected / offline（published 编辑需先 offline 再改）
 """
+
 import json
 
 from core.contact_validation import validate_email, validate_phone
@@ -58,6 +59,8 @@ def _parse_cooperation_capacity(body, fields, partial=False):
             # 保留已消耗名额，防止 owner 编辑下线内容时绕过 accept/release 状态机恢复名额。
             if not partial:
                 fields["cooperation_remaining"] = capacity
+
+
 INVENTOR_PERSON_TYPES = ("first_inventor", "co_inventor", "team_member")
 
 TRANSITIONS = {
@@ -132,11 +135,15 @@ def _row_to_list_item(row, user_id=None):
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
         "isMine": user_id is not None and row.get("owner_user_id") == user_id,
         "platformAssisted": row.get("owner_user_id") is None,
-        "cover": ({
-            "fileId": cover_id,
-            "url": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}",
-            "thumbnailUrl": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}?variant=thumbnail",
-        } if cover_id else None),
+        "cover": (
+            {
+                "fileId": cover_id,
+                "url": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}",
+                "thumbnailUrl": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}?variant=thumbnail",
+            }
+            if cover_id
+            else None
+        ),
     }
 
 
@@ -164,7 +171,9 @@ def list_achievements(args, user_id=None):
             industry_id = int(industry_id)
         except (TypeError, ValueError):
             raise bad_request("industryId 必须是整数")
-        where += " AND EXISTS (SELECT 1 FROM achievement_industry ai WHERE ai.achievement_id=a.id AND ai.industry_id=%s)"
+        where += (
+            " AND EXISTS (SELECT 1 FROM achievement_industry ai WHERE ai.achievement_id=a.id AND ai.industry_id=%s)"
+        )
         params.append(industry_id)
 
     count_sql = f"""
@@ -256,9 +265,9 @@ def get_achievement_detail(ach_id: int, user_id=None):
                 row["view_count"] = updated["view_count"]
 
         # 联系方式：仅发布方本人或已被接受的对接（accepted/confirmed/completed）可见明文
-        contact_visible = (
-            user_id is not None and row.get("owner_user_id") == user_id
-        ) or has_accepted_intent(cur, "achievement", ach_id, user_id)
+        contact_visible = (user_id is not None and row.get("owner_user_id") == user_id) or has_accepted_intent(
+            cur, "achievement", ach_id, user_id
+        )
 
         cur.execute(
             """
@@ -335,7 +344,11 @@ def get_achievement_detail(ach_id: int, user_id=None):
                 "bio": inv.get("bio"),
                 "homepageUrl": inv.get("homepage_url"),
                 "avatarFileId": inv.get("avatar_file_id"),
-                "avatarUrl": (f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{inv['avatar_file_id']}" if inv.get("avatar_file_id") else None),
+                "avatarUrl": (
+                    f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{inv['avatar_file_id']}"
+                    if inv.get("avatar_file_id")
+                    else None
+                ),
                 "contribution": inv.get("contribution"),
             }
             for inv in inventors
@@ -346,14 +359,9 @@ def get_achievement_detail(ach_id: int, user_id=None):
 
 def list_categories():
     with get_cursor() as cur:
-        cur.execute(
-            "SELECT id, code, name, sort_order FROM achievement_category WHERE enabled ORDER BY sort_order"
-        )
+        cur.execute("SELECT id, code, name, sort_order FROM achievement_category WHERE enabled ORDER BY sort_order")
         rows = cur.fetchall() or []
-    return [
-        {"id": r["id"], "code": r["code"], "name": r["name"], "sortOrder": r["sort_order"]}
-        for r in rows
-    ]
+    return [{"id": r["id"], "code": r["code"], "name": r["name"], "sortOrder": r["sort_order"]} for r in rows]
 
 
 def list_industries():
@@ -364,12 +372,19 @@ def list_industries():
         )
         rows = cur.fetchall() or []
     return [
-        {"id": row["id"], "code": row["code"], "name": row["name"], "parentId": row["parent_id"], "sortOrder": row["sort_order"]}
+        {
+            "id": row["id"],
+            "code": row["code"],
+            "name": row["name"],
+            "parentId": row["parent_id"],
+            "sortOrder": row["sort_order"],
+        }
         for row in rows
     ]
 
 
 # ── 写操作（P0-5）──────────────────────────────────────────
+
 
 def _parse_upsert_body(body: dict, partial: bool):
     """校验 AchievementUpsertRequest（openapi.yaml），返回 (db_fields, inventor_refs)
@@ -484,9 +499,7 @@ def _parse_upsert_body(body: dict, partial: bool):
                 raise bad_request(f"inventorRefs[{i}].orgName 长度不能超过 128")
             person_type = ref.get("personType")
             if person_type is not None and person_type not in INVENTOR_PERSON_TYPES:
-                raise bad_request(
-                    f"inventorRefs[{i}].personType 必须是 {INVENTOR_PERSON_TYPES} 之一"
-                )
+                raise bad_request(f"inventorRefs[{i}].personType 必须是 {INVENTOR_PERSON_TYPES} 之一")
             sort_order = ref.get("sortOrder", i)
             try:
                 sort_order = int(sort_order)
@@ -494,8 +507,11 @@ def _parse_upsert_body(body: dict, partial: bool):
                 raise bad_request(f"inventorRefs[{i}].sortOrder 必须是整数")
             extra = {}
             for api_key, column, maximum in (
-                ("department", "department", 128), ("title", "title", 128),
-                ("bio", "bio", 10000), ("phone", "phone", 32), ("email", "email", 128),
+                ("department", "department", 128),
+                ("title", "title", 128),
+                ("bio", "bio", 10000),
+                ("phone", "phone", 32),
+                ("email", "email", 128),
                 ("homepageUrl", "homepage_url", 2048),
             ):
                 value = ref.get(api_key)
@@ -511,6 +527,7 @@ def _parse_upsert_body(body: dict, partial: bool):
             if extra.get("homepage_url"):
                 # 防止 javascript: 等危险 scheme 存入公开成果详情
                 from urllib.parse import urlparse
+
                 parsed = urlparse(extra["homepage_url"])
                 if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                     raise bad_request(f"inventorRefs[{i}].homepageUrl 必须是 http(s) URL")
@@ -519,10 +536,15 @@ def _parse_upsert_body(body: dict, partial: bool):
                     extra["avatar_file_id"] = int(ref["avatarFileId"])
                 except (TypeError, ValueError):
                     raise bad_request(f"inventorRefs[{i}].avatarFileId 必须是整数")
-            cleaned.append({
-                "name": name, "org_name": org_name,
-                "person_type": person_type, "sort_order": sort_order, **extra,
-            })
+            cleaned.append(
+                {
+                    "name": name,
+                    "org_name": org_name,
+                    "person_type": person_type,
+                    "sort_order": sort_order,
+                    **extra,
+                }
+            )
         deduped = []
         seen = set()
         for ref in cleaned:
@@ -556,7 +578,9 @@ def _sync_inventors(cur, ach_id: int, refs, user_id: int | None = None):
     """整体替换成果-完成人关联（inventor 按 name+org_name get-or-create）"""
     avatar_ids = [ref.get("avatar_file_id") for ref in refs if ref.get("avatar_file_id")]
     if avatar_ids and user_id is not None:
-        cur.execute("SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, avatar_ids))
+        cur.execute(
+            "SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, avatar_ids)
+        )
         if {int(row["id"]) for row in cur.fetchall()} != set(avatar_ids):
             raise bad_request("完成人头像不存在、已删除或不属于当前用户")
     cur.execute("DELETE FROM achievement_inventor WHERE achievement_id=%s", (ach_id,))
@@ -568,20 +592,42 @@ def _sync_inventors(cur, ach_id: int, refs, user_id: int | None = None):
         row = cur.fetchone()
         if row:
             inventor_id = row["id"]
-            enrich = {key: value for key, value in ref.items() if key in {"person_type", "department", "title", "bio", "phone", "email", "homepage_url", "avatar_file_id"} and value is not None}
+            enrich = {
+                key: value
+                for key, value in ref.items()
+                if key
+                in {"person_type", "department", "title", "bio", "phone", "email", "homepage_url", "avatar_file_id"}
+                and value is not None
+            }
             if enrich:
                 assignments = ", ".join(
-                    f"{column}=COALESCE(%s, {column})" if column == "avatar_file_id" else f"{column}=COALESCE(NULLIF(%s, ''), {column})"
+                    f"{column}=COALESCE(%s, {column})"
+                    if column == "avatar_file_id"
+                    else f"{column}=COALESCE(NULLIF(%s, ''), {column})"
                     for column in enrich
                 )
-                cur.execute(f"UPDATE inventor SET {assignments}, updated_at=CURRENT_TIMESTAMP WHERE id=%s", list(enrich.values()) + [inventor_id])
+                cur.execute(
+                    f"UPDATE inventor SET {assignments}, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+                    list(enrich.values()) + [inventor_id],
+                )
         else:
             cur.execute(
                 """
                 INSERT INTO inventor (name, org_name, person_type, department, title, bio, phone, email, homepage_url, avatar_file_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                 """,
-                (ref["name"], ref["org_name"], ref["person_type"], ref.get("department"), ref.get("title"), ref.get("bio"), ref.get("phone"), ref.get("email"), ref.get("homepage_url"), ref.get("avatar_file_id")),
+                (
+                    ref["name"],
+                    ref["org_name"],
+                    ref["person_type"],
+                    ref.get("department"),
+                    ref.get("title"),
+                    ref.get("bio"),
+                    ref.get("phone"),
+                    ref.get("email"),
+                    ref.get("homepage_url"),
+                    ref.get("avatar_file_id"),
+                ),
             )
             inventor_id = cur.fetchone()["id"]
         cur.execute(
@@ -678,7 +724,11 @@ def _owner_detail(cur, ach_id: int, user_id=None):
                 "bio": inv.get("bio"),
                 "homepageUrl": inv.get("homepage_url"),
                 "avatarFileId": inv.get("avatar_file_id"),
-                "avatarUrl": (f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{inv['avatar_file_id']}" if inv.get("avatar_file_id") else None),
+                "avatarUrl": (
+                    f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{inv['avatar_file_id']}"
+                    if inv.get("avatar_file_id")
+                    else None
+                ),
                 "sortOrder": inv.get("sort_order"),
                 "contribution": inv.get("contribution"),
             }
@@ -756,9 +806,14 @@ def create_achievement(
         sync_content(cur, ach_id, media_owner_user_id or user_id, content)
 
         audit_record(
-            "achievement.create", "achievement", resource_id=ach_id,
-            actor_user_id=user_id, actor_user_no=user_no,
-            details={"title": fields.get("title")}, request_id=request_id, cur=cur,
+            "achievement.create",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            details={"title": fields.get("title")},
+            request_id=request_id,
+            cur=cur,
         )
 
     return _owner_detail_public(ach_id, user_id)
@@ -781,9 +836,7 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
         if row["owner_user_id"] != user_id:
             raise achievement_forbidden()
         if row["status"] not in EDITABLE_STATUSES:
-            raise achievement_conflict(
-                f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected/offline 可编辑）"
-            )
+            raise achievement_conflict(f"当前状态 {row['status']} 不允许编辑（仅 draft/rejected/offline 可编辑）")
 
         # 编辑 cooperationCapacity 时按 delta 调整 remaining，保留已消耗名额
         if "cooperation_capacity" in fields:
@@ -825,14 +878,21 @@ def update_achievement(user_id: int, user_no: str, ach_id: int, body: dict, requ
         sync_content(cur, ach_id, user_id, content)
 
         audit_record(
-            "achievement.update", "achievement", resource_id=ach_id,
-            actor_user_id=user_id, actor_user_no=user_no, request_id=request_id, cur=cur,
+            "achievement.update",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            request_id=request_id,
+            cur=cur,
         )
 
     return _owner_detail_public(ach_id, user_id)
 
 
-def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reason=None, reason_code=None, request_id=None):
+def _transition(
+    user_id: int, user_no: str, ach_id: int, version, op: str, reason=None, reason_code=None, request_id=None
+):
     rule = TRANSITIONS[op]
     if version is None:
         raise bad_request(f"{op} 必须携带 version（乐观锁）")
@@ -844,27 +904,28 @@ def _transition(user_id: int, user_no: str, ach_id: int, version, op: str, reaso
         if row["owner_user_id"] != user_id:
             raise achievement_forbidden()
         if row["status"] not in rule["from"]:
-            raise achievement_conflict(
-                f"当前状态 {row['status']} 不允许 {op}"
-                f"（要求 {'/'.join(rule['from'])}）"
-            )
-        if op == 'offline' and reason_code:
-            if reason_code not in ('cooperated', 'expired', 'superseded', 'duplicate', 'no_longer_available', 'other'):
-                raise bad_request('reasonCode 不合法')
+            raise achievement_conflict(f"当前状态 {row['status']} 不允许 {op}（要求 {'/'.join(rule['from'])}）")
+        if op == "offline" and reason_code:
+            if reason_code not in ("cooperated", "expired", "superseded", "duplicate", "no_longer_available", "other"):
+                raise bad_request("reasonCode 不合法")
         else:
             reason_code = None
         cur.execute(
             "UPDATE achievement SET status=%s, version=version+1, offline_reason_code=COALESCE(%s, offline_reason_code), offline_reason_note=COALESCE(%s, offline_reason_note) WHERE id=%s AND version=%s",
-            (rule["to"], reason_code, str(reason or '').strip()[:500] or None, ach_id, version),
+            (rule["to"], reason_code, str(reason or "").strip()[:500] or None, ach_id, version),
         )
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
         audit_record(
-            rule["action"], "achievement", resource_id=ach_id,
-            actor_user_id=user_id, actor_user_no=user_no,
+            rule["action"],
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
             details={"from": row["status"], "to": rule["to"], "reason": reason or None, "reasonCode": reason_code},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {"status": rule["to"]}
@@ -874,8 +935,12 @@ def submit_achievement(user_id: int, user_no: str, ach_id: int, version, request
     return _transition(user_id, user_no, ach_id, version, "submit", request_id=request_id)
 
 
-def offline_achievement(user_id: int, user_no: str, ach_id: int, version, reason=None, reason_code=None, request_id=None):
-    return _transition(user_id, user_no, ach_id, version, "offline", reason=reason, reason_code=reason_code, request_id=request_id)
+def offline_achievement(
+    user_id: int, user_no: str, ach_id: int, version, reason=None, reason_code=None, request_id=None
+):
+    return _transition(
+        user_id, user_no, ach_id, version, "offline", reason=reason, reason_code=reason_code, request_id=request_id
+    )
 
 
 def list_my_achievements(user_id: int, args):

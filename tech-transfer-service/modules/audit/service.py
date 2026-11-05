@@ -3,6 +3,7 @@
 
 Architecture source: 04-backend-domain-design.md §4.14, 05-data-model-design.md audit_log
 """
+
 import json
 
 from db import get_cursor

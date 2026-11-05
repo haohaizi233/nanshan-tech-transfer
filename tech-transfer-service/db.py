@@ -28,7 +28,7 @@
 import logging
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -79,9 +79,7 @@ def init_pool() -> None:
             return
         kwargs = _connect_kwargs()
         try:
-            _pool = ThreadedConnectionPool(
-                settings.DB_POOL_MIN, settings.DB_POOL_MAX, **kwargs
-            )
+            _pool = ThreadedConnectionPool(settings.DB_POOL_MIN, settings.DB_POOL_MAX, **kwargs)
         except psycopg2.Error as e:
             logger.warning("连接池初始化失败，降级为空池懒填充：%s", e)
             _pool = ThreadedConnectionPool(0, settings.DB_POOL_MAX, **kwargs)
@@ -150,18 +148,14 @@ def _release_conn(conn) -> None:
             conn.close()
         elif recycle:
             # 老连接：归还前关闭，不让池再借出死连接。
-            try:
+            with suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
         else:
             pool.putconn(conn)
     except Exception:
         logger.warning("归还连接异常，强制关闭", exc_info=True)
-        try:
+        with suppress(Exception):
             conn.close()
-        except Exception:
-            pass
     finally:
         with _acquire_cond:
             _acquire_cond.notify()
@@ -206,10 +200,8 @@ def _ping(conn) -> bool:
         finally:
             cur.close()
         # 探测本身会开启事务，回滚以免影响后续业务事务边界。
-        try:
+        with suppress(Exception):
             conn.rollback()
-        except Exception:
-            pass
         return True
     except Exception:
         return False
@@ -217,10 +209,8 @@ def _ping(conn) -> bool:
 
 def _replace_conn(conn) -> "psycopg2.extensions.connection":
     """关闭坏连接并向池借一条新连接；池空时返回一条新建连接。"""
-    try:
+    with suppress(Exception):
         conn.close()
-    except Exception:
-        pass
     _conn_born.pop(id(conn), None)
     try:
         return _acquire_conn()
@@ -243,10 +233,9 @@ def get_cursor(commit: bool = False):
                 # 会长期持有 AccessShareLock，阻塞后续 ALTER TABLE 等迁移。
                 conn.rollback()
         except Exception:
-            try:
+            # 坏连接由归还逻辑关闭，不掩盖业务异常
+            with suppress(Exception):
                 conn.rollback()
-            except Exception:
-                pass  # 坏连接由归还逻辑关闭，不掩盖业务异常
             raise
         finally:
             cur.close()
@@ -260,8 +249,6 @@ def transaction():
             yield conn
             conn.commit()
         except Exception:
-            try:
+            with suppress(Exception):
                 conn.rollback()
-            except Exception:
-                pass
             raise

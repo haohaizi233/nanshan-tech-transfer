@@ -11,6 +11,7 @@ AI 聊天记录入库 回归测试 —— /ai/chat/messages（GET/DELETE）+ /ai
 依赖：后端已启动；routes/ai.py 中 AI_FEATURE_ENABLED=True。
 成功路径（验证入库）需要 ai-agent 可达；不可达时本测试降级为只校验边界与清空。
 """
+
 import time
 
 import requests
@@ -66,7 +67,8 @@ print()
 # ── 3. 发起一次对话；成功则验证入库，503 则降级 ─────────────────
 chat_ok = False
 resp = requests.post(
-    f"{BASE}/ai/chat", headers=h_a,
+    f"{BASE}/ai/chat",
+    headers=h_a,
     json={"message": "帮我找机器视觉相关的科技成果"},
     timeout=120,
 )
@@ -91,8 +93,9 @@ if chat_ok:
         agent_cards = data.get("data")
         if isinstance(agent_cards, list) and agent_cards:
             hist_cards = msgs[1].get("cards")
-            check("assistant 卡片快照已入库", isinstance(hist_cards, list) and len(hist_cards) > 0,
-                  f"cards={hist_cards}")
+            check(
+                "assistant 卡片快照已入库", isinstance(hist_cards, list) and len(hist_cards) > 0, f"cards={hist_cards}"
+            )
             # 自排除：返回的成果卡片不应属于当前用户（卡片若带 owner_user_id 字段）
             own = [c for c in hist_cards if isinstance(c, dict) and c.get("owner_user_id") == user_a["userId"]]
             check("推荐不含自己的成果", len(own) == 0, f"own={own}")

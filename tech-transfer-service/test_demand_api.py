@@ -5,6 +5,7 @@
      /me/demands、审计
 依赖：后端已启动（127.0.0.1:8787），004 迁移已执行，etl_demands.py 已导入演示数据
 """
+
 import atexit
 import re
 
@@ -15,8 +16,13 @@ import requests
 from config import settings
 
 BASE = settings.API_BASE.rstrip("/") + settings.API_PREFIX
-DB = dict(host=settings.DB_HOST, port=settings.DB_PORT, user=settings.DB_USER,
-          password=settings.DB_PASSWORD, dbname=settings.DB_NAME)
+DB = {
+    "host": settings.DB_HOST,
+    "port": settings.DB_PORT,
+    "user": settings.DB_USER,
+    "password": settings.DB_PASSWORD,
+    "dbname": settings.DB_NAME,
+}
 PASS = 0
 FAIL = 0
 
@@ -43,9 +49,7 @@ def set_status_sql(demand_id, status):
     conn = psycopg2.connect(**DB)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE demand SET status=%s, published_at=NOW() WHERE id=%s", (status, demand_id)
-            )
+            cur.execute("UPDATE demand SET status=%s, published_at=NOW() WHERE id=%s", (status, demand_id))
         conn.commit()
     finally:
         conn.close()
@@ -85,7 +89,10 @@ check("列表项有title", bool(first.get("title")))
 check("列表项有orgName", bool(first.get("orgName")))
 check("列表项有region", bool(first.get("region")))
 check("列表项有coopMode数组", isinstance(first.get("coopMode"), list))
-check("列表项有budgetMinWan或negotiable", first.get("budgetMinWan") is not None or first.get("budgetNegotiable") in (True, False))
+check(
+    "列表项有budgetMinWan或negotiable",
+    first.get("budgetMinWan") is not None or first.get("budgetNegotiable") in (True, False),
+)
 check("列表项status=published", first.get("status") == "published")
 check("列表项isMine=false（非本人）", first.get("isMine") is False)
 print()
@@ -115,10 +122,26 @@ check("详情有description", bool(detail.get("description")))
 check("详情orgIntro遵循空值语义", detail.get("orgIntro") is None or isinstance(detail.get("orgIntro"), str))
 check("详情有deadlineDesc", bool(detail.get("deadlineDesc")))
 check("详情tags为数组", isinstance(detail.get("tags"), list))
-check("非owner手机号脱敏", not detail.get("contactPhone") or bool(re.fullmatch(r"\d{3}\*{4}\d{4}", detail["contactPhone"])), f"got {detail.get('contactPhone')}")
-check("非owner联系人姓名脱敏", not detail.get("contactName") or "*" in detail["contactName"], f"got {detail.get('contactName')}")
-check("非owner邮箱脱敏", detail.get("contactEmail") is None or "*" in detail["contactEmail"], f"got {detail.get('contactEmail')}")
-check("非owner微信号脱敏", not detail.get("contactWechat") or "*" in detail["contactWechat"], f"got {detail.get('contactWechat')}")
+check(
+    "非owner手机号脱敏",
+    not detail.get("contactPhone") or bool(re.fullmatch(r"\d{3}\*{4}\d{4}", detail["contactPhone"])),
+    f"got {detail.get('contactPhone')}",
+)
+check(
+    "非owner联系人姓名脱敏",
+    not detail.get("contactName") or "*" in detail["contactName"],
+    f"got {detail.get('contactName')}",
+)
+check(
+    "非owner邮箱脱敏",
+    detail.get("contactEmail") is None or "*" in detail["contactEmail"],
+    f"got {detail.get('contactEmail')}",
+)
+check(
+    "非owner微信号脱敏",
+    not detail.get("contactWechat") or "*" in detail["contactWechat"],
+    f"got {detail.get('contactWechat')}",
+)
 check("非owner职务可显示", detail.get("contactTitle") is None or isinstance(detail.get("contactTitle"), str))
 check("非owner看不到rejectReason", detail.get("rejectReason") is None)
 print()
@@ -129,43 +152,62 @@ resp = requests.post(f"{BASE}/demands", headers=headers_a, json=body_no_title, t
 check("缺title返回400", resp.status_code == 400, f"got {resp.status_code}")
 check("错误码TT_COMMON_40001", resp.json().get("code") == "TT_COMMON_40001")
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a,
-                     json={"title": "x", "description": "x", "coopMode": "不是数组"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands", headers=headers_a, json={"title": "x", "description": "x", "coopMode": "不是数组"}, timeout=10
+)
 check("coopMode非数组返回400", resp.status_code == 400)
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a,
-                     json={"title": "x", "description": "x", "budgetMinWan": 100, "budgetMaxWan": 50}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={"title": "x", "description": "x", "budgetMinWan": 100, "budgetMaxWan": 50},
+    timeout=10,
+)
 check("budgetMin>Max返回400", resp.status_code == 400)
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a,
-                     json={"title": "x", "description": "x", "categoryId": 999999}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands", headers=headers_a, json={"title": "x", "description": "x", "categoryId": 999999}, timeout=10
+)
 check("categoryId不存在返回400", resp.status_code == 400)
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a,
-                     json={"title": "x", "description": "x", "expectDeadline": "2026/01/01"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={"title": "x", "description": "x", "expectDeadline": "2026/01/01"},
+    timeout=10,
+)
 check("expectDeadline格式错误返回400", resp.status_code == 400)
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a,
-                     json={"title": "测试需求-忽略版本", "description": "x", "version": 1, "tags": ["算法"]}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={"title": "测试需求-忽略版本", "description": "x", "version": 1, "tags": ["算法"]},
+    timeout=10,
+)
 check("创建时带version被忽略不报错", resp.status_code == 201)
 created_id = resp.json()["data"]["id"]
 print()
 
 # ── 6. 创建成功 → draft ────────────────────────────────────
-resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
-    "title": "测试需求-工业机器人集成",
-    "description": "寻找具备工业机器人产线集成能力的团队，完成装配线自动化改造。",
-    "region": "广东 · 深圳南山",
-    "coopMode": ["技术合作", "委托开发"],
-    "budgetMinWan": 30,
-    "budgetMaxWan": 60,
-    "expectDeadline": "2026-12-31",
-    "deadlineDesc": "年底前完成",
-    "contactName": "赵主管",
-    "contactTitle": "制造部经理",
-    "contactPhone": "13600004444",
-    "tags": ["工业机器人", "自动化"],
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={
+        "title": "测试需求-工业机器人集成",
+        "description": "寻找具备工业机器人产线集成能力的团队，完成装配线自动化改造。",
+        "region": "广东 · 深圳南山",
+        "coopMode": ["技术合作", "委托开发"],
+        "budgetMinWan": 30,
+        "budgetMaxWan": 60,
+        "expectDeadline": "2026-12-31",
+        "deadlineDesc": "年底前完成",
+        "contactName": "赵主管",
+        "contactTitle": "制造部经理",
+        "contactPhone": "13600004444",
+        "tags": ["工业机器人", "自动化"],
+    },
+    timeout=10,
+)
 check("创建返回201", resp.status_code == 201, f"got {resp.status_code}")
 detail = resp.json()["data"]
 demand_id = detail["id"]
@@ -180,15 +222,20 @@ check("version=1", detail["version"] == 1)
 print()
 
 # ── 6b. 过渡期便捷字段 orgName/orgIntro/categoryName ────────
-resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
-    "title": "测试需求-名称引用字段",
-    "description": "通过 orgName/categoryName 创建的需求。",
-    "orgName": "测试组织-科技转化",
-    "orgIntro": "测试组织简介",
-    "categoryName": "智能制造",
-    "region": "广东 · 深圳南山",
-    "contactPhone": "13600005555",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={
+        "title": "测试需求-名称引用字段",
+        "description": "通过 orgName/categoryName 创建的需求。",
+        "orgName": "测试组织-科技转化",
+        "orgIntro": "测试组织简介",
+        "categoryName": "智能制造",
+        "region": "广东 · 深圳南山",
+        "contactPhone": "13600005555",
+    },
+    timeout=10,
+)
 check("orgName创建返回201", resp.status_code == 201, f"got {resp.status_code}")
 detail_name = resp.json()["data"]
 name_demand_id = detail_name["id"]
@@ -199,19 +246,31 @@ with psycopg2.connect(**DB) as association_conn, association_conn.cursor() as as
     check("orgName仅保存展示快照", association_cur.fetchone() == (None, "测试组织-科技转化"))
 check("categoryName复用既有分类", detail_name.get("categoryName") == "智能制造")
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
-    "title": "测试需求-组织复用",
-    "description": "同名展示文本不创建或推断机构关联。",
-    "orgName": "测试组织-科技转化",
-    "categoryName": "测试新分类-唯一",
-    "contactPhone": "13600005556",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={
+        "title": "测试需求-组织复用",
+        "description": "同名展示文本不创建或推断机构关联。",
+        "orgName": "测试组织-科技转化",
+        "categoryName": "测试新分类-唯一",
+        "contactPhone": "13600005556",
+    },
+    timeout=10,
+)
 check("同名orgName展示文本=201", resp.status_code == 201)
 check("新分类自动创建", resp.json()["data"].get("categoryName") == "测试新分类-唯一")
 
-resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
-    "title": "x", "description": "x", "orgIntro": "没有orgName",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={
+        "title": "x",
+        "description": "x",
+        "orgIntro": "没有orgName",
+    },
+    timeout=10,
+)
 check("orgIntro缺orgName=400", resp.status_code == 400)
 print()
 
@@ -227,25 +286,31 @@ check("不存在的需求=404", resp.status_code == 404)
 print()
 
 # ── 8. 编辑 —— 权限与乐观锁 ─────────────────────────────────
-resp = requests.patch(f"{BASE}/demands/{demand_id}", headers=headers_b,
-                      json={"title": "篡改", "version": 1}, timeout=10)
+resp = requests.patch(
+    f"{BASE}/demands/{demand_id}", headers=headers_b, json={"title": "篡改", "version": 1}, timeout=10
+)
 check("非owner编辑=403", resp.status_code == 403, f"got {resp.status_code}")
 check("错误码TT_DMD_40301", resp.json().get("code") == "TT_DMD_40301")
 
-resp = requests.patch(f"{BASE}/demands/{demand_id}", headers=headers_a,
-                      json={"title": "无版本号编辑"}, timeout=10)
+resp = requests.patch(f"{BASE}/demands/{demand_id}", headers=headers_a, json={"title": "无版本号编辑"}, timeout=10)
 check("缺version=400", resp.status_code == 400)
 
-resp = requests.patch(f"{BASE}/demands/{demand_id}", headers=headers_a,
-                      json={"title": "旧版本编辑", "version": 99}, timeout=10)
+resp = requests.patch(
+    f"{BASE}/demands/{demand_id}", headers=headers_a, json={"title": "旧版本编辑", "version": 99}, timeout=10
+)
 check("错误version=409乐观锁", resp.status_code == 409, f"got {resp.status_code}")
 
-resp = requests.patch(f"{BASE}/demands/{demand_id}", headers=headers_a, json={
-    "title": "测试需求-工业机器人集成（改）",
-    "budgetMaxWan": 80,
-    "tags": ["自动化改造"],
-    "version": 1,
-}, timeout=10)
+resp = requests.patch(
+    f"{BASE}/demands/{demand_id}",
+    headers=headers_a,
+    json={
+        "title": "测试需求-工业机器人集成（改）",
+        "budgetMaxWan": 80,
+        "tags": ["自动化改造"],
+        "version": 1,
+    },
+    timeout=10,
+)
 check("正确version编辑=200", resp.status_code == 200)
 detail = resp.json()["data"]
 check("编辑后version=2", detail["version"] == 2, f"got {detail['version']}")
@@ -256,34 +321,29 @@ check("未传字段保留（region）", detail["region"] == "广东 · 深圳南
 print()
 
 # ── 9. 状态机：submit ──────────────────────────────────────
-resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_a,
-                     json={"version": 1}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_a, json={"version": 1}, timeout=10)
 check("submit旧version=409乐观锁", resp.status_code == 409)
 
-resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_a,
-                     json={"version": 2}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_a, json={"version": 2}, timeout=10)
 check("submit成功=200", resp.status_code == 200)
 check("submit后status=pending_review", resp.json()["data"]["status"] == "pending_review")
 
-resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_a,
-                     json={"version": 3}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_a, json={"version": 3}, timeout=10)
 check("重复submit=409状态机", resp.status_code == 409, f"got {resp.status_code}")
 check("错误码TT_DMD_40901", resp.json().get("code") == "TT_DMD_40901")
 
-resp = requests.patch(f"{BASE}/demands/{demand_id}", headers=headers_a,
-                      json={"title": "审核中还想改", "version": 3}, timeout=10)
+resp = requests.patch(
+    f"{BASE}/demands/{demand_id}", headers=headers_a, json={"title": "审核中还想改", "version": 3}, timeout=10
+)
 check("pending_review编辑=409", resp.status_code == 409)
 
-resp = requests.post(f"{BASE}/demands/{demand_id}/cancel", headers=headers_a,
-                     json={"version": 3}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{demand_id}/cancel", headers=headers_a, json={"version": 3}, timeout=10)
 check("pending_review取消=409（仅published可取消）", resp.status_code == 409)
 
-resp = requests.post(f"{BASE}/demands/{demand_id}/close", headers=headers_a,
-                     json={"version": 3}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{demand_id}/close", headers=headers_a, json={"version": 3}, timeout=10)
 check("pending_review关闭=409", resp.status_code == 409)
 
-resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_b,
-                     json={"version": 3}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{demand_id}/submit", headers=headers_b, json={"version": 3}, timeout=10)
 check("非owner submit=403", resp.status_code == 403)
 print()
 
@@ -297,23 +357,19 @@ cancel_id = demand_id
 close_id = created_id
 set_status_sql(close_id, "published")
 
-resp = requests.post(f"{BASE}/demands/{cancel_id}/cancel", headers=headers_a,
-                     json={"version": 3}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{cancel_id}/cancel", headers=headers_a, json={"version": 3}, timeout=10)
 check("published→cancelled成功", resp.status_code == 200 and resp.json()["data"]["status"] == "cancelled")
 
-resp = requests.post(f"{BASE}/demands/{cancel_id}/cancel", headers=headers_a,
-                     json={"version": 4}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{cancel_id}/cancel", headers=headers_a, json={"version": 4}, timeout=10)
 check("重复cancel=409", resp.status_code == 409)
 
 resp = requests.get(f"{BASE}/demands/{cancel_id}", headers=headers_b, timeout=10)
 check("cancelled后非owner=404", resp.status_code == 404)
 
-resp = requests.post(f"{BASE}/demands/{close_id}/close", headers=headers_a,
-                     json={"version": 1}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{close_id}/close", headers=headers_a, json={"version": 1}, timeout=10)
 check("published→closed成功", resp.status_code == 200 and resp.json()["data"]["status"] == "closed")
 
-resp = requests.post(f"{BASE}/demands/{close_id}/close", headers=headers_a,
-                     json={"version": 2}, timeout=10)
+resp = requests.post(f"{BASE}/demands/{close_id}/close", headers=headers_a, json={"version": 2}, timeout=10)
 check("重复close=409", resp.status_code == 409)
 print()
 
@@ -332,15 +388,26 @@ check("/me/demands返回200", resp.status_code == 200)
 check("/me/demands只含本人需求", data["total"] >= 2 and all(i["isMine"] for i in data["list"]))
 
 # 审核结果必须在本人发布列表回显，不能只在详情页可见。
-resp = requests.post(f"{BASE}/demands", headers=headers_a, json={
-    "title": "测试需求-审核反馈", "description": "用于验证管理员驳回原因在本人列表回显。",
-}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands",
+    headers=headers_a,
+    json={
+        "title": "测试需求-审核反馈",
+        "description": "用于验证管理员驳回原因在本人列表回显。",
+    },
+    timeout=10,
+)
 feedback_demand = resp.json()["data"]
-resp = requests.post(f"{BASE}/demands/{feedback_demand['id']}/submit", headers=headers_a,
-                     json={"version": 1}, timeout=10)
+resp = requests.post(
+    f"{BASE}/demands/{feedback_demand['id']}/submit", headers=headers_a, json={"version": 1}, timeout=10
+)
 check("审核反馈需求提交成功", resp.status_code == 200, resp.text[:100])
-resp = requests.post(f"{BASE}/admin/demands/{feedback_demand['id']}/reject", headers=headers_admin,
-                     json={"version": 2, "reason": "请补充项目预算"}, timeout=10)
+resp = requests.post(
+    f"{BASE}/admin/demands/{feedback_demand['id']}/reject",
+    headers=headers_admin,
+    json={"version": 2, "reason": "请补充项目预算"},
+    timeout=10,
+)
 check("管理员驳回需求成功", resp.status_code == 200, resp.text[:100])
 resp = requests.get(f"{BASE}/me/demands", headers=headers_a, timeout=10)
 feedback_row = next((item for item in resp.json()["data"]["list"] if item["id"] == feedback_demand["id"]), None)

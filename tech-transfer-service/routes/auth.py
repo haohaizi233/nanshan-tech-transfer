@@ -1,6 +1,4 @@
-﻿from fastapi import APIRouter, Request
-
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 
 from core.errors import TT_AUTH_40105, TT_COMMON_40102, BizError, bootstrap_credential_invalid
 from core.middleware import identity
@@ -24,7 +22,6 @@ from modules.identity.service import (
     register_password_user,
     register_user,
 )
-
 from modules.identity.wechat import wechat_login_enabled, wechat_login_session
 
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
@@ -54,22 +51,19 @@ def login(body: LoginRequest, request: Request):
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
     if not (phone or username) or not password:
-        code, message, status = TT_AUTH_40105
+        code, _message, status = TT_AUTH_40105
         raise BizError(code, "请输入账号和密码", status)
 
     # D8: IP 维度限流在认证前（防暴力破解扫描）；账号维度仅计失败
     from core.rate_limit import _check, _client_ip
+
     ip = _client_ip(request)
     _check(f"login:ip:{ip}", limit=20, window_s=60)
 
     account = phone or username
     try:
-        if phone:
-            # 小程序端：手机号 + 密码（user_credential.phone 校验）
-            result = login_phone_session(phone, password)
-        else:
-            # 后台管理端：登录账号 + 密码（user_credential.username 校验）
-            result = password_login_session(username, password)
+        # 小程序端：手机号+密码（user_credential.phone 校验）；后台管理端：登录账号+密码（user_credential.username 校验）
+        result = login_phone_session(phone, password) if phone else password_login_session(username, password)
     except Exception:
         # D8: 认证失败时才计入账号限流桶（成功登录不计数）
         if account:
@@ -120,7 +114,7 @@ def refresh(body: RefreshTokenRequest, request: Request):
     check_ip_rate(request, "auth_refresh", limit=10, window_s=60)
     refresh_token = body.as_dict().get("refreshToken")
     if not refresh_token:
-        code, message, status = TT_COMMON_40102
+        code, _message, status = TT_COMMON_40102
         raise BizError(code, "缺少 refreshToken", status)
 
     result = refresh_session(refresh_token)
@@ -133,7 +127,7 @@ def logout(body: RefreshTokenRequest, request: Request):
     check_ip_rate(request, "auth_refresh", limit=10, window_s=60)
     refresh_token = body.as_dict().get("refreshToken")
     if not refresh_token:
-        code, message, status = TT_COMMON_40102
+        code, _message, status = TT_COMMON_40102
         raise BizError(code, "缺少 refreshToken", status)
 
     result = logout_session(refresh_token)

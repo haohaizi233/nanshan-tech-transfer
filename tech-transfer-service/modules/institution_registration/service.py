@@ -79,8 +79,12 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
                 raise conflict("同名机构已存在")
 
             user_id, user_no = create_password_account(
-                cur, username, password,
-                display_name=contact_name, phone=contact_phone, email=email,
+                cur,
+                username,
+                password,
+                display_name=contact_name,
+                phone=contact_phone,
+                email=email,
             )
             cur.execute(
                 """
@@ -90,22 +94,28 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, status, version
                     """,
-                (user_id, name, kind, credit_code, region,
-                 contact_name, contact_phone, email, intro),
+                (user_id, name, kind, credit_code, region, contact_name, contact_phone, email, intro),
             )
             application = cur.fetchone()
             audit_record(
-                "user.registration.submit", "app_user",
-                resource_id=user_id, actor_user_id=user_id, actor_user_no=user_no,
+                "user.registration.submit",
+                "app_user",
+                resource_id=user_id,
+                actor_user_id=user_id,
+                actor_user_no=user_no,
                 details={"username": username, "via": "institution_registration"},
-                request_id=request_id, cur=cur,
+                request_id=request_id,
+                cur=cur,
             )
             audit_record(
-                "institution_registration.submit", "organization_application",
-                resource_id=application["id"], actor_user_id=user_id,
+                "institution_registration.submit",
+                "organization_application",
+                resource_id=application["id"],
+                actor_user_id=user_id,
                 actor_user_no=user_no,
                 details={"name": name, "kind": kind},
-                request_id=request_id, cur=cur,
+                request_id=request_id,
+                cur=cur,
             )
             return {
                 "applicationId": application["id"],
@@ -203,7 +213,10 @@ def _load_application_version(application_id: int, select_extra: str = "") -> di
 def approve_institution_registration(admin: dict, application_id: int, request_id=None) -> dict:
     row = _load_application_version(application_id, ", proof_material")
     result = approve_organization_application(
-        admin, application_id, row["version"], request_id=request_id,
+        admin,
+        application_id,
+        row["version"],
+        request_id=request_id,
     )
 
     # 机构简介（暂存于 proof_material）回填建档结果（仅空值时写入，不覆盖人工维护）
@@ -218,9 +231,12 @@ def approve_institution_registration(admin: dict, application_id: int, request_i
     return result
 
 
-def reject_institution_registration(admin: dict, application_id: int, reason,
-                                    request_id=None) -> dict:
+def reject_institution_registration(admin: dict, application_id: int, reason, request_id=None) -> dict:
     row = _load_application_version(application_id)
     return reject_organization_application(
-        admin, application_id, row["version"], reason, request_id=request_id,
+        admin,
+        application_id,
+        row["version"],
+        reason,
+        request_id=request_id,
     )

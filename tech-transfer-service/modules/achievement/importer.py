@@ -1,6 +1,8 @@
 """PPT/PDF 成果资料导入：只抽取并写入 staging，绝不自动发布。"""
+
 from __future__ import annotations
 
+import contextlib
 import gc
 import json
 import re
@@ -22,8 +24,11 @@ from modules.achievement.extract import (
 from modules.audit.service import record as audit_record
 
 _IMAGE_MIME_BY_EXTENSION = {
-    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-    "webp": "image/webp", "gif": "image/gif",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
 }
 
 
@@ -53,11 +58,13 @@ def _pptx_images(slide, source_page_or_slide: str, slide_width: int, slide_heigh
         blob = getattr(image, "blob", b"")
         if not mime_type or not blob:
             continue
-        candidates.append({
-            "filename": f"{source_page_or_slide}-image-{index}.{extension}",
-            "mimeType": mime_type,
-            "data": blob,
-        })
+        candidates.append(
+            {
+                "filename": f"{source_page_or_slide}-image-{index}.{extension}",
+                "mimeType": mime_type,
+                "data": blob,
+            }
+        )
     return candidates
 
 
@@ -71,11 +78,13 @@ def _pdf_images(page, source_page_or_slide: str) -> list[dict]:
         data = getattr(image, "data", b"")
         if not mime_type or not data:
             continue
-        candidates.append({
-            "filename": f"{source_page_or_slide}-image-{index}.{extension}",
-            "mimeType": mime_type,
-            "data": data,
-        })
+        candidates.append(
+            {
+                "filename": f"{source_page_or_slide}-image-{index}.{extension}",
+                "mimeType": mime_type,
+                "data": data,
+            }
+        )
     return candidates
 
 
@@ -130,8 +139,14 @@ _TEMPLATE_PLACEHOLDERS = re.compile(
     re.IGNORECASE,
 )
 _CONTRIBUTOR_HEADINGS = {
-    "成果完成人", "完成人", "发明人介绍", "团队成员介绍", "负责人介绍",
-    "团队简介", "项目牵头人简介", "项目联系人及联系方式",
+    "成果完成人",
+    "完成人",
+    "发明人介绍",
+    "团队成员介绍",
+    "负责人介绍",
+    "团队简介",
+    "项目牵头人简介",
+    "项目联系人及联系方式",
 }
 _CONTRIBUTOR_CONTACT_HINTS = ("联系邮箱", "联系方式", "联系电话", "邮箱", "电话", "Email", "E-mail")
 _PATENT_PAGE_HINTS = ("专利号", "专利", "知识产权", "扫码查看", "专利公布公告")
@@ -240,27 +255,35 @@ def extract_document_records(path: str | Path) -> list[dict]:
     suffix = source.suffix.lower()
     if suffix == ".pptx":
         from pptx import Presentation
+
         deck = Presentation(source)
         pages = []
         for index, slide in enumerate(deck.slides, 1):
-            text = "\n".join(shape.text for shape in slide.shapes if getattr(shape, "has_text_frame", False) and shape.text.strip())
+            text = "\n".join(
+                shape.text for shape in slide.shapes if getattr(shape, "has_text_frame", False) and shape.text.strip()
+            )
             source_page_or_slide = f"slide-{index}"
-            pages.append({
-                "sourcePageOrSlide": source_page_or_slide,
-                "text": text,
-                "images": _pptx_images(slide, source_page_or_slide, deck.slide_width, deck.slide_height),
-            })
+            pages.append(
+                {
+                    "sourcePageOrSlide": source_page_or_slide,
+                    "text": text,
+                    "images": _pptx_images(slide, source_page_or_slide, deck.slide_width, deck.slide_height),
+                }
+            )
     elif suffix == ".pdf":
         from pypdf import PdfReader
+
         reader = PdfReader(str(source))
         pages = []
         for index, page in enumerate(reader.pages, 1):
             source_page_or_slide = f"page-{index}"
-            pages.append({
-                "sourcePageOrSlide": source_page_or_slide,
-                "text": page.extract_text() or "",
-                "images": _pdf_images(page, source_page_or_slide),
-            })
+            pages.append(
+                {
+                    "sourcePageOrSlide": source_page_or_slide,
+                    "text": page.extract_text() or "",
+                    "images": _pdf_images(page, source_page_or_slide),
+                }
+            )
     else:
         raise bad_request("只支持 .pptx 或 .pdf 导入")
 
@@ -351,7 +374,9 @@ def extract_document_records(path: str | Path) -> list[dict]:
             )
         else:
             for contrib in pending_contributors:
-                record = _normalize_page({"sourcePageOrSlide": contrib["sourcePageOrSlide"], "text": contrib["raw"]["text"]})
+                record = _normalize_page(
+                    {"sourcePageOrSlide": contrib["sourcePageOrSlide"], "text": contrib["raw"]["text"]}
+                )
                 record["raw"]["pageType"] = "contributor"
                 record["normalized"]["inventorRefs"] = [contrib["inventor"]]
                 record["images"] = list(contrib.get("images") or [])
@@ -363,15 +388,52 @@ def extract_document_records(path: str | Path) -> list[dict]:
 
 _PATENT_RE = re.compile(r"(?i)(?:CN|ZL)\s*\d{6,16}(?:\.\d+)?")
 _NON_TITLE_HEADINGS = {
-    "团队介绍", "团队简介", "联系方式", "相关成果发表", "成果简介", "技术简介",
-    "项目简介", "项目介绍", "项目牵头人简介", "项目联系人及联系方式", "成果完成人",
-    "参考文献", "目录", "附录", "致谢",
+    "团队介绍",
+    "团队简介",
+    "联系方式",
+    "相关成果发表",
+    "成果简介",
+    "技术简介",
+    "项目简介",
+    "项目介绍",
+    "项目牵头人简介",
+    "项目联系人及联系方式",
+    "成果完成人",
+    "参考文献",
+    "目录",
+    "附录",
+    "致谢",
 }
-_TITLE_KEYWORDS = ("技术", "平台", "系统", "方法", "装置", "材料", "产品", "算法", "模型", "设备", "工艺", "项目", "方案")
+_TITLE_KEYWORDS = (
+    "技术",
+    "平台",
+    "系统",
+    "方法",
+    "装置",
+    "材料",
+    "产品",
+    "算法",
+    "模型",
+    "设备",
+    "工艺",
+    "项目",
+    "方案",
+)
 _TEMPLATE_CONTENT_HINTS = (
-    "成果简介（包括但不限于", "成果照片", "（图片/视频", "图片/视频 1920", "字数800字以内",
-    "项目简介（", "项目代表性图片", "技术创新点(", "团队整体情况", "项目联系人",
-    "商业价值", "商业模式", "技术成熟度与项目进展", "可应用领域（",
+    "成果简介（包括但不限于",
+    "成果照片",
+    "（图片/视频",
+    "图片/视频 1920",
+    "字数800字以内",
+    "项目简介（",
+    "项目代表性图片",
+    "技术创新点(",
+    "团队整体情况",
+    "项目联系人",
+    "商业价值",
+    "商业模式",
+    "技术成熟度与项目进展",
+    "可应用领域（",
 )
 
 
@@ -387,17 +449,24 @@ def _canonical_import_label(label: str | None) -> str | None:
     candidate = _NUMBERED_LABEL_PREFIX.sub("", label).strip()
     return candidate if candidate in _FIELD_ALIASES else label
 
+
 # 常见高校 PPT/PDF 模板使用的字段名。无法识别的字段不臆造主表列，保留为动态区块。
 _FIELD_ALIASES = FIELD_ALIASES
 _SECTION_ALIASES = {
-    "技术创新点": ("innovation", "技术创新点"), "创新点": ("innovation", "技术创新点"),
-    "技术成熟度说明": ("maturity_detail", "技术成熟度说明"), "成熟度说明": ("maturity_detail", "技术成熟度说明"),
+    "技术创新点": ("innovation", "技术创新点"),
+    "创新点": ("innovation", "技术创新点"),
+    "技术成熟度说明": ("maturity_detail", "技术成熟度说明"),
+    "成熟度说明": ("maturity_detail", "技术成熟度说明"),
     "项目支持": ("project_support", "项目支持"),
     "技术问题": ("tech_problem", "技术问题"),
-    "技术手段": ("tech_method", "技术手段"), "技术方法": ("tech_method", "技术手段"),
-    "技术功效": ("tech_effect", "技术功效"), "技术效果": ("tech_effect", "技术功效"),
-    "市场前景": ("market_prospect", "市场前景"), "产业化情况": ("industrialization", "产业化情况"),
-    "团队介绍": ("team_intro", "团队介绍"), "技术路线": ("technical_route", "技术路线"),
+    "技术手段": ("tech_method", "技术手段"),
+    "技术方法": ("tech_method", "技术手段"),
+    "技术功效": ("tech_effect", "技术功效"),
+    "技术效果": ("tech_effect", "技术功效"),
+    "市场前景": ("market_prospect", "市场前景"),
+    "产业化情况": ("industrialization", "产业化情况"),
+    "团队介绍": ("team_intro", "团队介绍"),
+    "技术路线": ("technical_route", "技术路线"),
     "商业化": ("commercialization", "商业化情况"),
 }
 _PATENT_LABELS = {"专利", "专利号", "相关专利", "知识产权"}
@@ -533,14 +602,28 @@ def _normalize_page(page: dict) -> dict:
     if len(title) > 200:
         # 演示稿中常把整段团队/成果介绍放在首个文本框。保留原始内容，
         # 以数据库可承载的候选标题进入人工审核，而不是让整页资料丢失。
-        normalization_warnings.append({
-            "field": "title",
-            "message": "原始标题超过 200 字符，已截断为候选标题，请人工确认",
-        })
-    normalized = {"title": title[:200], "techIntro": description[:5000], "sections": [item for item in sections if item["content"].strip()]}
+        normalization_warnings.append(
+            {
+                "field": "title",
+                "message": "原始标题超过 200 字符，已截断为候选标题，请人工确认",
+            }
+        )
+    normalized = {
+        "title": title[:200],
+        "techIntro": description[:5000],
+        "sections": [item for item in sections if item["content"].strip()],
+    }
     for key in (
-        "titleEn", "sourceOrgName", "techRoute", "contactName", "contactTitle",
-        "contactPhone", "contactEmail", "contactWechat", "maturityLevel", "pricingMode",
+        "titleEn",
+        "sourceOrgName",
+        "techRoute",
+        "contactName",
+        "contactTitle",
+        "contactPhone",
+        "contactEmail",
+        "contactWechat",
+        "maturityLevel",
+        "pricingMode",
     ):
         value = harvested.get(key)
         if value:
@@ -552,12 +635,14 @@ def _normalize_page(page: dict) -> dict:
         if all(len(item) <= 40 for item in fields):
             normalized["applicationFields"] = fields[:20]
         else:
-            sections.append({
-                "code": "application",
-                "title": "可应用领域",
-                "content": "、".join(fields),
-                "sortOrder": len(sections),
-            })
+            sections.append(
+                {
+                    "code": "application",
+                    "title": "可应用领域",
+                    "content": "、".join(fields),
+                    "sortOrder": len(sections),
+                }
+            )
             normalized["sections"] = [item for item in sections if item["content"].strip()]
     if harvested.get("links"):
         normalized["links"] = harvested["links"]
@@ -588,24 +673,45 @@ def stage_document(path: str | Path, created_by: int | None, source_org_name: st
     try:
         if candidates:
             from modules.file.service import create_uploaded_file
+
             uploaded_file_ids = upload_candidate_media(records, int(created_by), create_uploaded_file)
         with get_cursor(commit=True) as cur:
-            cur.execute("INSERT INTO achievement_import_batch (source_filename,source_org_name,total_count,created_by) VALUES (%s,%s,%s,%s) RETURNING id", (source.name, source_org_name, len(records), created_by))
+            cur.execute(
+                "INSERT INTO achievement_import_batch (source_filename,source_org_name,total_count,created_by) VALUES (%s,%s,%s,%s) RETURNING id",
+                (source.name, source_org_name, len(records), created_by),
+            )
             batch_id = int(cur.fetchone()["id"])
             for record in records:
                 status = "failed" if record["errors"] else "staged"
-                cur.execute("INSERT INTO achievement_import_item (batch_id,source_page_or_slide,raw_data,normalized_data,validation_errors,status) VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s)", (batch_id, record["sourcePageOrSlide"], json.dumps(record["raw"], ensure_ascii=False), json.dumps(record["normalized"], ensure_ascii=False), json.dumps(record["errors"], ensure_ascii=False), status))
-            cur.execute("UPDATE achievement_import_batch SET failed_count=%s WHERE id=%s", (sum(bool(r["errors"]) for r in records), batch_id))
+                cur.execute(
+                    "INSERT INTO achievement_import_item (batch_id,source_page_or_slide,raw_data,normalized_data,validation_errors,status) VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s)",
+                    (
+                        batch_id,
+                        record["sourcePageOrSlide"],
+                        json.dumps(record["raw"], ensure_ascii=False),
+                        json.dumps(record["normalized"], ensure_ascii=False),
+                        json.dumps(record["errors"], ensure_ascii=False),
+                        status,
+                    ),
+                )
+            cur.execute(
+                "UPDATE achievement_import_batch SET failed_count=%s WHERE id=%s",
+                (sum(bool(r["errors"]) for r in records), batch_id),
+            )
     except Exception:
         if uploaded_file_ids and created_by:
             from modules.file.service import delete_uploaded_file
+
             for file_id in uploaded_file_ids:
-                try:
+                with contextlib.suppress(Exception):
                     delete_uploaded_file(file_id, int(created_by))
-                except Exception:
-                    pass
         raise
-    return {"batchId": batch_id, "total": len(records), "staged": sum(not r["errors"] for r in records), "failed": sum(bool(r["errors"]) for r in records)}
+    return {
+        "batchId": batch_id,
+        "total": len(records),
+        "staged": sum(not r["errors"] for r in records),
+        "failed": sum(bool(r["errors"]) for r in records),
+    }
 
 
 def _safe_import_filename(filename: str, suffix: str) -> str:
@@ -618,7 +724,9 @@ def _safe_import_filename(filename: str, suffix: str) -> str:
     return cleaned[:180]
 
 
-def stage_uploaded_document(filename: str, data: bytes, created_by: int | None, source_org_name: str | None = None) -> dict:
+def stage_uploaded_document(
+    filename: str, data: bytes, created_by: int | None, source_org_name: str | None = None
+) -> dict:
     suffix = Path(str(filename or "")).suffix.lower()
     if suffix == ".ppt":
         raise bad_request("旧版 .ppt 请先另存为 .pptx 后再导入")
@@ -670,25 +778,48 @@ def list_import_batches(page: int = 1, page_size: int = 20) -> dict:
     with get_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS total FROM achievement_import_batch")
         total = int(cur.fetchone()["total"])
-        cur.execute("SELECT id,source_filename,source_org_name,status,total_count,success_count,failed_count,created_at,completed_at FROM achievement_import_batch ORDER BY id DESC LIMIT %s OFFSET %s", (page_size, (page - 1) * page_size))
+        cur.execute(
+            "SELECT id,source_filename,source_org_name,status,total_count,success_count,failed_count,created_at,completed_at FROM achievement_import_batch ORDER BY id DESC LIMIT %s OFFSET %s",
+            (page_size, (page - 1) * page_size),
+        )
         rows = cur.fetchall()
     return {"page": page, "pageSize": page_size, "total": total, "list": [_batch_dto(row) for row in rows]}
 
 
 def get_import_batch(batch_id: int) -> dict | None:
     with get_cursor() as cur:
-        cur.execute("SELECT id,source_filename,source_org_name,status,total_count,success_count,failed_count,created_at,completed_at FROM achievement_import_batch WHERE id=%s", (batch_id,))
+        cur.execute(
+            "SELECT id,source_filename,source_org_name,status,total_count,success_count,failed_count,created_at,completed_at FROM achievement_import_batch WHERE id=%s",
+            (batch_id,),
+        )
         batch = cur.fetchone()
         if not batch:
             return None
-        cur.execute("SELECT id,source_page_or_slide,raw_data,normalized_data,validation_errors,status,achievement_id,created_at,updated_at FROM achievement_import_item WHERE batch_id=%s ORDER BY id", (batch_id,))
+        cur.execute(
+            "SELECT id,source_page_or_slide,raw_data,normalized_data,validation_errors,status,achievement_id,created_at,updated_at FROM achievement_import_item WHERE batch_id=%s ORDER BY id",
+            (batch_id,),
+        )
         items = cur.fetchall()
     data = _batch_dto(batch)
-    data["items"] = [{"id": row["id"], "sourcePageOrSlide": row["source_page_or_slide"], "raw": row["raw_data"], "normalized": row["normalized_data"], "validationErrors": row["validation_errors"], "status": row["status"], "achievementId": row["achievement_id"], "createdAt": row["created_at"].isoformat() if row["created_at"] else None} for row in items]
+    data["items"] = [
+        {
+            "id": row["id"],
+            "sourcePageOrSlide": row["source_page_or_slide"],
+            "raw": row["raw_data"],
+            "normalized": row["normalized_data"],
+            "validationErrors": row["validation_errors"],
+            "status": row["status"],
+            "achievementId": row["achievement_id"],
+            "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in items
+    ]
     return data
 
 
-def confirm_import_item(batch_id: int, item_id: int, actor: dict, overrides: dict | None = None, request_id=None) -> dict:
+def confirm_import_item(
+    batch_id: int, item_id: int, actor: dict, overrides: dict | None = None, request_id=None
+) -> dict:
     """将一条已审核的暂存记录创建为成果草稿，绝不直接发布。"""
     overrides = overrides or {}
     with get_cursor() as cur:
@@ -709,13 +840,35 @@ def confirm_import_item(batch_id: int, item_id: int, actor: dict, overrides: dic
 
     normalized = dict(item["normalized_data"] or {})
     # 只允许补充当前成果写入接口接受的字段，保留原始文本用于追溯。
-    allowed = {"title", "titleEn", "achievementKind", "techIntro", "techRoute", "sourceOrgName", "maturityLevel", "pricingMode", "applicationFields", "sections", "patents", "links", "media", "inventorRefs", "contactName", "contactTitle", "contactPhone", "contactEmail", "contactWechat", "categoryId"}
+    allowed = {
+        "title",
+        "titleEn",
+        "achievementKind",
+        "techIntro",
+        "techRoute",
+        "sourceOrgName",
+        "maturityLevel",
+        "pricingMode",
+        "applicationFields",
+        "sections",
+        "patents",
+        "links",
+        "media",
+        "inventorRefs",
+        "contactName",
+        "contactTitle",
+        "contactPhone",
+        "contactEmail",
+        "contactWechat",
+        "categoryId",
+    }
     payload = {key: value for key, value in normalized.items() if key in allowed}
     payload.update({key: value for key, value in overrides.items() if key in allowed and value is not None})
     if not payload.get("sourceOrgName") and item["source_org_name"]:
         payload["sourceOrgName"] = item["source_org_name"]
 
     from modules.achievement.service import create_achievement
+
     user_id = int(actor.get("userId") or actor.get("id") or 0)
     if not user_id:
         raise bad_request("无法识别确认人")
@@ -748,7 +901,17 @@ def confirm_import_item(batch_id: int, item_id: int, actor: dict, overrides: dic
 
 
 def _batch_dto(row: dict) -> dict:
-    return {"id": row["id"], "sourceFilename": row["source_filename"], "sourceOrgName": row["source_org_name"], "status": row["status"], "totalCount": row["total_count"], "successCount": row["success_count"], "failedCount": row["failed_count"], "createdAt": row["created_at"].isoformat() if row["created_at"] else None, "completedAt": row["completed_at"].isoformat() if row["completed_at"] else None}
+    return {
+        "id": row["id"],
+        "sourceFilename": row["source_filename"],
+        "sourceOrgName": row["source_org_name"],
+        "status": row["status"],
+        "totalCount": row["total_count"],
+        "successCount": row["success_count"],
+        "failedCount": row["failed_count"],
+        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+        "completedAt": row["completed_at"].isoformat() if row["completed_at"] else None,
+    }
 
 
 def clear_import_batches(actor: dict) -> dict:
@@ -765,7 +928,8 @@ def clear_import_batches(actor: dict) -> dict:
         cur.execute("DELETE FROM achievement_import_batch")
         deleted_batches = cur.rowcount
     audit_record(
-        "achievement_import.clear", "achievement_import_batch",
+        "achievement_import.clear",
+        "achievement_import_batch",
         actor_user_id=int(actor.get("userId") or 0),
         actor_user_no=actor.get("userNo", ""),
         details={"deletedBatches": deleted_batches, "stagedItemsCleared": len(staged_items)},
@@ -773,7 +937,9 @@ def clear_import_batches(actor: dict) -> dict:
     return {"deletedBatches": deleted_batches, "stagedItemsCleared": len(staged_items)}
 
 
-def publish_import_item(batch_id: int, item_id: int, actor: dict, overrides: dict | None = None, request_id=None) -> dict:
+def publish_import_item(
+    batch_id: int, item_id: int, actor: dict, overrides: dict | None = None, request_id=None
+) -> dict:
     """一步完成：确认暂存条目 → 提交审核 → 审核通过发布。仅限管理员一键发布。"""
     from modules.admin.service import review_achievement, submit_achievement_admin
 

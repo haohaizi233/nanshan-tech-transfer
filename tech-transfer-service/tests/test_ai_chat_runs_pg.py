@@ -320,10 +320,11 @@ def test_history_route_reports_current_generation_even_without_messages(database
 
 @pytest.mark.parametrize("failure", ["rate", "readiness", "reference"])
 def test_async_pre_accept_errors_are_explicit_and_keep_status_and_code(database, failure):
+    from starlette.requests import Request
+
     from core.errors import BizError
     from core.request_schemas import AiChatRequest
     from routes.ai import ai_chat
-    from starlette.requests import Request
 
     runs, _cursor_factory, _schema = database
     error = BizError("TT_COMMON_42901", "slow down", 429, {"reason": "rate_limit"})
@@ -350,10 +351,11 @@ def test_async_pre_accept_errors_are_explicit_and_keep_status_and_code(database,
 def test_async_duplicate_is_recovered_before_rate_or_readiness_checks(database):
     import json
 
+    from starlette.requests import Request
+
     from core.errors import BizError
     from core.request_schemas import AiChatRequest
     from routes.ai import ai_chat
-    from starlette.requests import Request
 
     runs, _cursor_factory, _schema = database
     original = runs.submit_run(1, "existing", "hello")
@@ -483,7 +485,11 @@ def test_match_history_persists_only_in_its_original_generation(database, cleare
     runs.clear_runs(1)
     demand_cursor = MagicMock()
     demand_cursor.fetchone.return_value = {
-        "id": 12, "title": "水处理", "description": "技术需求", "owner_user_id": 1, "status": "published",
+        "id": 12,
+        "title": "水处理",
+        "description": "技术需求",
+        "owner_user_id": 1,
+        "status": "published",
     }
 
     def forward(*_args, **_kwargs):

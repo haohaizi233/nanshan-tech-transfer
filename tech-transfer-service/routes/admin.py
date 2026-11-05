@@ -1,9 +1,10 @@
-﻿"""
+"""
 admin 路由 —— 管理审核组（06-api-design.md §15）
 
 统一：需登录 + user_role 实时校验 admin 角色（非 admin 403 TT_ADMIN_40301）；
 写操作幂等由状态机校验保证（重复审核 409），不要求 X-Idempotency-Key；全部记审计。
 """
+
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from core.middleware import admin_identity, backend_identity
@@ -72,6 +73,7 @@ async def admin_achievement_import_upload(
     created_by = int(admin.get("userId") or admin.get("id") or 0)
     if not created_by:
         from core.errors import bad_request
+
         raise bad_request("无法识别导入人")
     return success(
         stage_uploaded_documents(uploads, created_by, (sourceOrg or "").strip() or None),
@@ -91,6 +93,7 @@ def admin_achievement_import_detail(batch_id: int, admin: dict = Depends(admin_i
     data = get_import_batch(batch_id)
     if data is None:
         from core.errors import not_found
+
         raise not_found("导入批次不存在")
     return success(data)
 
@@ -134,6 +137,7 @@ def admin_achievements_list(
 ):
     return success(list_achievements_admin(request.query_params, scope))
 
+
 @router.post("/admin/achievements", status_code=201)
 def admin_achievement_create(
     body: AchievementCreateRequest,
@@ -145,6 +149,7 @@ def admin_achievement_create(
         request_id=get_request_id(),
     )
     return success(result, "成果创建成功")
+
 
 @router.get("/admin/achievements/review-queue")
 def admin_ach_queue(request: Request, admin: dict = Depends(admin_identity)):
@@ -212,6 +217,7 @@ def admin_ach_reject(ach_id: int, body: ReviewRejectRequest, admin: dict = Depen
     payload["_action"] = "reject"
     return success(review_achievement(admin, ach_id, payload, request_id=get_request_id()))
 
+
 @router.post("/admin/achievements/{ach_id}/offline", summary="管理员下架已发布成果（published → offline）")
 def admin_ach_offline(ach_id: int, body: VersionBody, scope: dict = Depends(backend_identity)):
     return success(
@@ -234,6 +240,7 @@ def admin_demands_list(
     scope: dict = Depends(backend_identity),
 ):
     return success(list_demands_admin(request.query_params, scope))
+
 
 @router.post("/admin/demands", status_code=201)
 def admin_demand_create(
@@ -259,6 +266,7 @@ def admin_demand_detail(
     scope: dict = Depends(backend_identity),
 ):
     return success(get_demand_admin(demand_id, scope))
+
 
 @router.patch("/admin/demands/{demand_id}")
 def admin_demand_update(
@@ -312,6 +320,7 @@ def admin_dmd_reject(demand_id: int, body: ReviewRejectRequest, admin: dict = De
     payload = body.as_dict()
     payload["_action"] = "reject"
     return success(review_demand(admin, demand_id, payload, request_id=get_request_id()))
+
 
 @router.post("/admin/demands/{demand_id}/close", summary="管理员关闭已发布/对接中的需求")
 def admin_dmd_close(demand_id: int, body: VersionBody, scope: dict = Depends(backend_identity)):

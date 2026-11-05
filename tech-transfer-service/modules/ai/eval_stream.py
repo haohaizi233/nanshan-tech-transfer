@@ -23,8 +23,10 @@
 - {"type": "content_delta", "text": "<增量>"}
 - {"type": "terminal", "status": "succeeded" | "failed"}   # 结果体由端点查库组装
 """
+
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -43,10 +45,10 @@ _TERMINAL_STATUSES = ("succeeded", "failed")
 
 
 class _Channel:
-    __slots__ = ("text", "terminal", "subs", "updated_at")
+    __slots__ = ("subs", "terminal", "text", "updated_at")
 
     def __init__(self) -> None:
-        self.text = ""            # 已生成全文（供迟到订阅快照回放）
+        self.text = ""  # 已生成全文（供迟到订阅快照回放）
         self.terminal: str | None = None  # "succeeded" | "failed" | None
         self.subs: list[queue.Queue] = []
         self.updated_at = time.monotonic()
@@ -93,7 +95,8 @@ def _gc_locked() -> None:
     """回收过期频道（调用方需持锁）。"""
     now = time.monotonic()
     stale = [
-        task_id for task_id, ch in _channels.items()
+        task_id
+        for task_id, ch in _channels.items()
         if now - ch.updated_at > CHANNEL_TTL_SECONDS and (ch.terminal is not None or not ch.subs)
     ]
     for task_id in stale:
@@ -192,10 +195,8 @@ def subscribe(task_id: int) -> Subscription:
         ch.subs.append(q)
         ch.updated_at = time.monotonic()
     if terminal is not None:
-        try:
+        with contextlib.suppress(queue.Full):
             q.put_nowait({"type": "terminal", "status": terminal})
-        except queue.Full:
-            pass
     return Subscription(task_id, q, snapshot)
 
 

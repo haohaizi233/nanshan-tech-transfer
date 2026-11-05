@@ -34,7 +34,6 @@ from routes.admin_ops import router as admin_ops_router
 from routes.ai import router as ai_router
 from routes.auth import router as auth_router
 from routes.capital import router as capital_router
-from routes.perf import router as perf_router
 from routes.cooperation import router as cooperation_router
 from routes.demand import router as demand_router
 from routes.favorite import router as favorite_router
@@ -46,6 +45,7 @@ from routes.me import router as me_router
 from routes.membership import router as membership_router
 from routes.notification import router as notification_router
 from routes.patent import router as patent_router
+from routes.perf import router as perf_router
 from routes.search import router as search_router
 
 assert_environment()
@@ -79,6 +79,7 @@ app = FastAPI(
 # 开发环境额外用 regex 放行本机/局域网/隧道 H5 dev server（见 config.cors_origin_regex）
 # 性能埋点：慢请求告警+响应头
 from core.perf_middleware import PerformanceMiddleware
+
 app.add_middleware(PerformanceMiddleware)
 
 # GZip压缩：减少响应体积（Content Download优化）
@@ -165,9 +166,7 @@ if (_admin_dist / "index.html").is_file():
             if candidate.is_file() and _admin_dist in candidate.parents:
                 return FileResponse(candidate)
         # index.html 不缓存：避免旧页面引用已失效的资源 hash 导致白屏
-        return FileResponse(
-            _admin_dist / "index.html", headers={"Cache-Control": "no-cache"}
-        )
+        return FileResponse(_admin_dist / "index.html", headers={"Cache-Control": "no-cache"})
 
     # 根级静态文件（favicon / icons）
     for _static_name in ("favicon.svg", "icons.svg"):
@@ -176,13 +175,12 @@ if (_admin_dist / "index.html").is_file():
             def _serve_static(file_name: str = _static_name):
                 return FileResponse(_admin_dist / file_name)
 
-            app.add_api_route(
-                f"/{_static_name}", _serve_static, methods=["GET"], include_in_schema=False
-            )
+            app.add_api_route(f"/{_static_name}", _serve_static, methods=["GET"], include_in_schema=False)
 
     # 浏览器会默认请求 /favicon.ico；后台只有 SVG 图标时复用它，避免每次访问都
     # 产生一条无意义的 404（现代浏览器支持以 SVG 作为站点图标）。
     if (_admin_dist / "favicon.svg").is_file():
+
         @app.get("/favicon.ico", include_in_schema=False)
         def admin_favicon_ico():
             return FileResponse(_admin_dist / "favicon.svg", media_type="image/svg+xml")
@@ -235,13 +233,17 @@ def _h5_from_dist(full_path: str):
             # hash资源：长缓存（文件名含内容hash，内容变了名字就变）
             is_hashed = any(ch in relative for ch in ("assets/",)) and "." in relative
             if is_hashed:
-                return FileResponse(candidate, headers={
-                    "Cache-Control": "public, max-age=31536000, immutable",
-                })
+                return FileResponse(
+                    candidate,
+                    headers={
+                        "Cache-Control": "public, max-age=31536000, immutable",
+                    },
+                )
             return FileResponse(candidate)
         # 带扩展名的文件不存在 → 返回404（不兜底HTML）
         if "." in relative.rsplit("/", 1)[-1]:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404)
     # SPA路由（无扩展名）→ 返回index.html
     return FileResponse(dist / "index.html", headers={"Cache-Control": "no-cache"})
@@ -318,11 +320,13 @@ async def request_timeout_middleware(request: Request, call_next):
         return await asyncio.wait_for(call_next(request), timeout=max_seconds)
     except TimeoutError:
         from core.errors import TT_COMMON_50301
-        code, message, status = TT_COMMON_50301
+
+        code, _message, _status = TT_COMMON_50301
         return JSONResponse(
             status_code=504,
             content={"code": code, "message": "请求处理超时，请稍后重试", "requestId": get_request_id()},
         )
+
 
 # ── 请求 ID 中间件 ──────────────────────────────────────────
 # 客户端 X-Request-Id 合法（受限字符集/长度）→ 复用；否则服务端生成。
@@ -365,14 +369,15 @@ def health():
     except Exception:
         # degraded 契约保持不变（HTTP 200 + code=1 + data.status=degraded）；
         # 具体异常（含 DB 连接细节）只进日志，不进响应
-        logging.getLogger("nanshan.error").exception(
-            "health check degraded request_id=%s", get_request_id()
+        logging.getLogger("nanshan.error").exception("health check degraded request_id=%s", get_request_id())
+        return JSONResponse(
+            status_code=200,
+            content={
+                "code": 1,
+                "message": "数据库暂不可用",
+                "data": {"status": "degraded", "database": "unavailable", "db": False},
+            },
         )
-        return JSONResponse(status_code=200, content={
-            "code": 1,
-            "message": "数据库暂不可用",
-            "data": {"status": "degraded", "database": "unavailable", "db": False},
-        })
 
 
 if __name__ == "__main__":
@@ -393,4 +398,3 @@ if __name__ == "__main__":
         # 生产环境多 worker 提升吞吐并隔离阻塞；本地 reload 模式不支持多 worker
         workers=settings.UVICORN_WORKERS if not (settings.DEBUG or settings.is_local) else 1,
     )
-

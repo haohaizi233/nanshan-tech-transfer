@@ -1,4 +1,5 @@
 """捕获 legacy 资本接口基线响应，供 Institution 统一改造前后 diff 验证。只读，不改数据。"""
+
 import json
 import urllib.request
 

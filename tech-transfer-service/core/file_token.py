@@ -10,6 +10,7 @@ L3: 文件访问短时效一次性 token（HMAC-SHA256 签名）
 token 格式：<user_id>:<file_id>:<expires_ts>:<hmac_hex>
 HMAC 密钥复用 JWT_SECRET（同源信任，无需额外配置）。
 """
+
 import hashlib
 import hmac
 import time

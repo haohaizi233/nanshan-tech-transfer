@@ -3,8 +3,7 @@ import requests
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
 
 # 1. Bootstrap
-resp = requests.post(f"{BASE}/auth/bootstrap",
-    json={"hostCredential": "local-dev-ticket-dev-user-001"}, timeout=10)
+resp = requests.post(f"{BASE}/auth/bootstrap", json={"hostCredential": "local-dev-ticket-dev-user-001"}, timeout=10)
 d = resp.json()["data"]
 token = d["accessToken"]
 print(f"[1] Bootstrap: userId={d['user']['userId']}, userNo={d['user']['userNo']}, isNewUser={d['isNewUser']}")
@@ -27,12 +26,16 @@ patch = {
 }
 resp = requests.patch(f"{BASE}/me/profile", json=patch, headers=headers, timeout=10)
 result = resp.json()["data"]
-print(f"[3] PATCH: displayName={result['displayName']}, userType={result['userType']}, orgTitle={result['orgTitle']}, version={result.get('version')}")
+print(
+    f"[3] PATCH: displayName={result['displayName']}, userType={result['userType']}, orgTitle={result['orgTitle']}, version={result.get('version')}"
+)
 
 # 4. GET /me again to verify persistence
 resp = requests.get(f"{BASE}/me", headers=headers, timeout=10)
 me2 = resp.json()["data"]
-print(f"[4] GET /me (verify): displayName={me2['displayName']}, orgTitle={me2['orgTitle']}, version={me2.get('version')}")
+print(
+    f"[4] GET /me (verify): displayName={me2['displayName']}, orgTitle={me2['orgTitle']}, version={me2.get('version')}"
+)
 
 # 5. Test optimistic lock (wrong version should fail)
 bad_patch = {"version": 1, "displayName": "should_fail"}
@@ -50,8 +53,7 @@ else:
     print(f"[6] No-token access: UNEXPECTED status={resp.status_code}")
 
 # 7. Test invalid bootstrap credential
-resp = requests.post(f"{BASE}/auth/bootstrap",
-    json={"hostCredential": "invalid-ticket"}, timeout=10)
+resp = requests.post(f"{BASE}/auth/bootstrap", json={"hostCredential": "invalid-ticket"}, timeout=10)
 if resp.status_code == 401:
     print("[7] Invalid credential: correctly rejected (401)")
 else:

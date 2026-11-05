@@ -9,6 +9,7 @@ Architecture source: 04-backend-domain-design.md §4.9, 05-data-model-design.md 
 - 列表内嵌目标摘要；目标已下线（非 published）仍返回并标注，不静默丢失收藏
 - 新增收藏：公开内容、本人内容、或已接受对接的双方（确认后离开列表仍可收藏）
 """
+
 from core.errors import bad_request, favorite_not_found
 from db import get_cursor
 from modules.audit.service import record as audit_record
@@ -73,6 +74,7 @@ def _target_summary(cur, target_type: str, target_id: int):
 
 # ── 收藏 / 取消（幂等） ──────────────────────────────────────
 
+
 def add_favorite(user_id: int, user_no: str, target_type: str, target_id: int, request_id=None):
     _validate_target_type(target_type)
     try:
@@ -109,10 +111,14 @@ def add_favorite(user_id: int, user_no: str, target_type: str, target_id: int, r
         row = cur.fetchone()
 
         audit_record(
-            "favorite.add", "favorite", resource_id=row["id"],
-            actor_user_id=user_id, actor_user_no=user_no,
+            "favorite.add",
+            "favorite",
+            resource_id=row["id"],
+            actor_user_id=user_id,
+            actor_user_no=user_no,
             details={"targetType": target_type, "targetId": target_id},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {
@@ -135,16 +141,20 @@ def remove_favorite(user_id: int, user_no: str, target_type: str, target_id: int
         )
 
         audit_record(
-            "favorite.remove", "favorite",
-            actor_user_id=user_id, actor_user_no=user_no,
+            "favorite.remove",
+            "favorite",
+            actor_user_id=user_id,
+            actor_user_no=user_no,
             details={"targetType": target_type, "targetId": target_id},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return None
 
 
 # ── 我的收藏列表 ─────────────────────────────────────────────
+
 
 def list_my_favorites(user_id: int, args):
     _validate_target_type(args.get("targetType") or "")

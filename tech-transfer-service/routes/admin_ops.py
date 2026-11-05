@@ -7,6 +7,7 @@ admin 运营路由（Release Closure）—— Dashboard / Institution / Cooperat
 Institution Create/Update 使用 Pydantic Schema（§21）；
 其余为 GET 查询参数。写操作：service 层同事务写审计（§16）。
 """
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
@@ -54,6 +55,7 @@ router = APIRouter(prefix="/api/tech-transfer/v1")
 
 # ── admin-dashboard ──────────────────────────────────────────
 
+
 @router.get("/admin/dashboard/summary", tags=["admin-dashboard"])
 def admin_dashboard_summary(admin: dict = Depends(admin_identity)):
     return success(dashboard_summary())
@@ -75,6 +77,7 @@ def admin_dashboard_trend(request: Request, admin: dict = Depends(admin_identity
 
 
 # ── 机构注册审核 ─────────────────────────────────────────────
+
 
 @router.get("/admin/institution-registrations", tags=["admin-institution-registrations"])
 def admin_institution_registrations_list(
@@ -120,6 +123,7 @@ def admin_institution_registration_reject(
 
 # ── admin-institutions ───────────────────────────────────────
 
+
 @router.get("/admin/institutions", tags=["admin-institutions"])
 def admin_institutions_list(request: Request, admin: dict = Depends(admin_identity)):
     return success(list_institutions_admin(request.query_params))
@@ -156,7 +160,10 @@ def admin_institutions_update(
     admin: dict = Depends(admin_identity),
 ):
     data = update_institution(
-        admin, institution_id, body.model_dump(exclude_unset=True), request_id=get_request_id(),
+        admin,
+        institution_id,
+        body.model_dump(exclude_unset=True),
+        request_id=get_request_id(),
     )
     return success(data)
 
@@ -179,6 +186,7 @@ def admin_institutions_offline(institution_id: int, admin: dict = Depends(admin_
 
 # ── admin-cooperations（只读 + 平台协助运营操作） ─────────────
 
+
 @router.get("/admin/cooperations", tags=["admin-cooperations"])
 def admin_cooperations_list(request: Request, scope: dict = Depends(backend_identity)):
     return success(list_cooperations_admin(request.query_params, scope))
@@ -187,6 +195,7 @@ def admin_cooperations_list(request: Request, scope: dict = Depends(backend_iden
 @router.get("/admin/cooperations/{intent_id}", tags=["admin-cooperations"])
 def admin_cooperations_detail(intent_id: int, scope: dict = Depends(backend_identity)):
     return success(get_cooperation_admin(intent_id, scope))
+
 
 @router.post("/admin/cooperations/{intent_id}/accept", tags=["admin-cooperations"])
 def admin_cooperations_accept(
@@ -219,6 +228,7 @@ def admin_cooperations_reject(
     )
     return success(result, "对接申请已驳回")
 
+
 @router.post("/admin/cooperations/{intent_id}/assist-status", tags=["admin-cooperations"])
 def admin_cooperation_assist_status(
     intent_id: int,
@@ -242,6 +252,7 @@ def admin_cooperation_assist_transition(
 # ── admin-users（READ ONLY，禁用/启用为 P1） ─────────────────
 # E2: 当前 admin-users 仅支持只读操作；未来若扩展禁用/启用用户写操作，
 # 必须同步接入 auth_cache.invalidate_user(user_id) 使缓存即时失效。
+
 
 @router.get("/admin/users", tags=["admin-users"])
 def admin_users_list(request: Request, scope: dict = Depends(backend_identity)):

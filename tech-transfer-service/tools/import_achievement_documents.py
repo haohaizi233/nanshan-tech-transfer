@@ -1,4 +1,5 @@
 """把 PPT/PDF 成果资料写入可审核 staging。用法见 --help。"""
+
 import argparse
 import json
 import sys
@@ -15,16 +16,23 @@ parser.add_argument("--dry-run", action="store_true", help="只解析并输出�
 args = parser.parse_args()
 if args.dry_run:
     records = extract_document_records(args.source)
-    print(json.dumps({
-        "source": str(Path(args.source)),
-        "total": len(records),
-        "staged": sum(not item["errors"] for item in records),
-        "failed": sum(bool(item["errors"]) for item in records),
-        "candidateImages": sum(len(item.get("images", [])) for item in records),
-        "errors": [
-            {"sourcePageOrSlide": item["sourcePageOrSlide"], "errors": item["errors"]}
-            for item in records if item["errors"]
-        ],
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "source": str(Path(args.source)),
+                "total": len(records),
+                "staged": sum(not item["errors"] for item in records),
+                "failed": sum(bool(item["errors"]) for item in records),
+                "candidateImages": sum(len(item.get("images", [])) for item in records),
+                "errors": [
+                    {"sourcePageOrSlide": item["sourcePageOrSlide"], "errors": item["errors"]}
+                    for item in records
+                    if item["errors"]
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 else:
     print(json.dumps(stage_document(args.source, args.created_by, args.source_org), ensure_ascii=False, indent=2))

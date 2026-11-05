@@ -29,8 +29,10 @@ def main():
     display_name = "系统管理员"
 
     conn = psycopg2.connect(
-        host=settings.DB_HOST, port=settings.DB_PORT,
-        user=settings.DB_USER, password=settings.DB_PASSWORD,
+        host=settings.DB_HOST,
+        port=settings.DB_PORT,
+        user=settings.DB_USER,
+        password=settings.DB_PASSWORD,
         dbname=settings.DB_NAME,
     )
     conn.autocommit = False
@@ -56,8 +58,7 @@ def main():
             user_id = cur.fetchone()[0]
 
             cur.execute(
-                "INSERT INTO user_profile (user_id, display_name) VALUES (%s, %s) "
-                "ON CONFLICT (user_id) DO NOTHING",
+                "INSERT INTO user_profile (user_id, display_name) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING",
                 (user_id, display_name),
             )
             cur.execute(

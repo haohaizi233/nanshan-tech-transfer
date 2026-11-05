@@ -1,4 +1,5 @@
 """Focused assertions for the organization-membership schema and authorization."""
+
 import json
 import sys
 import uuid
@@ -42,10 +43,9 @@ class AuthorizationCursor:
         if "FROM organization_membership" in normalized:
             user_id, org_id = params
             matches = [
-                row for row in self.memberships
-                if row["user_id"] == user_id
-                and row["org_id"] == org_id
-                and row["status"] == "active"
+                row
+                for row in self.memberships
+                if row["user_id"] == user_id and row["org_id"] == org_id and row["status"] == "active"
             ]
             if "role = 'admin'" in normalized or "role='admin'" in normalized:
                 matches = [row for row in matches if row["role"] == "admin"]
@@ -73,9 +73,7 @@ class IdentityCursor:
             self._rows = [
                 {"org_id": row["org_id"]}
                 for row in self.memberships
-                if row["user_id"] == params[0]
-                and row["role"] == "admin"
-                and row["status"] == "active"
+                if row["user_id"] == params[0] and row["role"] == "admin" and row["status"] == "active"
             ]
             return
         if "FROM user_role" in normalized:
@@ -242,7 +240,11 @@ def check_member_approval_cannot_demote_admin():
 
     try:
         membership_service._activate_membership(
-            ActiveAdminCursor(), 51, 101, "member", actor_id=99,
+            ActiveAdminCursor(),
+            51,
+            101,
+            "member",
+            actor_id=99,
         )
     except BizError as exc:
         check(
@@ -276,10 +278,9 @@ def check_revoked_user_can_apply_for_admin():
                 self._row = {"ok": 1}
             elif "FROM organization_membership" in normalized:
                 matches = [
-                    row for row in self.memberships
-                    if row["user_id"] == params[0]
-                    and row["org_id"] == params[1]
-                    and row["status"] == "active"
+                    row
+                    for row in self.memberships
+                    if row["user_id"] == params[0] and row["org_id"] == params[1] and row["status"] == "active"
                 ]
                 if "role = 'admin'" in normalized:
                     matches = [row for row in matches if row["role"] == "admin"]
@@ -311,14 +312,16 @@ def check_revoked_user_can_apply_for_admin():
         membership_service.transaction = fake_transaction
         try:
             result = membership_service.apply_organization_admin(
-                {"userId": 61}, {"orgId": 101, "reason": "负责机构认证"},
+                {"userId": 61},
+                {"orgId": 101, "reason": "负责机构认证"},
             )
         except (BizError, AssertionError) as exc:
             check("revoked user can submit organization-admin application", False, str(exc))
         else:
             check(
                 "revoked user can submit organization-admin application",
-                result == {
+                result
+                == {
                     "id": 601,
                     "userId": 61,
                     "orgId": 101,
@@ -374,7 +377,10 @@ def check_admin_rejection_audit_has_org_id():
     try:
         membership_service.transaction = fake_transaction
         result = membership_service.reject_organization_admin_application(
-            {"userId": 99, "userNo": "SYS-99"}, 701, 1, "材料不足",
+            {"userId": 99, "userNo": "SYS-99"},
+            701,
+            1,
+            "材料不足",
         )
         check(
             "organization-admin rejection audit includes organization id",
@@ -448,21 +454,28 @@ def check_http_flows():
             )
             org_admin_membership = cur.fetchone()["id"]
         headers = [
-            {"Authorization": f"Bearer {sign_access_token(uid, f'M{suffix}{i}', ['user'])}",
-             "X-Request-Id": f"membership-{suffix}"}
+            {
+                "Authorization": f"Bearer {sign_access_token(uid, f'M{suffix}{i}', ['user'])}",
+                "X-Request-Id": f"membership-{suffix}",
+            }
             for i, uid in enumerate(users)
         ]
         with TestClient(app) as client:
+
             def call(method, path, who=0, body=None, status=200):
                 response = client.request(
-                    method, "/api/tech-transfer/v1" + path,
-                    headers=headers[who] if who is not None else {}, json=body,
+                    method,
+                    "/api/tech-transfer/v1" + path,
+                    headers=headers[who] if who is not None else {},
+                    json=body,
                 )
                 check(f"HTTP {method} {path} = {status}", response.status_code == status, response.text[:300])
                 if response.status_code != status:
                     raise AssertionError(f"unexpected response: {response.status_code} {response.text[:300]}")
                 payload = response.json()
-                check("HTTP response carries request ID", payload.get("requestId") == response.headers.get("X-Request-Id"))
+                check(
+                    "HTTP response carries request ID", payload.get("requestId") == response.headers.get("X-Request-Id")
+                )
                 return payload.get("data")
 
             def all_pages(path, who):
@@ -474,12 +487,22 @@ def check_http_flows():
                 return {**result, "list": rows}
 
             found = call("GET", f"/institutions?keyword={suffix}&page=1&pageSize=1", who=None)
-            check("canonical search excludes disabled organizations and paginates", found["total"] == 2 and len(found["list"]) == 1)
+            check(
+                "canonical search excludes disabled organizations and paginates",
+                found["total"] == 2 and len(found["list"]) == 1,
+            )
             full = call("GET", f"/institutions?keyword={suffix}&pageSize=50", who=None)
-            check("public search returns only active canonical candidates", {row["name"] for row in full["list"]} == {names[0], names[1]})
+            check(
+                "public search returns only active canonical candidates",
+                {row["name"] for row in full["list"]} == {names[0], names[1]},
+            )
             check("search never grants membership", call("GET", "/me/organization-memberships")["list"] == [])
             call("POST", "/me/organization-membership-applications", body={"orgId": orgs[2]}, status=404)
-            application = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0], "realName": "申请人", "proofMaterial": "proof"})
+            application = call(
+                "POST",
+                "/me/organization-membership-applications",
+                body={"orgId": orgs[0], "realName": "申请人", "proofMaterial": "proof"},
+            )
             aid = application["id"]
             mine_apps = call("GET", "/me/organization-membership-applications")
             check(
@@ -490,22 +513,46 @@ def check_http_flows():
             call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]}, status=409)
             call("GET", f"/org-admin/members?orgId={orgs[0]}", status=403)
             queue = all_pages(f"/org-admin/membership-applications?orgId={orgs[0]}&status=pending", who=1)
-            check("review queue includes evidence", any(row["id"] == aid and row["proofMaterial"] == "proof" for row in queue["list"]))
+            check(
+                "review queue includes evidence",
+                any(row["id"] == aid and row["proofMaterial"] == "proof" for row in queue["list"]),
+            )
             cross = call("POST", "/me/organization-membership-applications", who=2, body={"orgId": orgs[1]})
             call("GET", f"/org-admin/membership-applications?orgId={orgs[1]}", who=1, status=403)
             call("GET", f"/org-admin/members?orgId={orgs[1]}", who=1, status=403)
-            call("POST", f"/org-admin/membership-applications/{cross['id']}/approve", who=1, body={"version": 1}, status=403)
-            call("POST", f"/org-admin/membership-applications/{cross['id']}/reject", who=1, body={"version": 1, "reason": "no"}, status=403)
+            call(
+                "POST",
+                f"/org-admin/membership-applications/{cross['id']}/approve",
+                who=1,
+                body={"version": 1},
+                status=403,
+            )
+            call(
+                "POST",
+                f"/org-admin/membership-applications/{cross['id']}/reject",
+                who=1,
+                body={"version": 1, "reason": "no"},
+                status=403,
+            )
             call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 99}, status=409)
             for version in (True, "1", 1.5, 0):
-                call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": version}, status=422)
+                call(
+                    "POST",
+                    f"/org-admin/membership-applications/{aid}/approve",
+                    who=1,
+                    body={"version": version},
+                    status=422,
+                )
             # Audit storage is the injected failure boundary; the real transaction
             # must roll back both the application review and new membership.
             from unittest.mock import patch
 
             import psycopg2
+
             with patch.object(membership_service, "audit_record", side_effect=psycopg2.DataError("test audit failure")):
-                call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1}, status=500)
+                call(
+                    "POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1}, status=500
+                )
             with db.get_cursor() as cur:
                 cur.execute("SELECT status, version FROM organization_membership_application WHERE id = %s", (aid,))
                 pending = cur.fetchone()
@@ -513,30 +560,76 @@ def check_http_flows():
                 member_count = cur.fetchone()["total"]
                 cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE actor_user_id = ANY(%s)", (users,))
                 audit_count = cur.fetchone()["total"]
-            check("audit failure rolls back application and membership atomically", pending["status"] == "pending" and pending["version"] == 1 and member_count == 0 and audit_count == 0)
+            check(
+                "audit failure rolls back application and membership atomically",
+                pending["status"] == "pending" and pending["version"] == 1 and member_count == 0 and audit_count == 0,
+            )
             approved = call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1})
             mid = approved["membership"]["id"]
-            check("approval activates membership", approved["membership"]["status"] == "active" and approved["membership"]["role"] == "member")
+            check(
+                "approval activates membership",
+                approved["membership"]["status"] == "active" and approved["membership"]["role"] == "member",
+            )
             mine = call("GET", "/me/organization-memberships")
             check("own membership includes canonical name", mine["list"][0]["orgName"] == names[0])
             members = call("GET", f"/org-admin/members?orgId={orgs[0]}&status=active", who=1)
             check("member list includes approved member", mid in [row["id"] for row in members["list"]])
             call("POST", f"/org-admin/membership-applications/{aid}/approve", who=1, body={"version": 1}, status=409)
-            call("POST", f"/org-admin/members/{org_admin_membership}/revoke", who=1, body={"version": 1, "reason": "no"}, status=409)
+            call(
+                "POST",
+                f"/org-admin/members/{org_admin_membership}/revoke",
+                who=1,
+                body={"version": 1, "reason": "no"},
+                status=409,
+            )
             call("POST", f"/org-admin/members/{mid}/revoke", who=1, body={"version": 1, "reason": "离职"})
             reapply = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]})
-            call("POST", f"/org-admin/membership-applications/{reapply['id']}/reject", who=1, body={"version": 1, "reason": "   "}, status=422)
-            call("POST", f"/org-admin/membership-applications/{reapply['id']}/reject", who=1, body={"version": 1, "reason": "材料不足"})
+            call(
+                "POST",
+                f"/org-admin/membership-applications/{reapply['id']}/reject",
+                who=1,
+                body={"version": 1, "reason": "   "},
+                status=422,
+            )
+            call(
+                "POST",
+                f"/org-admin/membership-applications/{reapply['id']}/reject",
+                who=1,
+                body={"version": 1, "reason": "材料不足"},
+            )
             reapply = call("POST", "/me/organization-membership-applications", body={"orgId": orgs[0]})
-            revived = call("POST", f"/org-admin/membership-applications/{reapply['id']}/approve", who=1, body={"version": 1})["membership"]
+            revived = call(
+                "POST", f"/org-admin/membership-applications/{reapply['id']}/approve", who=1, body={"version": 1}
+            )["membership"]
             check("reapplication reactivates revoked membership", revived["id"] == mid and revived["version"] == 3)
-            call("POST", f"/me/organization-membership-applications/{cross['id']}/cancel", body={"version": 1}, status=404)
-            call("POST", f"/me/organization-membership-applications/{cross['id']}/cancel", who=2, body={"version": 99}, status=409)
-            cancelled = call("POST", f"/me/organization-membership-applications/{cross['id']}/cancel", who=2, body={"version": 1})
+            call(
+                "POST",
+                f"/me/organization-membership-applications/{cross['id']}/cancel",
+                body={"version": 1},
+                status=404,
+            )
+            call(
+                "POST",
+                f"/me/organization-membership-applications/{cross['id']}/cancel",
+                who=2,
+                body={"version": 99},
+                status=409,
+            )
+            cancelled = call(
+                "POST", f"/me/organization-membership-applications/{cross['id']}/cancel", who=2, body={"version": 1}
+            )
             check("owner cancels pending application", cancelled["status"] == "cancelled")
             cross = call("POST", "/me/organization-membership-applications", who=2, body={"orgId": orgs[1]})
-            cross_member = call("POST", f"/org-admin/membership-applications/{cross['id']}/approve", who=3, body={"version": 1})["membership"]
-            call("POST", f"/org-admin/members/{cross_member['id']}/revoke", who=1, body={"version": 1, "reason": "no"}, status=403)
+            cross_member = call(
+                "POST", f"/org-admin/membership-applications/{cross['id']}/approve", who=3, body={"version": 1}
+            )["membership"]
+            call(
+                "POST",
+                f"/org-admin/members/{cross_member['id']}/revoke",
+                who=1,
+                body={"version": 1, "reason": "no"},
+                status=403,
+            )
             grant_path = f"/admin/organization-memberships/{mid}/grant-admin"
             revoke_path = f"/admin/organization-memberships/{mid}/revoke-admin"
             call("POST", grant_path, who=1, body={"version": 3}, status=403)
@@ -546,40 +639,87 @@ def check_http_flows():
             call("POST", revoke_path, who=1, body={"version": 4, "reason": "no"}, status=403)
             call("POST", revoke_path, who=3, body={"version": 4, "reason": "任期结束"})
             call("GET", f"/org-admin/members?orgId={orgs[0]}", status=403)
-            admin_app = call("POST", "/me/organization-admin-applications", body={"orgId": orgs[0], "proofMaterial": "admin-proof"})
+            admin_app = call(
+                "POST", "/me/organization-admin-applications", body={"orgId": orgs[0], "proofMaterial": "admin-proof"}
+            )
             call("GET", "/admin/organization-admin-applications", who=1, status=403)
             queue = all_pages("/admin/organization-admin-applications?status=pending", who=3)
-            check("admin application evidence visible to System Admin", any(row["id"] == admin_app["id"] and row["proofMaterial"] == "admin-proof" for row in queue["list"]))
+            check(
+                "admin application evidence visible to System Admin",
+                any(row["id"] == admin_app["id"] and row["proofMaterial"] == "admin-proof" for row in queue["list"]),
+            )
             path = f"/admin/organization-admin-applications/{admin_app['id']}"
             call("POST", path + "/approve", who=1, body={"version": 1}, status=403)
             call("POST", path + "/reject", who=3, body={"version": 1, "reason": "补材料"})
             admin_app = call("POST", "/me/organization-admin-applications", body={"orgId": orgs[0]})
-            call("POST", f"/admin/organization-admin-applications/{admin_app['id']}/approve", who=3, body={"version": 1})
-            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise", "contactName": "申请人", "contactPhone": "13800138000"})
+            call(
+                "POST", f"/admin/organization-admin-applications/{admin_app['id']}/approve", who=3, body={"version": 1}
+            )
+            org_app = call(
+                "POST",
+                "/me/organization-applications",
+                who=2,
+                body={
+                    "requestedName": names[4],
+                    "requestedType": "enterprise",
+                    "contactName": "申请人",
+                    "contactPhone": "13800138000",
+                },
+            )
             path = f"/admin/organization-applications/{org_app['id']}"
             call("GET", "/admin/organization-applications", who=1, status=403)
             queue = all_pages("/admin/organization-applications?status=pending", who=3)
-            check("new organization queue includes requested fields", any(row["id"] == org_app["id"] and row["requestedName"] == names[4] for row in queue["list"]))
+            check(
+                "new organization queue includes requested fields",
+                any(row["id"] == org_app["id"] and row["requestedName"] == names[4] for row in queue["list"]),
+            )
             call("POST", path + "/approve", who=1, body={"version": 1}, status=403)
             call("POST", path + "/reject", who=3, body={"version": 1, "reason": "补材料"})
-            org_app = call("POST", "/me/organization-applications", who=2, body={"requestedName": names[4], "requestedType": "enterprise", "contactPhone": "13800138000"})
-            created = call("POST", f"/admin/organization-applications/{org_app['id']}/approve", who=3, body={"version": 1})
+            org_app = call(
+                "POST",
+                "/me/organization-applications",
+                who=2,
+                body={"requestedName": names[4], "requestedType": "enterprise", "contactPhone": "13800138000"},
+            )
+            created = call(
+                "POST", f"/admin/organization-applications/{org_app['id']}/approve", who=3, body={"version": 1}
+            )
             orgs.append(created["orgId"])
-            check("new organization grants active administrator", created["membership"]["orgId"] == created["orgId"] and created["membership"]["role"] == "admin" and created["membership"]["status"] == "active")
+            check(
+                "new organization grants active administrator",
+                created["membership"]["orgId"] == created["orgId"]
+                and created["membership"]["role"] == "admin"
+                and created["membership"]["status"] == "active",
+            )
             found = call("GET", f"/institutions?keyword={names[4]}")
-            check("approved organization is canonical searchable candidate", int(found["list"][0]["id"]) == created["orgId"])
+            check(
+                "approved organization is canonical searchable candidate",
+                int(found["list"][0]["id"]) == created["orgId"],
+            )
             with db.get_cursor() as cur:
                 cur.execute("SELECT action, details, request_id FROM audit_log WHERE actor_user_id = ANY(%s)", (users,))
                 audits = cur.fetchall()
             actions = {row["action"] for row in audits}
-            check("reviews, cancellation, grants and revokes have audits", {
-                "organization_membership_application.approve", "organization_membership_application.reject",
-                "organization_membership_application.cancel", "organization_membership.revoke",
-                "organization_admin.grant", "organization_admin.revoke",
-                "organization_admin_application.approve", "organization_admin_application.reject",
-                "organization_application.approve", "organization_application.reject",
-            } <= actions)
-            check("audit records carry HTTP request ID", all(row["request_id"] == f"membership-{suffix}" for row in audits))
+            check(
+                "reviews, cancellation, grants and revokes have audits",
+                {
+                    "organization_membership_application.approve",
+                    "organization_membership_application.reject",
+                    "organization_membership_application.cancel",
+                    "organization_membership.revoke",
+                    "organization_admin.grant",
+                    "organization_admin.revoke",
+                    "organization_admin_application.approve",
+                    "organization_admin_application.reject",
+                    "organization_application.approve",
+                    "organization_application.reject",
+                }
+                <= actions,
+            )
+            check(
+                "audit records carry HTTP request ID",
+                all(row["request_id"] == f"membership-{suffix}" for row in audits),
+            )
     except AssertionError as exc:
         print(f"[HTTP FLOW STOPPED] {exc}")
     finally:
@@ -610,13 +750,23 @@ def check_profile_and_content_associations():
             for i in range(2):
                 cur.execute("INSERT INTO app_user (user_no) VALUES (%s) RETURNING id", (f"T4{suffix}{i}",))
                 users.append(cur.fetchone()["id"])
-                cur.execute("INSERT INTO institution (kind, name, intro, status, source_site) VALUES ('enterprise', %s, 'original intro', 'active', 'organization_membership_test') RETURNING id", (f"canonical-{suffix}-{i}",))
+                cur.execute(
+                    "INSERT INTO institution (kind, name, intro, status, source_site) VALUES ('enterprise', %s, 'original intro', 'active', 'organization_membership_test') RETURNING id",
+                    (f"canonical-{suffix}-{i}",),
+                )
                 orgs.append(cur.fetchone()["id"])
             cur.execute("INSERT INTO user_profile (user_id, org_id) VALUES (%s, %s)", (users[0], orgs[0]))
             cur.execute("INSERT INTO user_profile (user_id) VALUES (%s)", (users[1],))
-            cur.execute("INSERT INTO organization_membership (user_id, org_id, role) VALUES (%s, %s, 'member')", (users[1], orgs[1]))
-        headers = [{"Authorization": f"Bearer {sign_access_token(uid, f'T4{suffix}{i}', ['user'])}"} for i, uid in enumerate(users)]
+            cur.execute(
+                "INSERT INTO organization_membership (user_id, org_id, role) VALUES (%s, %s, 'member')",
+                (users[1], orgs[1]),
+            )
+        headers = [
+            {"Authorization": f"Bearer {sign_access_token(uid, f'T4{suffix}{i}', ['user'])}"}
+            for i, uid in enumerate(users)
+        ]
         with TestClient(app) as client:
+
             def call(method, path, body=None, who=0, status=200):
                 response = client.request(method, "/api/tech-transfer/v1" + path, headers=headers[who], json=body)
                 check(f"association {method} {path} = {status}", response.status_code == status, response.text[:200])
@@ -628,7 +778,12 @@ def check_profile_and_content_associations():
             check("company text is editable display text", updated.get("companyText") == display_name)
             check("company text does not create formal membership", updated.get("organizationMemberships") == [])
             for invalid_text in (123, {"orgId": orgs[1]}, "x" * 129):
-                call("PATCH", "/me/profile", {"version": updated.get("version", 1), "companyText": invalid_text}, status=400)
+                call(
+                    "PATCH",
+                    "/me/profile",
+                    {"version": updated.get("version", 1), "companyText": invalid_text},
+                    status=400,
+                )
             call("PATCH", "/me/profile", {"version": updated.get("version", 1), "orgId": orgs[1]}, status=400)
             with db.get_cursor() as cur:
                 cur.execute("SELECT org_id FROM user_profile WHERE user_id=%s", (users[0],))
@@ -639,11 +794,24 @@ def check_profile_and_content_associations():
                 check("profile company text creates no canonical organization", cur.fetchone()["c"] == 0)
             profile = call("GET", "/me", who=1)
             memberships = profile.get("organizationMemberships", [])
-            check("profile returns canonical active membership", len(memberships) == 1 and memberships[0].get("orgId") == orgs[1] and memberships[0].get("orgName") == f"canonical-{suffix}-1" and memberships[0].get("role") == "member" and memberships[0].get("status") == "active")
+            check(
+                "profile returns canonical active membership",
+                len(memberships) == 1
+                and memberships[0].get("orgId") == orgs[1]
+                and memberships[0].get("orgName") == f"canonical-{suffix}-1"
+                and memberships[0].get("role") == "member"
+                and memberships[0].get("status") == "active",
+            )
 
             for resource, table, content, text_key, column in (
                 ("demands", "demand", {"description": "ordinary publishing"}, "orgName", "org_name_snapshot"),
-                ("achievements", "achievement", {"maturityLevel": "02_lab", "pricingMode": "negotiable"}, "sourceOrgName", "source_org_name"),
+                (
+                    "achievements",
+                    "achievement",
+                    {"maturityLevel": "02_lab", "pricingMode": "negotiable"},
+                    "sourceOrgName",
+                    "source_org_name",
+                ),
             ):
                 base = {"title": f"task4-{suffix}", **content}
                 plain = call("POST", f"/{resource}", base, status=201)
@@ -656,57 +824,113 @@ def check_profile_and_content_associations():
                 check(f"{resource} preserve display snapshot", display.get(text_key) == display_name)
                 with db.get_cursor() as cur:
                     cur.execute("SELECT COUNT(*) AS c FROM institution WHERE name=%s", (display_name,))
-                    check(f"{resource} display text creates no canonical organization", cur.fetchone()["c"] == organization_count)
+                    check(
+                        f"{resource} display text creates no canonical organization",
+                        cur.fetchone()["c"] == organization_count,
+                    )
                     cur.execute(f"SELECT org_id, {column} FROM {table} WHERE id=%s", (display.get("id", -1),))
                     row = cur.fetchone() or {}
-                    check(f"{resource} text remains unassociated", row.get("org_id") is None and row.get(column) == display_name)
+                    check(
+                        f"{resource} text remains unassociated",
+                        row.get("org_id") is None and row.get(column) == display_name,
+                    )
                 call("POST", f"/{resource}", {**base, "orgId": orgs[0]}, status=403)
-                call("POST", f"/{resource}", {**base, "orgId": orgs[0], text_key: f"canonical-{suffix}-1"}, who=1, status=403)
+                call(
+                    "POST",
+                    f"/{resource}",
+                    {**base, "orgId": orgs[0], text_key: f"canonical-{suffix}-1"},
+                    who=1,
+                    status=403,
+                )
                 if display.get("id"):
                     call("PATCH", f"/{resource}/{display['id']}", {"version": 1, "orgId": orgs[1]}, status=403)
                     with db.get_cursor() as cur:
                         cur.execute(f"SELECT org_id, version FROM {table} WHERE id=%s", (display["id"],))
                         row = cur.fetchone()
-                        check(f"{resource} forged update leaves row unchanged", row["org_id"] is None and row["version"] == 1)
-                valid = call("POST", f"/{resource}", {**base, "orgId": orgs[1], text_key: display_name}, who=1, status=201)
+                        check(
+                            f"{resource} forged update leaves row unchanged",
+                            row["org_id"] is None and row["version"] == 1,
+                        )
+                valid = call(
+                    "POST", f"/{resource}", {**base, "orgId": orgs[1], text_key: display_name}, who=1, status=201
+                )
                 if valid.get("id"):
-                    call("PATCH", f"/{resource}/{valid['id']}", {"version": 1, "orgId": orgs[1], text_key: display_name + "-edit"}, who=1)
+                    call(
+                        "PATCH",
+                        f"/{resource}/{valid['id']}",
+                        {"version": 1, "orgId": orgs[1], text_key: display_name + "-edit"},
+                        who=1,
+                    )
                     with db.get_cursor() as cur:
                         cur.execute(f"SELECT org_id, {column} FROM {table} WHERE id=%s", (valid["id"],))
                         row = cur.fetchone()
-                        check(f"{resource} active membership authorizes exact org without guessing from text", row["org_id"] == orgs[1] and row[column] == display_name + "-edit")
+                        check(
+                            f"{resource} active membership authorizes exact org without guessing from text",
+                            row["org_id"] == orgs[1] and row[column] == display_name + "-edit",
+                        )
                         cur.execute("SELECT intro FROM institution WHERE id=%s", (orgs[1],))
-                        check(f"{resource} does not edit canonical organization", cur.fetchone()["intro"] == "original intro")
+                        check(
+                            f"{resource} does not edit canonical organization",
+                            cur.fetchone()["intro"] == "original intro",
+                        )
                     with db.get_cursor(commit=True) as cur:
                         cur.execute("UPDATE organization_membership SET status='revoked' WHERE user_id=%s", (users[1],))
                     profile = call("GET", "/me", who=1)
-                    check("revoked membership immediately disappears from certification", profile.get("organizationMemberships") == [])
+                    check(
+                        "revoked membership immediately disappears from certification",
+                        profile.get("organizationMemberships") == [],
+                    )
                     call("POST", f"/{resource}", {**base, "orgId": orgs[1]}, who=1, status=403)
                     call("PATCH", f"/{resource}/{valid['id']}", {"version": 2, "orgId": orgs[1]}, who=1, status=403)
                     # An unrelated edit must not rewrite a pre-existing association.
-                    call("PATCH", f"/{resource}/{valid['id']}", {"version": 2, "title": base["title"] + " edited"}, who=1)
+                    call(
+                        "PATCH", f"/{resource}/{valid['id']}", {"version": 2, "title": base["title"] + " edited"}, who=1
+                    )
                     with db.get_cursor(commit=True) as cur:
                         cur.execute(f"SELECT org_id FROM {table} WHERE id=%s", (valid["id"],))
-                        check(f"{resource} existing association is preserved on unrelated edit", cur.fetchone()["org_id"] == orgs[1])
+                        check(
+                            f"{resource} existing association is preserved on unrelated edit",
+                            cur.fetchone()["org_id"] == orgs[1],
+                        )
                         cur.execute("UPDATE organization_membership SET status='active' WHERE user_id=%s", (users[1],))
 
             with db.get_cursor(commit=True) as cur:
                 cur.execute("INSERT INTO user_role (user_id, role_code) VALUES (%s, 'admin')", (users[1],))
-            original = call("POST", "/demands", {
-                "title": f"admin-correction-{suffix}", "description": "correct display organization",
-                "orgName": display_name,
-            }, status=201)
+            original = call(
+                "POST",
+                "/demands",
+                {
+                    "title": f"admin-correction-{suffix}",
+                    "description": "correct display organization",
+                    "orgName": display_name,
+                },
+                status=201,
+            )
             check("user demand starts with original display organization", original.get("orgName") == display_name)
             if original.get("id"):
                 corrected_name = f"canonical-{suffix}-1"
-                call("PATCH", f"/admin/demands/{original['id']}", {
-                    "version": 1, "orgName": corrected_name,
-                }, who=1)
+                call(
+                    "PATCH",
+                    f"/admin/demands/{original['id']}",
+                    {
+                        "version": 1,
+                        "orgName": corrected_name,
+                    },
+                    who=1,
+                )
                 corrected = call("GET", f"/demands/{original['id']}")
-                check("admin organization correction replaces stale user display snapshot", corrected.get("orgName") == corrected_name, str(corrected.get("orgName")))
+                check(
+                    "admin organization correction replaces stale user display snapshot",
+                    corrected.get("orgName") == corrected_name,
+                    str(corrected.get("orgName")),
+                )
                 mine = call("GET", "/me/demands")
                 item = next((row for row in mine.get("list", []) if row["id"] == original["id"]), {})
-                check("user demand list reflects admin organization correction", item.get("orgName") == corrected_name, str(item.get("orgName")))
+                check(
+                    "user demand list reflects admin organization correction",
+                    item.get("orgName") == corrected_name,
+                    str(item.get("orgName")),
+                )
     finally:
         if users:
             with db.get_cursor(commit=True) as cur:
@@ -717,7 +941,10 @@ def check_profile_and_content_associations():
                 cur.execute("DELETE FROM user_role WHERE user_id = ANY(%s)", (users,))
                 cur.execute("DELETE FROM user_profile WHERE user_id = ANY(%s)", (users,))
                 cur.execute("DELETE FROM app_user WHERE id = ANY(%s)", (users,))
-                cur.execute("DELETE FROM institution WHERE id = ANY(%s) OR name = ANY(%s)", (orgs, [display_name, display_name + "-edit"]))
+                cur.execute(
+                    "DELETE FROM institution WHERE id = ANY(%s) OR name = ANY(%s)",
+                    (orgs, [display_name, display_name + "-edit"]),
+                )
 
 
 def main():

@@ -19,8 +19,9 @@ def _empty_page(page: int, page_size: int) -> dict:
     }
 
 
-def search(q: str, search_type: str, category_code: str, maturity_level: str,
-           page: int, page_size: int, user_id) -> dict:
+def search(
+    q: str, search_type: str, category_code: str, maturity_level: str, page: int, page_size: int, user_id
+) -> dict:
     """统一搜索：keyword 命中成果（title/tech_intro/source_org_name）与需求（title/description/org）。
 
     search_type: achievement / demand / all —— 非请求类型返回空分页结构（保持响应形状稳定）。

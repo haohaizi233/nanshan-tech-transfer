@@ -15,6 +15,7 @@ T007 Final Hardening 测试 —— PostgreSQL 故障恢复 / 泄漏压力 / 并�
 
 运行：python test_db_hardening.py（服务根目录，需本地 PostgreSQL 可用，无需后端进程）
 """
+
 import sys
 import threading
 import uuid
@@ -74,9 +75,7 @@ def _select_one() -> bool:
 
 # 建测试表
 with db.get_cursor(commit=True) as _cur:
-    _cur.execute(
-        f"CREATE TABLE IF NOT EXISTS {TABLE} (id BIGINT PRIMARY KEY, v TEXT)"
-    )
+    _cur.execute(f"CREATE TABLE IF NOT EXISTS {TABLE} (id BIGINT PRIMARY KEY, v TEXT)")
 
 try:
     # ════════════════════════════════════════════════════════
@@ -92,8 +91,7 @@ try:
         check("SELECT 1/0 应从 transaction() 抛出 psycopg2.Error", False, "未抛异常")
     except psycopg2.Error as e:
         sql_exc = e
-    check("SQL error 抛出 psycopg2.Error", isinstance(sql_exc, psycopg2.Error),
-          repr(sql_exc))
+    check("SQL error 抛出 psycopg2.Error", isinstance(sql_exc, psycopg2.Error), repr(sql_exc))
     fact("SQL error 实际类型", type(sql_exc).__name__)
     check("rollback 后 INSERT 不可见", not _row_exists(tid1))
 
@@ -112,9 +110,9 @@ try:
     # ════════════════════════════════════════════════════════
     print("[H3] 残留 INERROR 归还（get_conn 无 rollback）→ putconn 清理")
     try:
-        with db.get_conn() as conn:  # 故意不做任何 rollback
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1/0")
+        # 故意不做任何 rollback
+        with db.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1/0")
         check("SELECT 1/0 应从 get_conn 冒出", False, "未抛异常")
     except psycopg2.Error:
         pass  # 预期：异常冒出，finally 归还时 putconn 对 INERROR 做 rollback
@@ -155,15 +153,17 @@ try:
                 stress_errors.append(f"cycle {i}: SELECT 1 返回异常值")
         except Exception as e:
             stress_errors.append(f"cycle {i}: {e!r}")
-    check(f"{CYCLES} 轮交替（{CYCLES * 4} 次借还）后池未耗尽且 SELECT 1 全部正常",
-          not stress_errors, str(stress_errors[:3]))
+    check(
+        f"{CYCLES} 轮交替（{CYCLES * 4} 次借还）后池未耗尽且 SELECT 1 全部正常",
+        not stress_errors,
+        str(stress_errors[:3]),
+    )
     used_after_stress = _used_count()
     if used_after_stress is None:
         check("压力后无长期借出连接（_used 读取失败 → SKIPPED）", True)
         fact("压力后 _used", "不可读（SKIPPED）")
     else:
-        check("压力后无长期借出连接（_used=0）", used_after_stress == 0,
-              f"_used={used_after_stress}")
+        check("压力后无长期借出连接（_used=0）", used_after_stress == 0, f"_used={used_after_stress}")
         fact("压力后 _used", used_after_stress)
 
     # ════════════════════════════════════════════════════════
@@ -207,16 +207,14 @@ try:
                     pass
                 check(f"持有 {N}/{N} 时第 {N + 1} 借出应报池耗尽", False, "未抛异常")
             except psycopg2.OperationalError as e:
-                check(f"持有 {N}/{N} 时第 {N + 1} 借出 → OperationalError",
-                      "exhausted" in str(e), str(e))
+                check(f"持有 {N}/{N} 时第 {N + 1} 借出 → OperationalError", "exhausted" in str(e), str(e))
             finally:
                 settings.DB_POOL_ACQUIRE_TIMEOUT = orig_timeout
     finally:
         release.set()
         for t in threads:
             t.join(timeout=65)
-    check(f"{N} 个连接同时持有且各自查询正确", not holder_errors,
-          str(holder_errors[:3]))
+    check(f"{N} 个连接同时持有且各自查询正确", not holder_errors, str(holder_errors[:3]))
     check("全部归还后池恢复可用（SELECT 1）", _select_one())
 
     # ════════════════════════════════════════════════════════
@@ -247,14 +245,11 @@ try:
                 stats["exhausted"] += 1
             else:
                 stats["polluted"].append(r)
-    fact("16 并发短任务结果", f"ok={stats['ok']} exhausted={stats['exhausted']} "
-                              f"polluted={len(stats['polluted'])}")
-    check("16 并发无污染类错误（INERROR 泄漏/closed/unkeyed 等）",
-          not stats["polluted"], str(stats["polluted"][:3]))
+    fact("16 并发短任务结果", f"ok={stats['ok']} exhausted={stats['exhausted']} polluted={len(stats['polluted'])}")
+    check("16 并发无污染类错误（INERROR 泄漏/closed/unkeyed 等）", not stats["polluted"], str(stats["polluted"][:3]))
     check("16 并发结束后池可用（SELECT 1）", _select_one())
     if stats["exhausted"] == 0:
-        check("16 个并发短任务全部成功", stats["ok"] == 16,
-              f"ok={stats['ok']}")
+        check("16 个并发短任务全部成功", stats["ok"] == 16, f"ok={stats['ok']}")
 
     # ════════════════════════════════════════════════════════
     # H7 坏连接：手动 close → 归还丢弃 → 不污染

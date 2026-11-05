@@ -14,6 +14,7 @@ T007 数据库连接池与事务边界测试
 
 运行：python test_db_session.py（服务根目录，需本地 PostgreSQL 可用）
 """
+
 import sys
 import threading
 import time
@@ -65,8 +66,7 @@ with db.get_conn() as c1:
     with c1.cursor() as cur:
         cur.execute("SELECT 1 AS v")
         check("借出连接可执行查询", cur.fetchone()["v"] == 1)
-check("归还后池存在空闲连接", len(db._pool._pool) >= 1,
-      f"idle={len(db._pool._pool)}")
+check("归还后池存在空闲连接", len(db._pool._pool) >= 1, f"idle={len(db._pool._pool)}")
 with db.get_conn() as c2:
     check("池复用同一连接（LIFO）", c2 is c1, f"{c2!r} vs {c1!r}")
 
@@ -132,8 +132,7 @@ try:
                     pass
                 check("池耗尽应抛 OperationalError", False, "未抛异常")
             except psycopg2.OperationalError as e:
-                check("池耗尽 → OperationalError（含 exhausted）",
-                      "exhausted" in str(e), str(e))
+                check("池耗尽 → OperationalError（含 exhausted）", "exhausted" in str(e), str(e))
     finally:
         settings.DB_POOL_ACQUIRE_TIMEOUT = orig_timeout
         db._pool.closeall()
@@ -179,8 +178,7 @@ try:
         release_holder.set()
         holder.join(timeout=5)
         waiter.join(timeout=5)
-        check("等待归还后第二借出成功", acquired.is_set() and not waiter_errors,
-              str(waiter_errors[:3]))
+        check("等待归还后第二借出成功", acquired.is_set() and not waiter_errors, str(waiter_errors[:3]))
     finally:
         release_holder.set()
         settings.DB_POOL_ACQUIRE_TIMEOUT = orig_timeout

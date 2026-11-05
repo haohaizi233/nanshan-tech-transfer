@@ -21,7 +21,12 @@ class TodoCursor:
         return [
             {"kind": "achievement", "id": 1, "title": "成果 A", "created_at": "2026-09-09T09:00:00"},
             {"kind": "organization_application", "id": 2, "title": "机构 B", "created_at": "2026-09-09T08:00:00"},
-            {"kind": "membership_application", "id": 3, "title": "用户 U 申请加入机构 C", "created_at": "2026-09-09T07:00:00"},
+            {
+                "kind": "membership_application",
+                "id": 3,
+                "title": "用户 U 申请加入机构 C",
+                "created_at": "2026-09-09T07:00:00",
+            },
             {"kind": "cooperation", "id": 4, "title": "对接 D", "created_at": "2026-09-09T06:00:00"},
         ]
 
@@ -41,7 +46,10 @@ def main():
 
     assert result["total"] == 4
     assert [item["kind"] for item in result["list"]] == [
-        "achievement", "organization_application", "membership_application", "cooperation"
+        "achievement",
+        "organization_application",
+        "membership_application",
+        "cooperation",
     ]
     assert result["list"][1]["route"] == "/admin/membership-review?tab=organization"
     assert result["list"][2]["route"] == "/admin/membership-review?tab=member"

@@ -17,6 +17,7 @@
 
 权限：仅内容归属人（发布者）与平台管理员可见/可标记已读。
 """
+
 import json
 from datetime import date, datetime
 from decimal import Decimal
@@ -88,6 +89,7 @@ _REF_LABEL_SQL = {
 
 
 # ── 值归一化 / 展示文本 ──────────────────────────────────────
+
 
 def _is_blank(value) -> bool:
     if value is None:
@@ -180,6 +182,7 @@ def _clip(text: str) -> str:
 
 # ── 差异计算 ─────────────────────────────────────────────────
 
+
 def compute_changes(cur, target_type: str, old_row, fields: dict, extras=None) -> list[dict]:
     """对比旧值与本次写入值，产出字段级变更（只保留真实变化的字段）。
 
@@ -202,30 +205,35 @@ def compute_changes(cur, target_type: str, old_row, fields: dict, extras=None) -
         else:
             old_text = _display(old_value)
             new_text = _display(new_value)
-        changes.append({
-            "field": column[:MAX_FIELD_NAME],
-            "fieldLabel": (labels.get(column) or column)[:MAX_FIELD_LABEL],
-            "changeKind": "created" if _is_blank(old_value) and not _is_blank(new_value) else "updated",
-            "oldValue": _clip(old_text),
-            "newValue": _clip(new_text),
-        })
+        changes.append(
+            {
+                "field": column[:MAX_FIELD_NAME],
+                "fieldLabel": (labels.get(column) or column)[:MAX_FIELD_LABEL],
+                "changeKind": "created" if _is_blank(old_value) and not _is_blank(new_value) else "updated",
+                "oldValue": _clip(old_text),
+                "newValue": _clip(new_text),
+            }
+        )
 
     for item in extras or []:
         old_text = str(item.get("oldValue") or "")
         new_text = str(item.get("newValue") or "")
         if old_text == new_text:
             continue
-        changes.append({
-            "field": str(item.get("field") or "extra")[:MAX_FIELD_NAME],
-            "fieldLabel": str(item.get("fieldLabel") or item.get("field") or "其他")[:MAX_FIELD_LABEL],
-            "changeKind": "created" if not old_text.strip() and new_text.strip() else "updated",
-            "oldValue": _clip(old_text),
-            "newValue": _clip(new_text),
-        })
+        changes.append(
+            {
+                "field": str(item.get("field") or "extra")[:MAX_FIELD_NAME],
+                "fieldLabel": str(item.get("fieldLabel") or item.get("field") or "其他")[:MAX_FIELD_LABEL],
+                "changeKind": "created" if not old_text.strip() and new_text.strip() else "updated",
+                "oldValue": _clip(old_text),
+                "newValue": _clip(new_text),
+            }
+        )
     return changes
 
 
 # ── 写入（与管理端业务写同事务） ──────────────────────────────
+
 
 def record_admin_edit_changes(
     cur,
@@ -297,6 +305,7 @@ def _assert_owner_or_admin(cur, target_type: str, target_id: int, user: dict) ->
     row = cur.fetchone()
     if not row:
         from core.errors import not_found
+
         raise not_found("内容不存在或已删除")
     owner_user_id = row["owner_user_id"] if isinstance(row, dict) else row[0]
     viewer_id = user.get("userId")
@@ -331,12 +340,14 @@ def _row_to_change(row) -> dict:
         "oldValue": _row_value(row, "old_value", 5) or "",
         "newValue": _row_value(row, "new_value", 6) or "",
         "operatorName": _row_value(row, "operator_name", 7) or _row_value(row, "operator_user_no", 8) or "管理员",
-        "createdAt": created_at.strftime("%Y-%m-%d %H:%M") if hasattr(created_at, "strftime") else str(created_at or ""),
+        "createdAt": created_at.strftime("%Y-%m-%d %H:%M")
+        if hasattr(created_at, "strftime")
+        else str(created_at or ""),
     }
 
 
 def list_admin_changes(target_type: str, target_id: int, user: dict) -> dict:
-    """"GET /demands|achievements/{id}/admin-changes —— 未读数 + 字段级对比。"""
+    """ "GET /demands|achievements/{id}/admin-changes —— 未读数 + 字段级对比。"""
     from db import get_cursor
 
     with get_cursor() as cur:

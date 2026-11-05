@@ -3,6 +3,7 @@
 这些关系不混入 achievement 主表，旧字段继续由 service.py 负责，因而老数据和
 老客户端仍可工作；新客户端可以按 sections / patents / links / media 渲染。
 """
+
 from __future__ import annotations
 
 from urllib.parse import urlparse
@@ -12,9 +13,19 @@ from core.errors import bad_request
 from modules.patent.normalize import is_publication_no
 
 SECTION_CODES = {
-    "innovation", "maturity_detail", "project_support", "application", "tech_problem",
-    "tech_method", "tech_effect", "market_prospect", "industrialization", "team_intro",
-    "technical_route", "commercialization", "other",
+    "innovation",
+    "maturity_detail",
+    "project_support",
+    "application",
+    "tech_problem",
+    "tech_method",
+    "tech_effect",
+    "market_prospect",
+    "industrialization",
+    "team_intro",
+    "technical_route",
+    "commercialization",
+    "other",
 }
 PATENT_NO_MAX = 64
 LINK_TYPES = {"official_site", "personal_homepage", "company_site", "demo", "video", "paper", "other"}
@@ -103,7 +114,14 @@ def parse_content_payload(body: dict) -> dict:
             if code not in SECTION_CODES or code in seen:
                 raise bad_request(f"sections[{index}].code 无效或重复")
             seen.add(code)
-            sections.append({"code": code, "title": _text(item.get("title"), f"sections[{index}].title", 128, True), "content": _text(item.get("content"), f"sections[{index}].content", 20000, True), "sort": _sort_order(item.get("sortOrder"), f"sections[{index}].sortOrder", index)})
+            sections.append(
+                {
+                    "code": code,
+                    "title": _text(item.get("title"), f"sections[{index}].title", 128, True),
+                    "content": _text(item.get("content"), f"sections[{index}].content", 20000, True),
+                    "sort": _sort_order(item.get("sortOrder"), f"sections[{index}].sortOrder", index),
+                }
+            )
         result["sections"] = sections
     if "patents" in body:
         raw = body["patents"]
@@ -122,7 +140,15 @@ def parse_content_payload(body: dict) -> dict:
             if primary_count > 1:
                 raise bad_request("最多只能指定一个主专利")
             url = _optional_url(item.get("externalUrl"), f"patents[{index}].externalUrl")
-            patents.append({"no": no, "title": _text(item.get("title"), f"patents[{index}].title", 500), "primary": is_primary, "url": url, "sort": _sort_order(item.get("sortOrder"), f"patents[{index}].sortOrder", index)})
+            patents.append(
+                {
+                    "no": no,
+                    "title": _text(item.get("title"), f"patents[{index}].title", 500),
+                    "primary": is_primary,
+                    "url": url,
+                    "sort": _sort_order(item.get("sortOrder"), f"patents[{index}].sortOrder", index),
+                }
+            )
         result["patents"] = patents
     if "links" in body:
         raw = body["links"]
@@ -132,7 +158,14 @@ def parse_content_payload(body: dict) -> dict:
         for index, item in enumerate(raw):
             if not isinstance(item, dict) or item.get("type") not in LINK_TYPES:
                 raise bad_request(f"links[{index}] 类型无效")
-            links.append({"type": item["type"], "label": _text(item.get("label"), f"links[{index}].label", 255, True), "url": _optional_url(item.get("url"), f"links[{index}].url", required=True), "sort": _sort_order(item.get("sortOrder"), f"links[{index}].sortOrder", index)})
+            links.append(
+                {
+                    "type": item["type"],
+                    "label": _text(item.get("label"), f"links[{index}].label", 255, True),
+                    "url": _optional_url(item.get("url"), f"links[{index}].url", required=True),
+                    "sort": _sort_order(item.get("sortOrder"), f"links[{index}].sortOrder", index),
+                }
+            )
         result["links"] = links
     if "media" in body:
         raw = body["media"]
@@ -152,7 +185,15 @@ def parse_content_payload(body: dict) -> dict:
             cover_count += int(role == "cover")
             if cover_count > 1:
                 raise bad_request("最多只能设置一张封面")
-            media.append({"file_id": file_id, "role": role, "caption": _text(item.get("caption"), f"media[{index}].caption", 500), "alt": _text(item.get("altText"), f"media[{index}].altText", 500), "sort": _sort_order(item.get("sortOrder"), f"media[{index}].sortOrder", index)})
+            media.append(
+                {
+                    "file_id": file_id,
+                    "role": role,
+                    "caption": _text(item.get("caption"), f"media[{index}].caption", 500),
+                    "alt": _text(item.get("altText"), f"media[{index}].altText", 500),
+                    "sort": _sort_order(item.get("sortOrder"), f"media[{index}].sortOrder", index),
+                }
+            )
         result["media"] = media
     if "industryIds" in body:
         raw = body["industryIds"]
@@ -184,7 +225,9 @@ def _optional_url(value, field, required=False):
 def _assert_owned_files(cur, user_id: int, file_ids: list[int]):
     if not file_ids:
         return
-    cur.execute("SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, file_ids))
+    cur.execute(
+        "SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, file_ids)
+    )
     if {int(row["id"]) for row in cur.fetchall()} != set(file_ids):
         raise bad_request("媒体文件不存在、已删除或不属于当前用户")
 
@@ -209,15 +252,24 @@ def sync_content(cur, achievement_id: int, user_id: int, content: dict, allow_ex
     if "sections" in content:
         cur.execute("DELETE FROM achievement_section WHERE achievement_id=%s", (achievement_id,))
         for item in content["sections"]:
-            cur.execute("INSERT INTO achievement_section (achievement_id,section_code,title,content,sort_order) VALUES (%s,%s,%s,%s,%s)", (achievement_id, item["code"], item["title"], item["content"], item["sort"]))
+            cur.execute(
+                "INSERT INTO achievement_section (achievement_id,section_code,title,content,sort_order) VALUES (%s,%s,%s,%s,%s)",
+                (achievement_id, item["code"], item["title"], item["content"], item["sort"]),
+            )
     if "patents" in content:
         cur.execute("DELETE FROM achievement_patent WHERE achievement_id=%s", (achievement_id,))
         for item in content["patents"]:
-            cur.execute("INSERT INTO achievement_patent (achievement_id,patent_no,patent_title,is_primary,external_url,sort_order) VALUES (%s,%s,%s,%s,%s,%s)", (achievement_id, item["no"], item["title"], item["primary"], item["url"], item["sort"]))
+            cur.execute(
+                "INSERT INTO achievement_patent (achievement_id,patent_no,patent_title,is_primary,external_url,sort_order) VALUES (%s,%s,%s,%s,%s,%s)",
+                (achievement_id, item["no"], item["title"], item["primary"], item["url"], item["sort"]),
+            )
     if "links" in content:
         cur.execute("DELETE FROM achievement_link WHERE achievement_id=%s", (achievement_id,))
         for item in content["links"]:
-            cur.execute("INSERT INTO achievement_link (achievement_id,link_type,label,url,sort_order) VALUES (%s,%s,%s,%s,%s)", (achievement_id, item["type"], item["label"], item["url"], item["sort"]))
+            cur.execute(
+                "INSERT INTO achievement_link (achievement_id,link_type,label,url,sort_order) VALUES (%s,%s,%s,%s,%s)",
+                (achievement_id, item["type"], item["label"], item["url"], item["sort"]),
+            )
     if "media" in content:
         file_ids = [item["file_id"] for item in content["media"]]
         extra_ids: set[int] = set()
@@ -227,7 +279,10 @@ def sync_content(cur, achievement_id: int, user_id: int, content: dict, allow_ex
         _assert_owned_files(cur, user_id, [file_id for file_id in file_ids if file_id not in extra_ids])
         cur.execute("DELETE FROM achievement_media WHERE achievement_id=%s", (achievement_id,))
         for item in content["media"]:
-            cur.execute("INSERT INTO achievement_media (achievement_id,file_id,media_role,sort_order,caption,alt_text) VALUES (%s,%s,%s,%s,%s,%s)", (achievement_id, item["file_id"], item["role"], item["sort"], item["caption"], item["alt"]))
+            cur.execute(
+                "INSERT INTO achievement_media (achievement_id,file_id,media_role,sort_order,caption,alt_text) VALUES (%s,%s,%s,%s,%s,%s)",
+                (achievement_id, item["file_id"], item["role"], item["sort"], item["caption"], item["alt"]),
+            )
     if "industryIds" in content:
         industry_ids = content["industryIds"]
         if industry_ids:
@@ -253,15 +308,56 @@ def load_content(cur, achievement_id: int) -> dict:
         (achievement_id,),
     )
     tags = [row["name"] for row in cur.fetchall()]
-    cur.execute("SELECT section_code,title,content,sort_order FROM achievement_section WHERE achievement_id=%s ORDER BY sort_order,id", (achievement_id,))
-    sections = [{"code": r["section_code"], "title": r["title"], "content": r["content"], "sortOrder": r["sort_order"]} for r in cur.fetchall()]
-    cur.execute("SELECT patent_no,patent_title,is_primary,external_url,sort_order FROM achievement_patent WHERE achievement_id=%s ORDER BY sort_order,id", (achievement_id,))
-    patents = [{"patentNo": r["patent_no"], "title": r["patent_title"], "isPrimary": r["is_primary"], "externalUrl": r["external_url"], "sortOrder": r["sort_order"], "internalDetailAvailable": supports_internal_patent_lookup(r["patent_no"])} for r in cur.fetchall()]
-    cur.execute("SELECT link_type,label,url,sort_order FROM achievement_link WHERE achievement_id=%s ORDER BY sort_order,id", (achievement_id,))
-    links = [{"type": r["link_type"], "label": r["label"], "url": r["url"], "sortOrder": r["sort_order"]} for r in cur.fetchall()]
-    cur.execute("SELECT am.file_id,am.media_role,am.sort_order,am.caption,am.alt_text,fo.original_name,fo.mime_type,fo.size_bytes FROM achievement_media am JOIN file_object fo ON fo.id=am.file_id AND fo.status='active' WHERE am.achievement_id=%s ORDER BY am.sort_order,am.id", (achievement_id,))
+    cur.execute(
+        "SELECT section_code,title,content,sort_order FROM achievement_section WHERE achievement_id=%s ORDER BY sort_order,id",
+        (achievement_id,),
+    )
+    sections = [
+        {"code": r["section_code"], "title": r["title"], "content": r["content"], "sortOrder": r["sort_order"]}
+        for r in cur.fetchall()
+    ]
+    cur.execute(
+        "SELECT patent_no,patent_title,is_primary,external_url,sort_order FROM achievement_patent WHERE achievement_id=%s ORDER BY sort_order,id",
+        (achievement_id,),
+    )
+    patents = [
+        {
+            "patentNo": r["patent_no"],
+            "title": r["patent_title"],
+            "isPrimary": r["is_primary"],
+            "externalUrl": r["external_url"],
+            "sortOrder": r["sort_order"],
+            "internalDetailAvailable": supports_internal_patent_lookup(r["patent_no"]),
+        }
+        for r in cur.fetchall()
+    ]
+    cur.execute(
+        "SELECT link_type,label,url,sort_order FROM achievement_link WHERE achievement_id=%s ORDER BY sort_order,id",
+        (achievement_id,),
+    )
+    links = [
+        {"type": r["link_type"], "label": r["label"], "url": r["url"], "sortOrder": r["sort_order"]}
+        for r in cur.fetchall()
+    ]
+    cur.execute(
+        "SELECT am.file_id,am.media_role,am.sort_order,am.caption,am.alt_text,fo.original_name,fo.mime_type,fo.size_bytes FROM achievement_media am JOIN file_object fo ON fo.id=am.file_id AND fo.status='active' WHERE am.achievement_id=%s ORDER BY am.sort_order,am.id",
+        (achievement_id,),
+    )
     base = settings.MEDIA_BASE_URL.rstrip("/")
-    media = [{"fileId": r["file_id"], "role": r["media_role"], "sortOrder": r["sort_order"], "caption": r["caption"], "altText": r["alt_text"], "name": r["original_name"], "mimeType": r["mime_type"], "sizeBytes": r["size_bytes"], "url": f"{base}/{r['file_id']}"} for r in cur.fetchall()]
+    media = [
+        {
+            "fileId": r["file_id"],
+            "role": r["media_role"],
+            "sortOrder": r["sort_order"],
+            "caption": r["caption"],
+            "altText": r["alt_text"],
+            "name": r["original_name"],
+            "mimeType": r["mime_type"],
+            "sizeBytes": r["size_bytes"],
+            "url": f"{base}/{r['file_id']}",
+        }
+        for r in cur.fetchall()
+    ]
     cur.execute(
         """SELECT i.id,i.code,i.name,i.parent_id,ai.sort_order
            FROM achievement_industry ai JOIN industry i ON i.id=ai.industry_id AND i.enabled
@@ -269,7 +365,20 @@ def load_content(cur, achievement_id: int) -> dict:
         (achievement_id,),
     )
     industries = [
-        {"id": row["id"], "code": row["code"], "name": row["name"], "parentId": row["parent_id"], "sortOrder": row["sort_order"]}
+        {
+            "id": row["id"],
+            "code": row["code"],
+            "name": row["name"],
+            "parentId": row["parent_id"],
+            "sortOrder": row["sort_order"],
+        }
         for row in cur.fetchall()
     ]
-    return {"tags": tags, "sections": sections, "patents": patents, "links": links, "media": media, "industries": industries}
+    return {
+        "tags": tags,
+        "sections": sections,
+        "patents": patents,
+        "links": links,
+        "media": media,
+        "industries": industries,
+    }

@@ -10,6 +10,7 @@ Architecture source: 04-backend-domain-design.md §5.4, 06-api-design.md §15 ad
 - 通知入队（notification 模块）一期未实现，副作用仅审计留痕
 - 队列项含提交人与提交时间（06 §15）
 """
+
 import json
 
 from core.contact_validation import validate_contact_way
@@ -19,12 +20,14 @@ from core.errors import (
     TT_DMD_40401,
     TT_DMD_40901,
     BizError,
+    achievement_conflict,
     achievement_not_found,
     bad_request,
     conflict,
     coop_conflict,
     coop_forbidden,
     coop_not_found,
+    demand_conflict,
     demand_not_found,
     forbidden,
 )
@@ -35,11 +38,11 @@ from modules.achievement.service import (
     _sync_inventors,
     _validate_refs,
 )
-from modules.audit.service import record as audit_record
 from modules.admin.edit_log import (
     compute_changes,
     record_admin_edit_changes,
 )
+from modules.audit.service import record as audit_record
 from modules.cooperation.service import (
     _release_target_slot,
     _reserve_target_slot,
@@ -73,7 +76,6 @@ _STATUS_LABELS = {
     "cancelled": "已取消",
     "completed": "已完成",
 }
-
 
 
 def _page_args(args) -> tuple[int, int]:
@@ -196,13 +198,11 @@ def list_content_organizations_admin(scope: dict) -> list[dict]:
             """,
             params,
         )
-        return [
-            {"id": row["id"], "name": row["name"], "kind": row["kind"]}
-            for row in (cur.fetchall() or [])
-        ]
+        return [{"id": row["id"], "name": row["name"], "kind": row["kind"]} for row in (cur.fetchall() or [])]
 
 
 # ── 审核队列 ────────────────────────────────────────────────
+
 
 def achievements_review_queue(args) -> dict:
     """GET /admin/achievements/review-queue —— pending_review 成果队列"""
@@ -250,9 +250,7 @@ def demands_review_queue(args) -> dict:
     """GET /admin/demands/review-queue —— pending_review 需求队列"""
     page, page_size = _page_args(args)
     with get_cursor() as cur:
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM demand WHERE status = 'pending_review' AND deleted_at IS NULL"
-        )
+        cur.execute("SELECT COUNT(*) AS c FROM demand WHERE status = 'pending_review' AND deleted_at IS NULL")
         total = int(cur.fetchone()["c"])
         offset = (page - 1) * page_size
         cur.execute(
@@ -277,6 +275,7 @@ def demands_review_queue(args) -> dict:
 
 
 # ── 审核（approve / reject） ─────────────────────────────────
+
 
 def review_achievement(admin_user: dict, ach_id: int, body: dict, request_id=None) -> dict:
     """POST /admin/achievements/{id}/approve|reject 的事务实现"""
@@ -321,16 +320,27 @@ def review_achievement(admin_user: dict, ach_id: int, body: dict, request_id=Non
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         if row.get("owner_user_id"):
-            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
-                event_type=f"achievement.{action}", source_type="achievement", source_id=ach_id,
-                title="成果审核已通过" if action == "approve" else "成果审核未通过", body=reason or None,
-                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
+            emit_notification(
+                cur,
+                recipient_user_id=row["owner_user_id"],
+                category="review",
+                event_type=f"achievement.{action}",
+                source_type="achievement",
+                source_id=ach_id,
+                title="成果审核已通过" if action == "approve" else "成果审核未通过",
+                body=reason or None,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list",
+            )
 
         audit_record(
-            f"achievement.{action}", "achievement", resource_id=ach_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            f"achievement.{action}",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"from": "pending_review", "to": to_status, "reason": reason or None},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {"status": to_status}
@@ -380,16 +390,27 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         if row.get("owner_user_id"):
-            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
-                event_type=f"demand.{action}", source_type="demand", source_id=demand_id,
-                title="需求审核已通过" if action == "approve" else "需求审核未通过", body=reason or None,
-                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
+            emit_notification(
+                cur,
+                recipient_user_id=row["owner_user_id"],
+                category="review",
+                event_type=f"demand.{action}",
+                source_type="demand",
+                source_id=demand_id,
+                title="需求审核已通过" if action == "approve" else "需求审核未通过",
+                body=reason or None,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list",
+            )
 
         audit_record(
-            f"demand.{action}", "demand", resource_id=demand_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            f"demand.{action}",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"from": "pending_review", "to": to_status, "reason": reason or None},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {"status": to_status}
@@ -398,11 +419,22 @@ def review_demand(admin_user: dict, demand_id: int, body: dict, request_id=None)
 # ── 下架 / 关闭（管理端对已发布内容做下线，机构范围与列表一致）──
 
 ACHIEVEMENT_OFFLINE_REASON_CODES = (
-    "cooperated", "expired", "superseded", "duplicate", "no_longer_available", "other",
+    "cooperated",
+    "expired",
+    "superseded",
+    "duplicate",
+    "no_longer_available",
+    "other",
 )
 DEMAND_CLOSE_REASON_CODES = (
-    "fulfilled", "budget_changed", "timeline_changed", "duplicate", "no_longer_needed", "other",
+    "fulfilled",
+    "budget_changed",
+    "timeline_changed",
+    "duplicate",
+    "no_longer_needed",
+    "other",
 )
+
 
 def offline_achievement_admin(scope: dict, ach_id: int, body: dict, request_id=None) -> dict:
     """POST /admin/achievements/{id}/offline —— 管理端下架已发布成果（published → offline）。"""
@@ -426,7 +458,7 @@ def offline_achievement_admin(scope: dict, ach_id: int, body: dict, request_id=N
         if not row:
             raise achievement_not_found()
         if row["status"] != "published":
-            code, message, http_status = TT_ACH_40901
+            code, _message, http_status = TT_ACH_40901
             raise BizError(code, f"当前状态 {row['status']} 不允许下架（要求 published）", http_status)
 
         cur.execute(
@@ -443,19 +475,31 @@ def offline_achievement_admin(scope: dict, ach_id: int, body: dict, request_id=N
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
         if row.get("owner_user_id"):
-            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
-                event_type="achievement.offline", source_type="achievement", source_id=ach_id,
-                title="成果已被下架", body=reason,
-                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
+            emit_notification(
+                cur,
+                recipient_user_id=row["owner_user_id"],
+                category="review",
+                event_type="achievement.offline",
+                source_type="achievement",
+                source_id=ach_id,
+                title="成果已被下架",
+                body=reason,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list",
+            )
 
         audit_record(
-            "achievement.offline", "achievement", resource_id=ach_id,
-            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            "achievement.offline",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={"from": "published", "to": "offline", "reason": reason, "reasonCode": reason_code},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {"status": "offline"}
+
 
 def close_demand_admin(scope: dict, demand_id: int, body: dict, request_id=None) -> dict:
     """POST /admin/demands/{id}/close —— 管理端关闭已发布/对接中的需求。"""
@@ -481,7 +525,7 @@ def close_demand_admin(scope: dict, demand_id: int, body: dict, request_id=None)
         if not row:
             raise demand_not_found()
         if row["status"] not in ("published", "matched"):
-            code, message, http_status = TT_DMD_40901
+            code, _message, http_status = TT_DMD_40901
             raise BizError(code, f"当前状态 {row['status']} 不允许关闭（要求 published/matched）", http_status)
 
         cur.execute(
@@ -498,21 +542,34 @@ def close_demand_admin(scope: dict, demand_id: int, body: dict, request_id=None)
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
         if row.get("owner_user_id"):
-            emit_notification(cur, recipient_user_id=row["owner_user_id"], category="review",
-                event_type="demand.close", source_type="demand", source_id=demand_id,
-                title="需求已被关闭", body=reason_note,
-                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list")
+            emit_notification(
+                cur,
+                recipient_user_id=row["owner_user_id"],
+                category="review",
+                event_type="demand.close",
+                source_type="demand",
+                source_id=demand_id,
+                title="需求已被关闭",
+                body=reason_note,
+                target_path="/subpackages/tech-transfer/pages/mine-list/mine-list",
+            )
 
         audit_record(
-            "demand.close", "demand", resource_id=demand_id,
-            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            "demand.close",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={"from": row["status"], "to": "closed", "reasonCode": reason_code, "reasonNote": reason_note},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
 
     return {"status": "closed"}
 
+
 # ── 软删除（admin 删除走 UPDATE deleted_at，保留行用于追溯；列表已过滤 deleted_at IS NULL）──
+
 
 def soft_delete_achievement_admin(scope: dict, ach_id: int, request_id=None) -> dict:
     """管理员软删除成果：置 deleted_at=NOW()，不物理删除，保留审计追溯。
@@ -534,10 +591,14 @@ def soft_delete_achievement_admin(scope: dict, ach_id: int, request_id=None) -> 
         if cur.rowcount == 0:
             raise achievement_not_found()
         audit_record(
-            "achievement.admin_delete", "achievement", resource_id=ach_id,
-            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            "achievement.admin_delete",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={"soft": True},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"id": ach_id, "deleted": True}
 
@@ -559,15 +620,20 @@ def soft_delete_demand_admin(scope: dict, demand_id: int, request_id=None) -> di
         if cur.rowcount == 0:
             raise demand_not_found()
         audit_record(
-            "demand.admin_delete", "demand", resource_id=demand_id,
-            actor_user_id=scope["userId"], actor_user_no=scope.get("userNo", ""),
+            "demand.admin_delete",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=scope["userId"],
+            actor_user_no=scope.get("userNo", ""),
             details={"soft": True},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"id": demand_id, "deleted": True}
 
 
 # ── 审计日志查询 ─────────────────────────────────────────────
+
 
 def list_audit_logs(args) -> dict:
     """GET /admin/audit-logs —— 分页 + actorUserId/targetType/requestId/时间范围"""
@@ -614,25 +680,36 @@ def list_audit_logs(args) -> dict:
     ]
     total_pages = (total + page_size - 1) // page_size if total else 0
     return {
-        "total": total, "page": page, "pageSize": page_size,
-        "totalPages": total_pages, "list": items,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages,
+        "list": items,
     }
 
 
 # ── helpers ──────────────────────────────────────────────────
 
+
 def _page_of(rows, page, page_size, total, fn):
     total_pages = (total + page_size - 1) // page_size if total else 0
     return {
-        "total": total, "page": page, "pageSize": page_size,
-        "totalPages": total_pages, "list": [fn(r) for r in rows],
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages,
+        "list": [fn(r) for r in rows],
     }
 
 
 def _ach_queue_item(r):
     return {
-        "id": r["id"], "title": r["title"], "status": r["status"], "version": r["version"],
-        "categoryName": r.get("category_name"), "categoryCode": r.get("category_code"),
+        "id": r["id"],
+        "title": r["title"],
+        "status": r["status"],
+        "version": r["version"],
+        "categoryName": r.get("category_name"),
+        "categoryCode": r.get("category_code"),
         "orgName": r.get("source_org_name"),
         "submitterUserNo": r.get("submitter_user_no"),
         "submitterName": r.get("submitter_name"),
@@ -642,8 +719,12 @@ def _ach_queue_item(r):
 
 def _dmd_queue_item(r):
     return {
-        "id": r["id"], "title": r["title"], "status": r["status"], "version": r["version"],
-        "categoryName": r.get("category_name"), "categoryCode": r.get("category_code"),
+        "id": r["id"],
+        "title": r["title"],
+        "status": r["status"],
+        "version": r["version"],
+        "categoryName": r.get("category_name"),
+        "categoryCode": r.get("category_code"),
         "orgName": r.get("org_name"),
         "submitterUserNo": r.get("submitter_user_no"),
         "submitterName": r.get("submitter_name"),
@@ -665,8 +746,13 @@ from core.errors import (
 )
 
 INST_KINDS = (
-    "platform", "invest", "service",
-    "university", "institute", "enterprise", "other",
+    "platform",
+    "invest",
+    "service",
+    "university",
+    "institute",
+    "enterprise",
+    "other",
 )
 PLATFORM_TYPE_KEYS = ("poc", "pilot", "other")
 PLATFORM_TYPE_LABELS = {
@@ -701,6 +787,7 @@ INST_EDITABLE = {
 
 # ── P0-1 Dashboard ───────────────────────────────────────────
 
+
 def dashboard_summary() -> dict:
     """GET /admin/dashboard/summary —— 单查询真实 COUNT，无假数据、无趋势。"""
     with get_cursor() as cur:
@@ -728,21 +815,22 @@ def dashboard_summary() -> dict:
             """
         )
         r = cur.fetchone()
-        cur.execute(
-            "SELECT status, COUNT(*) AS c FROM achievement "
-            "WHERE deleted_at IS NULL GROUP BY status"
-        )
+        cur.execute("SELECT status, COUNT(*) AS c FROM achievement WHERE deleted_at IS NULL GROUP BY status")
         ach_status = {row["status"]: int(row["c"]) for row in (cur.fetchall() or [])}
-        cur.execute(
-            "SELECT status, COUNT(*) AS c FROM demand "
-            "WHERE deleted_at IS NULL GROUP BY status"
-        )
+        cur.execute("SELECT status, COUNT(*) AS c FROM demand WHERE deleted_at IS NULL GROUP BY status")
         dmd_status = {row["status"]: int(row["c"]) for row in (cur.fetchall() or [])}
 
-    pending_total = sum(int(r[key]) for key in (
-        "pending_achievements", "pending_demands", "pending_organization_applications",
-        "pending_organization_admin_applications", "pending_membership_applications", "pending_cooperations",
-    ))
+    pending_total = sum(
+        int(r[key])
+        for key in (
+            "pending_achievements",
+            "pending_demands",
+            "pending_organization_applications",
+            "pending_organization_admin_applications",
+            "pending_membership_applications",
+            "pending_cooperations",
+        )
+    )
     return {
         "users": int(r["users"]),
         "achievements": int(r["achievements"]),
@@ -979,6 +1067,7 @@ def dashboard_trend(days) -> dict:
 
 # ── P0-2 Institution 管理端 ─────────────────────────────────
 
+
 def _inst_admin_item(r):
     item = {
         "id": r["id"],
@@ -1011,17 +1100,19 @@ def _inst_admin_item(r):
     fid = item["logoFileId"]
     item["logoUrl"] = f"/api/file/{fid}" if fid else ""
     if r["kind"] == "platform":
-        item.update({
-            "serialNo": int(r.get("serial_no") or 0),
-            "platformType": (r.get("platform_type") or "").strip(),
-            "platformTypeKey": (r.get("platform_type_key") or "other").strip(),
-            "unit": (r.get("support_unit") or "").strip(),
-            "functionText": (r.get("functions") or "").strip(),
-            "contact": (r.get("contact_person") or "").strip(),
-            "phone": (r.get("contact_mobile") or "").strip(),
-            "sourceStatus": r.get("source_status"),
-            "orderNum": r.get("order_num"),
-        })
+        item.update(
+            {
+                "serialNo": int(r.get("serial_no") or 0),
+                "platformType": (r.get("platform_type") or "").strip(),
+                "platformTypeKey": (r.get("platform_type_key") or "other").strip(),
+                "unit": (r.get("support_unit") or "").strip(),
+                "functionText": (r.get("functions") or "").strip(),
+                "contact": (r.get("contact_person") or "").strip(),
+                "phone": (r.get("contact_mobile") or "").strip(),
+                "sourceStatus": r.get("source_status"),
+                "orderNum": r.get("order_num"),
+            }
+        )
     return item
 
 
@@ -1081,7 +1172,7 @@ def _validate_inst_payload(body: dict, require_kind: bool):
     if "name" in cleaned:
         cleaned["name"] = str(cleaned["name"]).strip()
         if not cleaned["name"]:
-            code, message, status = TT_INST_40001
+            code, _message, status = TT_INST_40001
             raise BizError(code, "机构名称不能为空", status)
     if "contact_mobile" in cleaned:
         cleaned["contact_mobile"] = validate_contact_way(
@@ -1090,14 +1181,14 @@ def _validate_inst_payload(body: dict, require_kind: bool):
 
     kind = None
     if require_kind:
-        kind = (str(body.get("kind") or "").strip().lower())
+        kind = str(body.get("kind") or "").strip().lower()
         if kind not in INST_KINDS:
-            code, message, status = TT_INST_40001
+            code, _message, status = TT_INST_40001
             raise BizError(code, f"kind 必须是 {'/'.join(INST_KINDS)}", status)
     if "platform_type_key" in cleaned:
         key = str(cleaned["platform_type_key"]).strip().lower()
         if key not in PLATFORM_TYPE_KEYS:
-            code, message, status = TT_INST_40001
+            code, _message, status = TT_INST_40001
             raise BizError(code, f"platformTypeKey 必须是 {'/'.join(PLATFORM_TYPE_KEYS)}", status)
         cleaned["platform_type_key"] = key
         if "platform_type" not in cleaned or not str(cleaned.get("platform_type") or "").strip():
@@ -1118,15 +1209,31 @@ def create_institution(admin_user: dict, body: dict, request_id=None) -> dict:
 
     columns = ["kind", "status"]
     values: list = [kind, "active"]
-    for snake in ("name", "region", "intro", "detail_info", "label", "logo_file_id", "sort_order",
-                  "user_type", "detail_activity_id", "platform_type", "platform_type_key",
-                  "support_unit", "functions", "contact_person", "contact_mobile",
-                  "serial_no", "source_status", "order_num"):
+    for snake in (
+        "name",
+        "region",
+        "intro",
+        "detail_info",
+        "label",
+        "logo_file_id",
+        "sort_order",
+        "user_type",
+        "detail_activity_id",
+        "platform_type",
+        "platform_type_key",
+        "support_unit",
+        "functions",
+        "contact_person",
+        "contact_mobile",
+        "serial_no",
+        "source_status",
+        "order_num",
+    ):
         if snake in cleaned:
             columns.append(snake)
             values.append(cleaned[snake])
     if "name" not in columns:
-        code, message, status = TT_INST_40001
+        code, _message, status = TT_INST_40001
         raise BizError(code, "机构名称 name 必填", status)
 
     placeholders = ",".join(["%s"] * len(columns))
@@ -1137,10 +1244,14 @@ def create_institution(admin_user: dict, body: dict, request_id=None) -> dict:
         )
         row = cur.fetchone()
         audit_record(
-            "institution.create", "institution", resource_id=row["id"],
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "institution.create",
+            "institution",
+            resource_id=row["id"],
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"kind": kind, "name": row["name"], "status": "active"},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return _inst_admin_item(row)
 
@@ -1170,13 +1281,16 @@ def update_institution(admin_user: dict, inst_id: int, body: dict, request_id=No
         )
         cur.execute("SELECT * FROM institution WHERE id = %s", (inst_id,))
         after = cur.fetchone()
-        changed = {k: {"from": row.get(k), "to": after.get(k)}
-                   for k in cleaned if row.get(k) != after.get(k)}
+        changed = {k: {"from": row.get(k), "to": after.get(k)} for k in cleaned if row.get(k) != after.get(k)}
         audit_record(
-            "institution.update", "institution", resource_id=inst_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "institution.update",
+            "institution",
+            resource_id=inst_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"changed": changed} if changed else {"changed": {}},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return _inst_admin_item(after)
 
@@ -1202,10 +1316,14 @@ def set_institution_status(admin_user: dict, inst_id: int, action: str, request_
             (to_status, inst_id),
         )
         audit_record(
-            f"institution.{action}", "institution", resource_id=inst_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            f"institution.{action}",
+            "institution",
+            resource_id=inst_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"from": row["status"], "to": to_status, "name": row["name"]},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"status": to_status}
 
@@ -1222,15 +1340,15 @@ def _to_int_or_none(v):
 
 def _normalize_import_item(raw: dict) -> dict:
     if not isinstance(raw, dict):
-        code, message, status = TT_INST_40001
+        code, _message, status = TT_INST_40001
         raise BizError(code, "导入行必须是对象", status)
     kind = str(raw.get("kind") or "").strip().lower()
     if kind not in CAPITAL_IMPORT_KINDS:
-        code, message, status = TT_INST_40001
+        code, _message, status = TT_INST_40001
         raise BizError(code, "kind 必须是 platform/invest/service", status)
     name = str(raw.get("name") or "").strip()
     if not name:
-        code, message, status = TT_INST_40001
+        code, _message, status = TT_INST_40001
         raise BizError(code, "机构名称 name 必填", status)
     platform_type_key = str(raw.get("platformTypeKey") or raw.get("platform_type_key") or "").strip().lower()
     if kind == "platform":
@@ -1240,18 +1358,12 @@ def _normalize_import_item(raw: dict) -> dict:
         platform_type_key = platform_type_key or "other"
     source_pk = raw.get("sourcePk") if raw.get("sourcePk") is not None else raw.get("source_pk")
     source_pk = _to_int_or_none(source_pk)
-    sort_order = _to_int_or_none(
-        raw.get("sortOrder") if raw.get("sortOrder") is not None else raw.get("sort_order")
-    )
-    serial_no = _to_int_or_none(
-        raw.get("serialNo") if raw.get("serialNo") is not None else raw.get("serial_no")
-    )
+    sort_order = _to_int_or_none(raw.get("sortOrder") if raw.get("sortOrder") is not None else raw.get("sort_order"))
+    serial_no = _to_int_or_none(raw.get("serialNo") if raw.get("serialNo") is not None else raw.get("serial_no"))
     source_status = _to_int_or_none(
         raw.get("sourceStatus") if raw.get("sourceStatus") is not None else raw.get("source_status")
     )
-    order_num = _to_int_or_none(
-        raw.get("orderNum") if raw.get("orderNum") is not None else raw.get("order_num")
-    )
+    order_num = _to_int_or_none(raw.get("orderNum") if raw.get("orderNum") is not None else raw.get("order_num"))
     return {
         "kind": kind,
         "name": name,
@@ -1283,10 +1395,10 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
     """Idempotent capital-resource upsert keyed by (kind, source_pk) or (kind, name)."""
     items = body.get("items") if isinstance(body, dict) else None
     if not isinstance(items, list) or not items:
-        code, message, status = TT_INST_40001
+        code, _message, status = TT_INST_40001
         raise BizError(code, "items 必须是非空数组", status)
     if len(items) > 500:
-        code, message, status = TT_INST_40001
+        code, _message, status = TT_INST_40001
         raise BizError(code, "单次最多导入 500 条", status)
 
     created = 0
@@ -1309,13 +1421,28 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
                 )
                 existing = cur.fetchone()
             values = (
-                item["name"], item["region"], item["intro"], item["label"],
-                item["unit"], item["functionText"], item["contact"], item["phone"],
-                item["platformTypeKey"], item["platformType"], item["sortOrder"],
-                item["status"], item["sourcePk"],
-                item["serialNo"], item["sourceStatus"], item["orderNum"],
-                item["sourceSite"], item["sourceApi"], item["fetchedAt"],
-                item["logoFileId"], item["detailInfo"], item["userType"],
+                item["name"],
+                item["region"],
+                item["intro"],
+                item["label"],
+                item["unit"],
+                item["functionText"],
+                item["contact"],
+                item["phone"],
+                item["platformTypeKey"],
+                item["platformType"],
+                item["sortOrder"],
+                item["status"],
+                item["sourcePk"],
+                item["serialNo"],
+                item["sourceStatus"],
+                item["orderNum"],
+                item["sourceSite"],
+                item["sourceApi"],
+                item["fetchedAt"],
+                item["logoFileId"],
+                item["detailInfo"],
+                item["userType"],
             )
             if existing:
                 cur.execute(
@@ -1367,10 +1494,14 @@ def import_institutions(admin_user: dict, body: dict, request_id=None) -> dict:
             # affected rows after an import instead of refetching the table.
             results.append({**item, "id": row_id, "action": action})
         audit_record(
-            "institution.import", "institution", resource_id=None,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "institution.import",
+            "institution",
+            resource_id=None,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"created": created, "updated": updated, "total": len(items)},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"created": created, "updated": updated, "total": len(items), "list": results}
 
@@ -1415,10 +1546,14 @@ def delete_institution(admin_user: dict, inst_id: int, request_id=None) -> dict:
             )
         cur.execute("DELETE FROM institution WHERE id=%s", (inst_id,))
         audit_record(
-            "institution.delete", "institution", resource_id=inst_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "institution.delete",
+            "institution",
+            resource_id=inst_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"name": row["name"], "kind": row["kind"]},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"id": inst_id, "deleted": True}
 
@@ -1436,7 +1571,8 @@ LEFT JOIN achievement a ON ci.target_type = 'achievement' AND ci.target_id = a.i
 LEFT JOIN institution org ON COALESCE(ci.target_org_id, d.org_id, a.org_id) = org.id
 """
 
-_COOP_LIST_SQL = """
+_COOP_LIST_SQL = (
+    """
 SELECT ci.id, ci.initiator_user_id, ci.target_type, ci.target_id,
        ci.target_owner_user_id, ci.intent_type, ci.message, ci.status, ci.version,
        ci.created_at, ci.accepted_at, ci.confirmed_at, ci.completed_at, ci.closed_at,
@@ -1447,7 +1583,9 @@ SELECT ci.id, ci.initiator_user_id, ci.target_type, ci.target_id,
        tu.user_no AS target_owner_user_no, tp.display_name AS target_owner_name,
        COALESCE(d.title, a.title) AS target_title,
        org.name AS target_org_name
-""" + _COOP_FROM
+"""
+    + _COOP_FROM
+)
 
 
 def _coop_admin_item(r):
@@ -1474,8 +1612,7 @@ def _coop_admin_item(r):
         "initiatorContact": r.get("initiator_contact_snapshot"),
         "assistNote": r.get("assist_note"),
         "contactShareConsentAt": (
-            r["contact_share_consent_at"].isoformat()
-            if r.get("contact_share_consent_at") else None
+            r["contact_share_consent_at"].isoformat() if r.get("contact_share_consent_at") else None
         ),
         "version": r["version"],
         "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
@@ -1569,6 +1706,7 @@ def get_cooperation_admin(intent_id: int, scope: dict) -> dict:
         for e in events
     ]
     return detail
+
 
 def _insert_admin_cooperation_event(
     cur,
@@ -1740,11 +1878,7 @@ def admin_review_cooperation(
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
-        operator_role = (
-            "admin"
-            if scope.get("isPlatformAdmin")
-            else "org_admin"
-        )
+        operator_role = "admin" if scope.get("isPlatformAdmin") else "org_admin"
 
         _insert_admin_cooperation_event(
             cur,
@@ -1762,7 +1896,7 @@ def admin_review_cooperation(
         if action == "accept":
             # 名额预占（与用户路径 _transition 保持一致）：exclusive/limited
             # 目标必须在 accept 时原子扣减 cooperation_remaining，否则可被超量接受。
-            slot = _reserve_target_slot(cur, row, intent_id)
+            _reserve_target_slot(cur, row, intent_id)
             cur.execute(
                 """
                 SELECT id
@@ -1853,13 +1987,19 @@ def admin_review_cooperation(
 # ── P0-5 成果/需求全量管理列表（后台管理页数据源，任意状态可读） ──
 
 _ACH_STATUS_LABELS = {
-    "draft": "草稿", "pending_review": "待审核",
-    "published": "已发布", "offline": "已下架", "rejected": "已驳回",
+    "draft": "草稿",
+    "pending_review": "待审核",
+    "published": "已发布",
+    "offline": "已下架",
+    "rejected": "已驳回",
 }
 _DMD_STATUS_LABELS = {
-    "draft": "草稿", "pending_review": "待审核",
-    "published": "已发布", "matched": "对接中",
-    "closed": "已关闭", "rejected": "已驳回",
+    "draft": "草稿",
+    "pending_review": "待审核",
+    "published": "已发布",
+    "matched": "对接中",
+    "closed": "已关闭",
+    "rejected": "已驳回",
 }
 
 
@@ -1917,16 +2057,14 @@ def claim_unassigned_content(scope: dict, content_type: str, content_id: int, ve
 
     with get_cursor(commit=True) as cur:
         cur.execute(
-            f"SELECT id, org_id, owner_user_id, version FROM {table} "
-            "WHERE id=%s AND deleted_at IS NULL FOR UPDATE",
+            f"SELECT id, org_id, owner_user_id, version FROM {table} WHERE id=%s AND deleted_at IS NULL FOR UPDATE",
             (content_id,),
         )
         row = cur.fetchone()
         if not row:
             raise achievement_not_found() if content_type == "achievement" else demand_not_found()
         cur.execute(
-            "SELECT 1 FROM organization_membership "
-            "WHERE user_id=%s AND org_id=%s AND status='active'",
+            "SELECT 1 FROM organization_membership WHERE user_id=%s AND org_id=%s AND status='active'",
             (row.get("owner_user_id"), claim_org_id),
         )
         owner_in_org = bool(cur.fetchone())
@@ -2047,7 +2185,7 @@ def list_achievements_admin(args, scope: dict) -> dict:
         )
         rows = cur.fetchall() or []
     items = _page_of(rows, page, page_size, total, _ach_admin_item)
-    for item, row in zip(items["list"], rows):
+    for item, row in zip(items["list"], rows, strict=False):
         item["pendingOrgAssignment"] = can_claim_unassigned_content(scope, {**row, "owner_in_org": True})
     return items
 
@@ -2105,35 +2243,37 @@ def get_achievement_admin(ach_id: int, scope: dict) -> dict:
         content = load_content(cur, ach_id)
 
     detail = _ach_admin_item(row)
-    detail.update({
-        "techIntro": row.get("tech_intro"),
-        "techRoute": row.get("tech_route"),
-        "maturityLevel": row.get("maturity_level"),
-        "maturityDesc": row.get("maturity_desc"),
-        "pricingMode": row.get("pricing_mode"),
-        "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") is not None else None,
-        "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") is not None else None,
-        "categoryId": row.get("category_id"),
-        "orgId": row.get("org_id"),
-        "sourceOrgName": row.get("source_org_name"),
-        "contactName": row.get("contact_name"),
-        "contactTitle": row.get("contact_title"),
-        "contactPhone": row.get("contact_phone"),
-        "contactEmail": row.get("contact_email"),
-        "contactWechat": row.get("contact_wechat"),
-        "inventors": [
-            {
-                "name": inv["name"],
-                "orgName": inv.get("org_name"),
-                "contribution": inv.get("contribution"),
-            }
-            for inv in inventors
-        ],
-        "sections": content.get("sections") or [],
-        "patents": content.get("patents") or [],
-        "links": content.get("links") or [],
-        "media": content.get("media") or [],
-    })
+    detail.update(
+        {
+            "techIntro": row.get("tech_intro"),
+            "techRoute": row.get("tech_route"),
+            "maturityLevel": row.get("maturity_level"),
+            "maturityDesc": row.get("maturity_desc"),
+            "pricingMode": row.get("pricing_mode"),
+            "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") is not None else None,
+            "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") is not None else None,
+            "categoryId": row.get("category_id"),
+            "orgId": row.get("org_id"),
+            "sourceOrgName": row.get("source_org_name"),
+            "contactName": row.get("contact_name"),
+            "contactTitle": row.get("contact_title"),
+            "contactPhone": row.get("contact_phone"),
+            "contactEmail": row.get("contact_email"),
+            "contactWechat": row.get("contact_wechat"),
+            "inventors": [
+                {
+                    "name": inv["name"],
+                    "orgName": inv.get("org_name"),
+                    "contribution": inv.get("contribution"),
+                }
+                for inv in inventors
+            ],
+            "sections": content.get("sections") or [],
+            "patents": content.get("patents") or [],
+            "links": content.get("links") or [],
+            "media": content.get("media") or [],
+        }
+    )
     application_fields = row.get("application_fields")
     if application_fields and isinstance(application_fields, str):
         try:
@@ -2247,7 +2387,7 @@ def list_demands_admin(args, scope: dict) -> dict:
         )
         rows = cur.fetchall() or []
     items = _page_of(rows, page, page_size, total, _dmd_admin_item)
-    for item, row in zip(items["list"], rows):
+    for item, row in zip(items["list"], rows, strict=False):
         item["pendingOrgAssignment"] = can_claim_unassigned_content(scope, {**row, "owner_in_org": True})
     return items
 
@@ -2292,20 +2432,22 @@ def get_demand_admin(demand_id: int, scope: dict) -> dict:
         tags = [r["name"] for r in (cur.fetchall() or [])]
 
     detail = _dmd_admin_item(row)
-    detail.update({
-        "description": row.get("description"),
-        "coopMode": row.get("coop_mode"),
-        "orgIntro": row.get("org_intro"),
-        "categoryId": row.get("category_id"),
-        "orgId": row.get("org_id"),
-        "budgetMinWan": float(row["budget_min_wan"]) if row.get("budget_min_wan") is not None else None,
-        "budgetMaxWan": float(row["budget_max_wan"]) if row.get("budget_max_wan") is not None else None,
-        "tags": tags,
-        "contactName": row.get("contact_name"),
-        "contactTitle": row.get("contact_title"),
-        "contactPhone": row.get("contact_phone"),
-        "contactEmail": row.get("contact_email"),
-    })
+    detail.update(
+        {
+            "description": row.get("description"),
+            "coopMode": row.get("coop_mode"),
+            "orgIntro": row.get("org_intro"),
+            "categoryId": row.get("category_id"),
+            "orgId": row.get("org_id"),
+            "budgetMinWan": float(row["budget_min_wan"]) if row.get("budget_min_wan") is not None else None,
+            "budgetMaxWan": float(row["budget_max_wan"]) if row.get("budget_max_wan") is not None else None,
+            "tags": tags,
+            "contactName": row.get("contact_name"),
+            "contactTitle": row.get("contact_title"),
+            "contactPhone": row.get("contact_phone"),
+            "contactEmail": row.get("contact_email"),
+        }
+    )
     return detail
 
 
@@ -2317,7 +2459,8 @@ LEFT JOIN user_profile p ON u.id = p.user_id
 LEFT JOIN institution o ON p.org_id = o.id
 """
 
-_USER_LIST_SQL = """
+_USER_LIST_SQL = (
+    """
 SELECT u.id, u.user_no, u.status, u.created_at, u.updated_at,
        p.display_name, p.user_type, p.phone, p.email, p.org_id, p.org_title,
        o.name AS org_name,
@@ -2328,7 +2471,9 @@ SELECT u.id, u.user_no, u.status, u.created_at, u.updated_at,
                   FROM organization_membership m
                   JOIN institution i ON i.id = m.org_id
                  WHERE m.user_id = u.id AND m.status = 'active') t) AS memberships
-""" + _USER_FROM
+"""
+    + _USER_FROM
+)
 
 
 def _user_admin_item(r):
@@ -2345,8 +2490,14 @@ def _user_admin_item(r):
         "orgTitle": (r.get("org_title") or "").strip(),
         "roles": list(r.get("roles") or []),
         "organizationMemberships": [
-            {"id": m["id"], "orgId": m["org_id"], "orgName": m["org_name"],
-             "role": m["role"], "status": m["status"], "version": m["version"]}
+            {
+                "id": m["id"],
+                "orgId": m["org_id"],
+                "orgName": m["org_name"],
+                "role": m["role"],
+                "status": m["status"],
+                "version": m["version"],
+            }
             for m in (r.get("memberships") or [])
         ],
         "createdAt": r["created_at"].isoformat() if r.get("created_at") else None,
@@ -2423,6 +2574,7 @@ def get_user_admin(user_id: int, scope: dict) -> dict:
     }
     return item
 
+
 def _admin_owner_user_id(cur, body: dict, org_id: int):
     """后台代录归属用户解析。
 
@@ -2456,6 +2608,7 @@ def _admin_owner_user_id(cur, body: dict, org_id: int):
         raise bad_request("归属用户不存在、已禁用，或未绑定所选机构")
 
     return owner_user_id
+
 
 def _content_write_context(cur, scope: dict, body: dict, fields: dict) -> tuple[int, int, int]:
     """
@@ -2498,6 +2651,7 @@ def _content_write_context(cur, scope: dict, body: dict, fields: dict) -> tuple[
         org_id,
     )
     return org_id, owner_user_id, actor_user_id
+
 
 def _resolve_admin_save_action(
     scope: dict,
@@ -2579,6 +2733,7 @@ def _assert_admin_status_transition(
     if current_status not in allowed:
         raise bad_request(message)
 
+
 def create_achievement_admin(
     scope: dict,
     body: dict,
@@ -2610,9 +2765,7 @@ def create_achievement_admin(
         if fields.get("category_id") is None:
             raise bad_request("后台录入必须选择成果分类")
 
-        org_id, owner_user_id, created_by_user_id = _content_write_context(
-            cur, scope, body, fields
-        )
+        _org_id, owner_user_id, created_by_user_id = _content_write_context(cur, scope, body, fields)
         _validate_refs(cur, fields)
 
         cur.execute(
@@ -2776,10 +2929,7 @@ def update_achievement_admin(
                 """,
                 (ach_id,),
             )
-            old_inventor_names = [
-                (row["name"] if isinstance(row, dict) else row[0])
-                for row in (cur.fetchall() or [])
-            ]
+            old_inventor_names = [(row["name"] if isinstance(row, dict) else row[0]) for row in (cur.fetchall() or [])]
 
         _validate_refs(cur, fields)
 
@@ -2846,19 +2996,23 @@ def update_achievement_admin(
         # 管理员修改变更留痕（发布者可见变更对比）：与业务写同事务。
         change_extras = []
         if inventor_refs is not None:
-            change_extras.append({
-                "field": "inventors",
-                "fieldLabel": "完成人",
-                "oldValue": "、".join(n for n in old_inventor_names if n),
-                "newValue": "、".join(ref["name"] for ref in inventor_refs),
-            })
+            change_extras.append(
+                {
+                    "field": "inventors",
+                    "fieldLabel": "完成人",
+                    "oldValue": "、".join(n for n in old_inventor_names if n),
+                    "newValue": "、".join(ref["name"] for ref in inventor_refs),
+                }
+            )
         if target_status is not None and target_status != current["status"]:
-            change_extras.append({
-                "field": "status",
-                "fieldLabel": "状态",
-                "oldValue": _STATUS_LABELS.get(current["status"], current["status"]),
-                "newValue": _STATUS_LABELS.get(target_status, target_status),
-            })
+            change_extras.append(
+                {
+                    "field": "status",
+                    "fieldLabel": "状态",
+                    "oldValue": _STATUS_LABELS.get(current["status"], current["status"]),
+                    "newValue": _STATUS_LABELS.get(target_status, target_status),
+                }
+            )
         record_admin_edit_changes(
             cur,
             "achievement",
@@ -2885,7 +3039,9 @@ def update_achievement_admin(
 
     return get_achievement_admin(ach_id, scope)
 
+
 # ── 后台需求新增 / 编辑 ─────────────────────────────────────
+
 
 def create_demand_admin(
     scope: dict,
@@ -2899,7 +3055,7 @@ def create_demand_admin(
     传 ownerUserId 指定需求归属人；未传 = 平台代录（owner NULL，进入平台协助对接），
     录入人 created_by_user_id 恒为当前管理员。
     """
-    fields, tags, attachments = _parse_demand_upsert_body(body, partial=False)
+    fields, tags, _attachments = _parse_demand_upsert_body(body, partial=False)
 
     save_action, target_status = _resolve_admin_save_action(
         scope,
@@ -2919,14 +3075,10 @@ def create_demand_admin(
         if fields.get("category_id") is None:
             raise bad_request("后台录入必须选择需求分类")
 
-        org_id, owner_user_id, created_by_user_id = _content_write_context(
-            cur, scope, body, fields
-        )
+        _org_id, owner_user_id, created_by_user_id = _content_write_context(cur, scope, body, fields)
 
         # orgName / categoryName：仅平台管理员可通过名称改绑机构。
-        _resolve_demand_name_refs(
-            cur, fields, allow_org_mutate=bool(scope.get("isPlatformAdmin"))
-        )
+        _resolve_demand_name_refs(cur, fields, allow_org_mutate=bool(scope.get("isPlatformAdmin")))
         _validate_demand_refs(cur, fields)
 
         cur.execute(
@@ -3034,7 +3186,7 @@ def update_demand_admin(
     不允许用该接口直接修改 owner、status、审核结果。
     status 仍由审核、取消、关闭等专用接口处理。
     """
-    fields, tags, attachments = _parse_demand_upsert_body(body, partial=True)
+    fields, tags, _attachments = _parse_demand_upsert_body(body, partial=True)
 
     save_action, target_status = _resolve_admin_save_action(
         scope,
@@ -3075,9 +3227,7 @@ def update_demand_admin(
             old_tag_names = _load_demand_tags(cur, [demand_id]).get(demand_id, [])
 
         # orgName / categoryName 在这里转成真正的 ID。
-        _resolve_demand_name_refs(
-            cur, fields, allow_org_mutate=bool(scope.get("isPlatformAdmin"))
-        )
+        _resolve_demand_name_refs(cur, fields, allow_org_mutate=bool(scope.get("isPlatformAdmin")))
         _validate_demand_refs(cur, fields)
 
         # PATCH 只传一个预算字段时，仍与数据库中的另一个预算字段一起校验。
@@ -3140,19 +3290,23 @@ def update_demand_admin(
         # 管理员修改变更留痕（发布者可见变更对比）：与业务写同事务。
         change_extras = []
         if tags is not None:
-            change_extras.append({
-                "field": "tags",
-                "fieldLabel": "标签",
-                "oldValue": "、".join(n for n in old_tag_names if n),
-                "newValue": "、".join(dict.fromkeys(n.strip() for n in tags if n and n.strip())),
-            })
+            change_extras.append(
+                {
+                    "field": "tags",
+                    "fieldLabel": "标签",
+                    "oldValue": "、".join(n for n in old_tag_names if n),
+                    "newValue": "、".join(dict.fromkeys(n.strip() for n in tags if n and n.strip())),
+                }
+            )
         if target_status is not None and target_status != current["status"]:
-            change_extras.append({
-                "field": "status",
-                "fieldLabel": "状态",
-                "oldValue": _STATUS_LABELS.get(current["status"], current["status"]),
-                "newValue": _STATUS_LABELS.get(target_status, target_status),
-            })
+            change_extras.append(
+                {
+                    "field": "status",
+                    "fieldLabel": "状态",
+                    "oldValue": _STATUS_LABELS.get(current["status"], current["status"]),
+                    "newValue": _STATUS_LABELS.get(target_status, target_status),
+                }
+            )
         record_admin_edit_changes(
             cur,
             "demand",
@@ -3182,6 +3336,7 @@ def update_demand_admin(
 
 # ── 代无账号内容提交审核（平台协助闭环：owner NULL 时无人可 submit） ──
 
+
 def submit_achievement_admin(admin_user: dict, ach_id: int, body: dict, request_id=None) -> dict:
     """POST /admin/achievements/{id}/submit —— 代平台代录成果提交审核。
 
@@ -3203,9 +3358,7 @@ def submit_achievement_admin(admin_user: dict, ach_id: int, body: dict, request_
         if row["owner_user_id"] is not None:
             raise bad_request("该成果有归属用户，应由归属用户自行提交审核")
         if row["status"] not in ("draft", "rejected"):
-            raise achievement_conflict(
-                f"当前状态 {row['status']} 不允许提交审核（要求 draft/rejected）"
-            )
+            raise achievement_conflict(f"当前状态 {row['status']} 不允许提交审核（要求 draft/rejected）")
         cur.execute(
             "UPDATE achievement SET status='pending_review', version=version+1 WHERE id=%s AND version=%s",
             (ach_id, version),
@@ -3213,10 +3366,14 @@ def submit_achievement_admin(admin_user: dict, ach_id: int, body: dict, request_
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         audit_record(
-            "achievement.admin_submit", "achievement", resource_id=ach_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "achievement.admin_submit",
+            "achievement",
+            resource_id=ach_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"from": row["status"], "to": "pending_review", "onBehalfOf": "platform"},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"status": "pending_review"}
 
@@ -3238,9 +3395,7 @@ def submit_demand_admin(admin_user: dict, demand_id: int, body: dict, request_id
         if row["owner_user_id"] is not None:
             raise bad_request("该需求有归属用户，应由归属用户自行提交审核")
         if row["status"] not in ("draft", "rejected"):
-            raise demand_conflict(
-                f"当前状态 {row['status']} 不允许提交审核（要求 draft/rejected）"
-            )
+            raise demand_conflict(f"当前状态 {row['status']} 不允许提交审核（要求 draft/rejected）")
         cur.execute(
             "UPDATE demand SET status='pending_review', version=version+1 WHERE id=%s AND version=%s",
             (demand_id, version),
@@ -3248,9 +3403,13 @@ def submit_demand_admin(admin_user: dict, demand_id: int, body: dict, request_id
         if cur.rowcount == 0:
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
         audit_record(
-            "demand.admin_submit", "demand", resource_id=demand_id,
-            actor_user_id=admin_user["userId"], actor_user_no=admin_user.get("userNo", ""),
+            "demand.admin_submit",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=admin_user["userId"],
+            actor_user_no=admin_user.get("userNo", ""),
             details={"from": row["status"], "to": "pending_review", "onBehalfOf": "platform"},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
     return {"status": "pending_review"}

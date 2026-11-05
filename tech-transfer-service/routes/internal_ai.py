@@ -13,6 +13,7 @@
 
 响应沿用统一 success() 信封；错误沿用 BizError → 全局异常处理器。
 """
+
 import hmac
 import logging
 

@@ -81,9 +81,7 @@ def _parse_capabilities(raw) -> list:
 def build_user_response(cur, user_id: int) -> dict:
     profile = _get_profile(cur, user_id)
     roles = _get_roles(cur, user_id)
-    cur.execute(
-        "SELECT user_no, status FROM app_user WHERE id=%s", (user_id,)
-    )
+    cur.execute("SELECT user_no, status FROM app_user WHERE id=%s", (user_id,))
     user = cur.fetchone()
     if not user:
         return None
@@ -99,16 +97,25 @@ def build_user_response(cur, user_id: int) -> dict:
         (user_id,),
     )
     memberships = [
-        {"id": row["id"], "orgId": row["org_id"], "orgName": row["org_name"],
-         "role": row["role"], "status": row["status"], "version": row["version"]}
+        {
+            "id": row["id"],
+            "orgId": row["org_id"],
+            "orgName": row["org_name"],
+            "role": row["role"],
+            "status": row["status"],
+            "version": row["version"],
+        }
         for row in cur.fetchall()
     ]
     return {
         "userId": user_id,
         "userNo": user["user_no"],
         "avatarFileId": profile.get("avatar_file_id") if profile else None,
-        "avatar": (f"{settings.MEDIA_BASE_URL.rstrip('/')}/{profile['avatar_file_id']}"
-                   if profile and profile.get("avatar_file_id") else None),
+        "avatar": (
+            f"{settings.MEDIA_BASE_URL.rstrip('/')}/{profile['avatar_file_id']}"
+            if profile and profile.get("avatar_file_id")
+            else None
+        ),
         "passwordLoginEnabled": profile.get("password_configured", True) if profile else True,
         "wechatBound": profile.get("wechat_bound", False) if profile else False,
         "displayName": profile["display_name"] if profile else None,
@@ -190,9 +197,7 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
     identity, is_new = find_or_create_user(ext)
 
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            "SELECT user_no FROM app_user WHERE id=%s", (identity.userId,)
-        )
+        cur.execute("SELECT user_no FROM app_user WHERE id=%s", (identity.userId,))
         row = cur.fetchone()
         user_no = row["user_no"] if row else ""
 
@@ -241,7 +246,7 @@ def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
     }
 
 
-def register_user(phone: str, password: str, display_name: str = None) -> dict:
+def register_user(phone: str, password: str, display_name: str | None = None) -> dict:
     """手机号注册：创建 app_user + user_profile + user_credential + user_role。
 
     注册成功后直接签发会话（免登录），返回与 password_login_session 相同结构。
@@ -324,7 +329,11 @@ def _verify_login_and_issue(cur, cred: dict | None, password: str) -> dict:
     """
     from core.errors import TT_AUTH_40105, TT_AUTH_40106
 
-    if cred is None or not cred.get("password_configured", True) or not verify_password(password, cred["password_hash"]):
+    if (
+        cred is None
+        or not cred.get("password_configured", True)
+        or not verify_password(password, cred["password_hash"])
+    ):
         code, message, status = TT_AUTH_40105
         raise BizError(code, message, status)
 
@@ -376,8 +385,9 @@ def login_phone_session(phone: str, password: str) -> dict:
         return _verify_login_and_issue(cur, cred, password)
 
 
-def create_password_account(cur, username: str, password: str,
-                            display_name=None, phone=None, email=None) -> tuple[int, str]:
+def create_password_account(
+    cur, username: str, password: str, display_name=None, phone=None, email=None
+) -> tuple[int, str]:
     """在调用方事务游标内创建密码账号全套（app_user/profile/credential/role）。
 
     返回 (user_id, user_no)。供普通注册与机构注册申请（单事务创建账号+申请）复用。
@@ -387,12 +397,11 @@ def create_password_account(cur, username: str, password: str,
     cred_phone = phone if is_valid_phone(phone) else None
     if cred_phone:
         cur.execute(
-            "SELECT 1 FROM user_credential WHERE phone = %s "
-            "OR (phone IS NULL AND username = %s)",
+            "SELECT 1 FROM user_credential WHERE phone = %s OR (phone IS NULL AND username = %s)",
             (cred_phone, cred_phone),
         )
         if cur.fetchone():
-            code, message, status = TT_COMMON_40903
+            code, _message, status = TT_COMMON_40903
             raise BizError(code, "该手机号已被注册", status)
 
     user_no = _generate_user_no(cur)
@@ -440,11 +449,16 @@ def register_password_user(body: dict, request_id: str | None = None) -> dict:
     with get_cursor(commit=True) as cur:
         cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
         if cur.fetchone():
-            code, message, status = TT_COMMON_40903
+            code, _message, status = TT_COMMON_40903
             raise BizError(code, "该登录账号已存在", status)
 
         user_id, user_no = create_password_account(
-            cur, username, password, display_name, phone, email,
+            cur,
+            username,
+            password,
+            display_name,
+            phone,
+            email,
         )
         audit_record(
             "user.registration.submit",
@@ -470,11 +484,13 @@ def refresh_session(refresh_token: str) -> dict:
         payload = decode_no_verify_exp(refresh_token)
     except _jwt.InvalidTokenError:
         from core.errors import TT_COMMON_40102, BizError
+
         code, message, status = TT_COMMON_40102
         raise BizError(code, message, status)
 
     if payload.get("type") != "refresh":
         from core.errors import TT_COMMON_40102, BizError
+
         code, message, status = TT_COMMON_40102
         raise BizError(code, message, status)
 
@@ -496,6 +512,7 @@ def refresh_session(refresh_token: str) -> dict:
         )
         if cur.rowcount == 0:
             from core.errors import TT_COMMON_40102, BizError
+
             code, message, status = TT_COMMON_40102
             raise BizError(code, message, status)
 
@@ -515,11 +532,11 @@ def refresh_session(refresh_token: str) -> dict:
             or (row["cred_status"] is not None and row["cred_status"] != "active")
         ):
             cur.execute(
-                "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
-                "WHERE user_id=%s AND status='active'",
+                "UPDATE auth_session SET status='revoked', revoked_at=NOW() WHERE user_id=%s AND status='active'",
                 (user_id,),
             )
             from core.errors import TT_AUTH_40106, BizError
+
             code, message, status = TT_AUTH_40106
             raise BizError(code, message, status)
         user_no = row["user_no"] or ""
@@ -598,7 +615,10 @@ def change_password(user_id: int, current_password: str, new_password: str) -> d
             (hash_password(new_password), user_id),
         )
         audit_record(
-            "user.change_password", "user_credential", resource_id=user_id,
-            actor_user_id=user_id, cur=cur,
+            "user.change_password",
+            "user_credential",
+            resource_id=user_id,
+            actor_user_id=user_id,
+            cur=cur,
         )
     return {"ok": True}

@@ -21,10 +21,18 @@ class QueueCursor:
         return {"total": 1}
 
     def fetchall(self):
-        return [{
-            "id": 88, "user_id": 9, "org_id": 7, "status": "pending", "version": 1,
-            "user_no": "U9", "org_name": "南山实验室", "real_name": "李四",
-        }]
+        return [
+            {
+                "id": 88,
+                "user_id": 9,
+                "org_id": 7,
+                "status": "pending",
+                "version": 1,
+                "user_no": "U9",
+                "org_name": "南山实验室",
+                "real_name": "李四",
+            }
+        ]
 
 
 class AllQueueCursor:
@@ -40,10 +48,16 @@ class AllQueueCursor:
         return {"total": 3}
 
     def fetchall(self):
-        return [{
-            "id": 2, "status": "pending", "application_kind": "member",
-            "user_no": "U2", "org_name": "南山实验室", "created_at": "2026-09-09 17:39:00",
-        }]
+        return [
+            {
+                "id": 2,
+                "status": "pending",
+                "application_kind": "member",
+                "user_no": "U2",
+                "org_name": "南山实验室",
+                "created_at": "2026-09-09 17:39:00",
+            }
+        ]
 
 
 def test_member_queue():

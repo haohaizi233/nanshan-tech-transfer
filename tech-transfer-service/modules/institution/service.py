@@ -14,8 +14,13 @@ Architecture source: 05-data-model-design.md §8（capital 三表归并为 insti
 from db import get_cursor
 
 KINDS = (
-    "platform", "invest", "service",
-    "university", "institute", "enterprise", "other",
+    "platform",
+    "invest",
+    "service",
+    "university",
+    "institute",
+    "enterprise",
+    "other",
 )
 
 # 平台类 keyword 命中字段（对齐旧 platform_base 五字段 LIKE）
@@ -35,7 +40,9 @@ def _normalize_type_key(type_key: str) -> str:
     return (type_key or "").strip().lower()
 
 
-def institution_search_order(keyword: str, auxiliary_fields: tuple = ("intro", "support_unit", "label")) -> tuple[str, tuple]:
+def institution_search_order(
+    keyword: str, auxiliary_fields: tuple = ("intro", "support_unit", "label")
+) -> tuple[str, tuple]:
     """Build relevance ordering for institution-directory keyword searches.
 
     A broad word often appears in every institution introduction. Keep those
@@ -120,11 +127,15 @@ def _logo_url(file_id: str) -> str:
 
 # ── legacy 适配层查询入口（供 modules/capital/service.py 调用） ──
 
+
 def list_platform_rows(page: int, page_size: int, type_key: str, keyword: str):
     """platform 类原始行（含全部列），供 capital 适配层映射为旧响应格式"""
     return _query(
-        page, page_size, "platform",
-        type_key=type_key, keyword=keyword,
+        page,
+        page_size,
+        "platform",
+        type_key=type_key,
+        keyword=keyword,
         keyword_fields=PLATFORM_KEYWORD_FIELDS,
         platform_order=True,
     )
@@ -133,12 +144,16 @@ def list_platform_rows(page: int, page_size: int, type_key: str, keyword: str):
 def list_org_rows(kind: str, keyword_fields: tuple, page: int, page_size: int, keyword: str):
     """机构类原始行，供 capital 适配层映射为旧响应格式"""
     return _query(
-        page, page_size, kind,
-        keyword=keyword, keyword_fields=keyword_fields,
+        page,
+        page_size,
+        kind,
+        keyword=keyword,
+        keyword_fields=keyword_fields,
     )
 
 
 # ── 新统一机构 API（routes/institution.py） ──
+
 
 def list_institutions(page: int, page_size: int, kind: str, type_key: str, keyword: str) -> dict:
     """GET /institutions —— 统一机构列表（公开数据，仅 active）"""
@@ -151,9 +166,11 @@ def list_institutions(page: int, page_size: int, kind: str, type_key: str, keywo
         kw_fields = ("name", "intro", "support_unit", "label")
 
     total, rows = _query(
-        page, page_size,
+        page,
+        page_size,
         kind if kind in KINDS else None,
-        type_key=type_key, keyword=keyword,
+        type_key=type_key,
+        keyword=keyword,
         keyword_fields=kw_fields,
         platform_order=(kind == "platform"),
     )
@@ -196,13 +213,15 @@ def _to_unified_item(row: dict) -> dict:
         "status": row.get("status") or "active",
     }
     if row["kind"] == "platform":
-        item.update({
-            "serialNo": int(row.get("serial_no") or 0),
-            "platformType": (row.get("platform_type") or "").strip(),
-            "platformTypeKey": (row.get("platform_type_key") or "other").strip(),
-            "unit": (row.get("support_unit") or "").strip(),
-            "functionText": (row.get("functions") or "").strip(),
-            "contact": (row.get("contact_person") or "").strip(),
-            "phone": (row.get("contact_mobile") or "").strip(),
-        })
+        item.update(
+            {
+                "serialNo": int(row.get("serial_no") or 0),
+                "platformType": (row.get("platform_type") or "").strip(),
+                "platformTypeKey": (row.get("platform_type_key") or "other").strip(),
+                "unit": (row.get("support_unit") or "").strip(),
+                "functionText": (row.get("functions") or "").strip(),
+                "contact": (row.get("contact_person") or "").strip(),
+                "phone": (row.get("contact_mobile") or "").strip(),
+            }
+        )
     return item

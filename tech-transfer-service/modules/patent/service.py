@@ -1,4 +1,4 @@
-﻿"""patent service —— 检索 / 详情 / PDF 代理。"""
+"""patent service —— 检索 / 详情 / PDF 代理。"""
 
 from __future__ import annotations
 
@@ -74,6 +74,7 @@ def _publication_rows(keyword: str, fetcher=None) -> tuple[list[dict], bool]:
 
     返回 (全部命中行列表, 是否走了枚举路径)。
     """
+
     def fetch(query: str, num: int) -> list[dict]:
         return _search_rows(query, "", 1, num, fetcher)
 
@@ -97,7 +98,7 @@ def search_patents(keyword: str, assignee: str, page: int, page_size: int, fetch
         total = len(publication_hits)
         offset = max(0, page - 1) * page_size
         items = []
-        for row in publication_hits[offset:offset + page_size]:
+        for row in publication_hits[offset : offset + page_size]:
             mapped = map_search_hit(row)
             if mapped:
                 items.append(mapped)

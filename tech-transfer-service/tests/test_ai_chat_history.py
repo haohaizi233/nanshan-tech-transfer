@@ -1,6 +1,7 @@
 """Persistence and route tests for recoverable, idempotent AI chat turns."""
-from datetime import datetime, timezone
+
 import time
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import jwt
@@ -26,8 +27,8 @@ def _turn_row(**overrides):
         "error_message": None,
         "error_code": None,
         "error_status": None,
-        "created_at": datetime(2026, 10, 17, tzinfo=timezone.utc),
-        "updated_at": datetime(2026, 10, 17, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 10, 17, tzinfo=UTC),
+        "updated_at": datetime(2026, 10, 17, tzinfo=UTC),
     }
     row.update(overrides)
     return row
@@ -37,8 +38,12 @@ def _turn_row(**overrides):
 def client():
     from fastapi.testclient import TestClient
 
-    with patch("db.init_pool"), patch("db.close_pool"), \
-            patch("db.get_cursor") as get_cursor, patch("db.get_conn") as get_conn:
+    with (
+        patch("db.init_pool"),
+        patch("db.close_pool"),
+        patch("db.get_cursor") as get_cursor,
+        patch("db.get_conn") as get_conn,
+    ):
         cursor = MagicMock()
         cursor.fetchone.return_value = None
         cursor.fetchall.return_value = []
@@ -46,6 +51,7 @@ def client():
         connection = MagicMock()
         get_conn.return_value = _mock_cursor_context(connection)
         from app import app
+
         with TestClient(app, raise_server_exceptions=False) as test_client:
             yield test_client
 
@@ -54,8 +60,12 @@ def _auth(user_id):
     now = int(time.time())
     token = jwt.encode(
         {
-            "sub": str(user_id), "userNo": f"U{user_id:03d}", "roles": ["user"],
-            "type": "access", "iat": now, "exp": now + 3600,
+            "sub": str(user_id),
+            "userNo": f"U{user_id:03d}",
+            "roles": ["user"],
+            "type": "access",
+            "iat": now,
+            "exp": now + 3600,
         },
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
@@ -154,8 +164,11 @@ class TestAiChatTurnStore:
 
         cur = MagicMock()
         cur.fetchone.return_value = _turn_row(
-            status="failed", reply="AI unavailable", error_message="AI unavailable",
-            error_code="TT_AI_50301", error_status=503,
+            status="failed",
+            reply="AI unavailable",
+            error_message="AI unavailable",
+            error_code="TT_AI_50301",
+            error_status=503,
         )
         mock_get_cursor.return_value = _mock_cursor_context(cur)
 
@@ -186,7 +199,14 @@ class TestAiChatTurnRoutes:
         import json
         from pathlib import Path
 
-        fixture = Path(__file__).resolve().parents[2] / "南山小程序" / "南山" / "tests" / "fixtures" / "ai-chat-history-contract.json"
+        fixture = (
+            Path(__file__).resolve().parents[2]
+            / "南山小程序"
+            / "南山"
+            / "tests"
+            / "fixtures"
+            / "ai-chat-history-contract.json"
+        )
         expected = json.loads(fixture.read_text(encoding="utf-8"))
         list_history.return_value = {key: value for key, value in expected.items() if key != "referenceSupported"}
         with patch("routes.ai.settings.AI_CHAT_RUNS_ENABLED", True):
@@ -199,9 +219,7 @@ class TestAiChatTurnRoutes:
     @patch("routes.ai.start_turn")
     @patch("routes.ai._forward_to_agent")
     @patch("routes.ai.complete_turn")
-    def test_new_turn_is_persisted_and_returns_agent_result(
-        self, complete_turn, forward, start_turn, _rate
-    ):
+    def test_new_turn_is_persisted_and_returns_agent_result(self, complete_turn, forward, start_turn, _rate):
         from core.request_schemas import AiChatRequest
         from routes.ai import ai_chat
 
@@ -209,7 +227,10 @@ class TestAiChatTurnRoutes:
             start_turn.return_value = ({"turnId": "turn-123", "status": "running"}, True)
             forward.return_value = {"success": True, "message": "Found it", "data": [{"id": 4}]}
             complete_turn.return_value = {
-                "turnId": "turn-123", "status": "succeeded", "reply": "Found it", "cards": [{"id": 4}]
+                "turnId": "turn-123",
+                "status": "succeeded",
+                "reply": "Found it",
+                "cards": [{"id": 4}],
             }
 
             response = ai_chat(AiChatRequest(message="hello", turnId="turn-123"), {"userId": 7})
@@ -247,9 +268,7 @@ class TestAiChatTurnRoutes:
     @patch("routes.ai.start_turn")
     @patch("routes.ai._forward_to_agent")
     @patch("routes.ai.fail_turn")
-    def test_upstream_failure_is_saved_and_not_retried_for_same_turn(
-        self, fail_turn, forward, start_turn, _rate
-    ):
+    def test_upstream_failure_is_saved_and_not_retried_for_same_turn(self, fail_turn, forward, start_turn, _rate):
         from core.errors import BizError
         from core.request_schemas import AiChatRequest
         from routes.ai import ai_chat
@@ -304,8 +323,13 @@ class TestAiChatTurnRoutes:
 
         with patch("routes.ai.settings.AI_AGENT_URL", "http://agent"):
             start_turn.return_value = (
-                {"turnId": "turn-123", "status": "failed", "errorMessage": "Unavailable",
-                 "errorCode": "TT_AI_50301", "errorStatus": 503},
+                {
+                    "turnId": "turn-123",
+                    "status": "failed",
+                    "errorMessage": "Unavailable",
+                    "errorCode": "TT_AI_50301",
+                    "errorStatus": 503,
+                },
                 False,
             )
             with pytest.raises(BizError) as exc_info:
@@ -339,4 +363,3 @@ class TestAiChatTurnRoutes:
         assert found.json()["data"]["status"] == "running"
         assert hidden.status_code == 404
         assert [call.args[0] for call in get_turn.call_args_list] == [7, 8]
-

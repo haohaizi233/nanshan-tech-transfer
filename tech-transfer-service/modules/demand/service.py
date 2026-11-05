@@ -8,6 +8,7 @@ Architecture source: 04-backend-domain-design.md §4.6, 05-data-model-design.md 
   published        → cancelled        (cancel)
   published / matched → closed        (close)
 """
+
 import json
 import re
 
@@ -40,10 +41,22 @@ SORT_WHITELIST = {
 }
 
 _UPSERT_FIELDS = (
-    "title", "categoryId", "orgId", "description", "region", "coopMode",
-    "budgetMinWan", "budgetMaxWan", "budgetNegotiable", "expectDeadline",
-    "deadlineDesc", "contactName", "contactTitle", "contactPhone",
-    "contactEmail", "contactWechat",
+    "title",
+    "categoryId",
+    "orgId",
+    "description",
+    "region",
+    "coopMode",
+    "budgetMinWan",
+    "budgetMaxWan",
+    "budgetNegotiable",
+    "expectDeadline",
+    "deadlineDesc",
+    "contactName",
+    "contactTitle",
+    "contactPhone",
+    "contactEmail",
+    "contactWechat",
 )
 
 
@@ -75,6 +88,7 @@ def _parse_cooperation_capacity(body, fields, partial=False):
 
 
 # ── 参数解析与校验 ───────────────────────────────────────────
+
 
 def _parse_page_args(args):
     try:
@@ -215,7 +229,14 @@ def _parse_upsert_body(body: dict, partial: bool):
             role = item.get("role", "attachment")
             if role not in ("attachment", "image", "specification"):
                 raise bad_request(f"attachments[{index}].role 无效")
-            cleaned.append({"fileId": file_id, "role": role, "caption": str(item.get("caption") or "").strip()[:500] or None, "sort": index})
+            cleaned.append(
+                {
+                    "fileId": file_id,
+                    "role": role,
+                    "caption": str(item.get("caption") or "").strip()[:500] or None,
+                    "sort": index,
+                }
+            )
         attachments = cleaned
 
     return fields, tags, attachments
@@ -301,6 +322,7 @@ def _resolve_category_name(cur, fields):
 
 # ── 标签 ─────────────────────────────────────────────────────
 
+
 def _load_tags(cur, demand_ids):
     if not demand_ids:
         return {}
@@ -349,6 +371,7 @@ def _org_cert_payload(row):
 
 
 # ── 行转 DTO ─────────────────────────────────────────────────
+
 
 def _parse_json(raw):
     if raw and isinstance(raw, str):
@@ -400,22 +423,26 @@ def _row_to_detail(row, tags, user_id, contact_visible=False, attachments=None):
             "contactWechat": row.get("contact_wechat"),
         }
     else:
-        contact = mask_contact({
-            "contactName": row.get("contact_name"),
-            "contactTitle": row.get("contact_title"),
-            "contactPhone": row.get("contact_phone"),
-            "contactEmail": row.get("contact_email"),
-            "contactWechat": row.get("contact_wechat"),
-        })
-    detail.update({
-        "version": row["version"],
-        "rejectReason": row.get("reject_reason") if is_owner else None,
-        "description": row["description"],
-        "expectDeadline": str(row["expect_deadline"]) if row.get("expect_deadline") else None,
-        "orgIntro": row.get("org_intro"),
-        "attachments": attachments or [],
-        **contact,
-    })
+        contact = mask_contact(
+            {
+                "contactName": row.get("contact_name"),
+                "contactTitle": row.get("contact_title"),
+                "contactPhone": row.get("contact_phone"),
+                "contactEmail": row.get("contact_email"),
+                "contactWechat": row.get("contact_wechat"),
+            }
+        )
+    detail.update(
+        {
+            "version": row["version"],
+            "rejectReason": row.get("reject_reason") if is_owner else None,
+            "description": row["description"],
+            "expectDeadline": str(row["expect_deadline"]) if row.get("expect_deadline") else None,
+            "orgIntro": row.get("org_intro"),
+            "attachments": attachments or [],
+            **contact,
+        }
+    )
     return detail
 
 
@@ -455,7 +482,10 @@ def list_demands(args, user_id: int):
         params.append(category_code)
 
     with get_cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) AS c FROM demand d LEFT JOIN institution o ON d.org_id=o.id LEFT JOIN demand_category c ON d.category_id=c.id{where}", params)
+        cur.execute(
+            f"SELECT COUNT(*) AS c FROM demand d LEFT JOIN institution o ON d.org_id=o.id LEFT JOIN demand_category c ON d.category_id=c.id{where}",
+            params,
+        )
         total = int((cur.fetchone() or {}).get("c") or 0)
 
         offset = (page - 1) * page_size
@@ -487,7 +517,10 @@ def list_my_demands(user_id: int, args):
         total = int((cur.fetchone() or {}).get("c") or 0)
 
         offset = (page - 1) * page_size
-        cur.execute(f"{_BASE_SELECT}{where} ORDER BY d.created_at DESC, d.id DESC LIMIT %s OFFSET %s", params + [page_size, offset])
+        cur.execute(
+            f"{_BASE_SELECT}{where} ORDER BY d.created_at DESC, d.id DESC LIMIT %s OFFSET %s",
+            params + [page_size, offset],
+        )
         rows = cur.fetchall() or []
         tags = _load_tags(cur, [r["id"] for r in rows])
 
@@ -536,15 +569,13 @@ def get_demand_detail(demand_id: int, user_id: int):
             row["view_count"] = (cur.fetchone() or {}).get("view_count", 0)
 
         tags = _load_tags(cur, [demand_id])
-        contact_visible = (
-            row["owner_user_id"] == user_id
-            or has_accepted_intent(cur, "demand", demand_id, user_id)
-        )
+        contact_visible = row["owner_user_id"] == user_id or has_accepted_intent(cur, "demand", demand_id, user_id)
         attachments = _load_attachments(cur, demand_id)
     return _row_to_detail(row, tags, user_id, contact_visible, attachments)
 
 
 # ── 写操作 ───────────────────────────────────────────────────
+
 
 def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
     fields, tags, attachments = _parse_upsert_body(body, partial=False)
@@ -599,9 +630,14 @@ def create_demand(user_id: int, user_no: str, body: dict, request_id=None):
         _sync_attachments(cur, demand_id, user_id, attachments)
 
         audit_record(
-            "demand.create", "demand", resource_id=demand_id,
-            actor_user_id=user_id, actor_user_no=user_no,
-            details={"title": fields.get("title")}, request_id=request_id, cur=cur,
+            "demand.create",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            details={"title": fields.get("title")},
+            request_id=request_id,
+            cur=cur,
         )
 
     return get_demand_detail(demand_id, user_id)
@@ -665,14 +701,21 @@ def update_demand(user_id: int, user_no: str, demand_id: int, body: dict, reques
         _sync_attachments(cur, demand_id, user_id, attachments)
 
         audit_record(
-            "demand.update", "demand", resource_id=demand_id,
-            actor_user_id=user_id, actor_user_no=user_no, request_id=request_id, cur=cur,
+            "demand.update",
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            request_id=request_id,
+            cur=cur,
         )
 
     return get_demand_detail(demand_id, user_id)
 
 
-def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, reason_code=None, reason_note=None, request_id=None):
+def _transition(
+    user_id: int, user_no: str, demand_id: int, version, op: str, reason_code=None, reason_note=None, request_id=None
+):
     rule = TRANSITIONS[op]
     if version is None:
         raise bad_request(f"{op} 必须携带 version（乐观锁）")
@@ -684,14 +727,18 @@ def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, re
         if row["owner_user_id"] != user_id:
             raise demand_forbidden()
         if row["status"] not in rule["from"]:
-            raise demand_conflict(
-                f"当前状态 {row['status']} 不允许 {op}"
-                f"（要求 {('/'.join(rule['from']))}）"
-            )
+            raise demand_conflict(f"当前状态 {row['status']} 不允许 {op}（要求 {('/'.join(rule['from']))}）")
         if op in ("cancel", "close") and reason_code:
-            if reason_code not in ('fulfilled', 'budget_changed', 'timeline_changed', 'duplicate', 'no_longer_needed', 'other'):
+            if reason_code not in (
+                "fulfilled",
+                "budget_changed",
+                "timeline_changed",
+                "duplicate",
+                "no_longer_needed",
+                "other",
+            ):
                 raise bad_request("reasonCode 不合法")
-            reason_note = str(reason_note or '').strip()[:500] or None
+            reason_note = str(reason_note or "").strip()[:500] or None
         else:
             reason_code, reason_note = None, None
         cur.execute(
@@ -702,9 +749,14 @@ def _transition(user_id: int, user_no: str, demand_id: int, version, op: str, re
             raise conflict("version 不匹配，请刷新后重试（乐观锁）")
 
         audit_record(
-            rule["action"], "demand", resource_id=demand_id,
-            actor_user_id=user_id, actor_user_no=user_no,
-            details={"from": row["status"], "to": rule["to"], "reasonCode": reason_code, "reasonNote": reason_note}, request_id=request_id, cur=cur,
+            rule["action"],
+            "demand",
+            resource_id=demand_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            details={"from": row["status"], "to": rule["to"], "reasonCode": reason_code, "reasonNote": reason_note},
+            request_id=request_id,
+            cur=cur,
         )
 
     return {"status": rule["to"]}
@@ -715,27 +767,51 @@ def _sync_attachments(cur, demand_id: int, user_id: int, attachments):
         return
     ids = [item["fileId"] for item in attachments]
     if ids:
-        cur.execute("SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, ids))
+        cur.execute(
+            "SELECT id FROM file_object WHERE created_by=%s AND status='active' AND id = ANY(%s)", (user_id, ids)
+        )
         if {int(r["id"]) for r in cur.fetchall()} != set(ids):
             raise bad_request("附件文件不存在、已删除或不属于当前用户")
     cur.execute("DELETE FROM demand_attachment WHERE demand_id=%s", (demand_id,))
     for item in attachments:
-        cur.execute("INSERT INTO demand_attachment (demand_id,file_id,attachment_role,sort_order,caption) VALUES (%s,%s,%s,%s,%s)", (demand_id, item["fileId"], item["role"], item["sort"], item["caption"]))
+        cur.execute(
+            "INSERT INTO demand_attachment (demand_id,file_id,attachment_role,sort_order,caption) VALUES (%s,%s,%s,%s,%s)",
+            (demand_id, item["fileId"], item["role"], item["sort"], item["caption"]),
+        )
 
 
 def _load_attachments(cur, demand_id: int):
-    cur.execute("SELECT da.file_id,da.attachment_role,da.sort_order,da.caption,fo.original_name,fo.mime_type,fo.size_bytes FROM demand_attachment da JOIN file_object fo ON fo.id=da.file_id AND fo.status='active' WHERE da.demand_id=%s ORDER BY da.sort_order,da.id", (demand_id,))
+    cur.execute(
+        "SELECT da.file_id,da.attachment_role,da.sort_order,da.caption,fo.original_name,fo.mime_type,fo.size_bytes FROM demand_attachment da JOIN file_object fo ON fo.id=da.file_id AND fo.status='active' WHERE da.demand_id=%s ORDER BY da.sort_order,da.id",
+        (demand_id,),
+    )
     base = __import__("config").settings.MEDIA_BASE_URL.rstrip("/")
-    return [{"fileId": r["file_id"], "role": r["attachment_role"], "sortOrder": r["sort_order"], "caption": r["caption"], "name": r["original_name"], "mimeType": r["mime_type"], "sizeBytes": r["size_bytes"], "url": f"{base}/{r['file_id']}"} for r in cur.fetchall()]
+    return [
+        {
+            "fileId": r["file_id"],
+            "role": r["attachment_role"],
+            "sortOrder": r["sort_order"],
+            "caption": r["caption"],
+            "name": r["original_name"],
+            "mimeType": r["mime_type"],
+            "sizeBytes": r["size_bytes"],
+            "url": f"{base}/{r['file_id']}",
+        }
+        for r in cur.fetchall()
+    ]
 
 
 def submit_demand(user_id: int, user_no: str, demand_id: int, version, request_id=None):
     return _transition(user_id, user_no, demand_id, version, "submit", request_id=request_id)
 
 
-def cancel_demand(user_id: int, user_no: str, demand_id: int, version, reason_code=None, reason_note=None, request_id=None):
+def cancel_demand(
+    user_id: int, user_no: str, demand_id: int, version, reason_code=None, reason_note=None, request_id=None
+):
     return _transition(user_id, user_no, demand_id, version, "cancel", reason_code, reason_note, request_id)
 
 
-def close_demand(user_id: int, user_no: str, demand_id: int, version, reason_code=None, reason_note=None, request_id=None):
+def close_demand(
+    user_id: int, user_no: str, demand_id: int, version, reason_code=None, reason_note=None, request_id=None
+):
     return _transition(user_id, user_no, demand_id, version, "close", reason_code, reason_note, request_id)

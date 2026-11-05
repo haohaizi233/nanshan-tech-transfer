@@ -3,6 +3,7 @@ Comprehensive route tests using FastAPI TestClient with mocked dependencies.
 Covers auth, me, achievement, demand, cooperation, favorite, search, capital,
 institution, patent, file, membership, notification, ai routes.
 """
+
 import time
 from unittest.mock import MagicMock, patch
 
@@ -37,11 +38,12 @@ def client():
     """FastAPI TestClient with DB fully mocked."""
     from fastapi.testclient import TestClient
 
-    with patch("db.init_pool"), \
-         patch("db.close_pool"), \
-         patch("db.get_cursor") as mock_gc, \
-         patch("db.get_conn") as mock_gconn:
-
+    with (
+        patch("db.init_pool"),
+        patch("db.close_pool"),
+        patch("db.get_cursor") as mock_gc,
+        patch("db.get_conn") as mock_gconn,
+    ):
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
         mock_cursor.fetchall.return_value = []
@@ -53,11 +55,13 @@ def client():
         mock_gconn.return_value.__exit__ = MagicMock(return_value=False)
 
         from app import app
+
         c = TestClient(app, raise_server_exceptions=False)
         yield c
 
 
 # ── Health endpoints ────────────────────────────────────────
+
 
 class TestHealthEndpoints:
     def test_health_degraded_when_db_fails(self, client):
@@ -75,15 +79,14 @@ class TestHealthEndpoints:
 
 # ── Auth routes ─────────────────────────────────────────────
 
+
 class TestAuthRoutes:
     @patch("routes.auth.login_phone_session")
     @patch("core.rate_limit._client_ip", return_value="127.0.0.1")
     @patch("core.rate_limit._check")
     def test_login_phone_success(self, mock_check, mock_ip, mock_login, client):
         mock_login.return_value = {"accessToken": "tok", "refreshToken": "ref"}
-        resp = client.post("/api/tech-transfer/v1/auth/login", json={
-            "phone": "13800138000", "password": "pass123"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/login", json={"phone": "13800138000", "password": "pass123"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["code"] == 0
@@ -94,52 +97,40 @@ class TestAuthRoutes:
     @patch("core.rate_limit._check")
     def test_login_username_success(self, mock_check, mock_ip, mock_login, client):
         mock_login.return_value = {"accessToken": "tok", "refreshToken": "ref"}
-        resp = client.post("/api/tech-transfer/v1/auth/login", json={
-            "username": "admin", "password": "Admin@2026"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/login", json={"username": "admin", "password": "Admin@2026"})
         assert resp.status_code == 200
 
     @patch("core.rate_limit._client_ip", return_value="127.0.0.1")
     @patch("core.rate_limit._check")
     def test_login_missing_credentials(self, mock_check, mock_ip, client):
-        resp = client.post("/api/tech-transfer/v1/auth/login", json={
-            "password": "pass"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/login", json={"password": "pass"})
         assert resp.status_code == 401
 
     @patch("core.rate_limit._client_ip", return_value="127.0.0.1")
     @patch("core.rate_limit._check")
     def test_login_missing_password(self, mock_check, mock_ip, client):
-        resp = client.post("/api/tech-transfer/v1/auth/login", json={
-            "username": "admin"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/login", json={"username": "admin"})
         assert resp.status_code == 401
 
     @patch("routes.auth.register_password_user")
     @patch("core.rate_limit.check_register_rate")
     def test_register_username(self, mock_rate, mock_register, client):
         mock_register.return_value = {"userId": 1}
-        resp = client.post("/api/tech-transfer/v1/auth/register", json={
-            "username": "newuser", "password": "pass123"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/register", json={"username": "newuser", "password": "pass123"})
         assert resp.status_code == 200
 
     @patch("routes.auth.register_user")
     @patch("core.rate_limit.check_register_rate")
     def test_register_phone(self, mock_rate, mock_register, client):
         mock_register.return_value = {"accessToken": "tok"}
-        resp = client.post("/api/tech-transfer/v1/auth/register", json={
-            "phone": "13800138000", "password": "pass123"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/register", json={"phone": "13800138000", "password": "pass123"})
         assert resp.status_code == 200
 
     @patch("routes.auth.refresh_session")
     @patch("core.rate_limit.check_ip_rate")
     def test_refresh_token(self, mock_rate, mock_refresh, client):
         mock_refresh.return_value = {"accessToken": "new_tok"}
-        resp = client.post("/api/tech-transfer/v1/auth/refresh", json={
-            "refreshToken": "old_refresh"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/refresh", json={"refreshToken": "old_refresh"})
         assert resp.status_code == 200
 
     @patch("core.rate_limit.check_ip_rate")
@@ -151,13 +142,12 @@ class TestAuthRoutes:
     @patch("core.rate_limit.check_ip_rate")
     def test_logout(self, mock_rate, mock_logout, client):
         mock_logout.return_value = {"ok": True}
-        resp = client.post("/api/tech-transfer/v1/auth/logout", json={
-            "refreshToken": "token"
-        })
+        resp = client.post("/api/tech-transfer/v1/auth/logout", json={"refreshToken": "token"})
         assert resp.status_code == 200
 
 
 # ── Achievement routes ──────────────────────────────────────
+
 
 class TestAchievementRoutes:
     @patch("routes.achievement.list_achievements")
@@ -197,45 +187,39 @@ class TestAchievementRoutes:
     @patch("routes.achievement.create_achievement")
     def test_create_achievement(self, mock_create, mock_active, client):
         mock_create.return_value = {"id": 1, "title": "New"}
-        resp = client.post("/api/tech-transfer/v1/achievements",
-                          json={"title": "New Achievement"},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/achievements", json={"title": "New Achievement"}, headers=_auth())
         assert resp.status_code == 201
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.achievement.update_achievement")
     def test_update_achievement(self, mock_update, mock_active, client):
         mock_update.return_value = {"id": 1, "title": "Updated"}
-        resp = client.patch("/api/tech-transfer/v1/achievements/1",
-                           json={"title": "Updated", "version": 1},
-                           headers=_auth())
+        resp = client.patch(
+            "/api/tech-transfer/v1/achievements/1", json={"title": "Updated", "version": 1}, headers=_auth()
+        )
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.achievement.submit_achievement")
     def test_submit_achievement(self, mock_submit, mock_active, client):
         mock_submit.return_value = {"status": "pending_review"}
-        resp = client.post("/api/tech-transfer/v1/achievements/1/submit",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/achievements/1/submit", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.achievement.offline_achievement")
     def test_offline_achievement(self, mock_offline, mock_active, client):
         mock_offline.return_value = {"status": "offline"}
-        resp = client.post("/api/tech-transfer/v1/achievements/1/offline",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/achievements/1/offline", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     def test_create_achievement_unauth(self, client):
-        resp = client.post("/api/tech-transfer/v1/achievements",
-                          json={"title": "Test"})
+        resp = client.post("/api/tech-transfer/v1/achievements", json={"title": "Test"})
         assert resp.status_code == 401
 
 
 # ── Demand routes ───────────────────────────────────────────
+
 
 class TestDemandRoutes:
     @patch("routes.demand.list_demands")
@@ -254,148 +238,130 @@ class TestDemandRoutes:
     @patch("routes.demand.create_demand")
     def test_create_demand(self, mock_create, mock_active, client):
         mock_create.return_value = {"id": 1}
-        resp = client.post("/api/tech-transfer/v1/demands",
-                          json={"title": "New Demand", "description": "desc"},
-                          headers=_auth())
+        resp = client.post(
+            "/api/tech-transfer/v1/demands", json={"title": "New Demand", "description": "desc"}, headers=_auth()
+        )
         assert resp.status_code == 201
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.demand.update_demand")
     def test_update_demand(self, mock_update, mock_active, client):
         mock_update.return_value = {"id": 1}
-        resp = client.patch("/api/tech-transfer/v1/demands/1",
-                           json={"title": "Updated", "version": 1},
-                           headers=_auth())
+        resp = client.patch("/api/tech-transfer/v1/demands/1", json={"title": "Updated", "version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.demand.submit_demand")
     def test_submit_demand(self, mock_submit, mock_active, client):
         mock_submit.return_value = {"status": "pending_review"}
-        resp = client.post("/api/tech-transfer/v1/demands/1/submit",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/demands/1/submit", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.demand.cancel_demand")
     def test_cancel_demand(self, mock_cancel, mock_active, client):
         mock_cancel.return_value = {"status": "cancelled"}
-        resp = client.post("/api/tech-transfer/v1/demands/1/cancel",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/demands/1/cancel", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.demand.close_demand")
     def test_close_demand(self, mock_close, mock_active, client):
         mock_close.return_value = {"status": "closed"}
-        resp = client.post("/api/tech-transfer/v1/demands/1/close",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/demands/1/close", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     def test_create_demand_unauth(self, client):
-        resp = client.post("/api/tech-transfer/v1/demands",
-                          json={"title": "Test", "description": "desc"})
+        resp = client.post("/api/tech-transfer/v1/demands", json={"title": "Test", "description": "desc"})
         assert resp.status_code == 401
 
 
 # ── Cooperation routes ──────────────────────────────────────
+
 
 class TestCooperationRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.create_intent")
     def test_create_cooperation(self, mock_create, mock_active, client):
         mock_create.return_value = {"id": 1}
-        resp = client.post("/api/tech-transfer/v1/cooperations",
-                          json={"targetType": "achievement", "targetId": 1, "contactShareConsent": True},
-                          headers=_auth())
+        resp = client.post(
+            "/api/tech-transfer/v1/cooperations",
+            json={"targetType": "achievement", "targetId": 1, "contactShareConsent": True},
+            headers=_auth(),
+        )
         assert resp.status_code == 201
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.get_intent_detail")
     def test_cooperation_detail(self, mock_detail, mock_active, client):
         mock_detail.return_value = {"id": 1}
-        resp = client.get("/api/tech-transfer/v1/cooperations/1",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/cooperations/1", headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.accept_intent")
     def test_accept_cooperation(self, mock_accept, mock_active, client):
         mock_accept.return_value = {"status": "accepted"}
-        resp = client.post("/api/tech-transfer/v1/cooperations/1/accept",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/cooperations/1/accept", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.reject_intent")
     def test_reject_cooperation(self, mock_reject, mock_active, client):
         mock_reject.return_value = {"status": "rejected"}
-        resp = client.post("/api/tech-transfer/v1/cooperations/1/reject",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/cooperations/1/reject", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.confirm_intent")
     def test_confirm_cooperation(self, mock_confirm, mock_active, client):
         mock_confirm.return_value = {"status": "confirmed"}
-        resp = client.post("/api/tech-transfer/v1/cooperations/1/confirm",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/cooperations/1/confirm", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.cancel_intent")
     def test_cancel_cooperation(self, mock_cancel, mock_active, client):
         mock_cancel.return_value = {"status": "cancelled"}
-        resp = client.post("/api/tech-transfer/v1/cooperations/1/cancel",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/cooperations/1/cancel", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.complete_intent")
     def test_complete_cooperation(self, mock_complete, mock_active, client):
         mock_complete.return_value = {"status": "completed"}
-        resp = client.post("/api/tech-transfer/v1/cooperations/1/complete",
-                          json={"version": 1},
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/cooperations/1/complete", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.cooperation.list_events")
     def test_cooperation_events(self, mock_events, mock_active, client):
         mock_events.return_value = []
-        resp = client.get("/api/tech-transfer/v1/cooperations/1/events",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/cooperations/1/events", headers=_auth())
         assert resp.status_code == 200
 
 
 # ── Favorite routes ─────────────────────────────────────────
+
 
 class TestFavoriteRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.favorite.add_favorite")
     def test_add_favorite(self, mock_add, mock_active, client):
         mock_add.return_value = {"ok": True}
-        resp = client.put("/api/tech-transfer/v1/favorites/achievement/1",
-                         headers=_auth())
+        resp = client.put("/api/tech-transfer/v1/favorites/achievement/1", headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.favorite.remove_favorite")
     def test_remove_favorite(self, mock_remove, mock_active, client):
         mock_remove.return_value = None
-        resp = client.delete("/api/tech-transfer/v1/favorites/achievement/1",
-                            headers=_auth())
+        resp = client.delete("/api/tech-transfer/v1/favorites/achievement/1", headers=_auth())
         assert resp.status_code == 200
 
 
 # ── Me routes ───────────────────────────────────────────────
+
 
 class TestMeRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
@@ -409,18 +375,16 @@ class TestMeRoutes:
     @patch("routes.me.update_my_profile")
     def test_patch_profile(self, mock_update, mock_active, client):
         mock_update.return_value = {"displayName": "Updated"}
-        resp = client.patch("/api/tech-transfer/v1/me/profile",
-                           json={"version": 1},
-                           headers=_auth())
+        resp = client.patch("/api/tech-transfer/v1/me/profile", json={"version": 1}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.me.change_password")
     def test_change_password(self, mock_change, mock_active, client):
         mock_change.return_value = {"ok": True}
-        resp = client.post("/api/tech-transfer/v1/me/password",
-                          json={"currentPassword": "old", "newPassword": "new"},
-                          headers=_auth())
+        resp = client.post(
+            "/api/tech-transfer/v1/me/password", json={"currentPassword": "old", "newPassword": "new"}, headers=_auth()
+        )
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
@@ -458,39 +422,35 @@ class TestMeRoutes:
 
 # ── Search routes ───────────────────────────────────────────
 
+
 class TestSearchRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.search.search")
     def test_search(self, mock_search, mock_active, client):
         mock_search.return_value = {"items": [], "total": 0}
-        resp = client.get("/api/tech-transfer/v1/search?q=test",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/search?q=test", headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     def test_search_empty_query(self, mock_active, client):
-        resp = client.get("/api/tech-transfer/v1/search?q=",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/search?q=", headers=_auth())
         assert resp.status_code == 400
 
     @patch("core.middleware._user_is_active", return_value=True)
     def test_search_long_query(self, mock_active, client):
-        resp = client.get("/api/tech-transfer/v1/search?q=" + "x" * 65,
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/search?q=" + "x" * 65, headers=_auth())
         assert resp.status_code == 400
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.search.search")
     def test_search_with_type(self, mock_search, mock_active, client):
         mock_search.return_value = {"items": []}
-        resp = client.get("/api/tech-transfer/v1/search?q=test&type=achievement",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/search?q=test&type=achievement", headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     def test_search_invalid_type(self, mock_active, client):
-        resp = client.get("/api/tech-transfer/v1/search?q=test&type=invalid",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/search?q=test&type=invalid", headers=_auth())
         assert resp.status_code == 400
 
     def test_search_unauth(self, client):
@@ -499,6 +459,7 @@ class TestSearchRoutes:
 
 
 # ── Capital routes (legacy) ─────────────────────────────────
+
 
 class TestCapitalRoutes:
     @patch("routes.capital.list_platforms")
@@ -523,6 +484,7 @@ class TestCapitalRoutes:
 
 # ── Institution routes ──────────────────────────────────────
 
+
 class TestInstitutionRoutes:
     @patch("routes.institution.list_institutions")
     def test_list_institutions(self, mock_list, client):
@@ -533,60 +495,60 @@ class TestInstitutionRoutes:
 
 # ── Patent routes ───────────────────────────────────────────
 
+
 class TestPatentRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.patent.search_patents")
     def test_patent_search(self, mock_list, mock_active, client):
         mock_list.return_value = {"items": [], "total": 0}
-        resp = client.get("/api/tech-transfer/v1/patents?q=AI",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/patents?q=AI", headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.patent.get_patent")
     def test_patent_detail(self, mock_detail, mock_active, client):
         mock_detail.return_value = {"publicationNo": "CN12345678A", "title": "Test"}
-        resp = client.get("/api/tech-transfer/v1/patents/CN12345678A",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/patents/CN12345678A", headers=_auth())
         assert resp.status_code == 200
 
 
 # ── Notification routes ─────────────────────────────────────
+
 
 class TestNotificationRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.notification.list")
     def test_list_notifications(self, mock_list, mock_active, client):
         mock_list.return_value = {"items": [], "total": 0}
-        resp = client.get("/api/tech-transfer/v1/me/notifications",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/me/notifications", headers=_auth())
         assert resp.status_code == 200
 
 
 # ── File routes ─────────────────────────────────────────────
 
+
 class TestFileRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     def test_file_upload_requires_file(self, mock_active, client):
-        resp = client.post("/api/tech-transfer/v1/files/upload",
-                          headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/files/upload", headers=_auth())
         # Requires multipart file upload, so 422 is expected
         assert resp.status_code in (422, 405)
 
 
 # ── Membership routes ───────────────────────────────────────
 
+
 class TestMembershipRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("modules.membership.service.list_my_memberships")
     def test_list_memberships(self, mock_list, mock_active, client):
         mock_list.return_value = {"list": [], "total": 0}
-        resp = client.get("/api/tech-transfer/v1/me/organization-memberships",
-                         headers=_auth())
+        resp = client.get("/api/tech-transfer/v1/me/organization-memberships", headers=_auth())
         assert resp.status_code == 200
 
 
 # ── 404 handling ────────────────────────────────────────────
+
 
 class TestNotFound:
     def test_nonexistent_route(self, client):
@@ -603,6 +565,7 @@ class TestNotFound:
 
 # ── Security headers ────────────────────────────────────────
 
+
 class TestSecurityHeaders:
     def test_security_headers_present(self, client):
         resp = client.get("/health")
@@ -618,11 +581,14 @@ class TestSecurityHeaders:
 
 # ── CORS ────────────────────────────────────────────────────
 
+
 class TestCORS:
     def test_cors_preflight(self, client):
-        resp = client.options("/api/tech-transfer/v1/achievements",
-                             headers={
-                                 "Origin": "http://localhost:5173",
-                                 "Access-Control-Request-Method": "GET",
-                             })
+        resp = client.options(
+            "/api/tech-transfer/v1/achievements",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
         assert resp.status_code in (200, 204, 405)

@@ -3,6 +3,7 @@
 
 用法：python run_migration.py 004_demand_domain.sql
 """
+
 import re
 import sys
 
@@ -18,8 +19,12 @@ def run_migration(filename: str):
     stmts = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().upper().startswith("USE ")]
 
     conn = pymysql.connect(
-        host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD,
-        database=DB_NAME, charset="utf8mb4",
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        charset="utf8mb4",
     )
     try:
         cur = conn.cursor()

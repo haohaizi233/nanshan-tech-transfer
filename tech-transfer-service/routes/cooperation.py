@@ -1,9 +1,10 @@
-﻿"""
+"""
 对接路由 —— /cooperations 意向创建、详情、状态机、事件时间线
 
 Architecture source: openapi.yaml paths /cooperations、/cooperations/{id}、
                      /cooperations/{id}/accept|reject|confirm|cancel|complete|events；06-api-design.md §8
 """
+
 from fastapi import APIRouter, Depends, Request
 
 from core.errors import bad_request
@@ -36,7 +37,9 @@ def cooperations_create(request: Request, body: CooperationCreateRequest, user: 
     if replay is not None:
         return replay
     detail = create_intent(
-        user["userId"], user.get("userNo", ""), body.as_dict(),
+        user["userId"],
+        user.get("userNo", ""),
+        body.as_dict(),
         request_id=get_request_id(),
     )
     result = success(detail, "意向已创建")
@@ -60,49 +63,75 @@ def _version_body(body: dict):
 @router.post("/cooperations/{intent_id}/accept")
 def cooperation_accept(intent_id: int, body: VersionBody, user: dict = Depends(identity)):
     version, _ = _version_body(body.as_dict())
-    return success(accept_intent(
-        user["userId"], user.get("userNo", ""), intent_id, version,
-        request_id=get_request_id(),
-    ))
+    return success(
+        accept_intent(
+            user["userId"],
+            user.get("userNo", ""),
+            intent_id,
+            version,
+            request_id=get_request_id(),
+        )
+    )
 
 
 @router.post("/cooperations/{intent_id}/reject")
 def cooperation_reject(intent_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
     version, payload = _version_body(body.as_dict())
-    return success(reject_intent(
-        user["userId"], user.get("userNo", ""), intent_id, version,
-        reason=payload.get("reason"),
-        request_id=get_request_id(),
-    ))
+    return success(
+        reject_intent(
+            user["userId"],
+            user.get("userNo", ""),
+            intent_id,
+            version,
+            reason=payload.get("reason"),
+            request_id=get_request_id(),
+        )
+    )
 
 
 @router.post("/cooperations/{intent_id}/confirm")
 def cooperation_confirm(intent_id: int, body: VersionBody, user: dict = Depends(identity)):
     version, _ = _version_body(body.as_dict())
-    return success(confirm_intent(
-        user["userId"], user.get("userNo", ""), intent_id, version,
-        request_id=get_request_id(),
-    ))
+    return success(
+        confirm_intent(
+            user["userId"],
+            user.get("userNo", ""),
+            intent_id,
+            version,
+            request_id=get_request_id(),
+        )
+    )
 
 
 @router.post("/cooperations/{intent_id}/cancel")
 def cooperation_cancel(intent_id: int, body: ReasonVersionBody, user: dict = Depends(identity)):
     version, payload = _version_body(body.as_dict())
-    return success(cancel_intent(
-        user["userId"], user.get("userNo", ""), intent_id, version,
-        reason=payload.get("reason"),
-        request_id=get_request_id(),
-    ))
+    return success(
+        cancel_intent(
+            user["userId"],
+            user.get("userNo", ""),
+            intent_id,
+            version,
+            reason=payload.get("reason"),
+            request_id=get_request_id(),
+        )
+    )
 
 
 @router.post("/cooperations/{intent_id}/complete")
 def cooperation_complete(intent_id: int, body: CooperationCompleteRequest, user: dict = Depends(identity)):
     version, payload = _version_body(body.as_dict())
-    return success(complete_intent(
-        user["userId"], user.get("userNo", ""), intent_id, version,
-        remark=payload.get("remark"), outcome=payload.get("outcome"),
-        request_id=get_request_id(),
-    ))
+    return success(
+        complete_intent(
+            user["userId"],
+            user.get("userNo", ""),
+            intent_id,
+            version,
+            remark=payload.get("remark"),
+            outcome=payload.get("outcome"),
+            request_id=get_request_id(),
+        )
+    )
 
 
 @router.get("/cooperations/{intent_id}/events")

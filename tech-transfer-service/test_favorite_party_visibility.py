@@ -18,12 +18,8 @@ class FakeCursor:
 def main():
     assert can_access_target(9, owner_user_id=1, status="published")
     assert can_access_target(1, owner_user_id=1, status="matched")
-    assert can_access_target(
-        9, owner_user_id=1, status="matched", is_dock_party=True
-    )
-    assert can_access_target(
-        9, owner_user_id=1, status="offline", is_dock_party=True
-    )
+    assert can_access_target(9, owner_user_id=1, status="matched", is_dock_party=True)
+    assert can_access_target(9, owner_user_id=1, status="offline", is_dock_party=True)
     assert not can_access_target(9, owner_user_id=1, status="matched")
     assert not can_access_target(9, owner_user_id=1, status="offline")
     assert not can_access_target(9, owner_user_id=1, status="draft")

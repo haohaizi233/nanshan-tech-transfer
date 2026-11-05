@@ -1,6 +1,5 @@
 """Validated request bodies for organization membership workflows."""
 
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 

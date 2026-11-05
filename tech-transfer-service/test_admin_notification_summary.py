@@ -16,8 +16,12 @@ class SummaryCursor:
 
     def fetchone(self):
         return {
-            "users": 1, "achievements": 2, "demands": 3, "cooperations": 4,
-            "pending_achievements": 2, "pending_demands": 3,
+            "users": 1,
+            "achievements": 2,
+            "demands": 3,
+            "cooperations": 4,
+            "pending_achievements": 2,
+            "pending_demands": 3,
             "pending_organization_applications": 1,
             "pending_organization_admin_applications": 4,
             "pending_membership_applications": 5,
@@ -62,12 +66,8 @@ def main():
         admin_service.get_cursor = fake_get_cursor
         platform = admin_service.notification_summary({"isPlatformAdmin": True})
         fake_get_cursor.current = org_cursor
-        org = admin_service.notification_summary(
-            {"isPlatformAdmin": False, "orgId": 17, "orgIds": [17], "userId": 8}
-        )
-        empty = admin_service.notification_summary(
-            {"isPlatformAdmin": False, "orgId": None, "orgIds": [], "userId": 8}
-        )
+        org = admin_service.notification_summary({"isPlatformAdmin": False, "orgId": 17, "orgIds": [17], "userId": 8})
+        empty = admin_service.notification_summary({"isPlatformAdmin": False, "orgId": None, "orgIds": [], "userId": 8})
     finally:
         admin_service.get_cursor = original_get_cursor
 

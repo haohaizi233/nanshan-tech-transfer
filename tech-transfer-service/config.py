@@ -114,9 +114,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: Annotated[list[str], NoDecode] = []
 
     # ── 文件代理（第三方源站 + 本地缓存目录）────────────────
-    SZTE_FILE_URL: str = (
-        "https://www.szte.com/portalapi/system/file/v1/downloadFile?fileId={file_id}"
-    )
+    SZTE_FILE_URL: str = "https://www.szte.com/portalapi/system/file/v1/downloadFile?fileId={file_id}"
     FILE_CACHE_DIR: str = "cache/logos"  # 相对 BASE_DIR，也可配绝对路径
 
     # ── 用户上传媒体（与第三方 Logo 代理缓存完全隔离）────────
@@ -184,9 +182,7 @@ class Settings(BaseSettings):
     def _validate_app_env(cls, v: str) -> str:
         v = v.strip().lower()
         if v not in _ALLOWED_ENVS:
-            raise ValueError(
-                f"APP_ENV 必须是 {' / '.join(sorted(_ALLOWED_ENVS))} 之一，当前: {v}"
-            )
+            raise ValueError(f"APP_ENV 必须是 {' / '.join(sorted(_ALLOWED_ENVS))} 之一，当前: {v}")
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")
@@ -222,9 +218,16 @@ class Settings(BaseSettings):
             raise ValueError("DB_POOL_ACQUIRE_TIMEOUT 必须 >= 0")
         return v
 
-    @field_validator("AI_MAX_CONCURRENT", "AI_AGENT_TIMEOUT", "AI_CHAT_GLOBAL_SLOTS",
-                     "AI_CHAT_QUEUE_SECONDS", "AI_CHAT_EXECUTION_SECONDS", "AI_CHAT_LEASE_SECONDS",
-                     "AI_CHAT_RENEW_SECONDS", "AI_CHAT_REAP_SECONDS")
+    @field_validator(
+        "AI_MAX_CONCURRENT",
+        "AI_AGENT_TIMEOUT",
+        "AI_CHAT_GLOBAL_SLOTS",
+        "AI_CHAT_QUEUE_SECONDS",
+        "AI_CHAT_EXECUTION_SECONDS",
+        "AI_CHAT_LEASE_SECONDS",
+        "AI_CHAT_RENEW_SECONDS",
+        "AI_CHAT_REAP_SECONDS",
+    )
     @classmethod
     def _validate_ai_limits(cls, v: int) -> int:
         if v < 1:
@@ -256,13 +259,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _validate_pool_order(self):
         if self.DB_POOL_MIN > self.DB_POOL_MAX:
-            raise ValueError(
-                f"DB_POOL_MIN({self.DB_POOL_MIN}) 不能大于 DB_POOL_MAX({self.DB_POOL_MAX})"
-            )
+            raise ValueError(f"DB_POOL_MIN({self.DB_POOL_MIN}) 不能大于 DB_POOL_MAX({self.DB_POOL_MAX})")
         # L8: 连接池总量约束 — DB_POOL_MAX × UVICORN_WORKERS 不应超过保守上限（100）
         total_conns = self.DB_POOL_MAX * max(1, self.UVICORN_WORKERS)
         if total_conns > 100:
             import warnings
+
             warnings.warn(
                 f"DB_POOL_MAX({self.DB_POOL_MAX}) × UVICORN_WORKERS({self.UVICORN_WORKERS}) = {total_conns}，"
                 f"可能超过 PostgreSQL max_connections，请确认 PG 配置",
@@ -282,10 +284,7 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """统一生成的连接串（展示/工具用；运行时连接仍用离散字段）。"""
-        return (
-            f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}"
-            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-        )
+        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @property
     def cors_origin_regex(self) -> str | None:
@@ -376,10 +375,7 @@ def assert_environment():
     if "127.0.0.1" in settings.API_BASE or "localhost" in settings.API_BASE:
         violations.append(f"API_BASE={settings.API_BASE} 指向本机回环地址")
     if not settings.CORS_ORIGINS:
-        sys.stderr.write(
-            f"[WARN] {env} 环境未配置 CORS_ORIGINS，跨域前端将被浏览器拦截"
-            f"（同源部署可忽略）\n"
-        )
+        sys.stderr.write(f"[WARN] {env} 环境未配置 CORS_ORIGINS，跨域前端将被浏览器拦截（同源部署可忽略）\n")
     if violations:
         sys.stderr.write(
             f"[FATAL] 环境保护断言失败（{env}）：\n  - "

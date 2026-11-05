@@ -9,6 +9,7 @@ organization_membership……），「我的」页并发十余查询时连接池
 
 内存护栏：条目数硬上限 + 过期清扫，防止 key 无限增长。
 """
+
 from __future__ import annotations
 
 import threading

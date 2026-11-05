@@ -4,6 +4,7 @@
      legacy 三接口与新 API 数据一致性、disabled 行不可见、非法参数 400
 依赖：后端已启动（127.0.0.1:8787），002 迁移 + etl_institutions.py 已执行
 """
+
 import requests
 
 BASE = "http://127.0.0.1:8787/api/tech-transfer/v1"
@@ -28,8 +29,10 @@ data = resp.json()["data"]
 check("列表返回200", resp.status_code == 200)
 # 三类种子各取 kind 总数，统一列表 total 应不小于三类之和
 # （管理后台可新增其他 kind 的真实机构数据，total 允许随内容增长）
-_k = {k: requests.get(f"{BASE}/institutions", params={"kind": k}, timeout=10).json()["data"]["total"]
-      for k in ("platform", "invest", "service")}
+_k = {
+    k: requests.get(f"{BASE}/institutions", params={"kind": k}, timeout=10).json()["data"]["total"]
+    for k in ("platform", "invest", "service")
+}
 check("total>=三类之和（100+21+16 起步）", data["total"] >= sum(_k.values()), f"got {data['total']}, kinds={_k}")
 check("默认pageSize=10", data["pageSize"] == 10)
 check("totalPages=ceil(total/10)", data["totalPages"] == -(-data["total"] // 10), f"got {data['totalPages']}")
@@ -66,13 +69,11 @@ print()
 # ── 3. platform type 过滤 ────────────────────────────────────
 resp = requests.get(f"{BASE}/institutions?kind=platform&type=poc", timeout=10)
 check("type=poc total=49", resp.json()["data"]["total"] == 49, f"got {resp.json()['data']['total']}")
-check("poc全部platformTypeKey=poc",
-      all(i["platformTypeKey"] == "poc" for i in resp.json()["data"]["list"]))
+check("poc全部platformTypeKey=poc", all(i["platformTypeKey"] == "poc" for i in resp.json()["data"]["list"]))
 
 resp = requests.get(f"{BASE}/institutions?kind=platform&type=pilot", timeout=10)
 check("type=pilot total=51", resp.json()["data"]["total"] == 51, f"got {resp.json()['data']['total']}")
-check("pilot全部platformTypeKey=pilot",
-      all(i["platformTypeKey"] == "pilot" for i in resp.json()["data"]["list"]))
+check("pilot全部platformTypeKey=pilot", all(i["platformTypeKey"] == "pilot" for i in resp.json()["data"]["list"]))
 
 resp = requests.get(f"{BASE}/institutions?kind=platform&type=other", timeout=10)
 check("type=other不过滤total=100", resp.json()["data"]["total"] == 100)
@@ -90,8 +91,7 @@ data = resp.json()["data"]
 check("platform keyword'封装' total=4", data["total"] == 4, f"got {data['total']}")
 
 resp = requests.get(f"{BASE}/institutions?kind=invest&keyword=%E6%8A%95%E8%B5%84", timeout=10)
-check("invest keyword'投资' total=20", resp.json()["data"]["total"] == 20,
-      f"got {resp.json()['data']['total']}")
+check("invest keyword'投资' total=20", resp.json()["data"]["total"] == 20, f"got {resp.json()['data']['total']}")
 
 resp = requests.get(f"{BASE}/institutions?keyword=%E4%B8%8D%E5%AD%98%E5%9C%A8xx", timeout=10)
 check("无结果keyword total=0", resp.json()["data"]["total"] == 0)
@@ -123,8 +123,7 @@ check("详情有detailInfo", "detailInfo" in d)
 
 resp = requests.get(f"{BASE}/institutions/101", timeout=10)
 d = resp.json()["data"]
-check("invest详情可查（id=101）", resp.json()["code"] == 0 and d is not None and d.get("kind") == "invest",
-      f"got {d}")
+check("invest详情可查（id=101）", resp.json()["code"] == 0 and d is not None and d.get("kind") == "invest", f"got {d}")
 
 resp = requests.get(f"{BASE}/institutions/99999", timeout=10)
 check("不存在详情data=null", resp.json()["data"] is None, f"got {resp.json()['data']}")
@@ -133,16 +132,16 @@ print()
 # ── 7. legacy 一致性（同数据双路径） ──────────────────────────
 legacy_platforms = requests.get(f"{LEGACY}/api/platform-base", timeout=10).json()["data"]["list"]
 new_platforms = requests.get(f"{BASE}/institutions?kind=platform&pageSize=50", timeout=10).json()["data"]["list"]
-check("legacy平台首行=新API首行",
-      legacy_platforms[0]["name"] == new_platforms[0]["name"],
-      f"legacy={legacy_platforms[0]['name'][:20]} new={new_platforms[0]['name'][:20]}")
+check(
+    "legacy平台首行=新API首行",
+    legacy_platforms[0]["name"] == new_platforms[0]["name"],
+    f"legacy={legacy_platforms[0]['name'][:20]} new={new_platforms[0]['name'][:20]}",
+)
 
 legacy_invests = requests.get(f"{LEGACY}/api/invest-orgs", timeout=10).json()["data"]["list"]
 new_invests = requests.get(f"{BASE}/institutions?kind=invest", timeout=10).json()["data"]["list"]
-check("legacy投资首行=新API首行",
-      legacy_invests[0]["name"] == new_invests[0]["name"])
-check("legacy投资详情=新API detailInfo",
-      legacy_invests[0]["detailInfo"] == new_invests[0]["detailInfo"])
+check("legacy投资首行=新API首行", legacy_invests[0]["name"] == new_invests[0]["name"])
+check("legacy投资详情=新API detailInfo", legacy_invests[0]["detailInfo"] == new_invests[0]["detailInfo"])
 
 # ── 结果 ─────────────────────────────────────────────────────
 print()

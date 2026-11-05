@@ -1,4 +1,5 @@
 """Tests for routes — coverage boost using TestClient with DB mocked."""
+
 import time
 from unittest.mock import MagicMock, patch
 
@@ -7,13 +8,18 @@ import pytest
 
 from config import settings
 
+
 def _token(user_id=1, roles=None):
     if roles is None:
         roles = ["user"]
     now = int(time.time())
     payload = {
-        "sub": str(user_id), "userNo": f"U{user_id:03d}", "roles": roles,
-        "type": "access", "iat": now, "exp": now + 3600,
+        "sub": str(user_id),
+        "userNo": f"U{user_id:03d}",
+        "roles": roles,
+        "type": "access",
+        "iat": now,
+        "exp": now + 3600,
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
@@ -25,8 +31,13 @@ def _auth(user_id=1, roles=None):
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient
-    with patch("db.init_pool"), patch("db.close_pool"), \
-         patch("db.get_cursor") as mock_gc, patch("db.get_conn") as mock_gconn:
+
+    with (
+        patch("db.init_pool"),
+        patch("db.close_pool"),
+        patch("db.get_cursor") as mock_gc,
+        patch("db.get_conn") as mock_gconn,
+    ):
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
         mock_cursor.fetchall.return_value = []
@@ -36,11 +47,13 @@ def client():
         mock_gconn.return_value.__enter__ = MagicMock(return_value=mock_conn)
         mock_gconn.return_value.__exit__ = MagicMock(return_value=False)
         from app import app
+
         c = TestClient(app, raise_server_exceptions=False)
         yield c
 
 
 # ── routes/ai.py ────────────────────────────────────────────
+
 
 class TestAiRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
@@ -48,8 +61,7 @@ class TestAiRoutes:
     @patch("routes.ai._forward_to_agent")
     def test_ai_chat(self, mock_chat, mock_turn, mock_active, client):
         mock_chat.return_value = {"reply": "hello", "cards": []}
-        resp = client.post("/api/tech-transfer/v1/ai/chat",
-                          json={"message": "hi"}, headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/ai/chat", json={"message": "hi"}, headers=_auth())
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
@@ -70,8 +82,7 @@ class TestAiRoutes:
     @patch("routes.ai.create_evaluation_task")
     def test_create_evaluation(self, mock_create, mock_active, client):
         mock_create.return_value = ({"taskId": 1, "status": "queued"}, True)
-        resp = client.post("/api/tech-transfer/v1/ai/evaluation-tasks",
-                          json={"achievementId": 1}, headers=_auth())
+        resp = client.post("/api/tech-transfer/v1/ai/evaluation-tasks", json={"achievementId": 1}, headers=_auth())
         assert resp.status_code in (200, 202)
 
     @patch("core.middleware._user_is_active", return_value=True)
@@ -87,6 +98,7 @@ class TestAiRoutes:
 
 
 # ── routes/admin.py ─────────────────────────────────────────
+
 
 class TestAdminRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
@@ -118,8 +130,9 @@ class TestAdminRoutes:
     @patch("routes.admin.review_achievement")
     def test_admin_review_achievement(self, mock_review, mock_admin, mock_active, client):
         mock_review.return_value = {"status": "published"}
-        resp = client.post("/api/tech-transfer/v1/admin/achievements/1/approve",
-                          json={"version": 1}, headers=_auth(roles=["admin"]))
+        resp = client.post(
+            "/api/tech-transfer/v1/admin/achievements/1/approve", json={"version": 1}, headers=_auth(roles=["admin"])
+        )
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
@@ -127,8 +140,9 @@ class TestAdminRoutes:
     @patch("routes.admin.review_demand")
     def test_admin_review_demand(self, mock_review, mock_admin, mock_active, client):
         mock_review.return_value = {"status": "published"}
-        resp = client.post("/api/tech-transfer/v1/admin/demands/1/approve",
-                          json={"version": 1}, headers=_auth(roles=["admin"]))
+        resp = client.post(
+            "/api/tech-transfer/v1/admin/demands/1/approve", json={"version": 1}, headers=_auth(roles=["admin"])
+        )
         assert resp.status_code == 200
 
     def test_admin_unauth(self, client):
@@ -137,6 +151,7 @@ class TestAdminRoutes:
 
 
 # ── routes/admin_ops.py ─────────────────────────────────────
+
 
 class TestAdminOpsRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
@@ -160,12 +175,12 @@ class TestAdminOpsRoutes:
     @patch("routes.admin_ops.list_institution_registrations")
     def test_admin_institution_registrations(self, mock_list, mock_admin, mock_active, client):
         mock_list.return_value = {"list": [], "total": 0}
-        resp = client.get("/api/tech-transfer/v1/admin/institution-registrations",
-                         headers=_auth(roles=["admin"]))
+        resp = client.get("/api/tech-transfer/v1/admin/institution-registrations", headers=_auth(roles=["admin"]))
         assert resp.status_code == 200
 
 
 # ── routes/patent.py ────────────────────────────────────────
+
 
 class TestPatentRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
@@ -199,6 +214,7 @@ class TestPatentRoutes:
 
 # ── routes/membership.py ────────────────────────────────────
 
+
 class TestMembershipRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("modules.membership.service.list_my_memberships")
@@ -211,16 +227,20 @@ class TestMembershipRoutes:
     @patch("modules.membership.service.apply_membership")
     def test_apply_membership(self, mock_apply, mock_active, client):
         mock_apply.return_value = {"id": 1, "status": "pending"}
-        resp = client.post("/api/tech-transfer/v1/me/organization-membership-applications",
-                          json={"orgId": 1}, headers=_auth())
+        resp = client.post(
+            "/api/tech-transfer/v1/me/organization-membership-applications", json={"orgId": 1}, headers=_auth()
+        )
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("modules.membership.service.cancel_membership_application")
     def test_cancel_membership(self, mock_cancel, mock_active, client):
         mock_cancel.return_value = {"status": "cancelled"}
-        resp = client.post("/api/tech-transfer/v1/me/organization-membership-applications/1/cancel",
-                          json={"version": 1}, headers=_auth())
+        resp = client.post(
+            "/api/tech-transfer/v1/me/organization-membership-applications/1/cancel",
+            json={"version": 1},
+            headers=_auth(),
+        )
         assert resp.status_code == 200
 
     @patch("core.middleware._user_is_active", return_value=True)
@@ -232,6 +252,7 @@ class TestMembershipRoutes:
 
 
 # ── routes/institution.py ───────────────────────────────────
+
 
 class TestInstitutionRoutes:
     @patch("modules.institution.service.list_institutions")
@@ -254,6 +275,7 @@ class TestInstitutionRoutes:
 
 
 # ── routes/notification.py ──────────────────────────────────
+
 
 class TestNotificationRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
@@ -294,6 +316,7 @@ class TestNotificationRoutes:
 
 # ── routes/capital.py (no prefix, uses full paths) ──────────
 
+
 class TestCapitalRoutes:
     @patch("modules.capital.service.list_platforms")
     def test_list_platforms(self, mock_list, client):
@@ -316,14 +339,15 @@ class TestCapitalRoutes:
 
 # ── routes/file.py ──────────────────────────────────────────
 
+
 class TestFileRoutes:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.file.create_uploaded_file")
     def test_file_upload(self, mock_upload, mock_active, client):
         mock_upload.return_value = {"id": 1, "name": "test.pdf"}
-        resp = client.post("/api/tech-transfer/v1/files",
-                          files={"file": ("test.pdf", b"%PDF-1.4", "application/pdf")},
-                          headers=_auth())
+        resp = client.post(
+            "/api/tech-transfer/v1/files", files={"file": ("test.pdf", b"%PDF-1.4", "application/pdf")}, headers=_auth()
+        )
         assert resp.status_code == 201
 
     def test_file_upload_unauth(self, client):
@@ -334,7 +358,9 @@ class TestFileRoutes:
     @patch("core.middleware._org_admin_info", return_value=([], True))
     @patch("routes.file.get_uploaded_file")
     def test_file_download(self, mock_get, mock_org, mock_active, client):
-        import tempfile, os
+        import os
+        import tempfile
+
         tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
         tmp.write(b"%PDF-1.4 test content")
         tmp.close()
@@ -362,18 +388,21 @@ class TestFileRoutes:
 
 # ── routes/institution_registration.py ──────────────────────
 
+
 class TestInstitutionRegistrationRoutes:
     @patch("core.rate_limit.check_register_rate")
     @patch("routes.institution_registration.create_institution_registration")
     def test_submit_registration(self, mock_create, mock_rate, client):
         mock_create.return_value = {"applicationId": 1, "status": "pending", "version": 1, "username": "testuser"}
-        resp = client.post("/api/tech-transfer/v1/institution-registrations",
-                          json={
-                              "kind": "enterprise",
-                              "name": "Test Corp",
-                              "contactName": "张三",
-                              "contactPhone": "13800138000",
-                              "username": "testuser",
-                              "password": "Test@12345",
-                          })
+        resp = client.post(
+            "/api/tech-transfer/v1/institution-registrations",
+            json={
+                "kind": "enterprise",
+                "name": "Test Corp",
+                "contactName": "张三",
+                "contactPhone": "13800138000",
+                "username": "testuser",
+                "password": "Test@12345",
+            },
+        )
         assert resp.status_code == 201

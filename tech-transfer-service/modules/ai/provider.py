@@ -3,19 +3,20 @@
 企业微信 Bot ID/Secret 不在这里使用：长连接由远端爱马仕 gateway 持有，
 本模块只调用 OpenAI 兼容 HTTP（默认 Hermes API Server :8642/v1）。
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
-import time
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Any
 
 from config import settings
-from modules.ai import evaluation
-from modules.ai import progress
+from modules.ai import evaluation, progress
 
 logger = logging.getLogger("nanshan.error")
 
@@ -72,9 +73,11 @@ def _chat_stream(messages: list[dict], timeout: float | None = None, on_progress
     if key:
         headers["Authorization"] = f"Bearer {key}"
         headers["x-api-key"] = key
-    req = urllib.request.Request(url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
+    req = urllib.request.Request(
+        url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST"
+    )
     wait = timeout if timeout is not None else float(settings.AI_PROVIDER_TIMEOUT or 120)
-    
+
     content_parts = []
     token_count = 0
     try:
@@ -94,17 +97,15 @@ def _chat_stream(messages: list[dict], timeout: float | None = None, on_progress
                         content_parts.append(piece)
                         token_count += 1
                         if on_progress:
-                            try:
+                            with contextlib.suppress(Exception):
                                 on_progress("".join(content_parts), token_count)
-                            except Exception:
-                                pass
                 except json.JSONDecodeError:
                     continue
     except urllib.error.HTTPError as exc:
         raise AiProviderError(f"provider HTTP {exc.code}") from None
     except Exception as exc:
         raise AiProviderError(f"stream error: {exc}") from None
-    
+
     result = "".join(content_parts)
     if not result.strip():
         raise AiProviderError("stream returned empty content")
@@ -154,9 +155,7 @@ def _chat(messages: list[dict], timeout: float | None = None) -> str:
     message = (choices[0] or {}).get("message") or {}
     content = message.get("content")
     if isinstance(content, list):
-        content = "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
-        )
+        content = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
     if not isinstance(content, str) or not content.strip():
         raise AiProviderError("provider returned empty content")
     return content
@@ -171,6 +170,7 @@ def complete_json(system: str, user: str, timeout: float | None = None) -> Any:
         timeout=timeout,
     )
     return parse_json_content(content)
+
 
 def evaluate_achievement(
     snapshot: dict,
@@ -192,6 +192,7 @@ def evaluate_achievement(
     供 SSE 流式总线（modules/ai/eval_stream）实时推给前端做打字机渲染。
     回调异常只记日志，不影响评价主流程。
     """
+
     def _stage(stage: str) -> None:
         if on_stage is None:
             return
@@ -200,10 +201,7 @@ def evaluate_achievement(
         except Exception:
             logger.exception("ai evaluation on_stage callback failed stage=%s", stage)
 
-    dim_desc = "；".join(
-        f"{d['key']}（{d['label']}，权重{d['weight']}：{d['hint']}）"
-        for d in evaluation.DIMENSIONS
-    )
+    dim_desc = "；".join(f"{d['key']}（{d['label']}，权重{d['weight']}：{d['hint']}）" for d in evaluation.DIMENSIONS)
     system = (
         "你是南山科转通的成果评价专家。只输出 JSON，不要 markdown。\n"
         f"请对成果做多维评价，必须包含六个维度：{dim_desc}。\n"
@@ -240,7 +238,14 @@ def evaluate_achievement(
         if token_count % 30 == 0:
             elapsed = int(time.time() - llm_start)
             _stage(f"AI生成中... 已产出{token_count}字 ({elapsed}s)")
-    data = parse_json_content(_chat_stream([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], timeout=timeout, on_progress=_llm_progress))
+
+    data = parse_json_content(
+        _chat_stream(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            timeout=timeout,
+            on_progress=_llm_progress,
+        )
+    )
     _stage(progress.STAGE_REPORT)  # 阶段3：解析 LLM 输出
     try:
         normalized = evaluation.normalize_llm_result(data)

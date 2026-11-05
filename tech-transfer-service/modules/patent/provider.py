@@ -104,7 +104,9 @@ def _raise_from_http(path: str, status: int, body: str) -> None:
         details["upstreamBody"] = _safe_snippet(body)
     logger.warning(
         "patent provider http error path=%s status=%s body=%s",
-        path, status, details.get("upstreamBody"),
+        path,
+        status,
+        details.get("upstreamBody"),
     )
     if status == 429:
         code, _message, http_status = TT_COMMON_42901
@@ -146,7 +148,10 @@ def _http_json(path: str, params: dict, timeout: int) -> dict:
             retryable = exc.code in _RETRY_STATUS and attempt < _RETRY_TIMES - 1
             logger.warning(
                 "patent provider http error path=%s status=%s attempt=%s body=%s",
-                path, exc.code, attempt + 1, body,
+                path,
+                exc.code,
+                attempt + 1,
+                body,
             )
             if retryable:
                 time.sleep(_RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)])
@@ -156,7 +161,9 @@ def _http_json(path: str, params: dict, timeout: int) -> dict:
             last_exc = exc
             logger.warning(
                 "patent provider fetch failed path=%s attempt=%s err=%r",
-                path, attempt + 1, exc,
+                path,
+                attempt + 1,
+                exc,
             )
             if attempt < _RETRY_TIMES - 1:
                 time.sleep(_RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)])
@@ -251,10 +258,13 @@ def iter_pdf_bytes(publication_no: str) -> Iterator[bytes]:
         body = _read_http_error_body(exc)
         logger.warning(
             "patent pdf http error pub=%s status=%s body=%s",
-            publication_no, exc.code, body,
+            publication_no,
+            exc.code,
+            body,
         )
         if exc.code == 404:
             from core.errors import patent_not_found
+
             raise patent_not_found() from None
         _raise_from_http("/patent_pdf", exc.code, body)
     except Exception as exc:

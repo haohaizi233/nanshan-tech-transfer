@@ -41,8 +41,11 @@ class FileProxyError(Exception):
 # 上传文件与旧的第三方 Logo 代理完全隔离。所有允许类型都要同时满足扩展名、
 # 声明 MIME 与文件头（图片）校验，避免把可执行内容伪装成附件。
 _ALLOWED = {
-    ".png": {"image/png"}, ".jpg": {"image/jpeg"}, ".jpeg": {"image/jpeg"},
-    ".webp": {"image/webp"}, ".gif": {"image/gif"},
+    ".png": {"image/png"},
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".webp": {"image/webp"},
+    ".gif": {"image/gif"},
     ".pdf": {"application/pdf"},
     ".doc": {"application/msword"},
     ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
@@ -52,8 +55,11 @@ _ALLOWED = {
     ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
 }
 _IMAGE_SIGNATURES = {
-    ".png": b"\x89PNG\r\n\x1a\n", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff",
-    ".gif": b"GIF8", ".webp": b"RIFF",
+    ".png": b"\x89PNG\r\n\x1a\n",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+    ".gif": b"GIF8",
+    ".webp": b"RIFF",
 }
 # Office 文档魔数：旧二进制 OLE2 复合文档统一头；OOXML 系列为 ZIP 容器
 _OFFICE_SIGNATURES = {
@@ -176,16 +182,23 @@ def create_uploaded_file(user_id: int, filename: str, content_type: str, data: b
             )
             row = cur.fetchone()
             audit_record(
-                "file.upload", "file_object", resource_id=row["id"],
-                actor_user_id=user_id, cur=cur,
+                "file.upload",
+                "file_object",
+                resource_id=row["id"],
+                actor_user_id=user_id,
+                cur=cur,
             )
     except Exception:
         path.unlink(missing_ok=True)
         raise
     return {
-        "id": int(row["id"]), "name": _safe_name(filename), "mimeType": mime,
-        "sizeBytes": len(data), "sha256": digest,
-        "width": width, "height": height,
+        "id": int(row["id"]),
+        "name": _safe_name(filename),
+        "mimeType": mime,
+        "sizeBytes": len(data),
+        "sha256": digest,
+        "width": width,
+        "height": height,
         "url": f"{settings.MEDIA_BASE_URL.rstrip('/')}/{int(row['id'])}",
         "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
     }
@@ -235,8 +248,18 @@ def get_uploaded_file(
                 LIMIT 1
                 """,
                 (
-                    file_id, user_id, user_id, can_review_import_media, user_id, user_id,
-                    file_id, user_id, user_id, can_review_import_media, user_id, user_id,
+                    file_id,
+                    user_id,
+                    user_id,
+                    can_review_import_media,
+                    user_id,
+                    user_id,
+                    file_id,
+                    user_id,
+                    user_id,
+                    can_review_import_media,
+                    user_id,
+                    user_id,
                 ),
             )
             readable = bool(cur.fetchone())
@@ -264,7 +287,9 @@ def get_uploaded_file(
 
 def delete_uploaded_file(file_id: int, user_id: int) -> None:
     with get_cursor(commit=True) as cur:
-        cur.execute("SELECT storage_key, created_by FROM file_object WHERE id=%s AND status='active' FOR UPDATE", (file_id,))
+        cur.execute(
+            "SELECT storage_key, created_by FROM file_object WHERE id=%s AND status='active' FOR UPDATE", (file_id,)
+        )
         row = cur.fetchone()
         if not row:
             raise not_found("文件不存在")
@@ -279,10 +304,16 @@ def delete_uploaded_file(file_id: int, user_id: int) -> None:
         )
         if cur.fetchone()["linked"]:
             raise bad_request("文件已被内容引用，不能删除")
-        cur.execute("UPDATE file_object SET status='deleted', deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=%s", (file_id,))
+        cur.execute(
+            "UPDATE file_object SET status='deleted', deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+            (file_id,),
+        )
         audit_record(
-            "file.delete", "file_object", resource_id=file_id,
-            actor_user_id=user_id, cur=cur,
+            "file.delete",
+            "file_object",
+            resource_id=file_id,
+            actor_user_id=user_id,
+            cur=cur,
         )
     (settings.media_root_path / row["storage_key"]).unlink(missing_ok=True)
     thumbnail_path_for_file(file_id).unlink(missing_ok=True)
@@ -304,11 +335,14 @@ def proxy_file(file_id: str) -> tuple[Path, str]:
     _split = urlsplit(source_url)
     referer = f"{_split.scheme}://{_split.netloc}/"
     url = source_url.format(file_id=fid)
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": referer,
-        "Accept": "image/*,*/*",
-    })
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": referer,
+            "Accept": "image/*,*/*",
+        },
+    )
     # 远端文件大小封顶：避免恶意/损坏源站把超大响应读进内存导致 OOM。
     # 复用上传上限的 4 倍作为代理上限（Logo/缩略图远小于此阈值）。
     max_proxy_bytes = getattr(settings, "MAX_PROXY_BYTES", None) or (settings.MAX_UPLOAD_BYTES * 4)
@@ -333,9 +367,7 @@ def proxy_file(file_id: str) -> tuple[Path, str]:
         raise FileProxyError(502, f"源站文件获取失败: HTTP {e.code}")
     except Exception as e:
         # 异常文本（URL/网络栈细节）只进日志，响应用固定文案
-        logging.getLogger("nanshan.error").warning(
-            "file proxy fetch failed file_id=%s err=%r", fid, e
-        )
+        logging.getLogger("nanshan.error").warning("file proxy fetch failed file_id=%s err=%r", fid, e)
         raise FileProxyError(502, "源站文件获取失败")
 
     if not content:

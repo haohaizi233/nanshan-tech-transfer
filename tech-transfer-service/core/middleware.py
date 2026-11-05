@@ -168,6 +168,7 @@ def admin_identity(request: Request) -> dict:
     user = identity(request)
     if not _is_admin_role(user["userId"]):
         from core.errors import TT_ADMIN_40301
+
         code, message, status = TT_ADMIN_40301
         raise BizError(code, message, status)
     return user
@@ -184,7 +185,7 @@ def org_admin_identity(request: Request) -> dict:
 
     org_ids, is_system_admin = _org_admin_info(user["userId"])
     if not org_ids and not is_system_admin:
-        code, message, status = TT_ADMIN_40301
+        code, _message, status = TT_ADMIN_40301
         raise BizError(code, "非机构管理员", status)
 
     return {

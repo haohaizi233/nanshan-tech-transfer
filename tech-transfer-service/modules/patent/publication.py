@@ -56,15 +56,12 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import re
-import time
 from collections.abc import Callable
 
 logger = logging.getLogger("nanshan.error")
 
 # 国家/地区码 + 数字段，数字段 3~12 位。允许尾随的 kind code（A/B/C/U…）。
-_PUB_NO_QUERY_RE = re.compile(
-    r"^(?P<country>[A-Za-z]{2})(?P<number>\d{3,12})(?P<kind>[A-Za-z])?$"
-)
+_PUB_NO_QUERY_RE = re.compile(r"^(?P<country>[A-Za-z]{2})(?P<number>\d{3,12})(?P<kind>[A-Za-z])?$")
 
 # 上游可识别为公开号前缀的号段长度。
 #   7 位 → 早期中国公开号（如 CN1100866A）
@@ -130,11 +127,11 @@ def expansion_candidates(country: str, number: str, kind: str = "") -> list[str]
         return []
     target = min(targets)
     missing = target - length
-    if missing < 1 or 10 ** missing > _ENUM_MAX_CANDIDATES:
+    if missing < 1 or 10**missing > _ENUM_MAX_CANDIDATES:
         return []
     prefix = f"{country.upper()}{number}"
     tail = (kind or "").upper()
-    return [prefix + str(i).zfill(missing) + tail for i in range(10 ** missing)]
+    return [prefix + str(i).zfill(missing) + tail for i in range(10**missing)]
 
 
 def _prefix_of(country: str, number: str, kind: str) -> str:
@@ -221,14 +218,13 @@ def search_publication_prefix(
         return filter_by_prefix(rows, country, number, kind), False
 
     merged: list[dict] = []
-    deadline = time.monotonic() + timeout if timeout else None
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     try:
         futures = {pool.submit(search_fn, c, num): c for c in candidates}
         for future in concurrent.futures.as_completed(futures, timeout=timeout):
             try:
                 merged.extend(future.result() or [])
-            except Exception:  # noqa: BLE001 —— 单个候选失败不影响其余候选
+            except Exception:
                 logger.warning(
                     "patent publication candidate failed query=%s",
                     futures[future],

@@ -3,6 +3,7 @@
 不嵌入 FastAPI lifespan，不占用企业微信长连接。
 由 tools/run_ai_worker.py 启动。
 """
+
 from __future__ import annotations
 
 import json
@@ -12,9 +13,7 @@ from typing import Any
 from psycopg2.extras import Json
 
 from db import close_pool, get_cursor, transaction
-from modules.ai import eval_stream
-from modules.ai import provider
-from modules.ai import progress
+from modules.ai import eval_stream, progress, provider
 
 logger = logging.getLogger("nanshan.ai.worker")
 FAIL_REASON_MAX = 500
@@ -35,9 +34,24 @@ def _clip(reason: str) -> str:
 # 对外文案脱敏：fail_reason 中可能包含上游 Provider 名称、HTTP 状态、URL 片段、
 # 超时栈细节等内部信息。这里替换为通用文案，原始 reason 仍保留在日志中。
 _DESENSITIZE_HINTS = (
-    "qwen", "openai", "hermes", "deepseek", "provider", "http",
-    "https://", "http://", "timeout", "timed out", "url", "connection",
-    "socket", "ssl", "proxy", "ai_agent", "api_key", "authorization",
+    "qwen",
+    "openai",
+    "hermes",
+    "deepseek",
+    "provider",
+    "http",
+    "https://",
+    "http://",
+    "timeout",
+    "timed out",
+    "url",
+    "connection",
+    "socket",
+    "ssl",
+    "proxy",
+    "ai_agent",
+    "api_key",
+    "authorization",
 )
 _DESENSITIZE_MSG = "AI 服务暂时不可用，请稍后重试"
 
@@ -155,6 +169,7 @@ def _report_stage(task_id: int, stage: str) -> None:
         progress.set_stage(task_id, stage)
     except Exception:
         logger.exception("ai evaluation stage report failed task=%s stage=%s", task_id, stage)
+
 
 def _stream_signal(fn, *args) -> None:
     """SSE 流式总线信号（best-effort）：总线异常绝不打断评估主流程。"""

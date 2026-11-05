@@ -50,12 +50,20 @@ def test_card_count_endpoint_validates_batch_and_returns_live_counts():
     app.dependency_overrides[identity] = lambda: {"userId": 7}
     app.dependency_overrides[ai.require_ai_enabled] = lambda: None
     with TestClient(app) as client:
-        with patch.object(ai, "get_card_view_counts", create=True, return_value=[
-            {"card_type": "achievement", "id": 7, "viewCount": 12},
-        ]):
-            response = client.post("/api/tech-transfer/v1/ai/cards/view-counts", json={
-                "cards": [{"card_type": "achievement", "id": 7}],
-            })
+        with patch.object(
+            ai,
+            "get_card_view_counts",
+            create=True,
+            return_value=[
+                {"card_type": "achievement", "id": 7, "viewCount": 12},
+            ],
+        ):
+            response = client.post(
+                "/api/tech-transfer/v1/ai/cards/view-counts",
+                json={
+                    "cards": [{"card_type": "achievement", "id": 7}],
+                },
+            )
         assert response.status_code == 200
         assert response.json()["data"]["list"][0]["viewCount"] == 12
         for cards in [

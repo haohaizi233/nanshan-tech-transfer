@@ -2,10 +2,10 @@ import argparse
 import hashlib
 import inspect
 import json
-from pathlib import Path
 import sys
 import time
 import urllib.error
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -19,9 +19,12 @@ def diagnose(turn_id, probe=False):
         "validatorFingerprint": hashlib.sha256(inspect.getsource(validate_result).encode()).hexdigest()[:12],
         "acceptsTwentyEvaluationCards": False,
     }
-    sample = {"success": True, "intent": "evaluate_achievement", "message": "test", "data": [
-        {"card_type": "achievement", "id": number} for number in range(1, 21)
-    ]}
+    sample = {
+        "success": True,
+        "intent": "evaluate_achievement",
+        "message": "test",
+        "data": [{"card_type": "achievement", "id": number} for number in range(1, 21)],
+    }
     try:
         validate_result(sample)
         report["acceptsTwentyEvaluationCards"] = True
@@ -37,10 +40,21 @@ def diagnose(turn_id, probe=False):
         report["lookup"] = "not_found" if not rows else "ambiguous_turn_id"
         return report
     turn = rows[0]["entry"]
-    report["turn"] = {key: turn.get(key) for key in (
-        "turn_id", "status", "stage", "stage_seq", "execution_mode", "error_code",
-        "error_status", "created_at", "updated_at", "completed_at",
-    )}
+    report["turn"] = {
+        key: turn.get(key)
+        for key in (
+            "turn_id",
+            "status",
+            "stage",
+            "stage_seq",
+            "execution_mode",
+            "error_code",
+            "error_status",
+            "created_at",
+            "updated_at",
+            "completed_at",
+        )
+    }
     report["runningSource"] = "This CLI reads files on disk; it does not prove an existing worker reloaded them."
     if not probe:
         return report
@@ -51,10 +65,22 @@ def diagnose(turn_id, probe=False):
     started = time.monotonic()
     try:
         result = post_agent(
-            settings.AI_CHAT_STREAM_URL, settings.AI_INTERNAL_SERVICE_KEY,
-            {"message": "/评估", "exclude_owner_user_id": turn["user_id"],
-             "executionId": "diagnose-picker", "context": {"schemaVersion": 1, "generation": turn.get("generation", 0), "queryPlan": {}, "cards": [], "messages": []}},
-            15, lambda stage, sequence: stages.append({"stage": stage, "sequence": sequence}),
+            settings.AI_CHAT_STREAM_URL,
+            settings.AI_INTERNAL_SERVICE_KEY,
+            {
+                "message": "/评估",
+                "exclude_owner_user_id": turn["user_id"],
+                "executionId": "diagnose-picker",
+                "context": {
+                    "schemaVersion": 1,
+                    "generation": turn.get("generation", 0),
+                    "queryPlan": {},
+                    "cards": [],
+                    "messages": [],
+                },
+            },
+            15,
+            lambda stage, sequence: stages.append({"stage": stage, "sequence": sequence}),
         )
         report["probe"] = {"status": "ok", "intent": result.get("intent"), "cards": len(result.get("data") or [])}
     except StreamError as error:

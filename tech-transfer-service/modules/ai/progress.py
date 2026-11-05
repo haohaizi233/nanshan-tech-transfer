@@ -14,6 +14,7 @@ GET /ai/evaluation-tasks/{taskId} 原样返回，前端据此展示真实进度
   把任务置 failed 后，迟到的进度写回会被丢弃，不污染终态
 - 本模块导入无副作用（db 惰性导入），provider 可安全引用阶段常量
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,11 +22,11 @@ import logging
 logger = logging.getLogger("nanshan.ai.progress")
 
 # 五阶段文案（顺序即执行顺序；与前端 ai-eval-detail 展示口径一致）
-STAGE_READING = "正在读取成果数据"      # 阶段1：快照加载
+STAGE_READING = "正在读取成果数据"  # 阶段1：快照加载
 STAGE_ANALYZING = "AI正在分析技术内容"  # 阶段2：LLM 调用中
-STAGE_REPORT = "正在生成评价报告"       # 阶段3：解析 LLM 输出
-STAGE_SCORING = "正在计算综合评分"      # 阶段4：evaluation 模块评分换算
-STAGE_SAVING = "正在保存评估结果"       # 阶段5：写入数据库
+STAGE_REPORT = "正在生成评价报告"  # 阶段3：解析 LLM 输出
+STAGE_SCORING = "正在计算综合评分"  # 阶段4：evaluation 模块评分换算
+STAGE_SAVING = "正在保存评估结果"  # 阶段5：写入数据库
 
 STAGES = (STAGE_READING, STAGE_ANALYZING, STAGE_REPORT, STAGE_SCORING, STAGE_SAVING)
 

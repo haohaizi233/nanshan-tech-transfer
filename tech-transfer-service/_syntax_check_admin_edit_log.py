@@ -1,4 +1,5 @@
 """Syntax check helper for admin-edit-log feature files."""
+
 import ast
 
 FILES = [

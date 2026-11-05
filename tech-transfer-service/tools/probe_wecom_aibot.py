@@ -13,10 +13,12 @@
   python tools/probe_wecom_aibot.py --tls-only
       只测 TLS，不订阅（不会踢掉已在线的爱马仕 gateway）
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import socket
@@ -84,9 +86,11 @@ def tcp_connect(host: str, port: int, timeout: float = 8.0) -> tuple[bool, str]:
 def tls_handshake(host: str, port: int = 443, timeout: float = 10.0) -> tuple[bool, str]:
     context = ssl.create_default_context()
     try:
-        with socket.create_connection((host, port), timeout=timeout) as raw:
-            with context.wrap_socket(raw, server_hostname=host) as tls:
-                return True, tls.version() or "TLS"
+        with (
+            socket.create_connection((host, port), timeout=timeout) as raw,
+            context.wrap_socket(raw, server_hostname=host) as tls,
+        ):
+            return True, tls.version() or "TLS"
     except OSError as exc:
         return False, str(exc)
 
@@ -159,10 +163,8 @@ def _use_utf8_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
-            try:
+            with contextlib.suppress(Exception):
                 reconfigure(encoding="utf-8")
-            except Exception:
-                pass
 
 
 def main() -> int:
@@ -204,7 +206,9 @@ def main() -> int:
     elif not bot_id or not secret:
         check("subscribe AI bot", False, "missing Bot ID or Secret")
     else:
-        print("  note: one bot can keep only one live connection; a successful subscribe briefly displaces an existing gateway, then this script disconnects.")
+        print(
+            "  note: one bot can keep only one live connection; a successful subscribe briefly displaces an existing gateway, then this script disconnects."
+        )
         started = time.time()
         ok, detail = asyncio.run(subscribe_once(bot_id, secret))
         elapsed = time.time() - started

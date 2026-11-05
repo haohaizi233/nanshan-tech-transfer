@@ -7,6 +7,7 @@
 1. 代码层：resource_type 统一用短名 `membership_application`，并在写库前按列宽截断；
 2. 数据库层：migrations/pg/028_audit_log_resource_type_width.sql 放宽到 VARCHAR(64)。
 """
+
 from unittest.mock import MagicMock, patch
 
 from modules.audit.service import (
@@ -16,6 +17,7 @@ from modules.audit.service import (
     record,
 )
 from modules.membership import service as membership_service
+
 
 class TestClip:
     def test_short_value_untouched(self):
@@ -31,6 +33,7 @@ class TestClip:
 
     def test_non_string_coerced(self):
         assert _clip(12345, _MAX_ACTION) == "12345"
+
 
 class TestAuditRecordClipsBeforeInsert:
     @patch("modules.audit.service.get_cursor")
@@ -49,7 +52,7 @@ class TestAuditRecordClipsBeforeInsert:
 
         values = cur.execute.call_args[0][1]
         assert len(values[3]) <= _MAX_RESOURCE_TYPE
-        assert values[3] == "organization_membership_application"[: _MAX_RESOURCE_TYPE]
+        assert values[3] == "organization_membership_application"[:_MAX_RESOURCE_TYPE]
 
     @patch("modules.audit.service.get_cursor")
     def test_long_action_and_request_id_are_truncated(self, mock_gc):
@@ -67,6 +70,7 @@ class TestAuditRecordClipsBeforeInsert:
         assert len(values[2]) == _MAX_ACTION
         assert len(values[7]) == 64
 
+
 class TestMembershipApplyAuditResourceType:
     """申请提交的审计 resource_type 必须落在列宽内，与其它成员申请动作一致。"""
 
@@ -82,9 +86,9 @@ class TestMembershipApplyAuditResourceType:
         cur.__exit__ = MagicMock(return_value=False)
         mock_trans.return_value = conn
         cur.fetchone.side_effect = [
-            {"id": 1},        # institution 存在
-            None,             # 无有效成员关系
-            None,             # 无待审申请
+            {"id": 1},  # institution 存在
+            None,  # 无有效成员关系
+            None,  # 无待审申请
             {"id": 9, "user_id": 1, "org_id": 1, "status": "pending", "version": 1},
         ]
 

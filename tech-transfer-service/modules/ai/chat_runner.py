@@ -96,7 +96,11 @@ class _HTTPSHandler(urllib.request.HTTPSHandler):
         self.budget = budget
 
     def https_open(self, request):
-        return self.do_open(lambda *args, **kwargs: _HTTPSConnection(*args, budget=self.budget, **kwargs), request, context=self._context)
+        return self.do_open(
+            lambda *args, **kwargs: _HTTPSConnection(*args, budget=self.budget, **kwargs),
+            request,
+            context=self._context,
+        )
 
 
 def private_opener(budget=None):

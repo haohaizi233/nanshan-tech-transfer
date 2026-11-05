@@ -1,4 +1,5 @@
 """动态成果内容与文件上传的无数据库回归测试。"""
+
 import base64
 import unittest
 from io import BytesIO
@@ -21,25 +22,32 @@ from modules.file.service import _image_dimensions, _validate_upload, _write_thu
 
 class ContentPayloadTests(unittest.TestCase):
     def test_parses_multiple_patents_and_ordered_sections(self):
-        parsed = parse_content_payload({
-            "sections": [
-                {"code": "tech_problem", "title": "技术问题", "content": "要解决的问题"},
-                {"code": "tech_method", "title": "技术方案", "content": "实现方案", "sortOrder": 3},
-            ],
-            "patents": [
-                {"patentNo": "cn123", "isPrimary": True},
-                {"patentNo": "CN456"},
-            ],
-        })
+        parsed = parse_content_payload(
+            {
+                "sections": [
+                    {"code": "tech_problem", "title": "技术问题", "content": "要解决的问题"},
+                    {"code": "tech_method", "title": "技术方案", "content": "实现方案", "sortOrder": 3},
+                ],
+                "patents": [
+                    {"patentNo": "cn123", "isPrimary": True},
+                    {"patentNo": "CN456"},
+                ],
+            }
+        )
         self.assertEqual([x["code"] for x in parsed["sections"]], ["tech_problem", "tech_method"])
         self.assertEqual(parsed["patents"][0]["no"], "CN123")
         self.assertTrue(parsed["patents"][0]["primary"])
 
     def test_rejects_duplicate_primary_patents(self):
         with self.assertRaises(BizError):
-            parse_content_payload({"patents": [
-                {"patentNo": "CN1", "isPrimary": True}, {"patentNo": "CN2", "isPrimary": True},
-            ]})
+            parse_content_payload(
+                {
+                    "patents": [
+                        {"patentNo": "CN1", "isPrimary": True},
+                        {"patentNo": "CN2", "isPrimary": True},
+                    ]
+                }
+            )
 
     def test_patent_internal_navigation_only_marks_numbers_supported_by_the_patent_module(self):
         self.assertTrue(supports_internal_patent_lookup("CN202310366203.1"))
@@ -118,10 +126,12 @@ class ContentPayloadTests(unittest.TestCase):
                 self.assertLessEqual(generated.height, 320)
 
     def test_import_normalizes_labeled_sections_and_patents(self):
-        record = _normalize_page({
-            "sourcePageOrSlide": "slide-3",
-            "text": "高精度视觉检测技术\n成果简介：面向工业缺陷识别。\n技术创新点：多模态融合提升小样本精度。\n技术问题：解决复杂光照误检。\n专利号：CN202310366203.1；CN202411797801.5",
-        })
+        record = _normalize_page(
+            {
+                "sourcePageOrSlide": "slide-3",
+                "text": "高精度视觉检测技术\n成果简介：面向工业缺陷识别。\n技术创新点：多模态融合提升小样本精度。\n技术问题：解决复杂光照误检。\n专利号：CN202310366203.1；CN202411797801.5",
+            }
+        )
         normalized = record["normalized"]
         self.assertEqual(normalized["title"], "高精度视觉检测技术")
         self.assertEqual(normalized["techIntro"], "面向工业缺陷识别。")
@@ -135,21 +145,25 @@ class ContentPayloadTests(unittest.TestCase):
         )
 
     def test_import_splits_contact_website_and_maturity_out_of_the_intro_blob(self):
-        record = _normalize_page({
-            "sourcePageOrSlide": "slide-8",
-            "text": "\n".join([
-                "高精度视觉检测技术",
-                "面向工业缺陷识别。",
-                "联系邮箱",
-                "ttc@sustech.edu.cn",
-                "个人网站",
-                "https://ttc.sustech.edu.cn",
-                "联系人：李老师",
-                "电话：13900001111",
-                "发明人：张三，李四",
-                "成熟度：实验室验证",
-            ]),
-        })
+        record = _normalize_page(
+            {
+                "sourcePageOrSlide": "slide-8",
+                "text": "\n".join(
+                    [
+                        "高精度视觉检测技术",
+                        "面向工业缺陷识别。",
+                        "联系邮箱",
+                        "ttc@sustech.edu.cn",
+                        "个人网站",
+                        "https://ttc.sustech.edu.cn",
+                        "联系人：李老师",
+                        "电话：13900001111",
+                        "发明人：张三，李四",
+                        "成熟度：实验室验证",
+                    ]
+                ),
+            }
+        )
         normalized = record["normalized"]
         self.assertEqual(normalized["title"], "高精度视觉检测技术")
         self.assertEqual(normalized["techIntro"], "面向工业缺陷识别。")
@@ -162,9 +176,21 @@ class ContentPayloadTests(unittest.TestCase):
 
     def test_import_aggregates_project_and_contributor_pages_into_one_record(self):
         pages = [
-            {"sourcePageOrSlide": "slide-1", "text": "基于边缘智能的航道智慧化安全管理方案\n面向工业缺陷识别。", "images": []},
-            {"sourcePageOrSlide": "slide-2", "text": "成果完成人\n联系方式\n联系邮箱\nwenru1989@126.com\n文奴\n深圳职业技术大学副研究员", "images": []},
-            {"sourcePageOrSlide": "slide-3", "text": "成果完成人\n联系方式\n联系邮箱\nzhang@163.com\n张三\n清华大学教授", "images": []},
+            {
+                "sourcePageOrSlide": "slide-1",
+                "text": "基于边缘智能的航道智慧化安全管理方案\n面向工业缺陷识别。",
+                "images": [],
+            },
+            {
+                "sourcePageOrSlide": "slide-2",
+                "text": "成果完成人\n联系方式\n联系邮箱\nwenru1989@126.com\n文奴\n深圳职业技术大学副研究员",
+                "images": [],
+            },
+            {
+                "sourcePageOrSlide": "slide-3",
+                "text": "成果完成人\n联系方式\n联系邮箱\nzhang@163.com\n张三\n清华大学教授",
+                "images": [],
+            },
         ]
         classified = []
         for page in pages:
@@ -180,7 +206,10 @@ class ContentPayloadTests(unittest.TestCase):
         self.assertEqual(_classify_page({"text": "单击添加标题", "images": []}), "template")
         self.assertEqual(_classify_page({"text": "双击此处添加文本", "images": []}), "template")
         self.assertEqual(_classify_page({"text": "Click to add title", "images": []}), "template")
-        self.assertNotEqual(_classify_page({"text": "基于边缘智能的航道智慧化安全管理方案\n面向工业缺陷识别。", "images": []}), "template")
+        self.assertNotEqual(
+            _classify_page({"text": "基于边缘智能的航道智慧化安全管理方案\n面向工业缺陷识别。", "images": []}),
+            "template",
+        )
 
     def test_import_classifies_patent_and_contributor_pages(self):
         patent_page = {"text": "图像恢复中的滤波方法\n专利号：CN201310495188.7\n扫码查看专利公布公告", "images": []}
@@ -190,12 +219,24 @@ class ContentPayloadTests(unittest.TestCase):
 
     def test_import_classifies_numbered_team_profile_as_a_contributor_page(self):
         contributor_page = {
-            "text": "\n".join([
-                "4 团队简介", "项目联系人及联系方式", "技术转移中心 罗老师，13927409073", "焦淑红 教授",
-                "团队整体情况及核心人员介绍", "主持国家自然科学基金青年基金项目", "发表 SCI 论文 230 篇",
-                "长期从事有机光电材料分子设计合成", "重点攻克光电产业材料问题", "推动产业发展",
-                "冯宁，17658596827", "高级工程师", "负责研发", "获得多项专利",
-            ]),
+            "text": "\n".join(
+                [
+                    "4 团队简介",
+                    "项目联系人及联系方式",
+                    "技术转移中心 罗老师，13927409073",
+                    "焦淑红 教授",
+                    "团队整体情况及核心人员介绍",
+                    "主持国家自然科学基金青年基金项目",
+                    "发表 SCI 论文 230 篇",
+                    "长期从事有机光电材料分子设计合成",
+                    "重点攻克光电产业材料问题",
+                    "推动产业发展",
+                    "冯宁，17658596827",
+                    "高级工程师",
+                    "负责研发",
+                    "获得多项专利",
+                ]
+            ),
             "images": [],
         }
         self.assertEqual(_classify_page(contributor_page), "contributor")
@@ -229,7 +270,7 @@ class ContentPayloadTests(unittest.TestCase):
         service_source = (base / "service.py").read_text(encoding="utf-8")
 
         self.assertIn("b.created_by AS imported_by_user_id", importer_source)
-        self.assertIn("media_owner_user_id=int(item[\"imported_by_user_id\"])", importer_source)
+        self.assertIn('media_owner_user_id=int(item["imported_by_user_id"])', importer_source)
         self.assertIn("media_owner_user_id: int | None = None", service_source)
         self.assertIn("media_owner_user_id or user_id", service_source)
 
@@ -243,7 +284,7 @@ class ContentPayloadTests(unittest.TestCase):
             Image.new("RGB", (32, 18), "navy").save(image_path, format="PNG")
             presentation = Presentation()
             slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-            slide.shapes.add_textbox(Inches(1), Inches(.2), Inches(4), Inches(.5)).text_frame.text = "图像成果"
+            slide.shapes.add_textbox(Inches(1), Inches(0.2), Inches(4), Inches(0.5)).text_frame.text = "图像成果"
             slide.shapes.add_picture(str(image_path), Inches(1), Inches(1))
             pptx_path = root / "source.pptx"
             presentation.save(pptx_path)
@@ -268,7 +309,9 @@ class ContentPayloadTests(unittest.TestCase):
             presentation = Presentation()
             slide = presentation.slides.add_slide(presentation.slide_layouts[6])
             slide.shapes.add_picture(str(background), 0, 0, presentation.slide_width, presentation.slide_height)
-            slide.shapes.add_textbox(Inches(1), Inches(.2), Inches(5), Inches(.5)).text_frame.text = "工业视觉检测平台"
+            slide.shapes.add_textbox(
+                Inches(1), Inches(0.2), Inches(5), Inches(0.5)
+            ).text_frame.text = "工业视觉检测平台"
             slide.shapes.add_picture(str(content_image), Inches(1), Inches(1))
             pptx_path = root / "source.pptx"
             presentation.save(pptx_path)
@@ -280,45 +323,57 @@ class ContentPayloadTests(unittest.TestCase):
         self.assertEqual(records[0]["images"][0]["data"][:8], b"\x89PNG\r\n\x1a\n")
 
     def test_import_prefers_achievement_title_over_team_section_heading(self):
-        record = _normalize_page({
-            "sourcePageOrSlide": "slide-3",
-            "text": "\n".join([
-                "团队介绍",
-                "团队长期从事人工智能与零售数字化研究。",
-                "面向智慧零售的多智能体协同运营平台",
-                "Multi-Agent Collaborative Operation Platform",
-            ]),
-        })
+        record = _normalize_page(
+            {
+                "sourcePageOrSlide": "slide-3",
+                "text": "\n".join(
+                    [
+                        "团队介绍",
+                        "团队长期从事人工智能与零售数字化研究。",
+                        "面向智慧零售的多智能体协同运营平台",
+                        "Multi-Agent Collaborative Operation Platform",
+                    ]
+                ),
+            }
+        )
 
         self.assertEqual(record["normalized"]["title"], "面向智慧零售的多智能体协同运营平台")
 
     def test_import_ignores_empty_template_title_field_before_later_labels(self):
-        record = _normalize_page({
-            "sourcePageOrSlide": "slide-1",
-            "text": "\n".join([
-                "扫描结构光超分辨显微镜",
-                "Scanning Structured Illumination Super-Resolution Microscopy",
-                "成果名称：",
-                "成果简介（包括但不限于:项目背景、解决的核心问题、核心技术、研发及商业化情况等，字数800字以内）：",
-                "成果照片（样机、产品)",
-                "技术创新点",
-                "光学成像",
-            ]),
-        })
+        record = _normalize_page(
+            {
+                "sourcePageOrSlide": "slide-1",
+                "text": "\n".join(
+                    [
+                        "扫描结构光超分辨显微镜",
+                        "Scanning Structured Illumination Super-Resolution Microscopy",
+                        "成果名称：",
+                        "成果简介（包括但不限于:项目背景、解决的核心问题、核心技术、研发及商业化情况等，字数800字以内）：",
+                        "成果照片（样机、产品)",
+                        "技术创新点",
+                        "光学成像",
+                    ]
+                ),
+            }
+        )
 
         self.assertEqual(record["normalized"]["title"], "扫描结构光超分辨显微镜")
         self.assertNotIn("成果简介（包括", record["normalized"]["title"])
 
     def test_import_reads_numbered_project_name_and_skips_template_section_headings(self):
-        record = _normalize_page({
-            "sourcePageOrSlide": "slide-2",
-            "text": "\n".join([
-                "项目简介（200-300字）",
-                "1 项目名称：面向交通运输、家庭储能等领域的新型电池",
-                "项目代表性图片或照片（1-2张），或组图（1组）",
-                "本项目聚焦新能源领域二次电池行业痛点。",
-            ]),
-        })
+        record = _normalize_page(
+            {
+                "sourcePageOrSlide": "slide-2",
+                "text": "\n".join(
+                    [
+                        "项目简介（200-300字）",
+                        "1 项目名称：面向交通运输、家庭储能等领域的新型电池",
+                        "项目代表性图片或照片（1-2张），或组图（1组）",
+                        "本项目聚焦新能源领域二次电池行业痛点。",
+                    ]
+                ),
+            }
+        )
 
         self.assertEqual(record["normalized"]["title"], "面向交通运输、家庭储能等领域的新型电池")
         self.assertNotIn("项目简介（200-300字）", record["normalized"]["techIntro"])
@@ -335,24 +390,31 @@ class ContentPayloadTests(unittest.TestCase):
         self.assertEqual(image["data"][:3], b"\xff\xd8\xff")
 
     def test_imported_candidate_uploads_become_ordered_media_payload(self):
-        media = _media_payload_from_uploads([
-            {"id": 12, "name": "slide-1-image-1.png"},
-            {"id": 18, "name": "slide-1-image-2.png"},
-        ])
-        self.assertEqual(media, [
-            {"fileId": 12, "role": "cover", "sortOrder": 0},
-            {"fileId": 18, "role": "gallery", "sortOrder": 1},
-        ])
+        media = _media_payload_from_uploads(
+            [
+                {"id": 12, "name": "slide-1-image-1.png"},
+                {"id": 18, "name": "slide-1-image-2.png"},
+            ]
+        )
+        self.assertEqual(
+            media,
+            [
+                {"fileId": 12, "role": "cover", "sortOrder": 0},
+                {"fileId": 18, "role": "gallery", "sortOrder": 1},
+            ],
+        )
 
     def test_import_keeps_text_staged_when_one_candidate_image_is_over_limit(self):
-        records = [{
-            "normalized": {},
-            "raw": {"text": "资料正文"},
-            "images": [
-                {"filename": "small.png", "mimeType": "image/png", "data": b"small"},
-                {"filename": "large.png", "mimeType": "image/png", "data": b"large"},
-            ],
-        }]
+        records = [
+            {
+                "normalized": {},
+                "raw": {"text": "资料正文"},
+                "images": [
+                    {"filename": "small.png", "mimeType": "image/png", "data": b"small"},
+                    {"filename": "large.png", "mimeType": "image/png", "data": b"large"},
+                ],
+            }
+        ]
 
         def uploader(_user_id, filename, _mime, _data):
             if filename == "large.png":
@@ -364,25 +426,32 @@ class ContentPayloadTests(unittest.TestCase):
         self.assertEqual(uploaded_ids, [88])
         self.assertEqual(records[0]["normalized"]["media"], [{"fileId": 88, "role": "cover", "sortOrder": 0}])
         self.assertEqual(records[0]["raw"]["images"][0]["fileId"], 88)
-        self.assertEqual(records[0]["raw"]["imageUploadWarnings"], [
-            {"filename": "large.png", "message": "文件不能超过 20MB"}
-        ])
+        self.assertEqual(
+            records[0]["raw"]["imageUploadWarnings"], [{"filename": "large.png", "message": "文件不能超过 20MB"}]
+        )
 
     def test_import_long_unlabelled_heading_stays_staged_with_source_preserved(self):
         source_title = "团队长期从事忆阻存储及存算一体芯片研究，" * 18
 
-        record = _normalize_page({
-            "sourcePageOrSlide": "slide-28",
-            "text": source_title + "\n团队负责人：杨玉超",
-        })
+        record = _normalize_page(
+            {
+                "sourcePageOrSlide": "slide-28",
+                "text": source_title + "\n团队负责人：杨玉超",
+            }
+        )
 
         self.assertEqual(record["errors"], [])
         self.assertEqual(record["normalized"]["title"], source_title[:200])
         self.assertEqual(record["raw"]["sourceTitle"], source_title)
-        self.assertEqual(record["raw"]["normalizationWarnings"], [{
-            "field": "title",
-            "message": "原始标题超过 200 字符，已截断为候选标题，请人工确认",
-        }])
+        self.assertEqual(
+            record["raw"]["normalizationWarnings"],
+            [
+                {
+                    "field": "title",
+                    "message": "原始标题超过 200 字符，已截断为候选标题，请人工确认",
+                }
+            ],
+        )
 
     def test_admin_preview_permission_covers_attached_and_staged_import_media(self):
         base = Path(__file__).parent
@@ -408,6 +477,7 @@ class ContentPayloadTests(unittest.TestCase):
 
     def test_uploaded_document_rejects_old_ppt_and_empty_payload(self):
         from modules.achievement.importer import stage_uploaded_document
+
         with self.assertRaises(BizError):
             stage_uploaded_document("成果.ppt", b"not-empty", 1)
         with self.assertRaises(BizError):
@@ -417,7 +487,9 @@ class ContentPayloadTests(unittest.TestCase):
 
     def test_admin_import_upload_route_is_registered(self):
         route_source = (Path(__file__).parent / "routes" / "admin.py").read_text(encoding="utf-8")
-        importer_source = (Path(__file__).parent / "modules" / "achievement" / "importer.py").read_text(encoding="utf-8")
+        importer_source = (Path(__file__).parent / "modules" / "achievement" / "importer.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('@router.post("/admin/achievement-imports")', route_source)
         self.assertIn("stage_uploaded_documents", route_source)
         self.assertIn("list[UploadFile]", route_source)

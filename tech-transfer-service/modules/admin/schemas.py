@@ -10,8 +10,13 @@ admin 请求 Schema（Release Closure P0-2）—— Pydantic v2
 from pydantic import BaseModel, ConfigDict, Field
 
 INST_KINDS = (
-    "platform", "invest", "service",
-    "university", "institute", "enterprise", "other",
+    "platform",
+    "invest",
+    "service",
+    "university",
+    "institute",
+    "enterprise",
+    "other",
 )
 PLATFORM_TYPE_KEYS = ("poc", "pilot", "other")
 

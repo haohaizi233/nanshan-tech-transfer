@@ -1,10 +1,11 @@
-﻿"""
+"""
 AI 路由 —— POST /ai/chat、POST /ai/match（同步，转发 nanshan-ai-agent），
 POST /ai/evaluation-tasks、GET /ai/evaluation-tasks/{taskId}（异步任务）。
 
 需求匹配与自然语言对话同步经本服务转发到独立的 ai-agent；成果评估沿用
 异步任务制（202 + 轮询），执行由独立 worker 认领，不把企业微信长连接嵌进本进程。
 """
+
 import json
 import logging
 import threading
@@ -27,16 +28,24 @@ from core.errors import (
 from core.idempotency import cache_response as cache_idem_response
 from core.idempotency import idempotent_create
 from core.middleware import identity
-from core.rate_limit import check_user_rate
 from core.pagination import parse_page_args
+from core.rate_limit import check_user_rate
 from core.request_schemas import AiCardViewCountsRequest, AiChatRequest, AiMatchRequest, EvaluationTaskRequest
 from core.response import get_request_id, success
-from modules.ai.chat_store import (
-    append_turn, capture_generation, clear_messages, complete_turn, fail_turn, get_turn as get_chat_turn,
-    list_history, start_turn,
-)
-from modules.ai.chat_runs import submit_run, clear_runs, has_durable_history
 from modules.ai import eval_stream
+from modules.ai.chat_runs import clear_runs, has_durable_history, submit_run
+from modules.ai.chat_store import (
+    append_turn,
+    capture_generation,
+    clear_messages,
+    complete_turn,
+    fail_turn,
+    list_history,
+    start_turn,
+)
+from modules.ai.chat_store import (
+    get_turn as get_chat_turn,
+)
 from modules.ai.service import (
     create_evaluation_task,
     get_card_view_counts,
@@ -80,13 +89,16 @@ def evaluation_tasks_create(request: Request, body: EvaluationTaskRequest, user:
     achievement_id = body.as_dict().get("achievementId")
     if not isinstance(achievement_id, int) or achievement_id <= 0:
         from core.errors import bad_request
+
         raise bad_request("achievementId 必须为正整数")
     # L2: X-Idempotency-Key 幂等去重（TTL 10min，重复请求直接回放缓存响应）
     idem_resp = idempotent_create(request, user)
     if idem_resp is not None:
         return idem_resp
     task, is_new = create_evaluation_task(
-        user["userId"], user.get("userNo", ""), achievement_id,
+        user["userId"],
+        user.get("userNo", ""),
+        achievement_id,
         request_id=get_request_id(),
     )
     if not is_new:
@@ -94,7 +106,12 @@ def evaluation_tasks_create(request: Request, body: EvaluationTaskRequest, user:
     else:
         resp = JSONResponse(status_code=202, content=success(task, "任务已受理"))
     # L2: 仅缓存成功响应，供后续重复请求回放
-    cache_idem_response(user["userId"], (request.headers.get("X-Idempotency-Key") or "").strip(), resp.status_code, success(task, "任务已受理"))
+    cache_idem_response(
+        user["userId"],
+        (request.headers.get("X-Idempotency-Key") or "").strip(),
+        resp.status_code,
+        success(task, "任务已受理"),
+    )
     return resp
 
 
@@ -229,6 +246,7 @@ def evaluation_history(request: Request, user: dict = Depends(identity)):
             achievement_id = 0
         if achievement_id <= 0:
             from core.errors import bad_request
+
             raise bad_request("achievementId 必须为正整数")
     return success(list_evaluations(user["userId"], page, page_size, achievement_id))
 
@@ -330,7 +348,7 @@ def _raise_from_agent_http(agent_status: int, body: str) -> None:
         details.get("upstreamBody"),
     )
     if agent_status == 429:
-        code, message, status = TT_COMMON_42901
+        code, _message, status = TT_COMMON_42901
         raise BizError(code, "AI 请求过于频繁，请稍后重试", status, details)
     if details.get("layer") == "llm" or agent_status in (500, 502, 504):
         raise ai_provider_failed("AI 服务暂时不可用，请稍后重试", details)
@@ -402,7 +420,9 @@ def _forward_to_agent(message: str, exclude_user_id: int | None = None) -> dict:
             last_http = (exc.code, body)
             logger.warning(
                 "[ai/chat] agent http error status=%s attempt=%s body=%s",
-                exc.code, attempt + 1, body,
+                exc.code,
+                attempt + 1,
+                body,
             )
             # 上层模型已经在 agent 内重试过；再转一圈只会把浏览器空等拉长。
             preview = _parse_agent_error_details(exc.code, body)
@@ -447,9 +467,18 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Reques
         raise bad_request("message 不能为空")
     user_message = message.strip()
     turn_id = body.as_dict().get("turnId")
-    if settings.AI_CHAT_RUNS_ENABLED and turn_id and request is not None and "respond-async" in request.headers.get("Prefer", "").lower():
-        turn = submit_run(user["userId"], turn_id, user_message, body.reference.model_dump() if body.reference else None)
-        return JSONResponse(status_code=202 if turn["status"] == "running" else 200, content=success(turn, "任务已受理"))
+    if (
+        settings.AI_CHAT_RUNS_ENABLED
+        and turn_id
+        and request is not None
+        and "respond-async" in request.headers.get("Prefer", "").lower()
+    ):
+        turn = submit_run(
+            user["userId"], turn_id, user_message, body.reference.model_dump() if body.reference else None
+        )
+        return JSONResponse(
+            status_code=202 if turn["status"] == "running" else 200, content=success(turn, "任务已受理")
+        )
     check_user_rate(user["userId"], "ai_chat", limit=30, window_s=300)
     generation = None
     if turn_id:
@@ -478,21 +507,31 @@ def ai_chat(body: AiChatRequest, user: dict = Depends(identity), request: Reques
     if not settings.AI_AGENT_URL:
         exc = ai_unavailable("AI 助手未配置")
         if turn_id:
-            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status, **generation_options)
+            fail_turn(
+                user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status, **generation_options
+            )
         raise exc
     try:
         result = _forward_to_agent(user_message, exclude_user_id=user["userId"])
     except BizError as exc:
         if turn_id:
-            fail_turn(user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status, **generation_options)
+            fail_turn(
+                user["userId"], turn_id, user_message, exc.message, exc.code, exc.http_status, **generation_options
+            )
         elif exc.http_status in (502, 503, 429):
-            _persist_failed_turn(user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试", **generation_options)
+            _persist_failed_turn(
+                user["userId"], user_message, exc.message or "AI 助手暂时不可用，请稍后重试", **generation_options
+            )
         raise
     except Exception:
         if turn_id:
             fail_turn(
-                user["userId"], turn_id, user_message,
-                "AI 助手暂时不可用，请稍后重试", "TT_COMMON_50001", 500,
+                user["userId"],
+                turn_id,
+                user_message,
+                "AI 助手暂时不可用，请稍后重试",
+                "TT_COMMON_50001",
+                500,
                 **generation_options,
             )
         raise
@@ -533,9 +572,38 @@ _DEMAND_MATCHABLE_STATUSES = ("published", "matched")
 
 # 中文停用词（需求标题里常见但无技术语义的词，不作为匹配理由）
 _DEMAND_STOPWORDS = {
-    "的", "了", "和", "与", "及", "或", "在", "为", "对", "由", "基于", "一种", "一个",
-    "系统", "方法", "装置", "设备", "技术", "研究", "应用", "开发", "寻求", "需要",
-    "需求", "希望", "想要", "请问", "帮我", "找", "有关", "相关", "方面",
+    "的",
+    "了",
+    "和",
+    "与",
+    "及",
+    "或",
+    "在",
+    "为",
+    "对",
+    "由",
+    "基于",
+    "一种",
+    "一个",
+    "系统",
+    "方法",
+    "装置",
+    "设备",
+    "技术",
+    "研究",
+    "应用",
+    "开发",
+    "寻求",
+    "需要",
+    "需求",
+    "希望",
+    "想要",
+    "请问",
+    "帮我",
+    "找",
+    "有关",
+    "相关",
+    "方面",
 }
 
 
@@ -600,8 +668,7 @@ def ai_match(body: AiMatchRequest, user: dict = Depends(identity)):
 
     with get_cursor() as cur:
         cur.execute(
-            "SELECT id, title, description, owner_user_id, status "
-            "FROM demand WHERE id = %s AND deleted_at IS NULL",
+            "SELECT id, title, description, owner_user_id, status FROM demand WHERE id = %s AND deleted_at IS NULL",
             (demand_id,),
         )
         demand = cur.fetchone()
@@ -676,7 +743,8 @@ def ai_chat_turn_detail(turn_id: str, user: dict = Depends(identity)):
     turn = get_chat_turn(user["userId"], turn_id)
     if turn is None:
         from core.errors import TT_AI_40401
-        code, message, status = TT_AI_40401
+
+        code, _message, status = TT_AI_40401
         raise BizError(code, "AI 问答轮次不存在", status)
     return success(turn, "ok")
 

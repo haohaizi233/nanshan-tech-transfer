@@ -12,8 +12,7 @@ from modules.audit.service import record as audit_record
 def _map_read_row(row: dict) -> dict:
     """Expose database fields in the API's existing camelCase convention."""
     return {
-        key.split('_')[0] + ''.join(part.title() for part in key.split('_')[1:]): value
-        for key, value in row.items()
+        key.split("_")[0] + "".join(part.title() for part in key.split("_")[1:]): value for key, value in row.items()
     }
 
 
@@ -30,8 +29,9 @@ _ORDER_BY_ID = "a.id"
 _ORDER_BY_CREATED_DESC = "a.created_at DESC, a.id DESC"
 
 
-def _read_page(cur, select_sql: str, from_sql: str, params: list, page: int, page_size: int,
-               order_by=_ORDER_BY_ID) -> dict:
+def _read_page(
+    cur, select_sql: str, from_sql: str, params: list, page: int, page_size: int, order_by=_ORDER_BY_ID
+) -> dict:
     if order_by not in {_ORDER_BY_ID, _ORDER_BY_CREATED_DESC}:
         raise ValueError("unsupported order")
     cur.execute(f"SELECT COUNT(*) AS total {from_sql}", params)
@@ -40,32 +40,36 @@ def _read_page(cur, select_sql: str, from_sql: str, params: list, page: int, pag
         f"SELECT {select_sql} {from_sql} ORDER BY {order_by} LIMIT %s OFFSET %s",
         [*params, page_size, (page - 1) * page_size],
     )
-    return {"list": [_map_read_row(row) for row in cur.fetchall()],
-            "total": total, "page": page, "pageSize": page_size}
+    return {"list": [_map_read_row(row) for row in cur.fetchall()], "total": total, "page": page, "pageSize": page_size}
 
 
 def list_my_memberships(user: dict, page: int, page_size: int) -> dict:
     with get_cursor() as cur:
         return _read_page(
-            cur, "a.*, o.name AS org_name, o.kind AS org_type",
+            cur,
+            "a.*, o.name AS org_name, o.kind AS org_type",
             "FROM organization_membership a JOIN institution o ON o.id = a.org_id WHERE a.user_id = %s",
-            [user["userId"]], page, page_size,
+            [user["userId"]],
+            page,
+            page_size,
         )
 
 
 def list_my_membership_applications(user: dict, status, page: int, page_size: int) -> dict:
     """GET /me/organization-membership-applications —— 本人提交的加入机构申请。"""
     with get_cursor() as cur:
-        sql = (
-            "FROM organization_membership_application a "
-            "JOIN institution o ON o.id = a.org_id WHERE a.user_id = %s"
-        )
+        sql = "FROM organization_membership_application a JOIN institution o ON o.id = a.org_id WHERE a.user_id = %s"
         params = [user["userId"]]
         if status is not None:
             sql += " AND a.status = %s"
             params.append(status)
         return _read_page(
-            cur, "a.*, o.name AS org_name, o.kind AS org_type", sql, params, page, page_size,
+            cur,
+            "a.*, o.name AS org_name, o.kind AS org_type",
+            sql,
+            params,
+            page,
+            page_size,
             order_by=_ORDER_BY_CREATED_DESC,
         )
 
@@ -85,8 +89,14 @@ def get_my_organization_certification(user: dict) -> dict:
             (user_id,),
         )
         memberships = [
-            {"id": row["id"], "orgId": row["org_id"], "orgName": row["org_name"],
-             "role": row["role"], "status": row["status"], "version": row["version"]}
+            {
+                "id": row["id"],
+                "orgId": row["org_id"],
+                "orgName": row["org_name"],
+                "role": row["role"],
+                "status": row["status"],
+                "version": row["version"],
+            }
             for row in (cur.fetchall() or [])
         ]
 
@@ -101,14 +111,18 @@ def get_my_organization_certification(user: dict) -> dict:
             (user_id,),
         )
         membership_application_row = cur.fetchone()
-        membership_application = None if not membership_application_row else {
-            "id": membership_application_row["id"],
-            "orgId": membership_application_row["org_id"],
-            "orgName": membership_application_row["org_name"],
-            "status": membership_application_row["status"],
-            "version": membership_application_row["version"],
-            "reviewReason": membership_application_row.get("review_reason"),
-        }
+        membership_application = (
+            None
+            if not membership_application_row
+            else {
+                "id": membership_application_row["id"],
+                "orgId": membership_application_row["org_id"],
+                "orgName": membership_application_row["org_name"],
+                "status": membership_application_row["status"],
+                "version": membership_application_row["version"],
+                "reviewReason": membership_application_row.get("review_reason"),
+            }
+        )
 
         cur.execute(
             """
@@ -120,13 +134,17 @@ def get_my_organization_certification(user: dict) -> dict:
             (user_id,),
         )
         organization_application_row = cur.fetchone()
-        organization_application = None if not organization_application_row else {
-            "id": organization_application_row["id"],
-            "requestedName": organization_application_row["requested_name"],
-            "status": organization_application_row["status"],
-            "version": organization_application_row["version"],
-            "reviewReason": organization_application_row.get("review_reason"),
-        }
+        organization_application = (
+            None
+            if not organization_application_row
+            else {
+                "id": organization_application_row["id"],
+                "requestedName": organization_application_row["requested_name"],
+                "status": organization_application_row["status"],
+                "version": organization_application_row["version"],
+                "reviewReason": organization_application_row.get("review_reason"),
+            }
+        )
 
     if any(item["role"] == "admin" for item in memberships):
         status = "certified_admin"
@@ -168,7 +186,12 @@ def list_organization_membership_applications(admin: dict, status, page: int, pa
             sql += " WHERE a.status = %s"
             params.append(status)
         return _read_page(
-            cur, "a.*, u.user_no, o.name AS org_name", sql, params, page, page_size,
+            cur,
+            "a.*, u.user_no, o.name AS org_name",
+            sql,
+            params,
+            page,
+            page_size,
             order_by=_ORDER_BY_CREATED_DESC,
         )
 
@@ -210,7 +233,13 @@ def _list_system_applications(admin, table, status, page, page_size):
             sql += " WHERE a.status = %s"
             params.append(status)
         return _read_page(
-            cur, columns, sql, params, page, page_size, order_by=_ORDER_BY_CREATED_DESC,
+            cur,
+            columns,
+            sql,
+            params,
+            page,
+            page_size,
+            order_by=_ORDER_BY_CREATED_DESC,
         )
 
 
@@ -260,7 +289,13 @@ def list_all_certification_applications(admin: dict, status, page: int, page_siz
     with get_cursor() as cur:
         _assert_system_admin(cur, admin)
         return _read_page(
-            cur, "a.*", from_sql, params, page, page_size, order_by=_ORDER_BY_CREATED_DESC,
+            cur,
+            "a.*",
+            from_sql,
+            params,
+            page,
+            page_size,
+            order_by=_ORDER_BY_CREATED_DESC,
         )
 
 
@@ -283,10 +318,14 @@ def cancel_membership_application(user: dict, application_id: int, version: int,
         if not cancelled:
             raise conflict("申请状态或版本已变更")
         audit_record(
-            "organization_membership_application.cancel", "membership_application", application_id,
-            user["userId"], user.get("userNo", ""),
+            "organization_membership_application.cancel",
+            "membership_application",
+            application_id,
+            user["userId"],
+            user.get("userNo", ""),
             {"orgId": cancelled["org_id"], "userId": cancelled["user_id"], "from": "pending", "to": "cancelled"},
-            request_id=request_id, cur=cur,
+            request_id=request_id,
+            cur=cur,
         )
         return _map_application(cancelled)
 
@@ -419,24 +458,32 @@ def apply_membership(user: dict, body: dict) -> dict:
                     RETURNING id, user_id, org_id, status, version
                     """,
                 (
-                    user_id, org_id, body.get("realName"), body.get("department"),
-                    body.get("title"), body.get("workEmail"),
-                    body.get("proofMaterial"), body.get("applyNote"),
+                    user_id,
+                    org_id,
+                    body.get("realName"),
+                    body.get("department"),
+                    body.get("title"),
+                    body.get("workEmail"),
+                    body.get("proofMaterial"),
+                    body.get("applyNote"),
                 ),
             )
             application = cur.fetchone()
             audit_record(
-                "membership.apply", "membership_application", application["id"],
-                user_id, user.get("userNo", ""),
-                {"orgId": org_id, "userId": user_id}, cur=cur,
+                "membership.apply",
+                "membership_application",
+                application["id"],
+                user_id,
+                user.get("userNo", ""),
+                {"orgId": org_id, "userId": user_id},
+                cur=cur,
             )
             return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的成员申请")
 
 
-def _activate_membership(cur, user_id: int, org_id: int, role: str, actor_id: int,
-                         department=None, title=None) -> dict:
+def _activate_membership(cur, user_id: int, org_id: int, role: str, actor_id: int, department=None, title=None) -> dict:
     cur.execute(
         """
         SELECT id, user_id, org_id, role, status, version
@@ -499,8 +546,7 @@ def _activate_membership(cur, user_id: int, org_id: int, role: str, actor_id: in
     return row
 
 
-def approve_membership_application(admin: dict, application_id: int, version: int,
-                                   request_id=None) -> dict:
+def approve_membership_application(admin: dict, application_id: int, version: int, request_id=None) -> dict:
     affected_user_id = None
     with transaction() as conn, conn.cursor() as cur:
         cur.execute(
@@ -531,15 +577,29 @@ def approve_membership_application(admin: dict, application_id: int, version: in
             raise conflict("申请状态或版本已变更")
         affected_user_id = application["user_id"]
         membership = _activate_membership(
-            cur, application["user_id"], application["org_id"], "member",
-            int(admin["userId"]), application.get("department"), application.get("title"),
+            cur,
+            application["user_id"],
+            application["org_id"],
+            "member",
+            int(admin["userId"]),
+            application.get("department"),
+            application.get("title"),
         )
         audit_record(
-            "organization_membership_application.approve", "membership_application",
-            application_id, admin["userId"], admin.get("userNo", ""),
-            {"orgId": application["org_id"], "userId": application["user_id"],
-             "membershipId": membership["id"], "from": "pending", "to": "approved"},
-            request_id=request_id, cur=cur,
+            "organization_membership_application.approve",
+            "membership_application",
+            application_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            {
+                "orgId": application["org_id"],
+                "userId": application["user_id"],
+                "membershipId": membership["id"],
+                "from": "pending",
+                "to": "approved",
+            },
+            request_id=request_id,
+            cur=cur,
         )
         result = _map_application(reviewed)
         result["membership"] = _map_membership(membership)
@@ -548,8 +608,7 @@ def approve_membership_application(admin: dict, application_id: int, version: in
     return result
 
 
-def reject_membership_application(admin: dict, application_id: int, version: int,
-                                  reason: str, request_id=None) -> dict:
+def reject_membership_application(admin: dict, application_id: int, version: int, reason: str, request_id=None) -> dict:
     reason = (reason or "").strip()
     if not reason:
         raise bad_request("审核驳回必须填写原因")
@@ -577,16 +636,25 @@ def reject_membership_application(admin: dict, application_id: int, version: int
         if not reviewed:
             raise conflict("申请状态或版本已变更")
         audit_record(
-            "organization_membership_application.reject", "membership_application",
-            application_id, admin["userId"], admin.get("userNo", ""),
-            {"orgId": application["org_id"], "userId": application["user_id"],
-             "from": "pending", "to": "rejected", "reason": reason},
-            request_id=request_id, cur=cur,
+            "organization_membership_application.reject",
+            "membership_application",
+            application_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            {
+                "orgId": application["org_id"],
+                "userId": application["user_id"],
+                "from": "pending",
+                "to": "rejected",
+                "reason": reason,
+            },
+            request_id=request_id,
+            cur=cur,
         )
         return _map_application(reviewed)
 
-def revoke_membership(admin: dict, membership_id: int, version: int, reason: str,
-                      request_id=None) -> dict:
+
+def revoke_membership(admin: dict, membership_id: int, version: int, reason: str, request_id=None) -> dict:
     """Org admins can revoke ordinary members in their own organization only."""
     reason = (reason or "").strip()
     if not reason:
@@ -616,11 +684,21 @@ def revoke_membership(admin: dict, membership_id: int, version: int, reason: str
         if not revoked:
             raise conflict("仅可撤销当前有效的普通成员，或版本已变更")
         audit_record(
-            "organization_membership.revoke", "organization_membership", membership_id,
-            admin["userId"], admin.get("userNo", ""),
-            {"orgId": membership["org_id"], "userId": membership["user_id"],
-             "role": "member", "from": "active", "to": "revoked", "reason": reason},
-            request_id=request_id, cur=cur,
+            "organization_membership.revoke",
+            "organization_membership",
+            membership_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            {
+                "orgId": membership["org_id"],
+                "userId": membership["user_id"],
+                "role": "member",
+                "from": "active",
+                "to": "revoked",
+                "reason": reason,
+            },
+            request_id=request_id,
+            cur=cur,
         )
         return _map_membership(revoked)
 
@@ -664,24 +742,32 @@ def apply_organization_admin(user: dict, body: dict) -> dict:
                     RETURNING id, user_id, org_id, status, version
                     """,
                 (
-                    user_id, org_id, body.get("realName"), body.get("department"),
-                    body.get("title"), body.get("workEmail"),
-                    body.get("proofMaterial"), body.get("reason"),
+                    user_id,
+                    org_id,
+                    body.get("realName"),
+                    body.get("department"),
+                    body.get("title"),
+                    body.get("workEmail"),
+                    body.get("proofMaterial"),
+                    body.get("reason"),
                 ),
             )
             application = cur.fetchone()
             audit_record(
-                "membership.apply_org_admin", "organization_admin_application", application["id"],
-                user_id, user.get("userNo", ""),
-                {"orgId": org_id, "userId": user_id}, cur=cur,
+                "membership.apply_org_admin",
+                "organization_admin_application",
+                application["id"],
+                user_id,
+                user.get("userNo", ""),
+                {"orgId": org_id, "userId": user_id},
+                cur=cur,
             )
             return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的机构管理员申请")
 
 
-def approve_organization_admin_application(admin: dict, application_id: int, version: int,
-                                           request_id=None) -> dict:
+def approve_organization_admin_application(admin: dict, application_id: int, version: int, request_id=None) -> dict:
     affected_user_id = None
     with transaction() as conn, conn.cursor() as cur:
         _assert_system_admin(cur, admin)
@@ -711,15 +797,29 @@ def approve_organization_admin_application(admin: dict, application_id: int, ver
             raise conflict("申请状态或版本已变更")
         affected_user_id = application["user_id"]
         membership = _activate_membership(
-            cur, application["user_id"], application["org_id"], "admin",
-            int(admin["userId"]), application.get("department"), application.get("title"),
+            cur,
+            application["user_id"],
+            application["org_id"],
+            "admin",
+            int(admin["userId"]),
+            application.get("department"),
+            application.get("title"),
         )
         audit_record(
-            "organization_admin_application.approve", "organization_admin_application",
-            application_id, admin["userId"], admin.get("userNo", ""),
-            {"orgId": application["org_id"], "userId": application["user_id"],
-             "membershipId": membership["id"], "from": "pending", "to": "approved"},
-            request_id=request_id, cur=cur,
+            "organization_admin_application.approve",
+            "organization_admin_application",
+            application_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            {
+                "orgId": application["org_id"],
+                "userId": application["user_id"],
+                "membershipId": membership["id"],
+                "from": "pending",
+                "to": "approved",
+            },
+            request_id=request_id,
+            cur=cur,
         )
         result = _map_application(reviewed)
         result["membership"] = _map_membership(membership)
@@ -728,16 +828,22 @@ def approve_organization_admin_application(admin: dict, application_id: int, ver
     return result
 
 
-def reject_organization_admin_application(admin: dict, application_id: int, version: int,
-                                          reason: str, request_id=None) -> dict:
+def reject_organization_admin_application(
+    admin: dict, application_id: int, version: int, reason: str, request_id=None
+) -> dict:
     return _reject_system_application(
-        admin, "organization_admin_application", application_id, version, reason,
-        "机构管理员申请不存在", "organization_admin_application.reject", request_id,
+        admin,
+        "organization_admin_application",
+        application_id,
+        version,
+        reason,
+        "机构管理员申请不存在",
+        "organization_admin_application.reject",
+        request_id,
     )
 
 
-def grant_organization_admin(admin: dict, membership_id: int, version: int,
-                             request_id=None) -> dict:
+def grant_organization_admin(admin: dict, membership_id: int, version: int, request_id=None) -> dict:
     affected_user_id = None
     with transaction() as conn, conn.cursor() as cur:
         _assert_system_admin(cur, admin)
@@ -757,10 +863,14 @@ def grant_organization_admin(admin: dict, membership_id: int, version: int,
             raise conflict("仅可授予当前有效普通成员管理员权限，或版本已变更")
         affected_user_id = granted["user_id"]
         audit_record(
-            "organization_admin.grant", "organization_membership", membership_id,
-            admin["userId"], admin.get("userNo", ""),
-            {"orgId": granted["org_id"], "userId": granted["user_id"],
-             "from": "member", "to": "admin"}, request_id=request_id, cur=cur,
+            "organization_admin.grant",
+            "organization_membership",
+            membership_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            {"orgId": granted["org_id"], "userId": granted["user_id"], "from": "member", "to": "admin"},
+            request_id=request_id,
+            cur=cur,
         )
         result = _map_membership(granted)
     # D7: 角色变更后立即失效鉴权缓存
@@ -768,8 +878,7 @@ def grant_organization_admin(admin: dict, membership_id: int, version: int,
     return result
 
 
-def revoke_organization_admin(admin: dict, membership_id: int, version: int, reason: str,
-                              request_id=None) -> dict:
+def revoke_organization_admin(admin: dict, membership_id: int, version: int, reason: str, request_id=None) -> dict:
     reason = (reason or "").strip()
     if not reason:
         raise bad_request("撤销机构管理员必须填写原因")
@@ -793,11 +902,21 @@ def revoke_organization_admin(admin: dict, membership_id: int, version: int, rea
             raise conflict("仅可撤销当前有效管理员身份，或版本已变更")
         affected_user_id = revoked["user_id"]
         audit_record(
-            "organization_admin.revoke", "organization_membership", membership_id,
-            admin["userId"], admin.get("userNo", ""),
-            {"orgId": revoked["org_id"], "userId": revoked["user_id"],
-             "role": "admin", "from": "active", "to": "revoked", "reason": reason},
-            request_id=request_id, cur=cur,
+            "organization_admin.revoke",
+            "organization_membership",
+            membership_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            {
+                "orgId": revoked["org_id"],
+                "userId": revoked["user_id"],
+                "role": "admin",
+                "from": "active",
+                "to": "revoked",
+                "reason": reason,
+            },
+            request_id=request_id,
+            cur=cur,
         )
         result = _map_membership(revoked)
     # D7: 角色变更后立即失效鉴权缓存
@@ -834,25 +953,35 @@ def apply_organization(user: dict, body: dict) -> dict:
                     RETURNING id, applicant_user_id, status, version
                     """,
                 (
-                    user_id, requested_name, body.get("requestedType"),
-                    body.get("creditCode"), body.get("website"), body.get("region"),
-                    body.get("address"), body.get("contactName"), contact_phone,
-                    contact_email, body.get("proofMaterial"),
+                    user_id,
+                    requested_name,
+                    body.get("requestedType"),
+                    body.get("creditCode"),
+                    body.get("website"),
+                    body.get("region"),
+                    body.get("address"),
+                    body.get("contactName"),
+                    contact_phone,
+                    contact_email,
+                    body.get("proofMaterial"),
                 ),
             )
             application = cur.fetchone()
             audit_record(
-                "membership.apply_org", "organization_application", application["id"],
-                user_id, user.get("userNo", ""),
-                {"orgId": None, "userId": user_id, "requestedName": requested_name}, cur=cur,
+                "membership.apply_org",
+                "organization_application",
+                application["id"],
+                user_id,
+                user.get("userNo", ""),
+                {"orgId": None, "userId": user_id, "requestedName": requested_name},
+                cur=cur,
             )
             return _map_application(application)
     except psycopg2.IntegrityError as exc:
         _duplicate_conflict(exc, "已有待审核的机构入驻申请")
 
 
-def approve_organization_application(admin: dict, application_id: int, version: int,
-                                     request_id=None) -> dict:
+def approve_organization_application(admin: dict, application_id: int, version: int, request_id=None) -> dict:
     try:
         with transaction() as conn, conn.cursor() as cur:
             _assert_system_admin(cur, admin)
@@ -899,20 +1028,38 @@ def approve_organization_application(admin: dict, application_id: int, version: 
                             'approved', %s, CURRENT_TIMESTAMP)
                     RETURNING id
                     """,
-                (kind, application["requested_name"], application.get("region"),
-                 application.get("credit_code"), kind,
-                 application["applicant_user_id"]),
+                (
+                    kind,
+                    application["requested_name"],
+                    application.get("region"),
+                    application.get("credit_code"),
+                    kind,
+                    application["applicant_user_id"],
+                ),
             )
             org_id = cur.fetchone()["id"]
             membership = _activate_membership(
-                cur, application["applicant_user_id"], org_id, "admin", int(admin["userId"]),
+                cur,
+                application["applicant_user_id"],
+                org_id,
+                "admin",
+                int(admin["userId"]),
             )
             audit_record(
-                "organization_application.approve", "organization_application", application_id,
-                admin["userId"], admin.get("userNo", ""),
-                {"orgId": org_id, "userId": application["applicant_user_id"],
-                 "membershipId": membership["id"], "from": "pending", "to": "approved"},
-                request_id=request_id, cur=cur,
+                "organization_application.approve",
+                "organization_application",
+                application_id,
+                admin["userId"],
+                admin.get("userNo", ""),
+                {
+                    "orgId": org_id,
+                    "userId": application["applicant_user_id"],
+                    "membershipId": membership["id"],
+                    "from": "pending",
+                    "to": "approved",
+                },
+                request_id=request_id,
+                cur=cur,
             )
             result = _map_application(reviewed)
             result["orgId"] = org_id
@@ -922,17 +1069,31 @@ def approve_organization_application(admin: dict, application_id: int, version: 
         _duplicate_conflict(exc, "同名有效机构已存在")
 
 
-def reject_organization_application(admin: dict, application_id: int, version: int,
-                                    reason: str, request_id=None) -> dict:
+def reject_organization_application(
+    admin: dict, application_id: int, version: int, reason: str, request_id=None
+) -> dict:
     return _reject_system_application(
-        admin, "organization_application", application_id, version, reason,
-        "机构入驻申请不存在", "organization_application.reject", request_id,
+        admin,
+        "organization_application",
+        application_id,
+        version,
+        reason,
+        "机构入驻申请不存在",
+        "organization_application.reject",
+        request_id,
     )
 
 
-def _reject_system_application(admin: dict, table: str, application_id: int, version: int,
-                               reason: str, missing_message: str, action: str,
-                               request_id=None) -> dict:
+def _reject_system_application(
+    admin: dict,
+    table: str,
+    application_id: int,
+    version: int,
+    reason: str,
+    missing_message: str,
+    action: str,
+    request_id=None,
+) -> dict:
     reason = (reason or "").strip()
     if not reason:
         raise bad_request("审核驳回必须填写原因")
@@ -972,7 +1133,13 @@ def _reject_system_application(admin: dict, table: str, application_id: int, ver
         if table == "organization_admin_application":
             details["orgId"] = application["org_id"]
         audit_record(
-            action, table, application_id, admin["userId"], admin.get("userNo", ""),
-            details, request_id=request_id, cur=cur,
+            action,
+            table,
+            application_id,
+            admin["userId"],
+            admin.get("userNo", ""),
+            details,
+            request_id=request_id,
+            cur=cur,
         )
         return _map_application(reviewed)

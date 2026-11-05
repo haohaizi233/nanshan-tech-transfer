@@ -1,9 +1,10 @@
-﻿"""
+"""
 统一机构路由 —— GET /institutions, GET /institutions/{id}
 
 Architecture source: 06-api-design.md §capital（公开数据，无需登录）
 P0-1：接管 legacy 三接口的数据源（institution 表），新路径按 kind 统一。
 """
+
 from fastapi import APIRouter, Request
 
 from core.errors import bad_request

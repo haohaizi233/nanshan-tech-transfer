@@ -42,6 +42,8 @@ def decode_token(token: str) -> dict:
 
 def decode_no_verify_exp(token: str) -> dict:
     return jwt.decode(
-        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM],
+        token,
+        settings.JWT_SECRET,
+        algorithms=[settings.JWT_ALGORITHM],
         options={"verify_exp": False},
     )

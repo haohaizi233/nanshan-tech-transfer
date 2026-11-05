@@ -1,7 +1,6 @@
 import psycopg2
 
-conn = psycopg2.connect(host='127.0.0.1', port=5432, user='postgres',
-                        password='postgres123', dbname='tech_transfer')
+conn = psycopg2.connect(host="127.0.0.1", port=5432, user="postgres", password="postgres123", dbname="tech_transfer")
 cur = conn.cursor()
 
 cur.execute(
@@ -14,19 +13,18 @@ cur.execute(
     """
 )
 rows = cur.fetchall()
-print('local-dev 身份映射（%d 条）:' % len(rows))
+print(f"local-dev 身份映射（{len(rows)} 条）:")
 for subject, name, roles, status in rows:
-    tag = ' <-- ADMIN' if 'admin' in (roles or []) else ''
-    print('  subject=%-24s name=%-12s roles=%s status=%s%s'
-          % (subject, name, roles, status, tag))
+    tag = " <-- ADMIN" if "admin" in (roles or []) else ""
+    print(f"  subject={subject:<24} name={name:<12} roles={roles} status={status}{tag}")
 
 cur.execute("SELECT COUNT(*), COUNT(*) FILTER (WHERE 'admin' = ANY(roles)) FROM app_user")
 total, admins = cur.fetchone()
 print()
-print('app_user 总数=%s，含 admin 角色=%s' % (total, admins))
+print(f"app_user 总数={total}，含 admin 角色={admins}")
 
 cur.execute("SELECT id, user_no, display_name, roles FROM app_user WHERE 'admin' = ANY(roles)")
 for uid, uno, name, roles in cur.fetchall():
-    print('  admin 用户: id=%s userNo=%s name=%s roles=%s' % (uid, uno, name, roles))
+    print(f"  admin 用户: id={uid} userNo={uno} name={name} roles={roles}")
 
 conn.close()

@@ -11,8 +11,9 @@
   由多维 1:1 派生，视图 scores 字段保持旧形状；
 - 旧数据（enhance 前、dimensions 为空）不补造新维度分。
 """
+
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import jwt
@@ -72,7 +73,7 @@ def _new_eval_row(**overrides):
         ],
         "report_sections": [{"heading": "综合评价", "content": "内容A"}],
         "rating": "fair",
-        "created_at": datetime(2026, 10, 20, 12, 0, 0, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC),
     }
     row.update(overrides)
     return row
@@ -95,7 +96,7 @@ def _legacy_eval_row(**overrides):
         "dimensions": None,
         "report_sections": None,
         "rating": None,
-        "created_at": datetime(2026, 9, 1, 8, 0, 0, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 9, 1, 8, 0, 0, tzinfo=UTC),
     }
     row.update(overrides)
     return row
@@ -105,8 +106,12 @@ def _legacy_eval_row(**overrides):
 def client():
     from fastapi.testclient import TestClient
 
-    with patch("db.init_pool"), patch("db.close_pool"), \
-            patch("db.get_cursor") as get_cursor, patch("db.get_conn") as get_conn:
+    with (
+        patch("db.init_pool"),
+        patch("db.close_pool"),
+        patch("db.get_cursor") as get_cursor,
+        patch("db.get_conn") as get_conn,
+    ):
         cursor = MagicMock()
         cursor.fetchone.return_value = None
         cursor.fetchall.return_value = []
@@ -114,6 +119,7 @@ def client():
         connection = MagicMock()
         get_conn.return_value = _mock_cursor_context(connection)
         from app import app
+
         with TestClient(app, raise_server_exceptions=False) as test_client:
             yield test_client
 
@@ -122,8 +128,12 @@ def _auth(user_id):
     now = int(time.time())
     token = jwt.encode(
         {
-            "sub": str(user_id), "userNo": f"U{user_id:03d}", "roles": ["user"],
-            "type": "access", "iat": now, "exp": now + 3600,
+            "sub": str(user_id),
+            "userNo": f"U{user_id:03d}",
+            "roles": ["user"],
+            "type": "access",
+            "iat": now,
+            "exp": now + 3600,
         },
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
@@ -135,36 +145,51 @@ def _auth(user_id):
 class TestDimensionRegistry:
     def test_six_dimensions_in_display_order(self):
         from modules.ai.evaluation import DIMENSION_KEYS
+
         assert DIMENSION_KEYS == (
-            "innovation", "techMaturity", "marketProspect",
-            "teamStrength", "cooperation", "riskAssessment",
+            "innovation",
+            "techMaturity",
+            "marketProspect",
+            "teamStrength",
+            "cooperation",
+            "riskAssessment",
         )
 
     def test_weights_sum_to_one(self):
         from modules.ai.evaluation import DIMENSION_WEIGHTS
+
         assert abs(sum(DIMENSION_WEIGHTS.values()) - 1.0) < 1e-9
 
     def test_all_weights_positive(self):
         from modules.ai.evaluation import DIMENSION_WEIGHTS
+
         assert all(0 < w < 1 for w in DIMENSION_WEIGHTS.values())
 
     def test_every_dimension_has_label_and_hint(self):
         from modules.ai.evaluation import DIMENSIONS
+
         for dim in DIMENSIONS:
             assert dim["label"]
             assert dim["hint"]
 
     def test_label_weight_maps_cover_registry(self):
         from modules.ai.evaluation import (
-            DIMENSION_KEYS, DIMENSION_LABELS, DIMENSION_WEIGHTS,
+            DIMENSION_KEYS,
+            DIMENSION_LABELS,
+            DIMENSION_WEIGHTS,
         )
+
         assert set(DIMENSION_LABELS) == set(DIMENSION_KEYS)
         assert set(DIMENSION_WEIGHTS) == set(DIMENSION_KEYS)
 
     def test_legacy_map_targets_are_real_dimensions(self):
         from modules.ai.evaluation import DIMENSION_KEYS, LEGACY_SCORE_MAP
+
         assert set(LEGACY_SCORE_MAP) == {
-            "techFeature", "applyScope", "maturity", "cooperation",
+            "techFeature",
+            "applyScope",
+            "maturity",
+            "cooperation",
         }
         assert set(LEGACY_SCORE_MAP.values()) <= set(DIMENSION_KEYS)
 
@@ -173,83 +198,124 @@ class TestDimensionRegistry:
 class TestScoreMath:
     def test_clamp_score_normal(self):
         from modules.ai.evaluation import clamp_score
+
         assert clamp_score(88) == 88.0
         assert clamp_score("72.5") == 72.5
 
     def test_clamp_score_rounds_to_one_decimal(self):
         from modules.ai.evaluation import clamp_score
+
         assert clamp_score(88.88) == 88.9
 
-    @pytest.mark.parametrize("value,expected", [
-        (150, 100.0), ("120", 100.0), (-5, 0.0), ("-1", 0.0), (0, 0.0), (100, 100.0),
-    ])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (150, 100.0),
+            ("120", 100.0),
+            (-5, 0.0),
+            ("-1", 0.0),
+            (0, 0.0),
+            (100, 100.0),
+        ],
+    )
     def test_clamp_score_bounds(self, value, expected):
         from modules.ai.evaluation import clamp_score
+
         assert clamp_score(value) == expected
 
     @pytest.mark.parametrize("value", ["abc", None, [1], {}])
     def test_clamp_score_rejects_non_numeric(self, value):
         from modules.ai.evaluation import EvaluationDataError, clamp_score
+
         with pytest.raises(EvaluationDataError):
             clamp_score(value)
 
     def test_compute_total_weighted(self):
         from modules.ai.evaluation import compute_total
+
         scores = {
-            "innovation": 80, "techMaturity": 90, "marketProspect": 70,
-            "teamStrength": 60, "cooperation": 50, "riskAssessment": 40,
+            "innovation": 80,
+            "techMaturity": 90,
+            "marketProspect": 70,
+            "teamStrength": 60,
+            "cooperation": 50,
+            "riskAssessment": 40,
         }
         # 80*.18 + 90*.22 + 70*.20 + 60*.15 + 50*.12 + 40*.13 = 68.4
         assert compute_total(scores) == 68.4
 
     def test_compute_total_all_zero(self):
         from modules.ai.evaluation import compute_total
+
         assert compute_total({}) == 0.0
 
     def test_compute_total_missing_dimension_counts_zero(self):
         from modules.ai.evaluation import compute_total
+
         assert compute_total({"innovation": 100}) == 18.0
 
     def test_compute_total_ignores_unknown_dimensions(self):
         from modules.ai.evaluation import compute_total
+
         scores = {
-            "innovation": 100, "techMaturity": 0, "marketProspect": 0,
-            "teamStrength": 0, "cooperation": 0, "riskAssessment": 0,
+            "innovation": 100,
+            "techMaturity": 0,
+            "marketProspect": 0,
+            "teamStrength": 0,
+            "cooperation": 0,
+            "riskAssessment": 0,
             "bogus": 100,
         }
         assert compute_total(scores) == 18.0
 
     def test_compute_total_clamps_input_scores(self):
         from modules.ai.evaluation import compute_total
+
         scores = {
-            "innovation": 150, "techMaturity": -20, "marketProspect": 0,
-            "teamStrength": 0, "cooperation": 0, "riskAssessment": 0,
+            "innovation": 150,
+            "techMaturity": -20,
+            "marketProspect": 0,
+            "teamStrength": 0,
+            "cooperation": 0,
+            "riskAssessment": 0,
         }
         assert compute_total(scores) == 18.0  # 100 * 0.18
 
-    @pytest.mark.parametrize("total,code,label", [
-        (100.0, "excellent", "优秀"),
-        (85.0, "excellent", "优秀"),
-        (84.9, "good", "良好"),
-        (70.0, "good", "良好"),
-        (69.9, "fair", "一般"),
-        (60.0, "fair", "一般"),
-        (59.9, "weak", "待改进"),
-        (0.0, "weak", "待改进"),
-    ])
+    @pytest.mark.parametrize(
+        "total,code,label",
+        [
+            (100.0, "excellent", "优秀"),
+            (85.0, "excellent", "优秀"),
+            (84.9, "good", "良好"),
+            (70.0, "good", "良好"),
+            (69.9, "fair", "一般"),
+            (60.0, "fair", "一般"),
+            (59.9, "weak", "待改进"),
+            (0.0, "weak", "待改进"),
+        ],
+    )
     def test_rating_bands(self, total, code, label):
         from modules.ai.evaluation import rating_for
+
         assert rating_for(total) == (code, label)
 
-    @pytest.mark.parametrize("total,star", [
-        (100.0, 5.0), (80.0, 4.0), (76.0, 3.8), (0.0, 0.0),
-    ])
+    @pytest.mark.parametrize(
+        "total,star",
+        [
+            (100.0, 5.0),
+            (80.0, 4.0),
+            (76.0, 3.8),
+            (0.0, 0.0),
+        ],
+    )
     def test_star_for(self, total, star):
         from modules.ai.evaluation import star_for
+
         assert star_for(total) == star
 
     def test_star_for_clamps_range(self):
         from modules.ai.evaluation import star_for
+
         assert star_for(130.0) == 5.0
         assert star_for(-10.0) == 0.0
 
@@ -258,11 +324,16 @@ class TestScoreMath:
 class TestNormalization:
     def test_dict_form_full(self):
         from modules.ai.evaluation import normalize_llm_result
+
         result = normalize_llm_result(_full_dimensions_payload())
         keys = [d["key"] for d in result["dimensions"]]
         assert keys == [
-            "innovation", "techMaturity", "marketProspect",
-            "teamStrength", "cooperation", "riskAssessment",
+            "innovation",
+            "techMaturity",
+            "marketProspect",
+            "teamStrength",
+            "cooperation",
+            "riskAssessment",
         ]
         first = result["dimensions"][0]
         assert first["label"] == "创新性"
@@ -272,6 +343,7 @@ class TestNormalization:
 
     def test_list_form_full(self):
         from modules.ai.evaluation import normalize_llm_result
+
         data = {
             "dimensions": [
                 {"key": "innovation", "score": 80},
@@ -283,11 +355,11 @@ class TestNormalization:
             ],
         }
         result = normalize_llm_result(data)
-        assert [d["score"] for d in result["dimensions"]] == \
-            [80.0, 90.0, 70.0, 60.0, 50.0, 40.0]
+        assert [d["score"] for d in result["dimensions"]] == [80.0, 90.0, 70.0, 60.0, 50.0, 40.0]
 
     def test_list_form_ignores_unknown_keys(self):
         from modules.ai.evaluation import normalize_llm_result
+
         data = {
             "dimensions": [
                 {"key": "innovation", "score": 80},
@@ -305,6 +377,7 @@ class TestNormalization:
 
     def test_flat_form(self):
         from modules.ai.evaluation import normalize_llm_result
+
         data = {
             "dimensions": {
                 "innovation": 88,
@@ -321,6 +394,7 @@ class TestNormalization:
 
     def test_missing_dimension_raises(self):
         from modules.ai.evaluation import EvaluationDataError, normalize_llm_result
+
         data = _full_dimensions_payload()
         del data["dimensions"]["innovation"]
         with pytest.raises(EvaluationDataError):
@@ -329,16 +403,19 @@ class TestNormalization:
     @pytest.mark.parametrize("payload", [[1, 2], "text", 42, None])
     def test_non_object_raises(self, payload):
         from modules.ai.evaluation import EvaluationDataError, normalize_llm_result
+
         with pytest.raises(EvaluationDataError):
             normalize_llm_result(payload)
 
     def test_missing_dimensions_raises(self):
         from modules.ai.evaluation import EvaluationDataError, normalize_llm_result
+
         with pytest.raises(EvaluationDataError):
             normalize_llm_result({"conclusion": "x"})
 
     def test_invalid_score_raises(self):
         from modules.ai.evaluation import EvaluationDataError, normalize_llm_result
+
         data = _full_dimensions_payload()
         data["dimensions"]["innovation"]["score"] = "abc"
         with pytest.raises(EvaluationDataError):
@@ -346,6 +423,7 @@ class TestNormalization:
 
     def test_comment_clipped_to_200(self):
         from modules.ai.evaluation import MAX_COMMENT_CHARS, normalize_llm_result
+
         data = _full_dimensions_payload()
         data["dimensions"]["innovation"]["comment"] = "x" * 300
         result = normalize_llm_result(data)
@@ -353,9 +431,11 @@ class TestNormalization:
 
     def test_conclusion_aliases_and_clip(self):
         from modules.ai.evaluation import normalize_llm_result
+
         result = normalize_llm_result(
             _full_dimensions_payload(
-                conclusion=None, summary="别名结论" * 200,
+                conclusion=None,
+                summary="别名结论" * 200,
             )
         )
         assert result["conclusion"].startswith("别名结论")
@@ -363,11 +443,13 @@ class TestNormalization:
 
     def test_highlights_string_becomes_list(self):
         from modules.ai.evaluation import normalize_llm_result
+
         result = normalize_llm_result(_full_dimensions_payload(highlights="单条亮点"))
         assert result["highlights"] == ["单条亮点"]
 
     def test_highlights_capped_and_clipped(self):
         from modules.ai.evaluation import MAX_HIGHLIGHTS, normalize_llm_result
+
         result = normalize_llm_result(
             _full_dimensions_payload(
                 highlights=["x" * 300] + [f"h{i}" for i in range(10)] + [""],
@@ -379,27 +461,25 @@ class TestNormalization:
 
     def test_highlights_suggestions_alias(self):
         from modules.ai.evaluation import normalize_llm_result
-        result = normalize_llm_result(
-            _full_dimensions_payload(highlights=None, suggestions=["s1", "s2"])
-        )
+
+        result = normalize_llm_result(_full_dimensions_payload(highlights=None, suggestions=["s1", "s2"]))
         assert result["highlights"] == ["s1", "s2"]
 
     def test_report_dict_becomes_list(self):
         from modules.ai.evaluation import normalize_llm_result
-        result = normalize_llm_result(
-            _full_dimensions_payload(report={"heading": "h", "content": "c"})
-        )
+
+        result = normalize_llm_result(_full_dimensions_payload(report={"heading": "h", "content": "c"}))
         assert result["report"] == [{"heading": "h", "content": "c"}]
 
     def test_report_title_body_alias(self):
         from modules.ai.evaluation import normalize_llm_result
-        result = normalize_llm_result(
-            _full_dimensions_payload(report=[{"title": "h", "body": "c"}])
-        )
+
+        result = normalize_llm_result(_full_dimensions_payload(report=[{"title": "h", "body": "c"}]))
         assert result["report"] == [{"heading": "h", "content": "c"}]
 
     def test_report_skips_invalid_and_empty_items(self):
         from modules.ai.evaluation import normalize_llm_result
+
         result = normalize_llm_result(
             _full_dimensions_payload(
                 report=[
@@ -414,21 +494,22 @@ class TestNormalization:
 
     def test_report_capped_and_content_clipped(self):
         from modules.ai.evaluation import (
-            MAX_REPORT_SECTIONS, MAX_SECTION_CONTENT_CHARS, normalize_llm_result,
+            MAX_REPORT_SECTIONS,
+            MAX_SECTION_CONTENT_CHARS,
+            normalize_llm_result,
         )
+
         result = normalize_llm_result(
             _full_dimensions_payload(
-                report=[
-                    {"heading": f"h{i}", "content": "y" * 2000} for i in range(12)
-                ],
+                report=[{"heading": f"h{i}", "content": "y" * 2000} for i in range(12)],
             )
         )
         assert len(result["report"]) == MAX_REPORT_SECTIONS == 8
-        assert all(len(s["content"]) == MAX_SECTION_CONTENT_CHARS == 1200
-                   for s in result["report"])
+        assert all(len(s["content"]) == MAX_SECTION_CONTENT_CHARS == 1200 for s in result["report"])
 
     def test_report_sections_alias(self):
         from modules.ai.evaluation import normalize_llm_result
+
         data = _full_dimensions_payload()
         del data["report"]
         data["reportSections"] = [{"heading": "h", "content": "c"}]
@@ -440,6 +521,7 @@ class TestNormalization:
 class TestAssembleResult:
     def test_full_assemble(self):
         from modules.ai.evaluation import assemble_result, normalize_llm_result
+
         result = assemble_result(normalize_llm_result(_full_dimensions_payload()))
         assert result["totalScore"] == 68.4
         assert result["starScore"] == 3.4
@@ -451,6 +533,7 @@ class TestAssembleResult:
 
     def test_legacy_scores_derived_one_to_one(self):
         from modules.ai.evaluation import assemble_result, normalize_llm_result
+
         result = assemble_result(normalize_llm_result(_full_dimensions_payload()))
         assert result["legacyScores"] == {
             "techFeature": 80.0,
@@ -461,9 +544,12 @@ class TestAssembleResult:
 
     def test_dimensions_carried_through_with_registry_metadata(self):
         from modules.ai.evaluation import (
-            DIMENSION_LABELS, DIMENSION_WEIGHTS, assemble_result,
+            DIMENSION_LABELS,
+            DIMENSION_WEIGHTS,
+            assemble_result,
             normalize_llm_result,
         )
+
         result = assemble_result(normalize_llm_result(_full_dimensions_payload()))
         for dim in result["dimensions"]:
             assert dim["label"] == DIMENSION_LABELS[dim["key"]]
@@ -471,12 +557,17 @@ class TestAssembleResult:
 
     def test_perfect_scores_rate_excellent(self):
         from modules.ai.evaluation import assemble_result, normalize_llm_result
+
         data = {
             "dimensions": {
                 key: {"score": 100}
                 for key in (
-                    "innovation", "techMaturity", "marketProspect",
-                    "teamStrength", "cooperation", "riskAssessment",
+                    "innovation",
+                    "techMaturity",
+                    "marketProspect",
+                    "teamStrength",
+                    "cooperation",
+                    "riskAssessment",
                 )
             },
         }
@@ -490,7 +581,8 @@ class TestAssembleResult:
 # ── build_evaluation_view：DB 行 → API 视图 ────────────────────
 class TestBuildEvaluationView:
     def test_new_data_full_multidim_view(self):
-        from modules.ai.evaluation import build_evaluation_view, star_for
+        from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_new_eval_row())
         assert view["evaluationId"] == 11
         assert view["taskId"] == 101
@@ -509,6 +601,7 @@ class TestBuildEvaluationView:
 
     def test_new_data_dimensions_enriched(self):
         from modules.ai.evaluation import build_evaluation_view, star_for
+
         view = build_evaluation_view(_new_eval_row())
         assert len(view["dimensions"]) == 6
         first = view["dimensions"][0]
@@ -521,11 +614,13 @@ class TestBuildEvaluationView:
 
     def test_new_data_report_preserved(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_new_eval_row())
         assert view["report"] == [{"heading": "综合评价", "content": "内容A"}]
 
     def test_new_data_rating_from_row(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_new_eval_row())
         assert view["rating"] == "fair"
         assert view["ratingLabel"] == "一般"
@@ -533,12 +628,12 @@ class TestBuildEvaluationView:
 
     def test_json_string_columns_parsed(self):
         import json
+
         from modules.ai.evaluation import build_evaluation_view
+
         row = _new_eval_row(
             dimensions=json.dumps(_new_eval_row()["dimensions"], ensure_ascii=False),
-            report_sections=json.dumps(
-                [{"heading": "综合评价", "content": "内容A"}], ensure_ascii=False
-            ),
+            report_sections=json.dumps([{"heading": "综合评价", "content": "内容A"}], ensure_ascii=False),
             suggestions=json.dumps(["亮点A", "亮点B"], ensure_ascii=False),
         )
         view = build_evaluation_view(row)
@@ -548,6 +643,7 @@ class TestBuildEvaluationView:
 
     def test_legacy_data_keeps_only_real_scores(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_legacy_eval_row())
         # 禁止给旧数据补造新维度分
         assert view["dimensions"] == []
@@ -562,33 +658,41 @@ class TestBuildEvaluationView:
 
     def test_legacy_data_rating_computed_from_total(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_legacy_eval_row())
-        assert view["rating"] == "good"   # 72.0 ≥ 70
+        assert view["rating"] == "good"  # 72.0 ≥ 70
         assert view["ratingLabel"] == "良好"
         assert view["starScore"] == 3.6
 
     def test_invalid_row_rating_falls_back_to_computed(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_new_eval_row(rating="great"))
         assert view["rating"] == "fair"
         assert view["ratingLabel"] == "一般"
 
     def test_highlights_single_string_normalized(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_legacy_eval_row(suggestions="旧亮点"))
         assert view["highlights"] == ["旧亮点"]
 
     def test_unknown_dimension_keys_filtered(self):
         from modules.ai.evaluation import build_evaluation_view
-        row = _new_eval_row(dimensions=_new_eval_row()["dimensions"] + [
-            {"key": "bogus", "score": 99},
-        ])
+
+        row = _new_eval_row(
+            dimensions=_new_eval_row()["dimensions"]
+            + [
+                {"key": "bogus", "score": 99},
+            ]
+        )
         view = build_evaluation_view(row)
         assert len(view["dimensions"]) == 6
         assert all(d["key"] != "bogus" for d in view["dimensions"])
 
     def test_model_version_placeholder_present(self):
         from modules.ai.evaluation import build_evaluation_view
+
         view = build_evaluation_view(_new_eval_row())
         assert "modelVersionLabel" in view
 
@@ -598,6 +702,7 @@ class TestListEvaluations:
     @patch("modules.ai.service.get_cursor")
     def test_history_returns_paginated_views_without_report(self, mock_gc):
         from modules.ai.service import list_evaluations
+
         cur = MagicMock()
         cur.fetchone.return_value = {"n": 2}
         cur.fetchall.return_value = [
@@ -621,6 +726,7 @@ class TestListEvaluations:
     @patch("modules.ai.service.get_cursor")
     def test_history_page_clamped(self, mock_gc):
         from modules.ai.service import list_evaluations
+
         cur = MagicMock()
         cur.fetchone.return_value = {"n": 0}
         cur.fetchall.return_value = []
@@ -636,6 +742,7 @@ class TestListEvaluations:
     @patch("modules.ai.service.get_cursor")
     def test_history_offset_follows_page(self, mock_gc):
         from modules.ai.service import list_evaluations
+
         cur = MagicMock()
         cur.fetchone.return_value = {"n": 0}
         cur.fetchall.return_value = []
@@ -648,6 +755,7 @@ class TestListEvaluations:
     @patch("modules.ai.service.get_cursor")
     def test_history_filters_by_achievement(self, mock_gc):
         from modules.ai.service import list_evaluations
+
         cur = MagicMock()
         cur.fetchone.return_value = {"n": 0}
         cur.fetchall.return_value = []
@@ -664,6 +772,7 @@ class TestListEvaluations:
     @patch("modules.ai.service.get_cursor")
     def test_history_scoped_to_current_user(self, mock_gc):
         from modules.ai.service import list_evaluations
+
         cur = MagicMock()
         cur.fetchone.return_value = {"n": 0}
         cur.fetchall.return_value = []
@@ -676,6 +785,7 @@ class TestListEvaluations:
     @patch("modules.ai.service.get_cursor")
     def test_history_empty(self, mock_gc):
         from modules.ai.service import list_evaluations
+
         cur = MagicMock()
         cur.fetchone.return_value = None  # COUNT 行缺失防御
         cur.fetchall.return_value = []
@@ -683,7 +793,10 @@ class TestListEvaluations:
 
         result = list_evaluations(7)
         assert result == {
-            "list": [], "total": 0, "page": 1, "pageSize": 10,
+            "list": [],
+            "total": 0,
+            "page": 1,
+            "pageSize": 10,
         }
 
 
@@ -697,18 +810,27 @@ class TestEvaluationHistoryRoute:
     @patch("routes.ai.list_evaluations")
     def test_history_contract(self, list_evaluations, _active, client):
         payload = {
-            "list": [{
-                "evaluationId": 11, "taskId": 101, "achievementId": 5,
-                "achievementTitle": "测试成果",
-                "scores": {"techFeature": 80.0, "applyScope": 70.0,
-                           "maturity": 90.0, "cooperation": 50.0},
-                "dimensions": [], "report": [],
-                "totalScore": 68.4, "starScore": 3.4,
-                "rating": "fair", "ratingLabel": "一般",
-                "conclusion": "总体良好", "highlights": ["亮点A"],
-                "createdAt": "2026-10-20T12:00:00+00:00",
-            }],
-            "total": 1, "page": 1, "pageSize": 10,
+            "list": [
+                {
+                    "evaluationId": 11,
+                    "taskId": 101,
+                    "achievementId": 5,
+                    "achievementTitle": "测试成果",
+                    "scores": {"techFeature": 80.0, "applyScope": 70.0, "maturity": 90.0, "cooperation": 50.0},
+                    "dimensions": [],
+                    "report": [],
+                    "totalScore": 68.4,
+                    "starScore": 3.4,
+                    "rating": "fair",
+                    "ratingLabel": "一般",
+                    "conclusion": "总体良好",
+                    "highlights": ["亮点A"],
+                    "createdAt": "2026-10-20T12:00:00+00:00",
+                }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 10,
         }
         list_evaluations.return_value = payload
 
@@ -736,9 +858,7 @@ class TestEvaluationHistoryRoute:
     @patch("core.middleware._user_is_active", return_value=True)
     @patch("routes.ai.list_evaluations")
     def test_history_rejects_invalid_achievement_id(self, list_evaluations, _active, client, raw):
-        resp = client.get(
-            f"{BASE}/ai/evaluations?achievementId={raw}", headers=_auth(7)
-        )
+        resp = client.get(f"{BASE}/ai/evaluations?achievementId={raw}", headers=_auth(7))
         assert resp.status_code == 400
         assert resp.json()["code"] == "TT_COMMON_40001"
         list_evaluations.assert_not_called()

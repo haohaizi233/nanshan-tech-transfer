@@ -29,7 +29,9 @@ def main():
             record_history(user_id, "keyword", f"{prefix}{number}")
         record_history(user_id, "assignee", f"{prefix}assignee")
         keyword_rows = [item for item in list_history(user_id, "keyword")["list"] if item["keyword"].startswith(prefix)]
-        assignee_rows = [item for item in list_history(user_id, "assignee")["list"] if item["keyword"].startswith(prefix)]
+        assignee_rows = [
+            item for item in list_history(user_id, "assignee")["list"] if item["keyword"].startswith(prefix)
+        ]
         assert len(keyword_rows) == 10
         assert keyword_rows[0]["keyword"] == f"{prefix}10"
         assert len(assignee_rows) == 1
@@ -61,7 +63,9 @@ def main():
         assert list_history(user_id, "assignee")["list"]
     finally:
         with get_cursor(commit=True) as cur:
-            cur.execute("DELETE FROM patent_search_history WHERE user_id=%s AND keyword LIKE %s", (user_id, prefix + "%"))
+            cur.execute(
+                "DELETE FROM patent_search_history WHERE user_id=%s AND keyword LIKE %s", (user_id, prefix + "%")
+            )
 
     print("PASS: patent search history validation")
 

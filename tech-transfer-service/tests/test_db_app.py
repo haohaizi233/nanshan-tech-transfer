@@ -1,6 +1,7 @@
 """
 Comprehensive tests for db.py and app.py (lifespan, health, middleware).
 """
+
 import time
 from unittest.mock import MagicMock, patch
 
@@ -8,9 +9,11 @@ import pytest
 
 # ── db.py ───────────────────────────────────────────────────
 
+
 class TestDB:
     def test_connect_kwargs(self):
         from db import _connect_kwargs
+
         kwargs = _connect_kwargs()
         assert "host" in kwargs
         assert "port" in kwargs
@@ -25,6 +28,7 @@ class TestDB:
     @patch("db.settings")
     def test_init_pool_success(self, mock_settings, mock_pool_cls):
         import db
+
         db._pool = None  # Reset
         mock_settings.DB_POOL_MIN = 2
         mock_settings.DB_POOL_MAX = 10
@@ -44,6 +48,7 @@ class TestDB:
     @patch("db.settings")
     def test_init_pool_idempotent(self, mock_settings, mock_pool_cls):
         import db
+
         db._pool = MagicMock()  # Already initialized
         db.init_pool()
         mock_pool_cls.assert_not_called()
@@ -54,6 +59,7 @@ class TestDB:
     def test_init_pool_degraded(self, mock_settings, mock_pool_cls):
         """DB unavailable: should degrade to empty pool."""
         import db
+
         db._pool = None
         mock_settings.DB_POOL_MIN = 2
         mock_settings.DB_POOL_MAX = 10
@@ -66,6 +72,7 @@ class TestDB:
         mock_settings.APP_NAME = "test"
         # First call raises, second succeeds (degraded pool)
         import psycopg2
+
         mock_pool_cls.side_effect = [psycopg2.Error("connection refused"), MagicMock()]
         db.init_pool()
         assert mock_pool_cls.call_count == 2
@@ -73,6 +80,7 @@ class TestDB:
 
     def test_close_pool(self):
         import db
+
         mock_pool = MagicMock()
         db._pool = mock_pool
         db.close_pool()
@@ -81,11 +89,13 @@ class TestDB:
 
     def test_close_pool_idempotent(self):
         import db
+
         db._pool = None
         db.close_pool()  # Should not raise
 
     def test_ping_success(self):
         from db import _ping
+
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value = mock_cur
@@ -95,6 +105,7 @@ class TestDB:
 
     def test_ping_failure(self):
         from db import _ping
+
         mock_conn = MagicMock()
         mock_conn.cursor.side_effect = Exception("connection lost")
         assert _ping(mock_conn) is False
@@ -102,6 +113,7 @@ class TestDB:
     def test_release_conn_normal(self):
         import db as db_module
         from db import _release_conn
+
         mock_pool = MagicMock()
         db_module._pool = mock_pool
         mock_conn = MagicMock()
@@ -114,6 +126,7 @@ class TestDB:
         """After close_pool, release should close connection directly."""
         import db as db_module
         from db import _release_conn
+
         db_module._pool = None
         mock_conn = MagicMock()
         _release_conn(mock_conn)
@@ -123,6 +136,7 @@ class TestDB:
         """Old connections should be recycled."""
         import db as db_module
         from db import _CONN_RECYCLE_SECONDS, _release_conn
+
         mock_pool = MagicMock()
         db_module._pool = mock_pool
         mock_conn = MagicMock()
@@ -142,8 +156,7 @@ class TestDB:
         mock_cur = MagicMock()
         mock_conn.cursor.return_value = mock_cur
 
-        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), \
-             patch.object(db_module, "_release_conn"):
+        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), patch.object(db_module, "_release_conn"):
             with get_cursor(commit=False) as cur:
                 assert cur == mock_cur
             mock_conn.rollback.assert_called()
@@ -157,8 +170,7 @@ class TestDB:
         mock_cur = MagicMock()
         mock_conn.cursor.return_value = mock_cur
 
-        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), \
-             patch.object(db_module, "_release_conn"):
+        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), patch.object(db_module, "_release_conn"):
             with get_cursor(commit=True) as cur:
                 cur.execute("INSERT ...")
             mock_conn.commit.assert_called_once()
@@ -172,8 +184,7 @@ class TestDB:
         mock_cur = MagicMock()
         mock_conn.cursor.return_value = mock_cur
 
-        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), \
-             patch.object(db_module, "_release_conn"):
+        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), patch.object(db_module, "_release_conn"):
             with pytest.raises(ValueError):
                 with get_cursor(commit=True):
                     raise ValueError("test error")
@@ -186,8 +197,7 @@ class TestDB:
 
         mock_conn = MagicMock()
 
-        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), \
-             patch.object(db_module, "_release_conn"):
+        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), patch.object(db_module, "_release_conn"):
             with transaction() as conn:
                 assert conn == mock_conn
             mock_conn.commit.assert_called_once()
@@ -199,8 +209,7 @@ class TestDB:
 
         mock_conn = MagicMock()
 
-        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), \
-             patch.object(db_module, "_release_conn"):
+        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), patch.object(db_module, "_release_conn"):
             with pytest.raises(ValueError):
                 with transaction():
                     raise ValueError("test error")
@@ -234,11 +243,13 @@ class TestDB:
         # Mark as dirty
         db_module._dirty_conns.add(mock_conn_id)
 
-        with patch.object(db_module, "_acquire_conn", return_value=mock_conn), \
-             patch.object(db_module, "_ping", return_value=False), \
-             patch.object(db_module, "_replace_conn", return_value=MagicMock()) as mock_replace, \
-             patch.object(db_module, "_release_conn"):
-            with get_conn() as conn:
+        with (
+            patch.object(db_module, "_acquire_conn", return_value=mock_conn),
+            patch.object(db_module, "_ping", return_value=False),
+            patch.object(db_module, "_replace_conn", return_value=MagicMock()) as mock_replace,
+            patch.object(db_module, "_release_conn"),
+        ):
+            with get_conn():
                 pass
             mock_replace.assert_called_once()
         db_module._dirty_conns.discard(mock_conn_id)
@@ -246,17 +257,22 @@ class TestDB:
 
 # ── app.py ──────────────────────────────────────────────────
 
+
 class TestApp:
     def test_app_importable(self):
         """app module should be importable without errors."""
         from app import app
+
         assert app.title == "tech-transfer-service"
 
     def test_app_routes_count(self):
         """App should have a significant number of routes."""
         from app import app
-        routes = [r for r in app.routes if hasattr(r, "methods")]
-        assert len(routes) > 20  # We have 144+ routes
+
+        # FastAPI 0.14+ 的 include_router 懒加载（_IncludedRouter）不再把子路由摊平进
+        # app.routes，直接数列表会漏掉业务路由，改用 openapi schema 统计真实路由数
+        paths = app.openapi()["paths"]
+        assert len(paths) > 20  # We have 144+ routes
 
     def test_health_endpoint(self):
         """Health endpoint should exist."""
@@ -283,11 +299,11 @@ class TestApp:
 
         from app import app
 
-        with patch("db.init_pool"), \
-             patch("db.close_pool"), \
-             patch("db.get_cursor") as mock_gc:
+        # health() 使用的是 app 模块内导入的 get_cursor 引用，必须 patch "app.get_cursor"
+        with patch("app.get_cursor") as mock_gc:
             mock_cur = MagicMock()
             import psycopg2
+
             mock_cur.execute.side_effect = psycopg2.OperationalError("DB down")
             mock_gc.return_value.__enter__ = MagicMock(return_value=mock_cur)
             mock_gc.return_value.__exit__ = MagicMock(return_value=False)
@@ -305,9 +321,7 @@ class TestApp:
 
         from app import app
 
-        with patch("db.init_pool"), \
-             patch("db.close_pool"), \
-             patch("db.get_cursor") as mock_gc:
+        with patch("db.init_pool"), patch("db.close_pool"), patch("db.get_cursor") as mock_gc:
             mock_cur = MagicMock()
             mock_cur.fetchone.return_value = (1,)
             mock_gc.return_value.__enter__ = MagicMock(return_value=mock_cur)
@@ -323,9 +337,7 @@ class TestApp:
 
         from app import app
 
-        with patch("db.init_pool"), \
-             patch("db.close_pool"), \
-             patch("db.get_cursor") as mock_gc:
+        with patch("db.init_pool"), patch("db.close_pool"), patch("db.get_cursor") as mock_gc:
             mock_cur = MagicMock()
             mock_cur.fetchone.return_value = (1,)
             mock_gc.return_value.__enter__ = MagicMock(return_value=mock_cur)
@@ -341,9 +353,7 @@ class TestApp:
 
         from app import app
 
-        with patch("db.init_pool"), \
-             patch("db.close_pool"), \
-             patch("db.get_cursor") as mock_gc:
+        with patch("db.init_pool"), patch("db.close_pool"), patch("db.get_cursor") as mock_gc:
             mock_cur = MagicMock()
             mock_cur.fetchone.return_value = (1,)
             mock_gc.return_value.__enter__ = MagicMock(return_value=mock_cur)
@@ -362,9 +372,7 @@ class TestApp:
 
         from app import app
 
-        with patch("db.init_pool"), \
-             patch("db.close_pool"), \
-             patch("db.get_cursor") as mock_gc:
+        with patch("db.init_pool"), patch("db.close_pool"), patch("db.get_cursor") as mock_gc:
             mock_cur = MagicMock()
             mock_gc.return_value.__enter__ = MagicMock(return_value=mock_cur)
             mock_gc.return_value.__exit__ = MagicMock(return_value=False)

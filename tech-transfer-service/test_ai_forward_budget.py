@@ -20,9 +20,9 @@ def test_proxy_does_not_retry_after_the_shared_request_budget_has_expired():
         patch.object(ai.time, "sleep"),
         patch.object(ai, "_AI_CONCURRENCY", BoundedSemaphore(1)),
         patch.object(ai.urllib.request, "urlopen", side_effect=timeout) as request,
+        pytest.raises(BizError),
     ):
-        with pytest.raises(BizError):
-            ai._forward_to_agent("找机器视觉成果")
+        ai._forward_to_agent("找机器视觉成果")
     assert request.call_count == 1
 
 

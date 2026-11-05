@@ -15,7 +15,10 @@ def test_profile_avatar_requires_owned_active_image_and_persists_file_id():
     def transaction(**kwargs):
         yield cursor
 
-    with patch.object(service, "get_cursor", transaction), patch.object(service, "build_user_response", return_value={"avatarFileId": 9}):
+    with (
+        patch.object(service, "get_cursor", transaction),
+        patch.object(service, "build_user_response", return_value={"avatarFileId": 9}),
+    ):
         result = service.update_my_profile(7, {"version": 1, "avatarFileId": 9})
     assert result["avatarFileId"] == 9
     statements = cursor.execute.call_args_list

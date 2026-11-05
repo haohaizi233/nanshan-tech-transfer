@@ -1,4 +1,5 @@
 """从导入文本或成果简介中拆出标题、联系方式、链接等结构化字段。"""
+
 from __future__ import annotations
 
 import re
@@ -12,24 +13,48 @@ URL_RE = re.compile(r"https?://[^\s）\]>，,;；]+", re.I)
 SPLIT_NAMES_RE = re.compile(r"[，,、;；/]+")
 
 FIELD_ALIASES = {
-    "成果名称": "title", "中文名称": "title", "项目名称": "title", "标题": "title",
-    "英文名称": "titleEn", "英文名": "titleEn",
-    "成果简介": "techIntro", "技术简介": "techIntro", "项目简介": "techIntro", "简介": "techIntro",
-    "来源单位": "sourceOrgName", "完成单位": "sourceOrgName", "依托单位": "sourceOrgName",
-    "所属机构": "sourceOrgName", "发布单位": "sourceOrgName",
-    "技术路线": "techRoute", "技术路径": "techRoute",
-    "联系人": "contactName", "联系人姓名": "contactName", "对接人": "contactName",
-    "团队负责人": "contactName", "负责人": "contactName",
-    "联系电话": "contactPhone", "电话": "contactPhone", "手机": "contactPhone",
+    "成果名称": "title",
+    "中文名称": "title",
+    "项目名称": "title",
+    "标题": "title",
+    "英文名称": "titleEn",
+    "英文名": "titleEn",
+    "成果简介": "techIntro",
+    "技术简介": "techIntro",
+    "项目简介": "techIntro",
+    "简介": "techIntro",
+    "来源单位": "sourceOrgName",
+    "完成单位": "sourceOrgName",
+    "依托单位": "sourceOrgName",
+    "所属机构": "sourceOrgName",
+    "发布单位": "sourceOrgName",
+    "技术路线": "techRoute",
+    "技术路径": "techRoute",
+    "联系人": "contactName",
+    "联系人姓名": "contactName",
+    "对接人": "contactName",
+    "团队负责人": "contactName",
+    "负责人": "contactName",
+    "联系电话": "contactPhone",
+    "电话": "contactPhone",
+    "手机": "contactPhone",
     "手机号": "contactPhone",
-    "联系邮箱": "contactEmail", "邮箱": "contactEmail", "电子邮箱": "contactEmail",
+    "联系邮箱": "contactEmail",
+    "邮箱": "contactEmail",
+    "电子邮箱": "contactEmail",
     "Email": "contactEmail",
-    "微信": "contactWechat", "微信号": "contactWechat",
-    "职务": "contactTitle", "联系人职务": "contactTitle",
-    "成熟度": "maturityLevel", "技术成熟度": "maturityLevel",
+    "微信": "contactWechat",
+    "微信号": "contactWechat",
+    "职务": "contactTitle",
+    "联系人职务": "contactTitle",
+    "成熟度": "maturityLevel",
+    "技术成熟度": "maturityLevel",
     "定价方式": "pricingMode",
-    "发明人": "inventorNames", "完成人": "inventorNames", "成果完成人": "inventorNames",
-    "应用领域": "applicationFields", "可应用领域": "applicationFields",
+    "发明人": "inventorNames",
+    "完成人": "inventorNames",
+    "成果完成人": "inventorNames",
+    "应用领域": "applicationFields",
+    "可应用领域": "applicationFields",
 }
 
 LINK_ALIASES = {
@@ -42,9 +67,17 @@ LINK_ALIASES = {
 }
 
 HARVEST_FIELD_KEYS = {
-    "contactName", "contactPhone", "contactEmail", "contactWechat", "contactTitle",
-    "maturityLevel", "pricingMode", "inventorNames", "applicationFields",
-    "sourceOrgName", "techRoute",
+    "contactName",
+    "contactPhone",
+    "contactEmail",
+    "contactWechat",
+    "contactTitle",
+    "maturityLevel",
+    "pricingMode",
+    "inventorNames",
+    "applicationFields",
+    "sourceOrgName",
+    "techRoute",
 }
 
 _MATURITY_VALUES = {

@@ -13,8 +13,12 @@ class SummaryCursor:
 
     def fetchone(self):
         return {
-            "users": 1, "achievements": 2, "demands": 3, "cooperations": 4,
-            "pending_achievements": 1, "pending_demands": 1,
+            "users": 1,
+            "achievements": 2,
+            "demands": 3,
+            "cooperations": 4,
+            "pending_achievements": 1,
+            "pending_demands": 1,
             "pending_organization_applications": 1,
             "pending_organization_admin_applications": 1,
             "pending_membership_applications": 1,

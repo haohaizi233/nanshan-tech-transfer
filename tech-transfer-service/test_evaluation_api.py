@@ -9,6 +9,7 @@
      边界：无 worker 时任务保持 queued，ai_evaluation 表不产生任何假评分
 依赖：后端已启动，013 迁移（ai_evaluation 表）已执行；routes/ai.py 中 AI_FEATURE_ENABLED=True
 """
+
 import json
 import time
 
@@ -19,8 +20,13 @@ import requests
 from config import settings
 
 BASE = settings.API_BASE.rstrip("/") + settings.API_PREFIX
-DB = dict(host=settings.DB_HOST, port=settings.DB_PORT, user=settings.DB_USER,
-          password=settings.DB_PASSWORD, dbname=settings.DB_NAME)
+DB = {
+    "host": settings.DB_HOST,
+    "port": settings.DB_PORT,
+    "user": settings.DB_USER,
+    "password": settings.DB_PASSWORD,
+    "dbname": settings.DB_NAME,
+}
 PASS = 0
 FAIL = 0
 
@@ -66,10 +72,17 @@ def db_exec(sql, params=()):
 
 
 def create_achievement(headers, title):
-    resp = requests.post(f"{BASE}/achievements", headers=headers, json={
-        "title": title, "maturityLevel": "02_lab", "pricingMode": "negotiable",
-        "techIntro": "评估链路测试成果简介",
-    }, timeout=10)
+    resp = requests.post(
+        f"{BASE}/achievements",
+        headers=headers,
+        json={
+            "title": title,
+            "maturityLevel": "02_lab",
+            "pricingMode": "negotiable",
+            "techIntro": "评估链路测试成果简介",
+        },
+        timeout=10,
+    )
     return resp
 
 

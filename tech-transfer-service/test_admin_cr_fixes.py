@@ -18,9 +18,7 @@ def main():
     assert scope_org_ids({"orgIds": [4, 9], "orgId": 4}) == [4, 9]
     assert scope_org_ids({"orgId": 4}) == [4]
 
-    predicate, params = organization_content_scope(
-        {"isPlatformAdmin": False, "orgId": 17, "userId": 8}, "a"
-    )
+    predicate, params = organization_content_scope({"isPlatformAdmin": False, "orgId": 17, "userId": 8}, "a")
     assert "a.org_id IN (%s)" in predicate or "a.org_id = %s" in predicate
     assert "organization_membership" in predicate
     assert params == [17, 17]
@@ -71,24 +69,16 @@ def main():
         "target_org_id": None,
         "target_owner_user_id": 4,
     }
-    assert _can_review_cooperation(
-        {"userId": 9, "orgIds": [17]}, inbound, MembershipCursor(True)
-    )
-    assert not _can_review_cooperation(
-        {"userId": 9, "orgIds": [17]}, inbound, MembershipCursor(False)
-    )
+    assert _can_review_cooperation({"userId": 9, "orgIds": [17]}, inbound, MembershipCursor(True))
+    assert not _can_review_cooperation({"userId": 9, "orgIds": [17]}, inbound, MembershipCursor(False))
 
     fields = {"org_id": 17, "org_name_snapshot": "伪造机构", "org_intro": "x"}
-    _restrict_org_admin_fields(
-        {"isPlatformAdmin": False, "orgIds": [17]}, fields, is_create=True, kind="demand"
-    )
+    _restrict_org_admin_fields({"isPlatformAdmin": False, "orgIds": [17]}, fields, is_create=True, kind="demand")
     assert fields["org_id"] == 17
     assert "org_name_snapshot" not in fields
 
     fields = {"org_id": 99, "org_name_snapshot": "伪造机构"}
-    _restrict_org_admin_fields(
-        {"isPlatformAdmin": False, "orgIds": [17]}, fields, is_create=True, kind="demand"
-    )
+    _restrict_org_admin_fields({"isPlatformAdmin": False, "orgIds": [17]}, fields, is_create=True, kind="demand")
     assert "org_id" not in fields
 
     class Cur:

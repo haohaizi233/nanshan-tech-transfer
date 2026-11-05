@@ -12,15 +12,20 @@ class CertificationCursor:
         normalized = " ".join(sql.split())
         assert params == (71,)
         if "FROM organization_membership m" in normalized:
-            self.rows = [{
-                "id": 101,
-                "org_id": 7,
-                "org_name": "南山产业集团",
-                "role": "admin",
-                "status": "active",
-                "version": 3,
-            }]
-        elif "FROM organization_membership_application a" in normalized or "FROM organization_application a" in normalized:
+            self.rows = [
+                {
+                    "id": 101,
+                    "org_id": 7,
+                    "org_name": "南山产业集团",
+                    "role": "admin",
+                    "status": "active",
+                    "version": 3,
+                }
+            ]
+        elif (
+            "FROM organization_membership_application a" in normalized
+            or "FROM organization_application a" in normalized
+        ):
             self.rows = []
         else:
             raise AssertionError(f"unexpected query: {normalized}")
@@ -47,14 +52,16 @@ def main():
         membership_service.get_cursor = original_get_cursor
 
     assert result["status"] == "certified_admin"
-    assert result["memberships"] == [{
-        "id": 101,
-        "orgId": 7,
-        "orgName": "南山产业集团",
-        "role": "admin",
-        "status": "active",
-        "version": 3,
-    }]
+    assert result["memberships"] == [
+        {
+            "id": 101,
+            "orgId": 7,
+            "orgName": "南山产业集团",
+            "role": "admin",
+            "status": "active",
+            "version": 3,
+        }
+    ]
     assert result["membershipApplication"] is None
     assert result["organizationApplication"] is None
     print("PASS: organization administrator certification state is returned")

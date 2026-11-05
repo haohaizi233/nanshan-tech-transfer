@@ -1,4 +1,5 @@
 """端到端验证：外网隧道 H5(8077) + API(8076) + CORS 跨域组合"""
+
 import json
 import urllib.request
 
@@ -22,9 +23,13 @@ try:
     with _OPENER.open("http://43.138.138.200:8076/api/health", timeout=15) as r:
         body = json.loads(r.read().decode())
     check("GET 43.138.138.200:8076/api/health = 200", True)
-    check("  code=0 status=ok db=ok", body.get("code") == 0
-          and body.get("data", {}).get("status") == "ok"
-          and body.get("data", {}).get("database") == "ok", body)
+    check(
+        "  code=0 status=ok db=ok",
+        body.get("code") == 0
+        and body.get("data", {}).get("status") == "ok"
+        and body.get("data", {}).get("database") == "ok",
+        body,
+    )
 except Exception as e:
     check("GET 8076/api/health", False, str(e))
 
@@ -43,7 +48,8 @@ try:
         "http://43.138.138.200:8076/api/tech-transfer/v1/auth/bootstrap",
         data=json.dumps({"hostCredential": "local-dev-ticket-dev-user-002"}).encode(),
         headers={"Content-Type": "application/json", "Origin": "http://43.138.138.200:8077"},
-        method="POST")
+        method="POST",
+    )
     with _OPENER.open(req, timeout=15) as r:
         body = json.loads(r.read().decode())
         cors_header = r.headers.get("access-control-allow-origin", "")
@@ -57,7 +63,8 @@ except Exception as e:
 try:
     req = urllib.request.Request(
         "http://43.138.138.200:8076/api/tech-transfer/v1/demands",
-        headers={"Authorization": f"Bearer {token}", "Origin": "http://43.138.138.200:8077"})
+        headers={"Authorization": f"Bearer {token}", "Origin": "http://43.138.138.200:8077"},
+    )
     with _OPENER.open(req, timeout=15) as r:
         body = json.loads(r.read().decode())
     d = body.get("data", {})

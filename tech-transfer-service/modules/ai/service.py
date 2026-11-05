@@ -13,13 +13,13 @@ Architecture source: 06-api-design.md §AI, openapi.yaml /ai/match-tasks,
 - 容灾：queued 超过 5 分钟的任务自动清理为 failed，GET 对外返回 stale
   终态（前端展示"排队超时"并可重试），任务不会永远卡在"排队中"
 """
+
 import hashlib
 import json
 import time
 from collections import defaultdict
 from threading import Lock
 
-from modules.ai import eval_executor
 from core.errors import (
     TT_ACH_40301,
     TT_ACH_40401,
@@ -29,6 +29,7 @@ from core.errors import (
     BizError,
 )
 from db import get_cursor
+from modules.ai import eval_executor
 from modules.ai.evaluation import build_evaluation_view
 from modules.audit.service import record as audit_record
 
@@ -43,8 +44,14 @@ _rate_lock = Lock()
 
 # 成果评估快照字段（创建时刻的成果数据版本）
 SNAPSHOT_FIELDS_EVAL = (
-    "id", "title", "tech_intro", "maturity_level", "source_org_name",
-    "category_name", "status", "version",
+    "id",
+    "title",
+    "tech_intro",
+    "maturity_level",
+    "source_org_name",
+    "category_name",
+    "status",
+    "version",
 )
 
 
@@ -60,11 +67,14 @@ def get_card_view_counts(cards: list[dict]) -> list[dict]:
                 "WHERE id = ANY(%s) AND status = 'published' AND deleted_at IS NULL",
                 (ids,),
             )
-            results.extend({
-                "card_type": card_type,
-                "id": row["id"],
-                "viewCount": int(row.get("view_count") or 0),
-            } for row in cur.fetchall())
+            results.extend(
+                {
+                    "card_type": card_type,
+                    "id": row["id"],
+                    "viewCount": int(row.get("view_count") or 0),
+                }
+                for row in cur.fetchall()
+            )
     return results
 
 
@@ -96,10 +106,10 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
         )
         achievement = cur.fetchone()
         if not achievement:
-            code, message, status = TT_ACH_40401
+            code, _message, status = TT_ACH_40401
             raise BizError(code, "成果不存在", status)
         if achievement["owner_user_id"] != user_id:
-            code, message, status = TT_ACH_40301
+            code, _message, status = TT_ACH_40301
             raise BizError(code, "非成果所有者", status)
 
         # 去重：同成果活跃任务直接复用
@@ -152,11 +162,14 @@ def create_evaluation_task(user_id: int, user_no: str, achievement_id: int, requ
         task_id = cur.fetchone()["id"]
 
         audit_record(
-            "ai.task.create", "ai_task", resource_id=task_id,
-            actor_user_id=user_id, actor_user_no=user_no,
-            details={"taskType": "evaluation", "achievementId": achievement_id,
-                     "inputDataVersion": input_data_version},
-            request_id=request_id, cur=cur,
+            "ai.task.create",
+            "ai_task",
+            resource_id=task_id,
+            actor_user_id=user_id,
+            actor_user_no=user_no,
+            details={"taskType": "evaluation", "achievementId": achievement_id, "inputDataVersion": input_data_version},
+            request_id=request_id,
+            cur=cur,
         )
 
     # 提交后台执行（非阻塞）：任务不会停留在 queued 等外部 worker。
@@ -211,9 +224,7 @@ def get_evaluation_task(user_id: int, task_id: int) -> dict:
             "progress_stage": progress_stage,
             "evaluation": None,
             "failReason": (
-                eval_executor.STALE_QUEUED_REASON
-                if stale_queued
-                else _desensitize_fail_reason(task.get("fail_reason"))
+                eval_executor.STALE_QUEUED_REASON if stale_queued else _desensitize_fail_reason(task.get("fail_reason"))
             ),
             "createdAt": _iso(task.get("created_at")),
             "finishedAt": _iso(task.get("finished_at")),
@@ -313,9 +324,24 @@ def _parse_reasons(raw):
 
 # fail_reason 脱敏：屏蔽 Provider 内部细节，避免泄露给客户端。
 _DESENSITIZE_HINTS = (
-    "qwen", "openai", "hermes", "deepseek", "provider", "http",
-    "https://", "http://", "timeout", "timed out", "url", "connection",
-    "socket", "ssl", "proxy", "ai_agent", "api_key", "authorization",
+    "qwen",
+    "openai",
+    "hermes",
+    "deepseek",
+    "provider",
+    "http",
+    "https://",
+    "http://",
+    "timeout",
+    "timed out",
+    "url",
+    "connection",
+    "socket",
+    "ssl",
+    "proxy",
+    "ai_agent",
+    "api_key",
+    "authorization",
 )
 _DESENSITIZE_MSG = "AI 服务暂时不可用，请稍后重试"
 
@@ -334,6 +360,7 @@ def _desensitize_fail_reason(reason: str | None) -> str | None:
 
 def _iso(dt):
     return dt.isoformat() if dt else None
+
 
 def _safe_reap_dead_tasks() -> int:
     """容灾清理（尽力而为）：卡死任务标记 failed，失败不影响业务主流程。"""

@@ -3,6 +3,7 @@
 这些用例全部用 mock，不触碰真实上游（上游是第三方 Google Patents 派生服务，
 不稳定且有限流；上游行为矩阵记录在 modules/patent/publication.py 的文档字符串里）。
 """
+
 import time
 
 from modules.patent.publication import (
@@ -186,6 +187,7 @@ class TestSearchPublicationPrefix:
 
     def test_enumeration_path_applies_strict_filter(self):
         """枚举路径也必须做严格过滤，不能把全文命中当成匹配。"""
+
         def fake(q, n):
             return [{"pub_number": "CN1170923C"}]
 
@@ -217,6 +219,7 @@ class TestSearchPublicationPrefix:
 
     def test_enumeration_path_is_stable_ordered(self):
         """并发合并后必须排序，保证结果稳定可复现。"""
+
         def fake(q, n):
             if q.endswith("9"):
                 return [{"pub_number": "CN1100869A"}]
@@ -250,6 +253,7 @@ class TestSearchPublicationPrefix:
 
     def test_single_candidate_failure_does_not_break_others(self):
         """单个候选超时/报错只丢弃该候选，其余候选的结果照常返回。"""
+
         def fake(q, n):
             if q == "CN1100863":
                 raise RuntimeError("upstream timeout")
@@ -263,12 +267,13 @@ class TestSearchPublicationPrefix:
 
     def test_timeout_budget_stops_slow_enumeration(self):
         """超出时间预算后放弃剩余候选，用已拿到的结果返回，不无限等待。"""
+
         def fake(q, n):
             time.sleep(0.3)
             return [{"pub_number": f"{q}C"}]
 
         t0 = time.monotonic()
-        hits, expanded = search_publication_prefix("CN110086", fake, timeout=0.1)
+        _hits, expanded = search_publication_prefix("CN110086", fake, timeout=0.1)
         elapsed = time.monotonic() - t0
         assert expanded is True
         # 超预算后不应等满 10 路（10 × 0.3s = 3s）
@@ -276,6 +281,7 @@ class TestSearchPublicationPrefix:
 
     def test_timeout_budget_returns_even_when_upstream_is_stuck(self):
         """上游完全卡住时也必须按预算返回，不能被拖死。"""
+
         def stuck(q, n):
             time.sleep(30)
             return []
@@ -289,6 +295,7 @@ class TestSearchPublicationPrefix:
 
     def test_timeout_budget_keeps_completed_results(self):
         """超时前已完成的候选结果必须保留。"""
+
         def fake(q, n):
             if q == "CN1100860":
                 return [{"pub_number": "CN1100860C"}]

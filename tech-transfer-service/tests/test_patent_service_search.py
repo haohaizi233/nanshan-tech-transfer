@@ -107,10 +107,14 @@ class TestSearchPatentsPublicationBranch:
         def fetcher(path, params, timeout):
             queries.append(params["q"])
             if params["q"] == "CN1100866":
-                return {"total": 2, "total_pages": 1, "results": [
-                    _row("CN1100866C", "数据安全备份"),
-                    _row("CN1100866A", "数据安全恢复"),
-                ]}
+                return {
+                    "total": 2,
+                    "total_pages": 1,
+                    "results": [
+                        _row("CN1100866C", "数据安全备份"),
+                        _row("CN1100866A", "数据安全恢复"),
+                    ],
+                }
             return {"total": 0, "total_pages": 0, "results": []}
 
         meta = search_patents("CN110086", "", 1, 10, fetcher=fetcher)
@@ -121,11 +125,10 @@ class TestSearchPatentsPublicationBranch:
 
     def test_enumeration_pagination_is_local(self):
         """枚举路径下分页在本地切，不依赖上游页码。"""
+
         def fetcher(path, params, timeout):
             if params["q"] == "CN1100860":
-                return {"total": 0, "total_pages": 1, "results": [
-                    _row(f"CN1100860{i}A") for i in range(10)
-                ]}
+                return {"total": 0, "total_pages": 1, "results": [_row(f"CN1100860{i}A") for i in range(10)]}
             return {"total": 0, "total_pages": 0, "results": []}
 
         page1 = search_patents("CN110086", "", 1, 10, fetcher=fetcher)

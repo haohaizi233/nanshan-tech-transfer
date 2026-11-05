@@ -1,6 +1,7 @@
 """
 用户数据隔离测试 + 环境保护测试
 """
+
 import os
 import subprocess
 import sys
@@ -14,31 +15,33 @@ print("测试 A: 用户数据隔离")
 print("=" * 60)
 
 # 1. Bootstrap user-001 (已有资料: 张三)
-resp = requests.post(f"{BASE}/auth/bootstrap",
-    json={"hostCredential": "local-dev-ticket-dev-user-001"}, timeout=10)
+resp = requests.post(f"{BASE}/auth/bootstrap", json={"hostCredential": "local-dev-ticket-dev-user-001"}, timeout=10)
 d1 = resp.json()["data"]
 token1 = d1["accessToken"]
 u1 = d1["user"]
 print(f"\n[1] User-001: userId={u1['userId']}, userNo={u1['userNo']}, displayName={u1['displayName']}")
 
 # 2. Bootstrap user-002 (新用户)
-resp = requests.post(f"{BASE}/auth/bootstrap",
-    json={"hostCredential": "local-dev-ticket-dev-user-002"}, timeout=10)
+resp = requests.post(f"{BASE}/auth/bootstrap", json={"hostCredential": "local-dev-ticket-dev-user-002"}, timeout=10)
 d2 = resp.json()["data"]
 token2 = d2["accessToken"]
 u2 = d2["user"]
-print(f"[2] User-002: userId={u2['userId']}, userNo={u2['userNo']}, displayName={u2['displayName']}, isNewUser={d2['isNewUser']}")
+print(
+    f"[2] User-002: userId={u2['userId']}, userNo={u2['userNo']}, displayName={u2['displayName']}, isNewUser={d2['isNewUser']}"
+)
 
 # 3. User-002 修改自己的资料
-resp = requests.patch(f"{BASE}/me/profile",
+resp = requests.patch(
+    f"{BASE}/me/profile",
     json={"version": u2.get("version") or 1, "displayName": "李四", "userType": "investor", "phone": "13900000000"},
-    headers={"Authorization": f"Bearer {token2}"}, timeout=10)
+    headers={"Authorization": f"Bearer {token2}"},
+    timeout=10,
+)
 u2_updated = resp.json()["data"]
 print(f"[3] User-002 PATCH: displayName={u2_updated['displayName']}, userType={u2_updated['userType']}")
 
 # 4. User-001 查看自己的资料，应该还是张三
-resp = requests.get(f"{BASE}/me",
-    headers={"Authorization": f"Bearer {token1}"}, timeout=10)
+resp = requests.get(f"{BASE}/me", headers={"Authorization": f"Bearer {token1}"}, timeout=10)
 u1_check = resp.json()["data"]
 print(f"[4] User-001 GET /me: displayName={u1_check['displayName']} (expected: 张三)")
 
@@ -46,8 +49,7 @@ assert u1_check["displayName"] == "张三", f"FAIL: User-001 资料被篡改! ex
 print("    -> PASS: User-001 资料未被 User-002 修改影响")
 
 # 5. User-002 查看自己的资料，应该是李四
-resp = requests.get(f"{BASE}/me",
-    headers={"Authorization": f"Bearer {token2}"}, timeout=10)
+resp = requests.get(f"{BASE}/me", headers={"Authorization": f"Bearer {token2}"}, timeout=10)
 u2_check = resp.json()["data"]
 print(f"[5] User-002 GET /me: displayName={u2_check['displayName']} (expected: 李四)")
 
@@ -59,8 +61,7 @@ assert u1["userId"] != u2["userId"], "FAIL: 两个 Mock 身份映射到同一个
 print(f"[6] userId 隔离: User-001={u1['userId']}, User-002={u2['userId']} -> PASS")
 
 # 7. User-001 的 token 不能操作 User-002 的资料
-resp = requests.get(f"{BASE}/me",
-    headers={"Authorization": f"Bearer {token1}"}, timeout=10)
+resp = requests.get(f"{BASE}/me", headers={"Authorization": f"Bearer {token1}"}, timeout=10)
 u1_again = resp.json()["data"]
 assert u1_again["userId"] == u1["userId"], "FAIL: token 跨用户!"
 print(f"[7] Token 隔离: User-001 token 只返回 userId={u1_again['userId']} -> PASS")

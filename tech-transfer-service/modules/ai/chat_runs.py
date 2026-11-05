@@ -110,7 +110,9 @@ def submit_run(user_id, turn_id, message, reference=None):
     with get_cursor(commit=True) as cur:
         generation = _lock_session(cur, user_id)
         try:
-            cur.execute("DELETE FROM ai_chat_tombstone WHERE user_id = %s AND expires_at <= clock_timestamp()", (user_id,))
+            cur.execute(
+                "DELETE FROM ai_chat_tombstone WHERE user_id = %s AND expires_at <= clock_timestamp()", (user_id,)
+            )
             cur.execute("SELECT 1 FROM ai_chat_tombstone WHERE user_id = %s AND turn_id = %s", (user_id, turn_id))
             if cur.fetchone():
                 raise conflict("该轮次已清空，请重新发起提问", {"reason": "chat_history_cleared"})

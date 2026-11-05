@@ -8,6 +8,7 @@
 
 用法：python tools/etl_institutions.py
 """
+
 import sys
 from pathlib import Path
 
@@ -41,9 +42,13 @@ def map_type_key(platform_type: str) -> str:
 
 def fetch_mysql():
     conn = pymysql.connect(
-        host=CAPITAL_DB_HOST, port=CAPITAL_DB_PORT, user=CAPITAL_DB_USER,
-        password=CAPITAL_DB_PASSWORD, database="nanshan_capital",
-        charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor,
+        host=CAPITAL_DB_HOST,
+        port=CAPITAL_DB_PORT,
+        user=CAPITAL_DB_USER,
+        password=CAPITAL_DB_PASSWORD,
+        database="nanshan_capital",
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
     )
     try:
         with conn.cursor() as cur:
@@ -70,33 +75,85 @@ def fetch_mysql():
 
 def platform_row(r):
     return (
-        "platform", r["platform_name"],
-        r["platform_type"] or "", map_type_key(r["platform_type"]),
-        r["support_unit"] or "", r["platform_fun"],
-        r["contact_person"] or "", r["contact_mobile"] or "",
-        r["serial_no"], r["source_status"], r["order_num"],
-        None, None, "", "", "", None, 0,
-        r["id"], r["source_site"] or "first-net.cn", "", "", r["fetched_at"],
+        "platform",
+        r["platform_name"],
+        r["platform_type"] or "",
+        map_type_key(r["platform_type"]),
+        r["support_unit"] or "",
+        r["platform_fun"],
+        r["contact_person"] or "",
+        r["contact_mobile"] or "",
+        r["serial_no"],
+        r["source_status"],
+        r["order_num"],
+        None,
+        None,
+        "",
+        "",
+        "",
+        None,
+        0,
+        r["id"],
+        r["source_site"] or "first-net.cn",
+        "",
+        "",
+        r["fetched_at"],
     )
 
 
 def invest_row(r):
     return (
-        "invest", r["org_name"],
-        "", "other", "", None, "", "", None, None, None,
-        r["intro"], r["detail_info"], "", "",
-        r["logo_file_id"] or "", r["detail_activity_id"], r["sort_order"],
-        r["id"], r["source_site"] or "szte.com", r["source_page"] or "", "", r["fetched_at"],
+        "invest",
+        r["org_name"],
+        "",
+        "other",
+        "",
+        None,
+        "",
+        "",
+        None,
+        None,
+        None,
+        r["intro"],
+        r["detail_info"],
+        "",
+        "",
+        r["logo_file_id"] or "",
+        r["detail_activity_id"],
+        r["sort_order"],
+        r["id"],
+        r["source_site"] or "szte.com",
+        r["source_page"] or "",
+        "",
+        r["fetched_at"],
     )
 
 
 def service_row(r):
     return (
-        "service", r["org_name"],
-        "", "other", "", None, "", "", None, None, None,
-        r["intro"], r["detail_info"], r["label"] or "", r["user_type"] or "",
-        r["logo_file_id"] or "", None, r["sort_order"],
-        r["id"], r["source_site"] or "szte.com", "", r["source_api"] or "", r["fetched_at"],
+        "service",
+        r["org_name"],
+        "",
+        "other",
+        "",
+        None,
+        "",
+        "",
+        None,
+        None,
+        None,
+        r["intro"],
+        r["detail_info"],
+        r["label"] or "",
+        r["user_type"] or "",
+        r["logo_file_id"] or "",
+        None,
+        r["sort_order"],
+        r["id"],
+        r["source_site"] or "szte.com",
+        "",
+        r["source_api"] or "",
+        r["fetched_at"],
     )
 
 
@@ -136,15 +193,21 @@ ON CONFLICT (kind, source_pk) DO UPDATE SET
 
 def main():
     platforms, invests, services = fetch_mysql()
-    print(f"MySQL 读取: platform_base={len(platforms)}, "
-          f"featured_invest_org={len(invests)}, ip_service_org={len(services)}")
+    print(
+        f"MySQL 读取: platform_base={len(platforms)}, "
+        f"featured_invest_org={len(invests)}, ip_service_org={len(services)}"
+    )
 
     pg = psycopg2.connect(
-        host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=DB_NAME,
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        dbname=DB_NAME,
     )
     try:
         with pg.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            for rows, fn, label in (
+            for rows, fn, _label in (
                 (platforms, platform_row, "platform"),
                 (invests, invest_row, "invest"),
                 (services, service_row, "service"),
@@ -152,9 +215,7 @@ def main():
                 for r in rows:
                     cur.execute(UPSERT, fn(r))
             pg.commit()
-            cur.execute(
-                "SELECT kind, COUNT(*) AS n FROM institution GROUP BY kind ORDER BY kind"
-            )
+            cur.execute("SELECT kind, COUNT(*) AS n FROM institution GROUP BY kind ORDER BY kind")
             counts = {row["kind"]: row["n"] for row in cur.fetchall()}
             cur.execute("SELECT COUNT(*) AS n FROM institution WHERE source_pk IS NULL")
             admin_rows = cur.fetchone()["n"]

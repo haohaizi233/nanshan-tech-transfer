@@ -13,6 +13,7 @@ Architecture source: 05-data-model-design.md §12.2（演示数据字段映射�
   contact*     → demand.contact_*
 幂等：按 title+owner 已存在则跳过，可重复执行。
 """
+
 import json
 
 from db import transaction
@@ -79,6 +80,7 @@ def parse_budget(text):
     if "面议" in text:
         return None, None, 1
     import re
+
     m = re.match(r"^(\d+(?:\.\d+)?)[–\-~至](\d+(?:\.\d+)?)万?$", text.replace("万", ""))
     if m:
         return float(m.group(1)), float(m.group(2)), 0
@@ -127,9 +129,7 @@ def main():
             tag_ids = [get_or_create(cur, "demand_tag", t, t) for t in industry_parts[1:]]
 
             budget_min, budget_max, negotiable = parse_budget(demo["budget"])
-            coop_mode = json.dumps(
-                [p.strip() for p in demo["cooperationType"].split("/")], ensure_ascii=False
-            )
+            coop_mode = json.dumps([p.strip() for p in demo["cooperationType"].split("/")], ensure_ascii=False)
 
             cur.execute(
                 """
@@ -143,11 +143,22 @@ def main():
                     RETURNING id
                     """,
                 (
-                    DEMO_OWNER_USER_ID, org_id, demo["title"], category_id,
-                    demo["demandDesc"], demo["location"], coop_mode,
-                    budget_min, budget_max, negotiable, demo["deadline"],
-                    demo["contactName"], demo["contactTitle"], demo["phone"],
-                    demo["email"], demo["wechat"],
+                    DEMO_OWNER_USER_ID,
+                    org_id,
+                    demo["title"],
+                    category_id,
+                    demo["demandDesc"],
+                    demo["location"],
+                    coop_mode,
+                    budget_min,
+                    budget_max,
+                    negotiable,
+                    demo["deadline"],
+                    demo["contactName"],
+                    demo["contactTitle"],
+                    demo["phone"],
+                    demo["email"],
+                    demo["wechat"],
                 ),
             )
             demand_id = cur.fetchone()["id"]
@@ -158,9 +169,7 @@ def main():
                 )
             print(f"inserted: {demo['title']} (id={demand_id}, org={demo['company']})")
 
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM demand WHERE status='published' AND deleted_at IS NULL"
-        )
+        cur.execute("SELECT COUNT(*) AS c FROM demand WHERE status='published' AND deleted_at IS NULL")
         print("published demands:", cur.fetchone()["c"])
 
 

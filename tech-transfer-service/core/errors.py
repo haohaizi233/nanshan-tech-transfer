@@ -5,6 +5,7 @@ Architecture source: 06-api-design.md §error-codes, openapi.yaml
 Frozen: error codes are add-only, never modify existing codes.
 """
 
+
 class BizError(Exception):
     def __init__(self, code: str, message: str, http_status: int = 400, details=None):
         super().__init__(message)
@@ -95,98 +96,99 @@ TT_FILE_50201 = ("TT_FILE_50201", "源站文件获取失败", 502)
 
 # ── Convenience constructors ────────────────────────────────
 
+
 def bad_request(msg="请求参数无效", details=None):
-    code, message, status = TT_COMMON_40001
+    code, _message, status = TT_COMMON_40001
     return BizError(code, msg, status, details)
 
 
 def unauthorized(msg="认证令牌无效或已过期", details=None):
-    code, message, status = TT_COMMON_40101
+    code, _message, status = TT_COMMON_40101
     return BizError(code, msg, status, details)
 
 
 def bootstrap_credential_invalid(msg="宿主凭证无效", details=None):
-    code, message, status = TT_AUTH_40103
+    code, _message, status = TT_AUTH_40103
     return BizError(code, msg, status, details)
 
 
 def conflict(msg="资源版本冲突", details=None):
-    code, message, status = TT_COMMON_40902
+    code, _message, status = TT_COMMON_40902
     return BizError(code, msg, status, details)
 
 
 def not_found(msg="资源不存在", details=None):
-    code, message, status = TT_COMMON_40402
+    code, _message, status = TT_COMMON_40402
     return BizError(code, msg, status, details)
 
 
 def demand_not_found(msg="需求不存在", details=None):
-    code, message, status = TT_DMD_40401
+    code, _message, status = TT_DMD_40401
     return BizError(code, msg, status, details)
 
 
 def achievement_not_found(msg="成果不存在", details=None):
-    code, message, status = TT_ACH_40401
+    code, _message, status = TT_ACH_40401
     return BizError(code, msg, status, details)
 
 
 def achievement_forbidden(msg="非成果所有者", details=None):
-    code, message, status = TT_ACH_40301
+    code, _message, status = TT_ACH_40301
     return BizError(code, msg, status, details)
 
 
 def achievement_conflict(msg="成果状态不允许此操作", details=None):
-    code, message, status = TT_ACH_40901
+    code, _message, status = TT_ACH_40901
     return BizError(code, msg, status, details)
 
 
 def demand_forbidden(msg="非需求所有者", details=None):
-    code, message, status = TT_DMD_40301
+    code, _message, status = TT_DMD_40301
     return BizError(code, msg, status, details)
 
 
 def demand_conflict(msg="需求状态不允许此操作", details=None):
-    code, message, status = TT_DMD_40901
+    code, _message, status = TT_DMD_40901
     return BizError(code, msg, status, details)
 
 
 def favorite_not_found(msg="收藏目标不存在或不可见", details=None):
-    code, message, status = TT_FAV_40401
+    code, _message, status = TT_FAV_40401
     return BizError(code, msg, status, details)
 
 
 def coop_bad_request(msg="不能对自己发布的内容发起对接", details=None):
-    code, message, status = TT_COOP_40001
+    code, _message, status = TT_COOP_40001
     return BizError(code, msg, status, details)
 
 
 def coop_forbidden(msg="无权操作此对接", details=None):
-    code, message, status = TT_COOP_40301
+    code, _message, status = TT_COOP_40301
     return BizError(code, msg, status, details)
 
 
 def coop_not_found(msg="对接意向不存在", details=None):
-    code, message, status = TT_COOP_40401
+    code, _message, status = TT_COOP_40401
     return BizError(code, msg, status, details)
 
 
 def coop_conflict(msg="对接状态不允许此操作", details=None):
-    code, message, status = TT_COOP_40901
+    code, _message, status = TT_COOP_40901
     return BizError(code, msg, status, details)
 
 
 def coop_active_exists(msg="已有进行中的对接意向", details=None):
-    code, message, status = TT_COOP_40902
+    code, _message, status = TT_COOP_40902
     return BizError(code, msg, status, details)
 
 
 def forbidden(msg="无权限访问该资源", details=None):
-    code, message, status = TT_COMMON_40301
+    code, _message, status = TT_COMMON_40301
     return BizError(code, msg, status, details)
 
 
 def ai_unavailable(msg="AI 服务不可用", details=None):
-    code, message, status = TT_AI_50301
+    code, _message, status = TT_AI_50301
     return BizError(code, msg, status, details)
 
 
@@ -195,30 +197,42 @@ def ai_provider_failed(msg="AI 服务暂时不可用，请稍后重试", details
     safe_msg = "AI 服务暂时不可用，请稍后重试"
     text = (msg or safe_msg).strip()
     lowered = text.lower()
-    if any(hint in lowered for hint in (
-        "provider", "qwen", "openai", "hermes", "deepseek",
-        "http", "https://", "timeout", "connection", "api_key",
-        "authorization", "ai_agent"
-    )):
+    if any(
+        hint in lowered
+        for hint in (
+            "provider",
+            "qwen",
+            "openai",
+            "hermes",
+            "deepseek",
+            "http",
+            "https://",
+            "timeout",
+            "connection",
+            "api_key",
+            "authorization",
+            "ai_agent",
+        )
+    ):
         text = safe_msg
     return BizError(code, text, status, details)
 
 
 def patent_not_found(msg="专利不存在", details=None):
-    code, message, status = TT_PATENT_40401
+    code, _message, status = TT_PATENT_40401
     return BizError(code, msg, status, details)
 
 
 def patent_unavailable(msg="专利查询服务不可用", details=None):
-    code, message, status = TT_PATENT_50301
+    code, _message, status = TT_PATENT_50301
     return BizError(code, msg, status, details)
 
 
 def patent_provider_failed(msg="专利查询上游调用失败", details=None):
-    code, message, status = TT_PATENT_50201
+    code, _message, status = TT_PATENT_50201
     return BizError(code, msg, status, details)
 
 
 def file_upstream_error(msg="源站文件获取失败", details=None):
-    code, message, status = TT_FILE_50201
+    code, _message, status = TT_FILE_50201
     return BizError(code, msg, status, details)
