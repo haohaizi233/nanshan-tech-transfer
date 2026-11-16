@@ -1074,19 +1074,28 @@
 		font-size: 30rpx;
 		color: #222222;
 		font-weight: 600;
-		margin-bottom: 10rpx;
+		margin-bottom: 12rpx;
+		line-height: 1.4;
 	}
 
 	.field-value {
 		display: block;
 		font-size: 26rpx;
 		color: #555555;
-		line-height: 1.6;
+		line-height: 1.8;
 		text-indent: 2em;
+		word-break: break-word;
+		overflow-wrap: break-word;
+		white-space: pre-wrap;
+		text-align: justify;
 	}
 
 	.field-value-user-text {
 		text-indent: 2em;
+		line-height: 1.8;
+		word-break: break-word;
+		overflow-wrap: break-word;
+		white-space: pre-wrap;
 	}
 
 	.title-en { display: block; margin: -4rpx 0 16rpx; color: #7c8798; font-size: 24rpx; line-height: 1.4; }
@@ -1098,7 +1107,11 @@
 	.inventor-avatar { width: 52rpx; height: 52rpx; flex-shrink: 0; border-radius: 50%; margin-right: 14rpx; }
 	.inventor-row .field-value { text-indent: 0; }
 
-        .field-muted {
+        .field {
+		margin-bottom: 24rpx;
+	}
+
+	.field-muted {
                 color: #666666;
         }
 
