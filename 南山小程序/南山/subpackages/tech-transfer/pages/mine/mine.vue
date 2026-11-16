@@ -35,14 +35,21 @@
 						:placeholder="authMode === 'register' ? '设置密码（至少8位）' : '请输入密码'"
 						@input="onAuthInput('password', $event)"
 					/>
+					<text v-if="authMode === 'register'" class="password-hint">密码长度为8–128位，建议组合使用字母、数字和符号。</text>
+					<text v-if="authMode === 'register' && authForm.password && authForm.password.trim().length < 8" class="password-error">密码太短，还需输入{{ 8 - authForm.password.trim().length }}位（首尾空格不计入）。</text>
 				</view>
 
 				<button class="login-btn" type="primary" @click="onAuthSubmit">
 					{{ authMode === 'register' ? '注册并继续' : '登录' }}
 				</button>
-				<text class="switch-auth" @click="toggleAuthMode">
-					{{ authMode === 'register' ? '已有账号？去登录' : '没有账号？去注册' }}
-				</text>
+				<view class="auth-helper-row">
+					<text class="switch-auth" @click="toggleAuthMode">
+						{{ authMode === 'register' ? '已有账号？去登录' : '没有账号？去注册' }}
+					</text>
+					<text v-if="authMode === 'login'" class="forgot-pwd-link" @click="openRecoveryModal">
+						忘记密码？
+					</text>
+				</view>
 
 				<view v-if="cachedAccounts.length" class="cache-box">
 					<text class="cache-title">已缓存账号（点击填入手机号）</text>
@@ -272,18 +279,157 @@
 			</view>
 		</view>
 
-		<!-- #ifdef MP-WEIXIN -->
-		<view v-if="viewMode !== 'auth' && profile && wechatLoginEnabled" class="login-card account-settings">
-			<WechatPrivacyGate v-if="!profile.wechatBound && privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
-			<button v-else-if="!profile.wechatBound" class="wechat-btn" open-type="getPhoneNumber" :disabled="wechatBusy" @getphonenumber="onWechatPhone">授权登录手机号并绑定微信</button>
-			<text v-else class="login-desc">已绑定微信，下次可微信快捷登录</text>
-			<view v-if="profile.passwordLoginEnabled === false" class="form-item">
-				<text class="label">设置手机号登录密码（用于 H5 登录）</text>
-				<input class="input" password v-model="initialPassword" placeholder="设置8—128位密码" maxlength="128" />
-				<button class="ghost-btn" :disabled="passwordBusy" @click="onSetInitialPassword">保存登录密码</button>
+		<!-- 账号与安全设置卡片（全端统一） -->
+		<view v-if="viewMode !== 'auth' && profile" class="login-card account-settings">
+			<text class="login-title">账号与安全</text>
+			<text class="login-desc">多端统一身份认证、安全联系方式与会话管理</text>
+
+			<view class="security-item">
+				<view class="security-meta">
+					<text class="security-title">安全手机</text>
+					<text class="security-sub">{{ (securityInfo && securityInfo.phone && securityInfo.phone.masked) ? securityInfo.phone.masked : '未绑定有效手机号' }}</text>
+				</view>
+				<button class="security-btn" size="mini" @click="openContactModal('phone')">
+					{{ (securityInfo && securityInfo.phone) ? '更换' : '绑定' }}
+				</button>
+			</view>
+
+			<view class="security-item">
+				<view class="security-meta">
+					<text class="security-title">安全邮箱</text>
+					<text class="security-sub">{{ (securityInfo && securityInfo.email && securityInfo.email.masked) ? securityInfo.email.masked : '未绑定有效邮箱' }}</text>
+				</view>
+				<button class="security-btn" size="mini" @click="openContactModal('email')">
+					{{ (securityInfo && securityInfo.email) ? '更换' : '绑定' }}
+				</button>
+			</view>
+
+			<view class="security-item">
+				<view class="security-meta">
+					<text class="security-title">登录密码</text>
+					<text class="security-sub">{{ profile.passwordLoginEnabled !== false ? '已设置（用于全端密码登录）' : '未设置' }}</text>
+				</view>
+				<button v-if="profile.passwordLoginEnabled !== false" class="security-btn" size="mini" @click="openPasswordModal">修改</button>
+				<button v-else class="security-btn primary" size="mini" @click="openSetInitialPasswordModal">设置密码</button>
+			</view>
+
+			<!-- #ifdef MP-WEIXIN -->
+			<view v-if="wechatLoginEnabled" class="security-item">
+				<view class="security-meta">
+					<text class="security-title">微信账号</text>
+					<text class="security-sub">{{ profile.wechatBound ? '已绑定（支持快捷登录）' : '未绑定微信身份' }}</text>
+				</view>
+				<WechatPrivacyGate v-if="!profile.wechatBound && privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
+				<button v-else-if="!profile.wechatBound" class="security-btn wechat" size="mini" open-type="getPhoneNumber" :disabled="wechatBusy" @getphonenumber="onWechatPhone">授权绑定</button>
+				<text v-else class="security-tag-bound">已绑定</text>
+			</view>
+			<!-- #endif -->
+
+			<view class="security-session-box">
+				<button class="revoke-sessions-btn" :disabled="sessionRevokeBusy" @click="onRevokeAllSessions">退出其他设备登录（吊销其他会话）</button>
 			</view>
 		</view>
-		<!-- #endif -->
+
+		<!-- 弹窗 1：安全联系方式（手机/邮箱）绑定 -->
+		<view v-if="showContactModal" class="dialog-mask" @click="closeContactModal">
+			<view class="dialog-panel" @click.stop>
+				<view class="dialog-header">
+					<text class="dialog-title">{{ contactModalType === 'phone' ? '绑定安全手机' : '绑定安全邮箱' }}</text>
+					<text class="dialog-close" @click="closeContactModal">×</text>
+				</view>
+				<view class="dialog-body">
+					<text class="dialog-desc">绑定并通过验证后，该联系方式可用于找回密码与安全通知</text>
+					<view class="form-item">
+						<text class="label">{{ contactModalType === 'phone' ? '手机号' : '邮箱地址' }}</text>
+						<input class="input" :type="contactModalType === 'phone' ? 'number' : 'text'" v-model="contactModalValue" :placeholder="contactModalType === 'phone' ? '请输入11位手机号' : '请输入邮箱地址'" />
+					</view>
+					<view class="form-item">
+						<text class="label">验证码</text>
+						<view class="code-input-row">
+							<input class="input code-input" type="number" maxlength="6" v-model="contactModalCode" placeholder="6位验证码" />
+							<button class="send-code-btn" size="mini" :disabled="contactModalCountdown > 0 || contactModalBusy" @click="sendContactChallenge">
+								{{ contactModalCountdown > 0 ? contactModalCountdown + 's' : '获取验证码' }}
+							</button>
+						</view>
+					</view>
+					<button class="primary-action-btn" :disabled="contactModalBusy" @click="submitContactVerify">确认绑定</button>
+				</view>
+			</view>
+		</view>
+
+		<!-- 弹窗 2：密码修改 / 设置初始密码 -->
+		<view v-if="showPasswordModal" class="dialog-mask" @click="closePasswordModal">
+			<view class="dialog-panel" @click.stop>
+				<view class="dialog-header">
+					<text class="dialog-title">{{ isSettingInitial ? '设置登录密码' : '修改登录密码' }}</text>
+					<text class="dialog-close" @click="closePasswordModal">×</text>
+				</view>
+				<view class="dialog-body">
+					<view v-if="!isSettingInitial" class="form-item">
+						<text class="label">当前密码</text>
+						<input class="input" password maxlength="128" v-model="pwdModalCurrent" placeholder="请输入当前密码" />
+					</view>
+					<view class="form-item">
+						<text class="label">新密码</text>
+						<input class="input" password maxlength="128" v-model="pwdModalNew" placeholder="设置8—128位新密码" />
+					</view>
+					<view class="form-item">
+						<text class="label">确认新密码</text>
+						<input class="input" password maxlength="128" v-model="pwdModalConfirm" placeholder="请再次输入新密码" />
+					</view>
+					<button class="primary-action-btn" :disabled="passwordBusy" @click="submitChangePassword">提交修改</button>
+				</view>
+			</view>
+		</view>
+
+		<!-- 弹窗 3：找回密码 -->
+		<view v-if="showRecoveryModal" class="dialog-mask" @click="closeRecoveryModal">
+			<view class="dialog-panel" @click.stop>
+				<view class="dialog-header">
+					<text class="dialog-title">找回密码</text>
+					<text class="dialog-close" @click="closeRecoveryModal">×</text>
+				</view>
+				<view v-if="recoveryStep === 1" class="dialog-body">
+					<text class="dialog-desc">请输入注册账号或手机号，并通过已验证联系方式获取验证码</text>
+					<view class="form-item">
+						<text class="label">账号 / 手机号</text>
+						<input class="input" v-model="recoveryAccount" placeholder="请输入用户名或手机号" />
+					</view>
+					<view class="form-item">
+						<text class="label">接收通道</text>
+						<view class="channel-picker">
+							<view :class="['channel-tab', recoveryChannel === 'sms' ? 'active' : '']" @click="recoveryChannel = 'sms'">短信验证码</view>
+							<view :class="['channel-tab', recoveryChannel === 'email' ? 'active' : '']" @click="recoveryChannel = 'email'">邮件验证码</view>
+						</view>
+					</view>
+					<button class="primary-action-btn" :disabled="recoveryBusy" @click="sendRecoveryChallenge">获取验证码</button>
+				</view>
+				<view v-else-if="recoveryStep === 2" class="dialog-body">
+					<text class="dialog-desc">已发送验证码至：{{ recoveryDestinationMasked || '已绑定联系方式' }}</text>
+					<view class="form-item">
+						<text class="label">6位验证码</text>
+						<input class="input" type="number" maxlength="6" v-model="recoveryCode" placeholder="请输入验证码" />
+					</view>
+					<button class="primary-action-btn" :disabled="recoveryBusy" @click="verifyRecoveryCode">验证并下一步</button>
+					<view class="countdown-row">
+						<text v-if="recoveryCountdown > 0" class="countdown-text">{{ recoveryCountdown }}秒后可重新获取</text>
+						<text v-else class="resend-text" @click="sendRecoveryChallenge">重新获取验证码</text>
+					</view>
+				</view>
+				<view v-else-if="recoveryStep === 3" class="dialog-body">
+					<text class="dialog-desc">身份验证通过，请设置新密码</text>
+					<view class="form-item">
+						<text class="label">新密码</text>
+						<input class="input" password maxlength="128" v-model="recoveryNewPassword" placeholder="设置8—128位新密码" />
+					</view>
+					<view class="form-item">
+						<text class="label">确认新密码</text>
+						<input class="input" password maxlength="128" v-model="recoveryConfirmPassword" placeholder="请再次输入新密码" />
+					</view>
+					<button class="primary-action-btn" :disabled="recoveryBusy" @click="submitRecoveryNewPassword">完成并使用新密码登录</button>
+				</view>
+			</view>
+		</view>
 		<!-- 底部导航（分包业务壳统一 tab：首页 / AI匹配 / 我的） -->
 		<AppTabbar active="mine" />
 	</view>
@@ -304,6 +450,14 @@
 			loginWithWechat,
 			getWechatLoginConfig,
 			setInitialPassword,
+			changePassword,
+			getSecurityInfo,
+			sendSecurityContactChallenge,
+			verifySecurityContact,
+			revokeAllUserSessions,
+			startPasswordRecovery,
+			verifyPasswordRecovery,
+			completePasswordRecovery,
 			listCachedAccounts,
 			getSessionPhone,
 			SUBJECT_TYPE_OPTIONS,
@@ -360,6 +514,40 @@
 				wechatBusy: false,
 				initialPassword: '',
 				passwordBusy: false,
+				securityInfo: {
+					phone: null,
+					email: null,
+					wechatBound: false,
+					passwordConfigured: true,
+					sessionVersion: 1
+				},
+				sessionRevokeBusy: false,
+				showContactModal: false,
+				contactModalType: 'phone',
+				contactModalValue: '',
+				contactModalCode: '',
+				contactModalChallengeId: null,
+				contactModalCountdown: 0,
+				contactModalTimer: null,
+				contactModalBusy: false,
+				showPasswordModal: false,
+				isSettingInitial: false,
+				pwdModalCurrent: '',
+				pwdModalNew: '',
+				pwdModalConfirm: '',
+				showRecoveryModal: false,
+				recoveryStep: 1,
+				recoveryAccount: '',
+				recoveryChannel: 'sms',
+				recoveryCode: '',
+				recoveryChallengeId: null,
+				recoveryDestinationMasked: '',
+				recoveryGrant: null,
+				recoveryNewPassword: '',
+				recoveryConfirmPassword: '',
+				recoveryCountdown: 0,
+				recoveryTimer: null,
+				recoveryBusy: false,
 				profile: null,
 				authPhone: '',
 				authForm: {
@@ -495,6 +683,261 @@
 				}
 				return this.onWechatLogin(code)
 			},
+			async loadSecurityInfo() {
+				if (!isLoggedIn()) return
+				try {
+					const info = await getSecurityInfo()
+					if (info) this.securityInfo = info
+				} catch (e) {
+					console.error('[mine] loadSecurityInfo error:', e)
+				}
+			},
+			openContactModal(type) {
+				this.contactModalType = type
+				this.contactModalValue = ''
+				this.contactModalCode = ''
+				this.contactModalChallengeId = null
+				this.contactModalCountdown = 0
+				if (this.contactModalTimer) {
+					clearInterval(this.contactModalTimer)
+					this.contactModalTimer = null
+				}
+				this.showContactModal = true
+			},
+			closeContactModal() {
+				this.showContactModal = false
+				if (this.contactModalTimer) {
+					clearInterval(this.contactModalTimer)
+					this.contactModalTimer = null
+				}
+			},
+			async sendContactChallenge() {
+				const val = (this.contactModalValue || '').trim()
+				if (!val) {
+					uni.showToast({ title: this.contactModalType === 'phone' ? '请输入手机号' : '请输入邮箱', icon: 'none' })
+					return
+				}
+				this.contactModalBusy = true
+				try {
+					const res = await sendSecurityContactChallenge(this.contactModalType, val)
+					this.contactModalChallengeId = res.challengeId
+					uni.showToast({ title: '验证码已发送', icon: 'success' })
+					this.contactModalCountdown = 60
+					if (this.contactModalTimer) clearInterval(this.contactModalTimer)
+					this.contactModalTimer = setInterval(() => {
+						if (this.contactModalCountdown <= 1) {
+							clearInterval(this.contactModalTimer)
+							this.contactModalTimer = null
+							this.contactModalCountdown = 0
+						} else {
+							this.contactModalCountdown -= 1
+						}
+					}, 1000)
+				} catch (e) {
+					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+				} finally {
+					this.contactModalBusy = false
+				}
+			},
+			async submitContactVerify() {
+				const val = (this.contactModalValue || '').trim()
+				const code = (this.contactModalCode || '').trim()
+				if (!val) {
+					uni.showToast({ title: '请输入' + (this.contactModalType === 'phone' ? '手机号' : '邮箱'), icon: 'none' })
+					return
+				}
+				if (!this.contactModalChallengeId) {
+					uni.showToast({ title: '请先获取验证码', icon: 'none' })
+					return
+				}
+				if (code.length !== 6) {
+					uni.showToast({ title: '请输入6位验证码', icon: 'none' })
+					return
+				}
+				this.contactModalBusy = true
+				try {
+					await verifySecurityContact(this.contactModalChallengeId, code, val)
+					uni.showToast({ title: '绑定成功', icon: 'success' })
+					this.closeContactModal()
+					await this.loadSecurityInfo()
+				} catch (e) {
+					uni.showToast({ title: e.message || '验证失败', icon: 'none' })
+				} finally {
+					this.contactModalBusy = false
+				}
+			},
+			openPasswordModal() {
+				this.isSettingInitial = false
+				this.pwdModalCurrent = ''
+				this.pwdModalNew = ''
+				this.pwdModalConfirm = ''
+				this.showPasswordModal = true
+			},
+			openSetInitialPasswordModal() {
+				this.isSettingInitial = true
+				this.pwdModalCurrent = ''
+				this.pwdModalNew = ''
+				this.pwdModalConfirm = ''
+				this.showPasswordModal = true
+			},
+			closePasswordModal() {
+				this.showPasswordModal = false
+			},
+			async submitChangePassword() {
+				const current = this.pwdModalCurrent.trim()
+				const next = this.pwdModalNew.trim()
+				const confirm = this.pwdModalConfirm.trim()
+				if (!this.isSettingInitial && !current) {
+					uni.showToast({ title: '请输入当前密码', icon: 'none' })
+					return
+				}
+				if (next.length < 8 || next.length > 128) {
+					uni.showToast({ title: '新密码长度须为8—128位', icon: 'none' })
+					return
+				}
+				if (next !== confirm) {
+					uni.showToast({ title: '两次输入的新密码不一致', icon: 'none' })
+					return
+				}
+				this.passwordBusy = true
+				try {
+					if (this.isSettingInitial) {
+						await setInitialPassword(next)
+					} else {
+						await changePassword(current, next)
+					}
+					uni.showToast({ title: '密码已保存', icon: 'success' })
+					this.closePasswordModal()
+					await this.refresh()
+				} catch (e) {
+					uni.showToast({ title: e.message || '密码保存失败', icon: 'none' })
+				} finally {
+					this.passwordBusy = false
+				}
+			},
+			async onRevokeAllSessions() {
+				uni.showModal({
+					title: '确认退出所有设备',
+					content: '此操作将立即吊销除当前操作外所有设备的登录会话，确定继续吗？',
+					success: async (res) => {
+						if (res.confirm) {
+							this.sessionRevokeBusy = true
+							try {
+								await revokeAllUserSessions()
+								uni.showToast({ title: '其他会话已全部吊销', icon: 'success' })
+								await this.loadSecurityInfo()
+							} catch (e) {
+								uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+							} finally {
+								this.sessionRevokeBusy = false
+							}
+						}
+					}
+				})
+			},
+			openRecoveryModal() {
+				this.recoveryStep = 1
+				this.recoveryAccount = this.authForm.phone || ''
+				this.recoveryChannel = 'sms'
+				this.recoveryCode = ''
+				this.recoveryChallengeId = null
+				this.recoveryDestinationMasked = ''
+				this.recoveryGrant = null
+				this.recoveryNewPassword = ''
+				this.recoveryConfirmPassword = ''
+				this.recoveryCountdown = 0
+				if (this.recoveryTimer) {
+					clearInterval(this.recoveryTimer)
+					this.recoveryTimer = null
+				}
+				this.showRecoveryModal = true
+			},
+			closeRecoveryModal() {
+				this.showRecoveryModal = false
+				if (this.recoveryTimer) {
+					clearInterval(this.recoveryTimer)
+					this.recoveryTimer = null
+				}
+			},
+			async sendRecoveryChallenge() {
+				const acc = (this.recoveryAccount || '').trim()
+				if (!acc) {
+					uni.showToast({ title: '请输入账号或手机号', icon: 'none' })
+					return
+				}
+				this.recoveryBusy = true
+				try {
+					const res = await startPasswordRecovery(acc, this.recoveryChannel)
+					this.recoveryChallengeId = res.challengeId
+					this.recoveryDestinationMasked = res.destinationMasked || ''
+					uni.showToast({ title: res.message || '若账号已绑定有效联系方式，验证信息已发送', icon: 'none', duration: 2500 })
+					this.recoveryStep = 2
+					this.recoveryCountdown = 60
+					if (this.recoveryTimer) clearInterval(this.recoveryTimer)
+					this.recoveryTimer = setInterval(() => {
+						if (this.recoveryCountdown <= 1) {
+							clearInterval(this.recoveryTimer)
+							this.recoveryTimer = null
+							this.recoveryCountdown = 0
+						} else {
+							this.recoveryCountdown -= 1
+						}
+					}, 1000)
+				} catch (e) {
+					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+				} finally {
+					this.recoveryBusy = false
+				}
+			},
+			async verifyRecoveryCode() {
+				const code = (this.recoveryCode || '').trim()
+				if (!this.recoveryChallengeId) {
+					uni.showToast({ title: '请先获取验证码', icon: 'none' })
+					return
+				}
+				if (code.length !== 6) {
+					uni.showToast({ title: '请输入6位验证码', icon: 'none' })
+					return
+				}
+				this.recoveryBusy = true
+				try {
+					const res = await verifyPasswordRecovery(this.recoveryChallengeId, code)
+					if (res && res.recoveryGrant) {
+						this.recoveryGrant = res.recoveryGrant
+						this.recoveryStep = 3
+					} else {
+						uni.showToast({ title: '验证失败', icon: 'none' })
+					}
+				} catch (e) {
+					uni.showToast({ title: e.message || '验证码错误或已失效', icon: 'none' })
+				} finally {
+					this.recoveryBusy = false
+				}
+			},
+			async submitRecoveryNewPassword() {
+				const next = this.recoveryNewPassword.trim()
+				const confirm = this.recoveryConfirmPassword.trim()
+				if (next.length < 8 || next.length > 128) {
+					uni.showToast({ title: '新密码长度须为8—128位', icon: 'none' })
+					return
+				}
+				if (next !== confirm) {
+					uni.showToast({ title: '两次输入的新密码不一致', icon: 'none' })
+					return
+				}
+				this.recoveryBusy = true
+				try {
+					await completePasswordRecovery(this.recoveryGrant, next)
+					uni.showToast({ title: '密码已重置，请登录', icon: 'success' })
+					this.closeRecoveryModal()
+					this.authMode = 'login'
+					this.authForm.password = ''
+				} catch (e) {
+					uni.showToast({ title: e.message || '重置失败，可能凭证已过期', icon: 'none' })
+				} finally {
+					this.recoveryBusy = false
+				}
+			},
 			async onSetInitialPassword() {
 				if (this.passwordBusy) return
 				const password = this.initialPassword.trim()
@@ -525,6 +968,9 @@
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
+				if (isLoggedIn()) {
+					this.loadSecurityInfo()
+				}
 
 				if (this.editing) {
 				this.viewMode = 'profile'
@@ -675,8 +1121,8 @@
 				uni.showToast({ title: '请输入密码', icon: 'none' })
 				return
 			}
-			if (this.authMode === 'register' && password.length < 8) {
-				uni.showToast({ title: '密码至少8位', icon: 'none' })
+			if (this.authMode === 'register' && (password.length < 8 || password.length > 128)) {
+				uni.showToast({ title: '请设置8–128位密码，首尾空格不计入', icon: 'none', duration: 3000 })
 				return
 			}
 			uni.showLoading({ title: this.authMode === 'register' ? '注册中...' : '登录中...', mask: true })
@@ -908,6 +1354,9 @@
 </script>
 
 <style>
+.login-card .password-hint, .login-card .password-error { display: block; margin-top: 12rpx; font-size: 24rpx; line-height: 1.6; }
+.login-card .password-hint { color: #64748b; }
+.login-card .password-error { color: #c53030; }
 	.wechat-login, .account-settings {
 		margin-top: 24rpx;
 		margin-bottom: 24rpx;
@@ -1619,5 +2068,175 @@
 	.ghost-btn.danger {
 		color: #e74c3c !important;
 		border-color: #e74c3c !important;
+	}
+
+	.auth-helper-row {
+		display: flex;
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		margin-top: 24rpx;
+	}
+	.forgot-pwd-link {
+		font-size: 26rpx;
+		color: #64748b;
+	}
+	.account-security-card {
+		margin-top: 24rpx;
+		margin-bottom: 24rpx;
+	}
+	.security-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 24rpx 0;
+		border-bottom: 1rpx solid #f1f5f9;
+	}
+	.security-meta {
+		display: flex;
+		flex-direction: column;
+	}
+	.security-title {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #1e293b;
+	}
+	.security-sub {
+		font-size: 24rpx;
+		color: #64748b;
+		margin-top: 4rpx;
+	}
+	.security-btn {
+		font-size: 24rpx;
+		padding: 8rpx 20rpx;
+		background: #f1f5f9;
+		color: #2563eb;
+		border-radius: 8rpx;
+		margin: 0;
+	}
+	.security-btn.primary {
+		background: #2563eb;
+		color: #ffffff;
+	}
+	.security-btn.wechat {
+		background: #07c160;
+		color: #ffffff;
+	}
+	.security-tag-bound {
+		font-size: 24rpx;
+		color: #16a34a;
+		font-weight: 600;
+	}
+	.security-session-box {
+		margin-top: 24rpx;
+	}
+	.revoke-sessions-btn {
+		background: #fff1f2;
+		color: #e11d48;
+		font-size: 26rpx;
+		border-radius: 10rpx;
+		border: 1rpx solid #fecdd3;
+	}
+	.dialog-mask {
+		position: fixed;
+		left: var(--window-left, 0px);
+		right: var(--window-right, 0px);
+		top: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 1000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 32rpx;
+		box-sizing: border-box;
+	}
+	.dialog-panel {
+		width: 100%;
+		max-width: 620rpx;
+		background: #ffffff;
+		border-radius: 20rpx;
+		padding: 32rpx;
+		box-sizing: border-box;
+	}
+	.dialog-header {
+		display: flex;
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 20rpx;
+	}
+	.dialog-title {
+		font-size: 32rpx;
+		font-weight: 600;
+		color: #0f172a;
+	}
+	.dialog-close {
+		font-size: 40rpx;
+		color: #94a3b8;
+		line-height: 1;
+		padding: 8rpx;
+	}
+	.dialog-desc {
+		font-size: 24rpx;
+		color: #64748b;
+		margin-bottom: 20rpx;
+		line-height: 1.5;
+	}
+	.channel-picker {
+		display: flex;
+		flex-direction: row;
+		gap: 16rpx;
+	}
+	.channel-tab {
+		flex: 1;
+		text-align: center;
+		padding: 14rpx;
+		background: #f1f5f9;
+		color: #475569;
+		border-radius: 8rpx;
+		font-size: 26rpx;
+	}
+	.channel-tab.active {
+		background: #eff6ff;
+		color: #2563eb;
+		font-weight: 600;
+		border: 1rpx solid #bfdbfe;
+	}
+	.primary-action-btn {
+		margin-top: 24rpx;
+		background: #2563eb;
+		color: #ffffff;
+		font-size: 28rpx;
+		border-radius: 10rpx;
+	}
+	.code-input-row {
+		display: flex;
+		flex-direction: row;
+		gap: 16rpx;
+		align-items: center;
+	}
+	.code-input {
+		flex: 1;
+	}
+	.send-code-btn {
+		white-space: nowrap;
+		font-size: 24rpx;
+		background: #eff6ff;
+		color: #2563eb;
+		margin: 0;
+	}
+	.countdown-row {
+		text-align: center;
+		margin-top: 20rpx;
+	}
+	.countdown-text {
+		font-size: 24rpx;
+		color: #94a3b8;
+	}
+	.resend-text {
+		font-size: 24rpx;
+		color: #2563eb;
 	}
 </style>

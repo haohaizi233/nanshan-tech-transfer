@@ -274,6 +274,72 @@ export async function setInitialPassword(password) {
 	setCurrentUser(user)
 }
 
+/** 修改登录密码（已有密码时需提供当前密码） */
+export async function changePassword(currentPassword, newPassword) {
+	const cur = String(currentPassword || '')
+	const next = String(newPassword || '').trim()
+	if (next.length < 8 || next.length > 128) throw new Error('密码长度须为8—128位')
+	const userId = getCurrentUser()?.userId
+	await apiRequest('POST', '/me/password', null, { currentPassword: cur, newPassword: next })
+	if (getCurrentUser()?.userId !== userId) return
+	const user = await apiRequest('GET', '/me')
+	if (getCurrentUser()?.userId !== userId) return
+	setCurrentUser(user)
+}
+
+/** 获取安全中心概要信息（已验证联系方式、密码配置状态等） */
+export async function getSecurityInfo() {
+	return apiRequest('GET', '/me/security')
+}
+
+/** 发起安全联系方式绑定挑战（发送验证码） */
+export async function sendSecurityContactChallenge(contactType, contactValue) {
+	return apiRequest('POST', '/me/security/contact/challenge', null, {
+		contactType,
+		contactValue: String(contactValue || '').trim()
+	})
+}
+
+/** 提交验证码确认绑定安全联系方式 */
+export async function verifySecurityContact(challengeId, code, contactValue) {
+	return apiRequest('POST', '/me/security/contact/verify', null, {
+		challengeId,
+		code: String(code || '').trim(),
+		contactValue: String(contactValue || '').trim()
+	})
+}
+
+/** 吊销所有已登录会话（除当前请求外） */
+export async function revokeAllUserSessions() {
+	return apiRequest('POST', '/me/security/revoke-sessions')
+}
+
+/** 发起找回密码挑战（防枚举返回） */
+export async function startPasswordRecovery(account, channel = 'sms') {
+	return apiRequest('POST', '/auth/recovery/start', null, {
+		account: String(account || '').trim(),
+		channel
+	})
+}
+
+/** 验证找回密码挑战验证码，换取单次 recoveryGrant */
+export async function verifyPasswordRecovery(challengeId, code) {
+	return apiRequest('POST', '/auth/recovery/verify', null, {
+		challengeId,
+		code: String(code || '').trim()
+	})
+}
+
+/** 使用 recoveryGrant 完成密码重置 */
+export async function completePasswordRecovery(recoveryGrant, newPassword) {
+	const pwd = String(newPassword || '').trim()
+	if (pwd.length < 8 || pwd.length > 128) throw new Error('新密码长度须为8—128位')
+	return apiRequest('POST', '/auth/recovery/complete', null, {
+		recoveryGrant,
+		newPassword: pwd
+	})
+}
+
 export async function saveUserProfile(profile) {
 	if (!isLoggedIn()) return null
 
