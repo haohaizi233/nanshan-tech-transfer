@@ -69,6 +69,31 @@ def test_mock_email_provider_send_and_last_link():
         em.send_code("test@example.com", "123123", "password_recovery")
 
 
+def test_sendcloud_sms_provider_logic():
+    import json
+
+    from modules.security.provider import SendCloudSmsProvider
+
+    with pytest.raises(ProviderError, match="缺少 SMS_USER 或 SMS_KEY"):
+        SendCloudSmsProvider(sms_user="", sms_key="", template_id="123")
+
+    with pytest.raises(ProviderError, match="缺少 SENDCLOUD_SMS_TEMPLATE_ID"):
+        SendCloudSmsProvider(sms_user="user", sms_key="key", template_id="")
+
+    provider = SendCloudSmsProvider(sms_user="test_u", sms_key="test_k", template_id="999")
+    with patch("urllib.request.urlopen") as mock_url:
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"result": True, "statusCode": 200}).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_url.return_value = mock_resp
+
+        res = provider.send_code("13800138000", "123456", "password_recovery", 300)
+        assert res is True
+        assert mock_url.called
+        req = mock_url.call_args[0][0]
+        assert "signature=" in req.data.decode("utf-8")
+
+
 # ── 2. 密码找回发起测试（防枚举） ────────────────────────────────
 
 

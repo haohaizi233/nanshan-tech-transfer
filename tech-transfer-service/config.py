@@ -83,9 +83,14 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = False
     REDIS_URL: str = "redis://127.0.0.1:6379/0"
 
-    # ── 短信服务（SmsProvider：mock / tencent）──────────────
+    # ── 短信服务（SmsProvider：mock / tencent / sendcloud）──────
     SMS_ENABLED: bool = False
     SMS_PROVIDER: str = "mock"
+    SMS_USER: str = ""
+    SMS_KEY: str = ""
+    SENDCLOUD_SMS_USER: str = ""
+    SENDCLOUD_SMS_KEY: str = ""
+    SENDCLOUD_SMS_TEMPLATE_ID: str = ""
     TENCENT_SMS_SECRET_ID: str = ""
     TENCENT_SMS_SECRET_KEY: str = ""
     TENCENT_SMS_SDK_APP_ID: str = ""

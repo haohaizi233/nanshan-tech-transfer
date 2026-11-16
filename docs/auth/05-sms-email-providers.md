@@ -32,6 +32,13 @@ class SmsProvider(abc.ABC):
 - `TENCENT_SMS_SIGN_NAME`：短信签名名称（需工信部与腾讯云报备审核通过，例如 `南山科转通`）
 - `TENCENT_SMS_TEMPLATE_ID`：正文模板 ID（例如：`您的验证码为{1}，请在{2}分钟内完成操作`）
 
+### 2.3 SendCloud 短信 (SendCloudSmsProvider) 配置清单
+- `SMS_ENABLED=true`
+- `SMS_PROVIDER=sendcloud`
+- `SMS_USER` / `SENDCLOUD_SMS_USER`：SendCloud 短信发信账号（如 `nanshan`）
+- `SMS_KEY` / `SENDCLOUD_SMS_KEY`：SendCloud API Key（32位密钥，通过 SHA256 签名传输，防窃听）
+- `SENDCLOUD_SMS_TEMPLATE_ID`：SendCloud 审核通过的短信模板 ID（如 `928135`，正文格式包含 `%code%`）
+
 ---
 
 ## 3. 邮件服务商 (EmailProvider)

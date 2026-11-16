@@ -172,6 +172,65 @@ class TencentSmsProvider(SmsProvider):
             return json.loads(resp.read().decode("utf-8"))
 
 
+class SendCloudSmsProvider(SmsProvider):
+    """SendCloud 短信发送适配器（SHA256 签名，stdlib 实现，零第三方库依赖）。"""
+
+    API_URL = "https://api.sendcloud.net/smsapi/send"
+
+    def __init__(
+        self,
+        sms_user: str,
+        sms_key: str,
+        template_id: int | str,
+        timeout: int = 5,
+    ):
+        self.sms_user = str(sms_user or "").strip()
+        self.sms_key = str(sms_key or "").strip()
+        self.template_id = str(template_id or "").strip()
+        self.timeout = timeout
+        if not (self.sms_user and self.sms_key):
+            raise ProviderError("SendCloud 短信配置不完整，缺少 SMS_USER 或 SMS_KEY")
+        if not self.template_id:
+            raise ProviderError("SendCloud 短信配置不完整，缺少 SENDCLOUD_SMS_TEMPLATE_ID")
+
+    def send_code(self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
+        clean_phone = phone.replace("+86", "").replace("-", "").strip()
+        minutes = max(1, expires_in_seconds // 60)
+        vars_payload = json.dumps({"%code%": code, "%time%": str(minutes), "code": code})
+        payload = {
+            "smsUser": self.sms_user,
+            "templateId": self.template_id,
+            "phone": clean_phone,
+            "vars": vars_payload,
+        }
+        sorted_keys = sorted(payload.keys())
+        param_str = "&".join(f"{key}={payload[key]}" for key in sorted_keys)
+        sign_str = f"{self.sms_key}&{param_str}&{self.sms_key}"
+        signature = hashlib.sha256(sign_str.encode("utf-8")).hexdigest()
+        payload["signature"] = signature
+
+        try:
+            data_bytes = urllib.parse.urlencode(payload).encode("utf-8")
+            req = urllib.request.Request(
+                self.API_URL,
+                data=data_bytes,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+            if not resp_data.get("result") or resp_data.get("statusCode") != 200:
+                err_msg = resp_data.get("message") or "未知错误"
+                logger.error("SendCloud 短信发送失败: %s (resp=%s)", err_msg, resp_data)
+                raise ProviderError(f"短信发送失败: {err_msg}")
+            return True
+        except ProviderError:
+            raise
+        except Exception as e:
+            logger.error("SendCloud 短信接口请求异常: %s", e)
+            raise ProviderError("短信服务暂时不可用，请稍后重试") from None
+
+
 # ── Email Provider ───────────────────────────────────────────
 
 
@@ -376,7 +435,13 @@ def get_sms_provider() -> SmsProvider:
         raise ProviderError("短信找回功能暂未开放")
 
     provider_type = (settings.SMS_PROVIDER or "mock").lower()
-    if provider_type == "tencent":
+    if provider_type == "sendcloud":
+        _sms_provider_instance = SendCloudSmsProvider(
+            sms_user=settings.SENDCLOUD_SMS_USER or settings.SMS_USER,
+            sms_key=settings.SENDCLOUD_SMS_KEY or settings.SMS_KEY,
+            template_id=settings.SENDCLOUD_SMS_TEMPLATE_ID,
+        )
+    elif provider_type == "tencent":
         _sms_provider_instance = TencentSmsProvider(
             secret_id=settings.TENCENT_SMS_SECRET_ID,
             secret_key=settings.TENCENT_SMS_SECRET_KEY,
