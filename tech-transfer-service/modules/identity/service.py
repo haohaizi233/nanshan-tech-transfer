@@ -252,15 +252,19 @@ def register_user(phone: str, password: str, display_name: str | None = None) ->
     注册成功后直接签发会话（免登录），返回与 password_login_session 相同结构。
     手机号已注册时抛 TT_AUTH_40901。
     """
-    from core.errors import TT_AUTH_40901, TT_COMMON_40001, BizError
+    from core.errors import TT_AUTH_40901, TT_COMMON_40001, BizError, bad_request
     from core.password import hash_password
 
     try:
         phone = validate_phone(phone, required=True)
     except BizError:
-        raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "请输入11位手机号")
-    if not password or len(password) < 8:
-        raise BizError(*TT_COMMON_40001[:2], TT_COMMON_40001[2], "密码至少8位")
+        raise bad_request("请输入11位手机号", details="请输入11位手机号")
+    if not password:
+        raise bad_request("请输入密码", details="请输入密码")
+    if len(password) < 8:
+        raise bad_request("密码至少8位", details="密码至少8位")
+    if len(password) > 128:
+        raise bad_request("密码长度不能超过128位", details="密码长度不能超过128位")
 
     with get_cursor(commit=True) as cur:
         # 检查手机号是否已注册（phone 唯一索引 + username 唯一约束双查，

@@ -697,8 +697,11 @@ class TestIdentityServiceRegister:
         from modules.identity.service import register_user
 
         with patch("modules.identity.service.validate_phone", return_value="13800138000"):
-            with pytest.raises(BizError):
+            with pytest.raises(BizError) as exc_info:
                 register_user("13800138000", "short")
+            assert exc_info.value.code == "TT_COMMON_40001"
+            assert exc_info.value.message == "密码至少8位"
+            assert exc_info.value.details == "密码至少8位"
 
 
 class TestIdentityServiceLogin:
