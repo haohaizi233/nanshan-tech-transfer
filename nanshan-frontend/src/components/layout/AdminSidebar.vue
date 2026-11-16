@@ -52,6 +52,7 @@ const orgAdminPaths = new Set([
   '/admin/requirements',
   '/admin/cooperation',
   '/admin/users',
+  '/admin/security',
 ])
 
 const menuList = [
@@ -114,6 +115,11 @@ const menuList = [
     name: '操作日志',
     path: '/admin/logs',
     icon: 'log'
+  },
+  {
+    name: '安全中心',
+    path: '/admin/security',
+    icon: 'system'
   }
 ]
 

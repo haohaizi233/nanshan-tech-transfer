@@ -46,7 +46,8 @@ const onTabKeydown = (event, currentValue) => {
 
 const validatePassword = form => {
   if (!form.username.trim() || !form.password) return '请填写登录账号和密码。'
-  if (form.password.length < 8) return '密码至少需要 8 位。'
+  if (form.password.length < 8) return '密码太短，请设置至少 8 位密码（最多 128 位）。'
+  if (form.password.length > 128) return '密码太长，请缩短至 128 位以内。'
   if (form.password !== form.confirmPassword) return '两次输入的密码不一致。'
   return ''
 }
@@ -156,7 +157,7 @@ const submit = async () => {
             <label>手机号码<input v-model="userForm.phone" maxlength="32" placeholder="选填" /></label>
             <label>登录账号 <em>*</em><input v-model="userForm.username" maxlength="64" placeholder="4-64 位：字母、数字、._-" /></label>
             <label>电子邮箱<input v-model="userForm.email" type="email" maxlength="128" placeholder="选填" /></label>
-            <label>登录密码 <em>*</em><input v-model="userForm.password" type="password" maxlength="128" placeholder="至少 8 位" /></label>
+            <label>登录密码 <em>*</em><input v-model="userForm.password" type="password" maxlength="128" autocomplete="new-password" placeholder="设置 8–128 位密码" /><small class="password-hint">密码长度为 8–128 位，建议组合使用字母、数字和符号。</small><small v-if="userForm.password && userForm.password.length < 8" class="password-error" role="status">密码太短，还需输入 {{ 8 - userForm.password.length }} 位。</small></label>
             <label>确认密码 <em>*</em><input v-model="userForm.confirmPassword" type="password" maxlength="128" /></label>
         </div>
 
@@ -180,12 +181,12 @@ const submit = async () => {
             <label>联系电话 <em>*</em><input v-model="institutionForm.contactPhone" maxlength="32" /></label>
             <label>电子邮箱<input v-model="institutionForm.email" type="email" maxlength="128" placeholder="选填" /></label>
             <label>登录账号 <em>*</em><input v-model="institutionForm.username" maxlength="64" placeholder="4-64 位：字母、数字、._-" /></label>
-            <label>登录密码 <em>*</em><input v-model="institutionForm.password" type="password" maxlength="128" placeholder="至少 8 位" /></label>
+            <label>登录密码 <em>*</em><input v-model="institutionForm.password" type="password" maxlength="128" autocomplete="new-password" placeholder="设置 8–128 位密码" /><small class="password-hint">密码长度为 8–128 位，建议组合使用字母、数字和符号。</small><small v-if="institutionForm.password && institutionForm.password.length < 8" class="password-error" role="status">密码太短，还需输入 {{ 8 - institutionForm.password.length }} 位。</small></label>
             <label>确认密码 <em>*</em><input v-model="institutionForm.confirmPassword" type="password" maxlength="128" /></label>
           </div>
         </div>
 
-        <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
+        <p v-if="errorMessage" class="message error" role="alert">{{ errorMessage }}</p>
         <p v-if="successMessage" class="message success">{{ successMessage }}</p>
         <footer class="actions"><button type="button" class="secondary" @click="router.push('/login')">返回登录</button><button type="submit" class="primary" :disabled="submitting || Boolean(successMessage)">{{ submitting ? '提交中…' : mode === 'user' ? '完成注册' : '提交注册申请' }}</button></footer>
       </form>
@@ -194,5 +195,8 @@ const submit = async () => {
 </template>
 
 <style scoped>
+.password-hint, .password-error { display: block; margin-top: 6px; font-size: 12px; font-weight: 400; line-height: 1.6; }
+.password-hint { color: #64748b; }
+.password-error { color: #c53030; }
 .register-page { min-height: 100vh; padding: 48px 20px; background: radial-gradient(circle at 12% 6%, #dceeff 0, transparent 30%), #f5f7fb; }.register-card { box-sizing: border-box; max-width: 840px; margin: 0 auto; padding: 38px 44px; border: 1px solid #e4eaf2; border-radius: 18px; background: #fff; box-shadow: 0 20px 50px rgba(34, 62, 100, .12); }.heading { margin-bottom: 26px; }.brand { margin: 0; color: #1677ff; font-size: 13px; font-weight: 700; letter-spacing: .04em; }.heading h1 { margin: 8px 0; color: #1f2d3d; font-size: 28px; }.heading p:last-child { margin: 0; color: #718096; line-height: 1.7; }.mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 28px; padding: 5px; border-radius: 10px; background: #f1f5f9; }.mode-tabs button { padding: 11px; border: 0; border-radius: 7px; background: transparent; color: #64748b; font: inherit; font-weight: 650; cursor: pointer; }.mode-tabs button.active { background: #fff; color: #1677ff; box-shadow: 0 2px 8px rgba(22, 119, 255, .13); }h2 { margin: 28px 0 16px; padding-top: 24px; border-top: 1px solid #edf1f5; color: #25364a; font-size: 18px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }label { display: block; color: #344154; font-size: 14px; font-weight: 650; }em { color: #ef4444; font-style: normal; }input, select, textarea { box-sizing: border-box; width: 100%; margin-top: 7px; padding: 10px 11px; border: 1px solid #d7e0eb; border-radius: 7px; color: #243447; font: inherit; font-weight: 400; outline: none; }input:focus, select:focus, textarea:focus { border-color: #1677ff; box-shadow: 0 0 0 3px rgba(22,119,255,.1); }textarea { resize: vertical; }.full-width { margin-top: 18px; }.message { margin: 18px 0 0; padding: 11px 13px; border-radius: 7px; font-size: 14px; }.error { color: #c53030; background: #fff1f1; }.success { color: #177245; background: #edf9f0; }.actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 30px; }button { padding: 10px 19px; border: 0; border-radius: 7px; font: inherit; font-weight: 650; cursor: pointer; }.primary { color: #fff; background: #1677ff; }.primary:disabled { cursor: not-allowed; opacity: .65; }.secondary { color: #475569; background: #edf2f7; }@media (max-width: 640px) { .register-card { padding: 28px 22px; }.form-grid { grid-template-columns: 1fr; }.register-page { padding: 22px 12px; } }
 </style>

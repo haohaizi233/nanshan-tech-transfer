@@ -58,6 +58,82 @@ const handleLogin = async () => {
 const goRegister = () => {
   router.push('/register')
 }
+
+const goForgotPassword = () => {
+  router.push('/forgot-password')
+}
+
+import { api, saveSession } from '../../api/client'
+const wechatWebConfig = ref({ enabled: false, appid: '' })
+const activeTab = ref('password')
+const wechatLoading = ref(false)
+const wechatAuthUrl = ref('')
+const wechatBindInfo = ref(null)
+
+const loadWechatConfig = async () => {
+  try {
+    const res = await api('/auth/wechat/web/config')
+    if (res && res.enabled) {
+      wechatWebConfig.value = res
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+const switchToWechat = async () => {
+  activeTab.value = 'wechat'
+  errorMsg.value = ''
+  wechatLoading.value = true
+  try {
+    const redirectUri = window.location.origin + '/login'
+    const res = await api('/auth/wechat/web/authorize', { params: { redirectUri } })
+    if (res && res.authorizeUrl) {
+      wechatAuthUrl.value = res.authorizeUrl
+    }
+  } catch (e) {
+    errorMsg.value = e.message || '获取微信扫码地址失败'
+  } finally {
+    wechatLoading.value = false
+  }
+}
+
+const checkWechatCallback = async () => {
+  const code = route.query.code
+  const state = route.query.state
+  if (!code || !state) return
+  wechatLoading.value = true
+  try {
+    const res = await api('/auth/wechat/web/callback', {
+      method: 'POST',
+      body: { code, state },
+      skipAuthRefresh: true
+    })
+    if (res.accessToken) {
+      saveSession(res.accessToken, res.user, res.refreshToken)
+      authStore.token = res.accessToken
+      authStore.user = res.user
+      const roles = res.user.roles || []
+      const defaultPath = roles.includes('org_admin') && !roles.includes('admin')
+        ? '/admin/achievements'
+        : '/admin/overview'
+      router.push(route.query.redirect || defaultPath)
+    } else if (res.bindingTicket) {
+      wechatBindInfo.value = res
+      errorMsg.value = res.message || '微信尚未绑定科转通账号，请登录已有账号后绑定'
+    }
+  } catch (err) {
+    errorMsg.value = err.message || '微信扫码登录失败'
+  } finally {
+    wechatLoading.value = false
+  }
+}
+
+onMounted(() => {
+  loadWechatConfig()
+  checkWechatCallback()
+})
+
 </script>
 
 <template>
@@ -114,8 +190,36 @@ const goRegister = () => {
             <h2>欢迎登录</h2>
             <p>南山科转通后台管理系统</p>
           </div>
+          <div v-if="wechatWebConfig.enabled" class="login-tab-switcher">
+            <button
+              type="button"
+              class="tab-btn"
+              :class="{ active: activeTab === 'password' }"
+              @click="activeTab = 'password'"
+            >
+              账号密码登录
+            </button>
+            <button
+              type="button"
+              class="tab-btn"
+              :class="{ active: activeTab === 'wechat' }"
+              @click="switchToWechat"
+            >
+              微信扫码登录
+            </button>
+          </div>
 
-          <form @submit.prevent="handleLogin">
+
+          <div v-if="activeTab === 'wechat'" class="wechat-panel">
+            <div v-if="wechatLoading" class="wechat-loading">加载二维码中…</div>
+            <div v-else-if="wechatAuthUrl" class="wechat-qr-box">
+              <p class="qr-desc">请使用微信扫一扫授权登录</p>
+              <a :href="wechatAuthUrl" class="qr-jump-btn" target="_blank">点击前往微信安全扫码页面</a>
+              <p class="qr-tip">授权完成后将自动完成登录</p>
+            </div>
+            <p v-if="errorMsg" class="login-error">{{ errorMsg }}</p>
+          </div>
+          <form v-else @submit.prevent="handleLogin">
             <div class="form-item">
               <label>账号</label>
 
@@ -170,12 +274,13 @@ const goRegister = () => {
                   v-model="form.remember"
                   type="checkbox"
                 />
-                <span>记住密码</span>
+                <span>记住账号</span>
               </label>
 
               <button
                 type="button"
                 class="text-button"
+                @click="goForgotPassword"
               >
                 忘记密码？
               </button>
@@ -546,5 +651,51 @@ const goRegister = () => {
   width: 700px;
   height: 700px;
   border: 1px solid rgba(79, 160, 255, 0.1);
+}
+
+.login-tab-switcher {
+  display: flex;
+  border-bottom: 1px solid #eef1f6;
+  margin-bottom: 24px;
+}
+.tab-btn {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  background: none;
+  font-size: 15px;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.tab-btn.active {
+  color: #0256ff;
+  border-bottom-color: #0256ff;
+  font-weight: 600;
+}
+.wechat-panel {
+  padding: 24px 0;
+  text-align: center;
+}
+.qr-desc {
+  font-size: 14px;
+  color: #334155;
+  margin-bottom: 16px;
+}
+.qr-jump-btn {
+  display: inline-block;
+  background: #07c160;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+.qr-tip {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #94a3b8;
 }
 </style>

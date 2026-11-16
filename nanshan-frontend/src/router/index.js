@@ -37,7 +37,8 @@ const orgAdminAllowedPaths = [
   '/admin/achievements',
   '/admin/requirements',
   '/admin/cooperation',
-  '/admin/users'
+  '/admin/users',
+  '/admin/security'
 ]
 
 const routes = [
@@ -56,6 +57,16 @@ const routes = [
     path: '/register',
     name: 'register',
     component: RegisterView
+  },
+  {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('../views/auth/ForgotPasswordView.vue')
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('../views/auth/ResetPasswordView.vue')
   },
 
   {
@@ -227,6 +238,12 @@ const routes = [
         name: 'logs',
         component: LogView,
         meta: { parent: '系统管理', title: '操作日志' }
+      },
+      {
+        path: 'security',
+        name: 'security',
+        component: () => import('../views/admin/AccountSecurityView.vue'),
+        meta: { parent: '系统管理', title: '账号安全' }
       }
     ]
   },
@@ -252,6 +269,9 @@ router.beforeEach(to => {
   }
   // 已认证用户不应停留在注册页
   if (to.path === '/register' && getToken()) {
+    return { path: isOrgAdminOnly() ? '/admin/achievements' : '/admin/overview' }
+  }
+  if ((to.path === '/forgot-password' || to.path === '/reset-password') && getToken()) {
     return { path: isOrgAdminOnly() ? '/admin/achievements' : '/admin/overview' }
   }
   if (

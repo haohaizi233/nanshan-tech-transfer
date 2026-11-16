@@ -135,6 +135,11 @@ const openPassword = () => {
   passwordForm.confirmPassword = ''
 }
 
+const goSecurity = () => {
+  showUserMenu.value = false
+  router.push('/admin/security')
+}
+
 const savePassword = async () => {
   if (!passwordForm.currentPassword) {
     passwordError.value = '请填写当前密码'
@@ -159,7 +164,9 @@ const savePassword = async () => {
       },
     })
     passwordVisible.value = false
-    await alertDialog({ title: '已更新', message: '密码已修改，请牢记新密码' })
+    await alertDialog({ title: '密码已修改', message: '密码已更新，所有现有会话已安全失效，请重新登录' })
+    await authStore.logout()
+    router.push('/login')
   } catch (err) {
     passwordError.value = err.message || '修改密码失败'
   } finally {
@@ -256,6 +263,13 @@ const savePassword = async () => {
             @click="openPassword"
           >
             修改密码
+          </button>
+
+          <button
+            type="button"
+            @click="goSecurity"
+          >
+            安全中心
           </button>
 
           <div class="dropdown-line"></div>
