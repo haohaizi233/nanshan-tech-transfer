@@ -568,18 +568,29 @@
 	.card-foot {
 		margin-top: 16rpx;
 		display: flex;
+		flex-direction: row;
 		justify-content: flex-end;
 		align-items: center;
+		width: 100%;
+		box-sizing: border-box;
 	}
 
-	.card-foot .btn {
+	.card-foot .btn,
+	.card-foot button,
+	.card-foot uni-button {
 		width: auto;
 		min-width: 160rpx;
-		margin-left: auto;
+		margin: 0 0 0 auto !important;
+		margin-right: 0 !important;
 		font-size: 26rpx;
 		height: 64rpx;
 		line-height: 64rpx;
 		padding: 0 28rpx;
+	}
+
+	.card-foot .btn::after,
+	.card-foot button::after {
+		border: none;
 	}
 
 	.load-more {
