@@ -66,6 +66,41 @@ class WechatBindRequest(WechatLoginRequest):
     phoneCode: str = Field(..., min_length=1, max_length=512)
 
 
+class RecoveryStartRequest(RequestBody):
+    account: str = Field(..., min_length=1, description="用户名、手机号或邮箱")
+    channel: str = Field("sms", description="sms / email_otp / email_link")
+
+
+class RecoveryVerifyRequest(RequestBody):
+    challengeId: str = Field(..., description="挑战 UUID")
+    code: str = Field(..., min_length=1, max_length=128, description="验证码或重置Token")
+
+
+class RecoveryCompleteRequest(RequestBody):
+    recoveryGrant: str = Field(..., min_length=1, description="恢复授权凭证")
+    newPassword: str = Field(..., min_length=8, max_length=128, description="新密码（8-128位）")
+
+
+class WechatWebCallbackRequest(RequestBody):
+    code: str = Field(..., min_length=1, description="微信开放平台授权码")
+    state: str = Field(..., min_length=1, description="OAuth state 校验值")
+
+
+class WechatWebBindRequest(RequestBody):
+    bindingTicket: str = Field(..., min_length=1, description="绑定临时票据")
+
+
+class ContactChallengeRequest(RequestBody):
+    contactType: str = Field(..., description="phone 或 email")
+    contactValue: str = Field(..., min_length=1, description="联系方式号码或邮箱")
+
+
+class ContactVerifyRequest(RequestBody):
+    challengeId: str = Field(..., description="挑战 UUID")
+    code: str = Field(..., min_length=1, max_length=128, description="收到的验证码")
+    contactValue: str = Field(..., min_length=1, description="联系方式号码或邮箱")
+
+
 # ── me ──────────────────────────────────────────────────────
 
 

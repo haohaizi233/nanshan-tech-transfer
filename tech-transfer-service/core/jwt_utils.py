@@ -10,11 +10,12 @@ def _now():
     return int(time.time())
 
 
-def sign_access_token(user_id: int, user_no: str, roles: list[str]) -> str:
+def sign_access_token(user_id: int, user_no: str, roles: list[str], session_version: int = 1) -> str:
     payload = {
         "sub": str(user_id),
         "userNo": user_no,
         "roles": roles,
+        "ver": int(session_version),
         "type": "access",
         "iat": _now(),
         "exp": _now() + settings.ACCESS_TOKEN_EXPIRES,

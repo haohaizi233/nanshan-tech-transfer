@@ -52,6 +52,32 @@ def _user_is_active(user_id: int) -> bool:
     return auth_cache.cached(("user_active", user_id), _query)
 
 
+def _user_session_version(user_id: int) -> int:
+    """Check app_user.session_version for instant JWT access token revocation.
+
+    Cached with 30s TTL in auth_cache. When a user resets their password or logs out
+    all sessions, session_version is incremented and cache invalidated immediately.
+    Defaults to 1 if not found or in unit tests without database.
+    """
+    from db import get_cursor
+
+    def _query() -> int:
+        try:
+            with get_cursor() as cur:
+                cur.execute(
+                    "SELECT session_version FROM app_user WHERE id = %s",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                if not row or not isinstance(row, dict) or row.get("session_version") is None:
+                    return 1
+                return int(row["session_version"])
+        except Exception:
+            return 1
+
+    return auth_cache.cached(("user_session_version", user_id), _query)
+
+
 def _is_admin_role(user_id: int) -> bool:
     """user_role 表实时 admin 判定（M8: 30s TTL 缓存，写路径主动失效）。"""
     from db import get_cursor
@@ -117,6 +143,21 @@ def identity(request: Request) -> dict:
     if not _user_is_active(actor["userId"]):
         code, message, status = TT_COMMON_40102
         raise BizError(code, message, status)
+
+    # Session version gap: password change / recovery increments session_version.
+    # Check that the token's ver matches current user's session_version.
+    token_ver = payload.get("ver")
+    current_ver = _user_session_version(actor["userId"])
+    if token_ver is not None:
+        if int(token_ver) != current_ver:
+            code, message, status = TT_COMMON_40102
+            raise BizError(code, "登录已失效，请重新登录", status)
+    else:
+        # 兼容过渡期：无 ver 的存量 Token 仅在 session_version == 1 时放行
+        if current_ver > 1:
+            code, message, status = TT_COMMON_40102
+            raise BizError(code, "登录已失效，请重新登录", status)
+
     return actor
 
 
@@ -140,6 +181,16 @@ def identity_from_access_token(token: str):
     actor = _payload_to_actor(payload)
     if not _user_is_active(actor["userId"]):
         return None
+
+    token_ver = payload.get("ver")
+    current_ver = _user_session_version(actor["userId"])
+    if token_ver is not None:
+        if int(token_ver) != current_ver:
+            return None
+    else:
+        if current_ver > 1:
+            return None
+
     return actor
 
 

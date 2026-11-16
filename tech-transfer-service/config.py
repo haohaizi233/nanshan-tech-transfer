@@ -74,6 +74,39 @@ class Settings(BaseSettings):
     WECHAT_APPID: str = ""
     WECHAT_APP_SECRET: str = ""
 
+    # ── 微信开放平台（PC 网站扫码登录 OAuth2）────────────────
+    WECHAT_OPEN_ENABLED: bool = False
+    WECHAT_OPEN_APPID: str = ""
+    WECHAT_OPEN_APP_SECRET: str = ""
+
+    # ── Redis 缓存与分布式原子限流 ──────────────────────────
+    REDIS_ENABLED: bool = False
+    REDIS_URL: str = "redis://127.0.0.1:6379/0"
+
+    # ── 短信服务（SmsProvider：mock / tencent）──────────────
+    SMS_ENABLED: bool = False
+    SMS_PROVIDER: str = "mock"
+    TENCENT_SMS_SECRET_ID: str = ""
+    TENCENT_SMS_SECRET_KEY: str = ""
+    TENCENT_SMS_SDK_APP_ID: str = ""
+    TENCENT_SMS_SIGN_NAME: str = "南山科转通"
+    TENCENT_SMS_TEMPLATE_ID: str = ""
+
+    # ── 邮件服务（EmailProvider：mock / tencent / smtp）─────
+    EMAIL_ENABLED: bool = False
+    EMAIL_PROVIDER: str = "mock"
+    TENCENT_SES_SECRET_ID: str = ""
+    TENCENT_SES_SECRET_KEY: str = ""
+    TENCENT_SES_FROM_EMAIL: str = ""
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_SSL: bool = True
+
+    # ── 前端页面地址（用于生成密码重置链接与扫码回调）──────
+    FRONTEND_URL: str = "http://localhost:5173"
+
     # ── 对外 API 地址（staging/production 必须为真实域名）───
     API_BASE: str = "http://127.0.0.1:8787"
     API_PREFIX: str = "/api/tech-transfer/v1"
@@ -376,6 +409,10 @@ def assert_environment():
         violations.append(f"API_BASE={settings.API_BASE} 指向本机回环地址")
     if not settings.CORS_ORIGINS:
         sys.stderr.write(f"[WARN] {env} 环境未配置 CORS_ORIGINS，跨域前端将被浏览器拦截（同源部署可忽略）\n")
+    if settings.SMS_ENABLED and settings.SMS_PROVIDER == "mock":
+        violations.append("生产环境启用了 SMS_ENABLED 但 SMS_PROVIDER 仍为 mock")
+    if settings.EMAIL_ENABLED and settings.EMAIL_PROVIDER == "mock":
+        violations.append("生产环境启用了 EMAIL_ENABLED 但 EMAIL_PROVIDER 仍为 mock")
     if violations:
         sys.stderr.write(
             f"[FATAL] 环境保护断言失败（{env}）：\n  - "
