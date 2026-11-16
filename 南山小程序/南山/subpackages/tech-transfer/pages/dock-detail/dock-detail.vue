@@ -44,10 +44,6 @@
 		<view class="section">
 			<view class="section-head">
 				<text class="section-title">{{ type === 'demand' ? '需求信息' : '成果信息' }}</text>
-				<text
-					:class="favorited ? 'star-btn star-on' : 'star-btn'"
-					@click="onToggleFavorite"
-				>{{ favorited ? '★' : '☆' }}</text>
 			</view>
 
 			<!-- 需求详情 -->
@@ -312,6 +308,14 @@
 				<button class="sheet-cancel" @click="closeIntentDialog">取消</button>
 			</view>
 		</view>
+	</view>
+	<!-- 浮动收藏按钮 - 右下角 -->
+	<view
+		v-if="detail"
+		class="floating-star-btn"
+		@click="onToggleFavorite"
+	>
+		<text :class="favorited ? 'star-on' : ''">{{ favorited ? '★' : '☆' }}</text>
 	</view>
 </template>
 
@@ -1059,6 +1063,27 @@
 		font-size: 26rpx;
 		color: #e67e22;
 		font-weight: 500;
+	}
+
+	.floating-star-btn {
+		position: fixed;
+		right: 32rpx;
+		bottom: 120rpx;
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 50%;
+		background: #ffffff;
+		box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.15);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 999;
+		font-size: 44rpx;
+		color: #cccccc;
+	}
+
+	.floating-star-btn .star-on {
+		color: #ffb800;
 	}
 
 	.field {
