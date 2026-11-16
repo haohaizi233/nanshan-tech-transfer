@@ -76,7 +76,7 @@
 					</view>
 					<text class="desc">{{ item.demandDesc }}</text>
 					<view v-if="item.canDock" class="card-foot">
-						<button class="btn" size="mini" @click.stop="openDetail('demand', item.id)">我要对接</button>
+						<button class="btn dock-btn" size="mini" style="margin-left: auto !important; margin-right: 0 !important;" @click.stop="openDetail('demand', item.id)">我要对接</button>
 					</view>
 				</view>
 			</block>
@@ -97,7 +97,7 @@
 					</view>
 					<text v-if="item.techIntro" class="desc">{{ item.techIntro }}</text>
 					<view v-if="item.canDock" class="card-foot">
-						<button class="btn" size="mini" @click.stop="openDetail('result', item.id)">我要对接</button>
+						<button class="btn dock-btn" size="mini" style="margin-left: auto !important; margin-right: 0 !important;" @click.stop="openDetail('result', item.id)">我要对接</button>
 					</view>
 				</view>
 			</block>
@@ -576,6 +576,7 @@
 	}
 
 	.card-foot .btn,
+	.card-foot .dock-btn,
 	.card-foot button,
 	.card-foot uni-button {
 		width: auto;
@@ -589,7 +590,9 @@
 	}
 
 	.card-foot .btn::after,
-	.card-foot button::after {
+	.card-foot .dock-btn::after,
+	.card-foot button::after,
+	.card-foot uni-button::after {
 		border: none;
 	}
 
