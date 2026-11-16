@@ -213,7 +213,7 @@ def test_wechat_new_user_can_initialize_password_but_existing_password_is_requir
     ):
         cursor.fetchone.return_value = {"password_hash": "random", "password_configured": False, "status": "active"}
         assert service.change_password(7, "", "NewPassword123")["ok"] is True
-        assert "password_configured=true" in cursor.execute.call_args.args[0]
+        assert any("password_configured=true" in str(call.args[0]) for call in cursor.execute.call_args_list)
         cursor.fetchone.return_value = {"password_hash": "existing", "password_configured": True, "status": "active"}
         with pytest.raises(BizError):
             service.change_password(7, "", "NewPassword123")

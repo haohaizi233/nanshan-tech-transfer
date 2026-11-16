@@ -197,11 +197,12 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
     identity, is_new = find_or_create_user(ext)
 
     with get_cursor(commit=True) as cur:
-        cur.execute("SELECT user_no FROM app_user WHERE id=%s", (identity.userId,))
+        cur.execute("SELECT user_no, session_version FROM app_user WHERE id=%s", (identity.userId,))
         row = cur.fetchone()
-        user_no = row["user_no"] if row else ""
+        user_no = (row and row.get("user_no")) or ""
+        session_version = int((row and row.get("session_version")) or 1)
 
-        access_token = sign_access_token(identity.userId, user_no, identity.roles)
+        access_token = sign_access_token(identity.userId, user_no, identity.roles, session_version=session_version)
         refresh_token, jti = sign_refresh_token(identity.userId)
 
         cur.execute(
@@ -225,11 +226,12 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
 
 def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
     """签发 access/refresh token 并落 auth_session，返回响应 dict（无 user 字段）。"""
-    cur.execute("SELECT user_no, status FROM app_user WHERE id=%s", (user_id,))
+    cur.execute("SELECT user_no, status, session_version FROM app_user WHERE id=%s", (user_id,))
     row = cur.fetchone()
-    user_no = row["user_no"] if row else ""
+    user_no = (row and row.get("user_no")) or ""
+    session_version = int((row and row.get("session_version")) or 1)
 
-    access_token = sign_access_token(user_id, user_no, roles)
+    access_token = sign_access_token(user_id, user_no, roles, session_version=session_version)
     refresh_token, jti = sign_refresh_token(user_id)
 
     cur.execute(
@@ -252,7 +254,7 @@ def register_user(phone: str, password: str, display_name: str | None = None) ->
     注册成功后直接签发会话（免登录），返回与 password_login_session 相同结构。
     手机号已注册时抛 TT_AUTH_40901。
     """
-    from core.errors import TT_AUTH_40901, TT_COMMON_40001, BizError, bad_request
+    from core.errors import TT_AUTH_40901, BizError, bad_request
     from core.password import hash_password
 
     try:
@@ -522,7 +524,7 @@ def refresh_session(refresh_token: str) -> dict:
 
         cur.execute(
             """
-            SELECT au.user_no, au.status AS user_status, uc.status AS cred_status
+            SELECT au.user_no, au.status AS user_status, au.session_version, uc.status AS cred_status
             FROM app_user au
             LEFT JOIN user_credential uc ON uc.user_id = au.id
             WHERE au.id = %s AND au.deleted_at IS NULL
@@ -544,9 +546,10 @@ def refresh_session(refresh_token: str) -> dict:
             code, message, status = TT_AUTH_40106
             raise BizError(code, message, status)
         user_no = row["user_no"] or ""
+        session_version = int(row.get("session_version") or 1)
 
         roles = _get_roles(cur, user_id)
-        access_token = sign_access_token(user_id, user_no, roles)
+        access_token = sign_access_token(user_id, user_no, roles, session_version=session_version)
         new_refresh_token, new_jti = sign_refresh_token(user_id)
 
         cur.execute(
@@ -618,6 +621,19 @@ def change_password(user_id: int, current_password: str, new_password: str) -> d
             "UPDATE user_credential SET password_hash=%s, password_configured=true WHERE user_id=%s",
             (hash_password(new_password), user_id),
         )
+        # 递增 session_version 使旧 Access Token 即刻失效
+        cur.execute(
+            "UPDATE app_user SET session_version = session_version + 1 WHERE id = %s",
+            (user_id,),
+        )
+        # 吊销所有活跃 refresh token
+        cur.execute(
+            "UPDATE auth_session SET status='revoked', revoked_at=NOW() WHERE user_id=%s AND status='active'",
+            (user_id,),
+        )
+        from core import auth_cache
+
+        auth_cache.invalidate_user(user_id)
         audit_record(
             "user.change_password",
             "user_credential",

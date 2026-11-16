@@ -175,6 +175,15 @@ def wechat_login_session(login_code: str, phone_code: str | None = None, *, bind
                     "VALUES (%s, 'wechat-mini', %s, %s)",
                     (user_id, settings.WECHAT_APPID, openid),
                 )
+                if phone:
+                    cursor.execute(
+                        """
+                        INSERT INTO account_contact (user_id, contact_type, normalized_value, verified_at, status)
+                        VALUES (%s, 'phone', %s, NOW(), 'active')
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (user_id, phone),
+                    )
                 audit_record("user.bind_wechat", "app_user", resource_id=user_id, actor_user_id=user_id, cur=cursor)
             result = _issue_session(cursor, user_id, _get_roles(cursor, user_id))
             result["user"] = build_user_response(cursor, user_id)

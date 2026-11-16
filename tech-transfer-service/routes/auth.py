@@ -6,10 +6,15 @@ from core.rate_limit import check_ip_rate, check_register_rate
 from core.request_schemas import (
     BootstrapRequest,
     LoginRequest,
+    RecoveryCompleteRequest,
+    RecoveryStartRequest,
+    RecoveryVerifyRequest,
     RefreshTokenRequest,
     RegisterRequest,
     WechatBindRequest,
     WechatLoginRequest,
+    WechatWebBindRequest,
+    WechatWebCallbackRequest,
 )
 from core.response import get_request_id, success
 from modules.identity.provider import get_identity_provider
@@ -23,6 +28,21 @@ from modules.identity.service import (
     register_user,
 )
 from modules.identity.wechat import wechat_login_enabled, wechat_login_session
+from modules.identity.wechat_web import (
+    bind_web_wechat,
+    get_web_authorize_url,
+    handle_web_callback,
+    wechat_web_enabled,
+)
+from modules.security.rate_limiter import (
+    check_recovery_start_rate,
+    check_verify_challenge_rate,
+)
+from modules.security.service import (
+    complete_password_recovery,
+    start_password_recovery,
+    verify_recovery_challenge,
+)
 
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
 
@@ -30,6 +50,46 @@ router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
 @router.get("/wechat/config")
 def wechat_config():
     return success({"enabled": wechat_login_enabled()})
+
+
+@router.get("/wechat/web/config", summary="PC 微信扫码配置")
+def wechat_web_config():
+    from config import settings
+
+    return success({"enabled": wechat_web_enabled(), "appid": settings.WECHAT_OPEN_APPID})
+
+
+@router.get("/wechat/web/authorize", summary="获取 PC 微信扫码授权 URL")
+def wechat_web_authorize(redirectUri: str):
+    return success(get_web_authorize_url(redirectUri))
+
+
+@router.post("/wechat/web/callback", summary="处理 PC 微信扫码回调")
+def wechat_web_callback(body: WechatWebCallbackRequest, request: Request):
+    check_ip_rate(request, "wechat_web_callback", limit=20, window_s=60)
+    return success(handle_web_callback(body.code, body.state))
+
+
+@router.post("/wechat/web/bind", summary="当前账号绑定 PC 微信扫码身份")
+def wechat_web_bind(body: WechatWebBindRequest, user: dict = Depends(identity)):
+    return success(bind_web_wechat(user["userId"], body.bindingTicket))
+
+
+@router.post("/recovery/start", summary="发起密码找回（发送短信/邮件验证码或重置链接）")
+def recovery_start(body: RecoveryStartRequest, request: Request):
+    check_recovery_start_rate(request, body.account)
+    return success(start_password_recovery(body.account, body.channel))
+
+
+@router.post("/recovery/verify", summary="核验找回挑战凭证，获取短期重置授权凭证")
+def recovery_verify(body: RecoveryVerifyRequest, request: Request):
+    check_verify_challenge_rate(body.challengeId)
+    return success(verify_recovery_challenge(body.challengeId, body.code))
+
+
+@router.post("/recovery/complete", summary="完成密码重置（单事务提交并失效全部旧会话）")
+def recovery_complete(body: RecoveryCompleteRequest):
+    return success(complete_password_recovery(body.recoveryGrant, body.newPassword))
 
 
 @router.post("/wechat/login")
