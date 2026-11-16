@@ -207,7 +207,9 @@ export async function registerAccount(phone, password) {
 	const pwd = (password || '').trim()
 	const phoneCheck = validatePhone(p, { required: true })
 	if (!phoneCheck.ok) return { ok: false, message: phoneCheck.message }
-	if (pwd.length < 6) return { ok: false, message: '密码至少6位' }
+	if (!pwd) return { ok: false, message: '请输入密码' }
+	if (pwd.length < 8) return { ok: false, message: '密码至少8位' }
+	if (pwd.length > 128) return { ok: false, message: '密码长度不能超过128位' }
 	try {
 		// 注册新账号前清理旧会话缓存，避免旧账号残留
 		clearAllTtCacheKeys()
@@ -215,7 +217,8 @@ export async function registerAccount(phone, password) {
 		pushHistoryPhone(p)
 		return { ok: true }
 	} catch (e) {
-		return { ok: false, message: e.message || '注册失败' }
+		const message = (e && (e.details || e.message)) || '注册失败'
+		return { ok: false, message: typeof message === 'string' ? message : (e.message || '注册失败') }
 	}
 }
 
@@ -236,7 +239,8 @@ export async function loginAccount(phone, password) {
 		pushHistoryPhone(p)
 		return { ok: true, needProfile: !isProfileComplete(getUserProfile()) }
 	} catch (e) {
-		return { ok: false, message: e.message || '登录失败' }
+		const message = (e && (e.details || e.message)) || '登录失败'
+		return { ok: false, message: typeof message === 'string' ? message : (e.message || '登录失败') }
 	}
 }
 

@@ -193,6 +193,24 @@ async function ensureSession() {
   throw new Error('未登录，请先登录')
 }
 
+export function extractResponseErrorMessage(res, fallback = '操作失败') {
+  if (!res) return fallback
+  if (typeof res.details === 'string' && res.details.trim()) {
+    return res.details.trim()
+  }
+  if (Array.isArray(res.details) && res.details.length > 0) {
+    const first = res.details[0]
+    if (typeof first === 'string' && first.trim()) return first.trim()
+    if (first && typeof first.message === 'string' && first.message.trim()) {
+      return first.message.trim()
+    }
+  }
+  if (typeof res.message === 'string' && res.message.trim() && res.message !== '请求参数无效') {
+    return res.message.trim()
+  }
+  return (res.message && res.message.trim()) || fallback
+}
+
 /**
  * 手机号注册（创建账号并直接签发会话）
  * @returns {Promise<{accessToken, refreshToken, expiresIn, user, isNewUser}>}
@@ -211,8 +229,11 @@ export async function authRegister(phone, password, displayName) {
     saveSession(res.data, 'account')
     return res.data
   }
-  const err = new Error(res.message || '注册失败')
+  const msg = extractResponseErrorMessage(res, '注册失败')
+  const err = new Error(msg)
   err.code = res.code
+  err.details = res.details
+  err.requestId = res.requestId
   throw err
 }
 
@@ -230,8 +251,11 @@ export async function authLogin(phone, password) {
     saveSession(res.data, 'account')
     return res.data
   }
-  const err = new Error(res.message || '登录失败')
+  const msg = extractResponseErrorMessage(res, '登录失败')
+  const err = new Error(msg)
   err.code = res.code
+  err.details = res.details
+  err.requestId = res.requestId
   throw err
 }
 
@@ -257,8 +281,10 @@ export async function authWechat(phoneCode, bind = false) {
   })
   if (epoch !== sessionEpoch) throw new Error('登录状态已变更，请重试')
   if (res.code !== 0) {
-    const error = new Error(res.message || '微信登录失败')
+    const error = new Error(extractResponseErrorMessage(res, '微信登录失败'))
     error.code = res.code
+    error.details = res.details
+    error.requestId = res.requestId
     throw error
   }
   saveSession(res.data, 'account')
@@ -319,7 +345,7 @@ export async function apiRequest(method, path, query, body, options = {}) {
     clearSession()
   }
 
-  const err = new Error(res.message || 'Request failed')
+  const err = new Error(extractResponseErrorMessage(res, 'Request failed'))
   err.code = res.code
   err.requestId = res.requestId
   err.details = res.details
@@ -334,7 +360,7 @@ export async function apiRequest(method, path, query, body, options = {}) {
 export async function publicRequest(method, path, query, body) {
   const res = await HostBridge.request({ method, path, query, body })
   if (res.code === 0) return res.data
-  const err = new Error(res.message || 'Request failed')
+  const err = new Error(extractResponseErrorMessage(res, 'Request failed'))
   err.code = res.code
   err.requestId = res.requestId
   err.details = res.details

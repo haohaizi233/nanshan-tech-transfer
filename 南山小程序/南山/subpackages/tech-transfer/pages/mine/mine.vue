@@ -30,8 +30,9 @@
 					<input
 						class="input"
 						password
+						maxlength="128"
 						:value="authForm.password"
-						:placeholder="authMode === 'register' ? '设置密码（至少6位）' : '请输入密码'"
+						:placeholder="authMode === 'register' ? '设置密码（至少8位）' : '请输入密码'"
 						@input="onAuthInput('password', $event)"
 					/>
 				</view>
@@ -666,6 +667,18 @@
 			async onAuthSubmit() {
 			const phone = (this.authForm.phone || '').trim()
 			const password = (this.authForm.password || '').trim()
+			if (!phone) {
+				uni.showToast({ title: '请输入手机号', icon: 'none' })
+				return
+			}
+			if (!password) {
+				uni.showToast({ title: '请输入密码', icon: 'none' })
+				return
+			}
+			if (this.authMode === 'register' && password.length < 8) {
+				uni.showToast({ title: '密码至少8位', icon: 'none' })
+				return
+			}
 			uni.showLoading({ title: this.authMode === 'register' ? '注册中...' : '登录中...', mask: true })
 			let res
 			try {
