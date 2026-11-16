@@ -212,9 +212,22 @@ async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn40
 
   const payload = await resp.json().catch(() => ({}))
   if (!resp.ok || payload.code !== 0) {
-    const error = new Error(payload.message || `请求失败（${resp.status}）`)
+    let msg = payload.message || `请求失败（${resp.status}）`
+    if (typeof payload.details === 'string' && payload.details.trim()) {
+      msg = payload.details.trim()
+    } else if (Array.isArray(payload.details) && payload.details.length > 0) {
+      const first = payload.details[0]
+      if (typeof first === 'string' && first.trim()) {
+        msg = first.trim()
+      } else if (first && typeof first.message === 'string' && first.message.trim()) {
+        msg = first.message.trim()
+      }
+    }
+    const error = new Error(msg)
     error.code = payload.code
     error.status = resp.status
+    error.details = payload.details
+    error.requestId = payload.requestId
     if (!skipErrorToast) notifyError(error)
     throw error
   }
