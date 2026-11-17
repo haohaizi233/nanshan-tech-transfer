@@ -78,6 +78,8 @@ def test_signed_in_phone_owner_can_bind_wechat(runtime):
     assert result["user"]["userId"] == 7
     phone.assert_called_once_with("phone-code", "trusted-openid")
     assert any("INSERT INTO external_identity" in call.args[0] for call in cursor.execute.call_args_list)
+    contacts = [call.args[0] for call in cursor.execute.call_args_list if "INSERT INTO account_contact" in call.args[0]]
+    assert contacts and "verification_method" in contacts[0] and "'wechat'" in contacts[0]
 
 
 def test_binding_a_legacy_phone_username_backfills_the_verified_login_phone(runtime):

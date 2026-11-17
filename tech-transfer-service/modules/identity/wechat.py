@@ -178,8 +178,8 @@ def wechat_login_session(login_code: str, phone_code: str | None = None, *, bind
                 if phone:
                     cursor.execute(
                         """
-                        INSERT INTO account_contact (user_id, contact_type, normalized_value, verified_at, status)
-                        VALUES (%s, 'phone', %s, NOW(), 'active')
+                        INSERT INTO account_contact (user_id, contact_type, normalized_value, verified_at, status, verification_method)
+                        VALUES (%s, 'phone', %s, NOW(), 'active', 'wechat')
                         ON CONFLICT DO NOTHING
                         """,
                         (user_id, phone),
