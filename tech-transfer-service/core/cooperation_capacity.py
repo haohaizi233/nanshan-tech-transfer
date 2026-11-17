@@ -1,4 +1,5 @@
 """Bound finite slot counts before converting or persisting them."""
+
 from decimal import Decimal, InvalidOperation
 
 from core.errors import bad_request

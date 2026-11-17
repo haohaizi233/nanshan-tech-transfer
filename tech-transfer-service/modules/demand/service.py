@@ -12,8 +12,8 @@ Architecture source: 04-backend-domain-design.md §4.6, 05-data-model-design.md 
 import json
 import re
 
-from core.cooperation_capacity import normalize_cooperation_capacity
 from core.contact_validation import validate_email, validate_phone
+from core.cooperation_capacity import normalize_cooperation_capacity
 from core.errors import (
     bad_request,
     conflict,

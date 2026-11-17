@@ -102,7 +102,7 @@ def recovery_start(
     else:
         check_recovery_start_rate(request, body.account)
     challenge_id = str(uuid.uuid4())
-    enqueue_recovery_task(body.account.strip(),body.channel,challenge_id,ctx)
+    enqueue_recovery_task(body.account.strip(), body.channel, challenge_id, ctx)
     background.add_task(run_queued_recovery_task, challenge_id)
     return success(recovery_response(challenge_id, body.channel))
 

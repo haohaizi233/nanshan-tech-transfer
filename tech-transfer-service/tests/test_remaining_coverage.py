@@ -345,8 +345,9 @@ class TestCoreMiddleware:
 
         assert _user_is_active(1) is True
 
+    @patch("core.middleware._user_session_version", return_value=1)
     @patch("core.middleware._user_is_active", return_value=True)
-    def test_identity_from_access_token_valid(self, _mock_active):
+    def test_identity_from_access_token_valid(self, _mock_active, _mock_ver):
         import time
 
         import jwt

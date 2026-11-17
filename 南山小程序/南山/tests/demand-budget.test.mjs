@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { formatDemandBudget, parseDemandBudget } from '../subpackages/tech-transfer/utils/demand-budget.mjs'
+import { normalizeCooperationCapacity } from '../subpackages/tech-transfer/utils/cooperation-capacity.mjs'
 import { formatDemandBudget as adminFormat } from '../../../nanshan-frontend/src/utils/demand-budget.mjs'
 
 const cases = [
@@ -64,18 +65,18 @@ test('all four pages use the same card adapter', async () => {
 test('form payload keeps money and validate blocks invalid text before preview/submit', () => {
  const source = readFileSync(new URL('../subpackages/tech-transfer/pages/post-demand/post-demand.vue',import.meta.url),'utf8')
  const payloadBody = source.slice(source.indexOf('function buildPayload'),source.indexOf('export default'))
- const build = new Function('parseDemandBudget',payloadBody+';return buildPayload')(parseDemandBudget)
+ const build = new Function('parseDemandBudget','normalizeCooperationCapacity',payloadBody+';return buildPayload')(parseDemandBudget,normalizeCooperationCapacity)
  const result = build({title:'test',budget:'100万以内，面议'})
  assert.equal(result.budgetMaxWan,100)
  assert.equal(result.budgetNegotiable,true)
  const validation = source.slice(source.indexOf('validate(data) {')+'validate(data) {'.length, source.indexOf('onPreview()'))
- const fn = new Function('parseDemandBudget','validatePhone','validateEmail','data',validation.slice(0,validation.lastIndexOf('},')))
+ const fn = new Function('parseDemandBudget','validatePhone','validateEmail','normalizeCooperationCapacity','data',validation.slice(0,validation.lastIndexOf('},')))
  let error
  const context = {showPreviewError(message) {error=message;return false}}
  const data = {title:'t',company:'c',location:'l',demandDesc:'d',contactName:'n',phone:'13800138000'}
  for (const budget of ['100万左右面议','120-80万']) {
-  assert.equal(fn.call(context,parseDemandBudget,()=>({ok:true}),()=>({ok:true}),{...data,budget}),false)
+  assert.equal(fn.call(context,parseDemandBudget,()=>({ok:true}),()=>({ok:true}),normalizeCooperationCapacity,{...data,budget}),false)
   assert.ok(error)
  }
- assert.equal(fn.call(context,parseDemandBudget,()=>({ok:true}),()=>({ok:true}),{...data,budget:'100万以内，面议'}),true)
+ assert.equal(fn.call(context,parseDemandBudget,()=>({ok:true}),()=>({ok:true}),normalizeCooperationCapacity,{...data,budget:'100万以内，面议'}),true)
 })

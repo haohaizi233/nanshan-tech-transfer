@@ -64,7 +64,7 @@ async def test_service_signature_replay_and_body_tamper(monkeypatch):
     monkeypatch.setattr(settings, "SMS_SERVICE_CLIENTS", {"backend": secret})
     used = set()
 
-    async def store(n,ttl=300):
+    async def store(n, ttl=300):
         if n in used:
             return False
         used.add(n)

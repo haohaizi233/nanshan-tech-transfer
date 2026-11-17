@@ -37,7 +37,7 @@ def test_send_task_receipt_and_stable_retry(monkeypatch):
     receipt = provider.send_task("13800138000", "123456", "reset_password", send_request_id="stable-id")
     assert receipt.accepted is True
     assert receipt.request_id == "stable-id"
-    assert receipt.provider_ids == ('provider-1',)
+    assert receipt.provider_ids == ("provider-1",)
 
     assert parse_qs(calls[0])["sendRequestId"] == ["stable-id"]
     assert calls[0] == calls[1]
@@ -60,8 +60,6 @@ def test_business_rejection_not_retried_and_sanitized(monkeypatch, caplog):
     assert len(calls) == 1
     assert not error.value.outcome_unknown
     assert "123456" not in str(error.value)
-
-
 
 
 def test_sendcloud_smsids_field(monkeypatch):

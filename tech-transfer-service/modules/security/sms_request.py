@@ -133,7 +133,7 @@ async def validate_sms_request(request: Request) -> SmsRequestContext:
             nonce_digest = hmac.new(secret.encode(), (client_id + ":" + nonce).encode(), hashlib.sha256).hexdigest()
             # Cover the entire +/- clock-skew interval, including future-dated
             # requests whose signatures remain valid after a simple 300s TTL.
-            if not await _nonce_store(nonce_digest,2*settings.SMS_SERVICE_TIMESTAMP_WINDOW_SECONDS+1):
+            if not await _nonce_store(nonce_digest, 2 * settings.SMS_SERVICE_TIMESTAMP_WINDOW_SECONDS + 1):
                 raise HTTPException(409, "Replay detected")
         except HTTPException:
             raise
