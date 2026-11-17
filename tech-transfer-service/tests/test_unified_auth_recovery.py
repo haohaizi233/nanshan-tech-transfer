@@ -118,12 +118,14 @@ def test_recovery_start_valid_account_sends_sms():
     sms = MockSmsProvider()
     reset_providers_for_test(sms=sms)
 
+    from config import settings as _settings
     from modules.security.sms_risk import DecisionAction, RiskDecision
 
     with (
         patch("modules.security.sms_gateway.get_cursor") as mock_gc,
         patch("modules.security.sms_gateway._engine") as engine,
         patch("modules.security.sms_gateway.audit_record"),
+        patch.object(_settings, "SMS_ENABLED", True),
     ):
         engine.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
         cur = MagicMock()
@@ -378,12 +380,14 @@ def test_api_recovery_flow_e2e():
     sms = MockSmsProvider()
     reset_providers_for_test(sms=sms)
 
+    from config import settings as _settings
     from modules.security.sms_risk import DecisionAction, RiskDecision
 
     with (
         patch("modules.security.sms_gateway.get_cursor") as mock_gc,
         patch("modules.security.sms_gateway._engine") as engine,
         patch("modules.security.sms_gateway.audit_record"),
+        patch.object(_settings, "SMS_ENABLED", True),
     ):
         engine.return_value.check_request.return_value = RiskDecision(DecisionAction.ALLOW)
         engine.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
