@@ -78,12 +78,22 @@ jobs:
       - name: Run tests with coverage
         working-directory: tech-transfer-service
         run: |
-          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 -v --tb=long 2>&1 | tee /tmp/pytest_output.txt
+          set +e
+          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 --tb=long -v 2>&1 | tee /tmp/pytest_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "::group::Failed tests detail"
-            grep -E "FAILED|ERROR|assert" /tmp/pytest_output.txt | head -50
-            echo "::endgroup::"
+            echo "## ❌ Test Failures" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "^FAILED|^ERROR" /tmp/pytest_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### Error Details" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -B2 -A10 "^FAILED\|^ERROR" /tmp/pytest_output.txt | head -100 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### Last 50 lines" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/pytest_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
           exit $EXIT_CODE
 
