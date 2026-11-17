@@ -79,23 +79,17 @@ jobs:
         working-directory: tech-transfer-service
         run: |
           set +e
-          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 --tb=long -v 2>&1 | tee /tmp/pytest_output.txt
+          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 --tb=long -v --junit-xml=/tmp/junit.xml 2>&1 | tail -80
           EXIT_CODE=${PIPESTATUS[0]}
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "## ❌ Test Failures" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -E "^FAILED|^ERROR" /tmp/pytest_output.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "### Error Details" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -B2 -A10 "^FAILED\|^ERROR" /tmp/pytest_output.txt | head -100 >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "### Last 50 lines" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -50 /tmp/pytest_output.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "EXIT_CODE=$EXIT_CODE" >> $GITHUB_STEP_SUMMARY
           exit $EXIT_CODE
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: /tmp/junit.xml
 
       - name: Run nanshan-ai-agent tests
         working-directory: nanshan-ai-agent
