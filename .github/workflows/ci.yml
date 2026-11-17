@@ -173,6 +173,8 @@ jobs:
         run: node --test tests/*.test.mjs
       - name: Build H5 and WeChat miniapp
         working-directory: 南山小程序/南山
+        env:
+          UNI_INPUT_DIR: ${{ github.workspace }}/南山小程序/南山
         run: |
           npm run build:h5
           npm run build:mp-weixin
