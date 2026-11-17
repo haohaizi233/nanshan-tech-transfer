@@ -79,9 +79,15 @@ jobs:
         working-directory: tech-transfer-service
         run: |
           set +e
-          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 --tb=long -v --junit-xml=/tmp/junit.xml 2>&1 | tail -80
+          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 --tb=long --junit-xml=junit.xml -q 2>&1 | tee /tmp/pytest_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
-          echo "EXIT_CODE=$EXIT_CODE" >> $GITHUB_STEP_SUMMARY
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::pytest failed with exit code $EXIT_CODE"
+            grep -E "^FAILED|^ERROR" /tmp/pytest_output.txt | while read -r line; do
+              echo "::error::$line"
+            done
+            tail -30 /tmp/pytest_output.txt
+          fi
           exit $EXIT_CODE
 
       - name: Upload test report
@@ -89,7 +95,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-report
-          path: /tmp/junit.xml
+          path: tech-transfer-service/junit.xml
 
       - name: Run nanshan-ai-agent tests
         working-directory: nanshan-ai-agent
