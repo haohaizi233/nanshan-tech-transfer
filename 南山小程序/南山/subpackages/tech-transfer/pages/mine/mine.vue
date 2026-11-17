@@ -206,7 +206,7 @@
 			</view>
 
 			<view :class="'org-card org-card-' + certification.status">
-      <image class="org-card-bg" src="/static/images/mine/org-certification-bg.jpg" mode="aspectFit"></image>
+      <image class="org-card-bg" src="/static/images/mine/org-certification-bg.jpg" mode="aspectFill"></image>
 				<view class="org-card-content">
 					<image class="org-card-icon" src="/static/icons/mine/org-certification.png" mode="aspectFit"></image>
 					<view :class="certification.canApply ? 'org-card-main org-card-main-actionable' : 'org-card-main'">
@@ -378,7 +378,8 @@
 						<text class="label">确认新密码</text>
 						<input class="input" password maxlength="128" v-model="pwdModalConfirm" placeholder="请再次输入新密码" />
 					</view>
-					<button class="primary-action-btn" :disabled="passwordBusy" @click="submitChangePassword">提交修改</button>
+					<text v-if="passwordError" class="password-feedback-error" role="alert">{{ passwordError }}</text>
+					<button class="primary-action-btn" :loading="passwordBusy" :disabled="passwordBusy" @click="submitChangePassword">{{ passwordBusy ? '正在保存，请稍候…' : (isSettingInitial ? '确认设置密码' : '确认修改密码') }}</button>
 				</view>
 			</view>
 		</view>
@@ -515,6 +516,7 @@
 				wechatBusy: false,
 				initialPassword: '',
 				passwordBusy: false,
+				passwordError: '',
 				securityInfo: {
 					phone: null,
 					email: null,
@@ -769,6 +771,7 @@
 				}
 			},
 			openPasswordModal() {
+				this.passwordError = ''
 				this.isSettingInitial = false
 				this.pwdModalCurrent = ''
 				this.pwdModalNew = ''
@@ -776,6 +779,7 @@
 				this.showPasswordModal = true
 			},
 			openSetInitialPasswordModal() {
+				this.passwordError = ''
 				this.isSettingInitial = true
 				this.pwdModalCurrent = ''
 				this.pwdModalNew = ''
@@ -783,21 +787,27 @@
 				this.showPasswordModal = true
 			},
 			closePasswordModal() {
+				if (this.passwordBusy) return
 				this.showPasswordModal = false
 			},
 			async submitChangePassword() {
+				if (this.passwordBusy) return
+				this.passwordError = ''
 				const current = this.pwdModalCurrent.trim()
 				const next = this.pwdModalNew.trim()
 				const confirm = this.pwdModalConfirm.trim()
 				if (!this.isSettingInitial && !current) {
+					this.passwordError = '请输入当前密码'
 					uni.showToast({ title: '请输入当前密码', icon: 'none' })
 					return
 				}
 				if (next.length < 8 || next.length > 128) {
+					this.passwordError = '新密码长度须为8—128位'
 					uni.showToast({ title: '新密码长度须为8—128位', icon: 'none' })
 					return
 				}
 				if (next !== confirm) {
+					this.passwordError = '两次输入的新密码不一致'
 					uni.showToast({ title: '两次输入的新密码不一致', icon: 'none' })
 					return
 				}
@@ -808,10 +818,27 @@
 					} else {
 						await changePassword(current, next)
 					}
-					uni.showToast({ title: '密码已保存', icon: 'success' })
+					this.passwordBusy = false
 					this.closePasswordModal()
-					await this.refresh()
+					this.pwdModalCurrent = ''
+					this.pwdModalNew = ''
+					this.pwdModalConfirm = ''
+					const signingOut = logout().catch(() => {})
+					uni.showModal({
+						title: this.isSettingInitial ? '密码设置成功' : '密码修改成功',
+						content: '登录密码已更新。为保障账号安全，请使用新密码重新登录。',
+						showCancel: false,
+						confirmText: '重新登录',
+						success: async () => {
+							await signingOut
+							this.profile = null
+							this.viewMode = 'auth'
+							this.authMode = 'login'
+							this.authForm.password = ''
+						}
+					})
 				} catch (e) {
+					this.passwordError = e.message || '密码保存失败，请稍后重试'
 					uni.showToast({ title: e.message || '密码保存失败', icon: 'none' })
 				} finally {
 					this.passwordBusy = false
@@ -1806,11 +1833,11 @@
 
 .org-card-bg {
   position: absolute;
-  left: auto;
-  right: -8rpx;
+  left: 0;
+  right: 0;
   top: 0;
   bottom: 0;
-  width: 76%;
+  width: 100%;
   height: 100%;
   opacity: 0.92;
 }
@@ -2179,6 +2206,16 @@
 		color: #94a3b8;
 		line-height: 1;
 		padding: 8rpx;
+	}
+	.password-feedback-error {
+		display: block;
+		margin: 16rpx 0;
+		padding: 18rpx 20rpx;
+		border-radius: 10rpx;
+		background: #fff1f0;
+		color: #b42318;
+		font-size: 26rpx;
+		line-height: 1.6;
 	}
 	.dialog-desc {
 		font-size: 24rpx;

@@ -35,7 +35,7 @@ test('indents all detail values and descriptive preview text', () => {
 })
 
 test('uses the certification artwork as a subtle right-side scene instead of a second card frame', () => {
-  assert.match(mine, /\.org-card-bg\s*\{[\s\S]*left:\s*auto[\s\S]*right:\s*-8rpx[\s\S]*width:\s*76%[\s\S]*opacity:\s*0\.92/)
+  assert.match(mine, /\.org-card-bg\s*\{[\s\S]*left:\s*0[\s\S]*right:\s*0[\s\S]*width:\s*100%[\s\S]*opacity:\s*0\.92/)
   assert.match(mine, /\.org-card\s*\{[\s\S]*background:\s*linear-gradient/)
 })
 

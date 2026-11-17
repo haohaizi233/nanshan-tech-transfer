@@ -266,12 +266,8 @@ export async function getWechatLoginConfig() {
 export async function setInitialPassword(password) {
 	const normalized = String(password || '').trim()
 	if (normalized.length < 8 || normalized.length > 128) throw new Error('密码长度须为8—128位')
-	const userId = getCurrentUser()?.userId
-	await apiRequest('POST', '/me/password', null, { currentPassword: '', newPassword: normalized })
-	if (getCurrentUser()?.userId !== userId) return
-	const user = await apiRequest('GET', '/me')
-	if (getCurrentUser()?.userId !== userId) return
-	setCurrentUser(user)
+	// 密码变更会吊销旧会话；以本次提交结果为准，不再用旧Token刷新资料。
+	return apiRequest('POST', '/me/password', null, { currentPassword: '', newPassword: normalized })
 }
 
 /** 修改登录密码（已有密码时需提供当前密码） */
@@ -279,12 +275,7 @@ export async function changePassword(currentPassword, newPassword) {
 	const cur = String(currentPassword || '')
 	const next = String(newPassword || '').trim()
 	if (next.length < 8 || next.length > 128) throw new Error('密码长度须为8—128位')
-	const userId = getCurrentUser()?.userId
-	await apiRequest('POST', '/me/password', null, { currentPassword: cur, newPassword: next })
-	if (getCurrentUser()?.userId !== userId) return
-	const user = await apiRequest('GET', '/me')
-	if (getCurrentUser()?.userId !== userId) return
-	setCurrentUser(user)
+	return apiRequest('POST', '/me/password', null, { currentPassword: cur, newPassword: next })
 }
 
 /** 获取安全中心概要信息（已验证联系方式、密码配置状态等） */

@@ -32,7 +32,7 @@
 				<input class="input" v-model="form.cooperationType" placeholder="例如：技术合作 / 联合开发" />
 			</view>
 			<view class="form-item">
-				<text class="label">可对接名额 <text class="optional">留空表示不限量</text></text>
+				<text class="label">可对接名额 <text class="optional">留空表示不限量，超过9999自动按不限量处理</text></text>
 				<input class="input" v-model="form.cooperationCapacity" type="number" placeholder="例如：3" />
 			</view>
 			<view class="form-item">
@@ -102,6 +102,7 @@
 	import { createDemand, submitDemand } from '../../api/demand.js'
 	import { getSessionPhone, getUserProfile, isLoggedIn } from '../../api/user.js'
 	import { getMyOrganizationCertification } from '../../api/membership.js'
+	import { normalizeCooperationCapacity } from '../../utils/cooperation-capacity.mjs'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import { clearPublishDraft, restorePublishDraft, savePublishDraft } from '../../api/publish-draft.mjs'
 	import { uploadContentFile } from '../../api/file.js'
@@ -142,7 +143,7 @@
 				.map((s) => s.trim())
 				.filter(Boolean)
 		}
-		if (data.cooperationCapacity) payload.cooperationCapacity = Number(data.cooperationCapacity)
+		payload.cooperationCapacity = normalizeCooperationCapacity(data.cooperationCapacity)
 		if (data.industry) {
 			const parts = data.industry.split(/[·•]/).map((s) => s.trim()).filter(Boolean)
 			if (parts[0]) payload.categoryName = parts[0]
@@ -260,7 +261,10 @@
 						},
 						validate(data) {
 							this.previewError = ''
-				const required = [
+				try { normalizeCooperationCapacity(data.cooperationCapacity) } catch (error) {
+                    return this.showPreviewError(error.message)
+                }
+                const required = [
 					{ key: 'title', tip: '请填写需求标题' },
 					{ key: 'company', tip: '请填写公司名称' },
 					{ key: 'location', tip: '请填写地点' },

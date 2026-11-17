@@ -324,6 +324,16 @@ export async function apiRequest(method, path, query, body, options = {}) {
   }
 
   const headers = { ...options.headers }
+  if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$/.test(path)) {
+    // Resettable random app instance, not a MAC/OpenID or authentication proof.
+    let deviceId = getStored('tt_device_instance_v1')
+    if (typeof deviceId !== 'string' || !/^[a-z0-9-]{16,80}$/.test(deviceId)) {
+      deviceId = `mini-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+      setStored('tt_device_instance_v1', deviceId)
+    }
+    headers['X-Client-Source'] = 'mini'
+    headers['X-Device-Id'] = deviceId
+  }
   if (method === 'POST' || method === 'PATCH') {
     headers['X-Idempotency-Key'] =
       'tt_' + Date.now() + '_' + Math.floor(Math.random() * 100000)

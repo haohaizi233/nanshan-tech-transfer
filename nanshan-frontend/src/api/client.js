@@ -2,6 +2,7 @@
 // 响应契约：{ code: 0, message, data, requestId }；非 0 一律抛错（含错误码）
 
 import { showToast } from '../utils/toast.js'
+import { getDeviceInstanceId } from '../utils/device-instance.js'
 
 const BASE = '/api/tech-transfer/v1'
 const TOKEN_KEY = 'nanshan_admin_token'
@@ -152,6 +153,11 @@ async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn40
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
   const buildHeaders = () => {
     const headers = {}
+    if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$/.test(url.pathname)) {
+      headers['X-Client-Source'] = 'h5'
+      const deviceId = getDeviceInstanceId()
+      if (deviceId) headers['X-Device-Id'] = deviceId
+    }
     if (!isForm) headers['Content-Type'] = 'application/json'
     const token = getToken()
     if (token) {

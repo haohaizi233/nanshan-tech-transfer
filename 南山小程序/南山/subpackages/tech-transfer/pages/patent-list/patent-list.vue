@@ -49,11 +49,12 @@
 
     <view class="list-wrap">
       <view v-if="!searched" class="state-box empty-state">
-        <image
-          class="state-illustration"
-          src="/static/images/patent/patent-search-guide.png"
-          mode="widthFix"
-        />
+        <view class="state-artwork">
+          <image class="state-illustration" src="/static/images/patent/patent-search-guide.png" mode="widthFix" />
+        </view>
+        <text class="state-title">开启专利探索之旅</text>
+        <text class="state-sub">输入关键词，快速发现相关专利成果。</text>
+        <view class="state-tips"><text>精准检索</text><text>专利详情</text><text>成果发现</text></view>
       </view>
 
       <view v-else-if="loading && list.length === 0" class="state-box empty-state state-plain">
@@ -70,11 +71,17 @@
       </view>
 
       <view v-else-if="!loading && list.length === 0" class="state-box empty-state">
-        <image
-          class="state-illustration"
-          src="/static/images/patent/patent-search-empty.png"
-          mode="widthFix"
-        />
+        <view class="state-artwork">
+          <image class="state-illustration" src="/static/images/patent/patent-search-guide.png" mode="widthFix" />
+        </view>
+        <text class="state-title">暂未找到相关专利</text>
+        <text class="state-sub">试试调整关键词，或切换检索方式。</text>
+        <view class="state-suggestions">
+          <text>检索建议</text>
+          <text>检查公开号或关键词是否完整</text>
+          <text>尝试更简短、通用的技术关键词</text>
+          <text>切换“按申请人”检索机构名称</text>
+        </view>
       </view>
 
       <view v-else>
@@ -463,11 +470,7 @@ export default {
 .empty-state {
   padding: 24rpx 16rpx 20rpx;
   border-radius: 24rpx;
-  /* 底色取自设计图背景 #F5F8FD，图片透明区与卡片完全同色，接缝不可见 */
-  background-color: #f5f8fd;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(61, 139, 253, 0.07) 0, rgba(61, 139, 253, 0.07) 2rpx, transparent 2rpx, transparent 40rpx),
-    repeating-linear-gradient(90deg, rgba(61, 139, 253, 0.07) 0, rgba(61, 139, 253, 0.07) 2rpx, transparent 2rpx, transparent 40rpx);
+  background: #f5f8fd;
 }
 
 .state-plain {
@@ -493,11 +496,42 @@ export default {
   text-align: center;
 }
 
-/* 空状态插画：直接使用设计图，白底已抠透明，融入卡片网格背景 */
+/* 只展示清晰素材的插画部分，所有说明文字由页面渲染。 */
+.state-artwork {
+  width: 480rpx;
+  max-width: 100%;
+  height: 240rpx;
+  overflow: hidden;
+  position: relative;
+}
 .state-illustration {
   display: block;
-  width: 86%;
-  margin: 0 auto;
+  width: 100%;
+  margin-top: -40rpx;
+}
+.state-tips {
+  display: flex;
+  justify-content: space-around;
+  width: 100%;
+  margin-top: 32rpx;
+  padding: 24rpx 0;
+  border-radius: 20rpx;
+  background: #eaf3fc;
+  color: #607d9f;
+  font-size: 24rpx;
+}
+.state-suggestions {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 28rpx;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background: #eaf3fc;
+  color: #607d9f;
+  font-size: 24rpx;
+  line-height: 1.5;
 }
 
 /* 加载与错误 */

@@ -52,7 +52,7 @@
 					</view>
 				</view>
 				<view class="form-item">
-					<text class="label">可对接名额 <text class="optional">留空表示不限量</text></text>
+					<text class="label">可对接名额 <text class="optional">留空表示不限量，超过9999自动按不限量处理</text></text>
 					<input class="input" v-model="form.cooperationCapacity" type="number" placeholder="例如：3" />
 				</view>
 				<view class="form-item">
@@ -171,6 +171,7 @@
 	import { createAchievement, submitAchievement, getAchievementCategories, getAchievementIndustries } from '../../api/achievement.js'
 	import { createEvaluationTask } from '../../api/ai.js'
 	import { getMyOrganizationCertification } from '../../api/membership.js'
+	import { normalizeCooperationCapacity } from '../../utils/cooperation-capacity.mjs'
 	import { validateEmail, validatePhone } from '../../api/contact-validation.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
@@ -430,7 +431,10 @@
 			validate() {
 				this.previewError = ''
 				const f = this.form
-				const required = [
+				try { normalizeCooperationCapacity(f.cooperationCapacity) } catch (error) {
+                    return this.showPreviewError(error.message)
+                }
+                const required = [
 					{ key: 'title', tip: '请填写成果名称' },
 					{ key: 'techIntro', tip: '请填写技术简介' },
 					{ key: 'contactName', tip: '请填写联系人' },
@@ -508,7 +512,7 @@
 				if (f.industryIds && f.industryIds.length) body.industryIds = f.industryIds
 				const media = (f.media || []).map((item, index) => ({ fileId: item.id || item.fileId, role: item.role || 'gallery', sortOrder: index })).filter((item) => item.fileId)
 				if (media.length) body.media = media
-				if (f.cooperationCapacity) body.cooperationCapacity = Number(f.cooperationCapacity)
+				body.cooperationCapacity = normalizeCooperationCapacity(f.cooperationCapacity)
 				if (f.pricingMode && f.pricingMode !== 'negotiable') {
 					const min = parseFloat(f.priceMinWan)
 					const max = parseFloat(f.priceMaxWan)

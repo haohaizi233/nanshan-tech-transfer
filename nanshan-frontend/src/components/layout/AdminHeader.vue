@@ -141,12 +141,13 @@ const goSecurity = () => {
 }
 
 const savePassword = async () => {
+  if (passwordSaving.value) return
   if (!passwordForm.currentPassword) {
     passwordError.value = '请填写当前密码'
     return
   }
-  if (passwordForm.newPassword.length < 8) {
-    passwordError.value = '新密码至少需要 8 位'
+  if (passwordForm.newPassword.length < 8 || passwordForm.newPassword.length > 128) {
+    passwordError.value = '新密码长度须为 8—128 位'
     return
   }
   if (passwordForm.newPassword !== passwordForm.confirmPassword) {
@@ -318,21 +319,21 @@ const savePassword = async () => {
   <div
     v-if="passwordVisible"
     class="account-mask"
-    @click.self="passwordVisible = false"
+    @click.self="!passwordSaving && (passwordVisible = false)"
   >
     <section class="account-modal">
       <header>
         <h2>修改密码</h2>
-        <button type="button" class="account-close" @click="passwordVisible = false">×</button>
+        <button type="button" class="account-close" :disabled="passwordSaving" @click="passwordVisible = false">×</button>
       </header>
-      <p v-if="passwordError" class="account-error">{{ passwordError }}</p>
+      <p v-if="passwordError" class="account-error" role="alert">{{ passwordError }}</p>
       <div class="account-form">
-        <label>当前密码<input v-model="passwordForm.currentPassword" type="password" placeholder="请输入当前密码" /></label>
-        <label>新密码<input v-model="passwordForm.newPassword" type="password" placeholder="至少 8 位" /></label>
-        <label>确认新密码<input v-model="passwordForm.confirmPassword" type="password" placeholder="再次输入新密码" /></label>
+        <label>当前密码<input v-model="passwordForm.currentPassword" :disabled="passwordSaving" type="password" autocomplete="current-password" placeholder="请输入当前密码" /></label>
+        <label>新密码<input v-model="passwordForm.newPassword" :disabled="passwordSaving" type="password" autocomplete="new-password" maxlength="128" placeholder="8—128 位" /></label>
+        <label>确认新密码<input v-model="passwordForm.confirmPassword" :disabled="passwordSaving" type="password" autocomplete="new-password" maxlength="128" placeholder="再次输入新密码" /></label>
       </div>
       <footer>
-        <button type="button" class="ghost-btn" @click="passwordVisible = false">取消</button>
+        <button type="button" class="ghost-btn" :disabled="passwordSaving" @click="passwordVisible = false">取消</button>
         <button type="button" class="primary-btn" :disabled="passwordSaving" @click="savePassword">
           {{ passwordSaving ? '提交中…' : '确认修改' }}
         </button>
