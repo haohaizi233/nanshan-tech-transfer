@@ -98,18 +98,19 @@ def test_sendcloud_sms_provider_logic():
 
 
 def test_recovery_start_nonexistent_account_uniform_response():
-    """防账号枚举：查询不存在的账号时对外返回成功信息，但 challengeId 为空，不调用 Provider。"""
+    """Unknown accounts receive an opaque ID with the same response shape."""
     sms = MockSmsProvider()
     reset_providers_for_test(sms=sms)
 
-    with patch("modules.security.service.get_cursor") as mock_gc:
+    with patch("modules.security.sms_gateway.get_cursor") as mock_gc, patch("modules.security.sms_gateway._audit"):
         cur = MagicMock()
-        cur.fetchone.return_value = None
+        cur.fetchall.return_value = []
         mock_gc.return_value.__enter__.return_value = cur
 
         resp = start_password_recovery("nonexistent_user", "sms")
         assert resp["sent"] is True
-        assert resp["challengeId"] is None
+        assert resp["challengeId"] is not None
+        assert resp["maskedDestination"] is None
         assert len(sms.sent_messages) == 0
 
 
@@ -117,20 +118,24 @@ def test_recovery_start_valid_account_sends_sms():
     sms = MockSmsProvider()
     reset_providers_for_test(sms=sms)
 
-    with patch("modules.security.service.get_cursor") as mock_gc:
+    from modules.security.sms_risk import DecisionAction, RiskDecision
+
+    with (
+        patch("modules.security.sms_gateway.get_cursor") as mock_gc,
+        patch("modules.security.sms_gateway._engine") as engine,
+        patch("modules.security.sms_gateway.audit_record"),
+    ):
+        engine.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
         cur = MagicMock()
         # 第一次 fetchone: 命中 app_user
         # 第二次 fetchone: 命中 account_contact
-        cur.fetchone.side_effect = [
-            {"user_id": 101, "user_status": "active"},
-            {"normalized_value": "13800138000"},
-        ]
+        cur.fetchall.return_value = [{"user_id": 101, "normalized_value": "13800138000"}]
         mock_gc.return_value.__enter__.return_value = cur
 
         resp = start_password_recovery("13800138000", "sms")
         assert resp["sent"] is True
         assert resp["challengeId"] is not None
-        assert resp["maskedDestination"] == "138****8000"
+        assert resp["maskedDestination"] is None
         assert len(sms.sent_messages) == 1
         assert sms.sent_messages[0]["phone"] == "13800138000"
 
@@ -176,7 +181,9 @@ def test_verify_challenge_success_and_grant_issuance():
                 "user_id": 101,
                 "purpose": "password_recovery",
                 "channel": "sms",
-                "destination_fingerprint": "dummy_fp",
+                "destination_fingerprint": __import__(
+                    "modules.security.service", fromlist=["_fingerprint"]
+                )._fingerprint("13800138000"),
                 "code_hash": code_hash,
                 "status": "pending",
                 "attempt_count": 0,
@@ -206,7 +213,9 @@ def test_verify_challenge_wrong_code_increments_attempt():
                 "user_id": 101,
                 "purpose": "password_recovery",
                 "channel": "sms",
-                "destination_fingerprint": "dummy_fp",
+                "destination_fingerprint": __import__(
+                    "modules.security.service", fromlist=["_fingerprint"]
+                )._fingerprint("13800138000"),
                 "code_hash": correct_hash,
                 "status": "pending",
                 "attempt_count": 1,
@@ -369,17 +378,31 @@ def test_api_recovery_flow_e2e():
     sms = MockSmsProvider()
     reset_providers_for_test(sms=sms)
 
-    with patch("modules.security.service.get_cursor") as mock_gc:
+    from modules.security.sms_risk import DecisionAction, RiskDecision
+
+    with (
+        patch("modules.security.sms_gateway.get_cursor") as mock_gc,
+        patch("modules.security.sms_gateway._engine") as engine,
+        patch("modules.security.sms_gateway.audit_record"),
+    ):
+        engine.return_value.check_request.return_value = RiskDecision(DecisionAction.ALLOW)
+        engine.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
         cur = MagicMock()
-        # 1. start
-        cur.fetchone.side_effect = [
-            {"user_id": 200, "user_status": "active"},
-            {"normalized_value": "13800138999"},
-        ]
+        cur.fetchall.return_value = [{"user_id": 200, "normalized_value": "13800138999"}]
+        cur.fetchone.return_value = {
+            "payload": {
+                "account": "13800138999",
+                "channel": "sms",
+                "ip": "testclient",
+                "device_id": None,
+                "request_id": "test-request",
+            }
+        }
         mock_gc.return_value.__enter__.return_value = cur
 
         resp = client.post(
-            "/api/tech-transfer/v1/auth/recovery/start", json={"account": "13800138999", "channel": "sms"}
+            "https://testserver/api/tech-transfer/v1/auth/recovery/start",
+            json={"account": "13800138999", "channel": "sms"},
         )
         assert resp.status_code == 200
         data = resp.json()["data"]
@@ -401,7 +424,9 @@ def test_api_recovery_flow_e2e():
                 "user_id": 200,
                 "purpose": "password_recovery",
                 "channel": "sms",
-                "destination_fingerprint": "fp",
+                "destination_fingerprint": __import__(
+                    "modules.security.service", fromlist=["_fingerprint"]
+                )._fingerprint("13800138999"),
                 "code_hash": code_hash,
                 "status": "pending",
                 "attempt_count": 0,
@@ -462,3 +487,197 @@ def test_api_wechat_web_endpoints():
         cb_data = resp.json()["data"]
         assert cb_data["isBound"] is False
         assert "bindingTicket" in cb_data
+
+
+@pytest.mark.parametrize(
+    "phone,code,ttl",
+    [
+        ("", "123456", 300),
+        ("13800138000,13900139000", "123456", 300),
+        ("23800138000", "123456", 300),
+        ("13800138000", 123456, 300),
+        ("13800138000", "１２３４５６", 300),
+        ("13800138000", "123456", True),
+        ("13800138000", "123456", 0),
+    ],
+)
+def test_sendcloud_rejects_invalid_inputs(phone, code, ttl):
+    from modules.security.provider import SendCloudSmsProvider
+
+    with patch("urllib.request.urlopen") as network:
+        with pytest.raises(ProviderError):
+            SendCloudSmsProvider("u", "k", 123).send_code(phone, code, "bind_phone", ttl)
+        network.assert_not_called()
+
+
+def test_sendcloud_exact_form_and_signature():
+    import hashlib
+    import json
+    from urllib.parse import parse_qs
+
+    from modules.security.provider import SendCloudSmsProvider
+
+    with patch("urllib.request.urlopen") as network:
+        network.return_value.__enter__.return_value.read.return_value = b'{"result":true,"statusCode":200}'
+        provider = SendCloudSmsProvider("用户 &+", "secret", 123)
+        provider.send_code("+8613800138000", "001234", "bind_phone", 61, request_id="task &+1")
+        actual = {k: v[0] for k, v in parse_qs(network.call_args.args[0].data.decode()).items()}
+        expected = {
+            "smsUser": "用户 &+",
+            "templateId": "123",
+            "phone": "13800138000",
+            "vars": '{"%code%":"001234"}',
+            "sendRequestId": "task &+1",
+        }
+        signature = hashlib.sha256(
+            ("secret&" + "&".join(k + "=" + expected[k] for k in sorted(expected)) + "&secret").encode()
+        ).hexdigest()
+        assert actual == dict(expected, signature=signature)
+        assert json.loads(actual["vars"]) == {"%code%": "001234"}
+        for key in expected:
+            changed = dict(expected)
+            changed[key] += "x"
+            assert (
+                hashlib.sha256(
+                    ("secret&" + "&".join(k + "=" + changed[k] for k in sorted(changed)) + "&secret").encode()
+                ).hexdigest()
+                != signature
+            )
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_production_rejects_cached_mock(monkeypatch, enabled):
+    import modules.security.provider as p
+
+    monkeypatch.setattr(p.settings, "APP_ENV", "production")
+    monkeypatch.setattr(p.settings, "SMS_ENABLED", enabled)
+    monkeypatch.setattr(p.settings, "SMS_PROVIDER", "mock")
+    with pytest.raises(ProviderError):
+        p.get_sms_provider()
+
+
+@pytest.mark.parametrize(
+    "kind,status,unknown",
+    [
+        ("http", 400, False),
+        ("http", 503, True),
+        ("json", None, True),
+        ("structure", None, True),
+        ("connect", None, True),
+        ("read", None, True),
+        ("connection", None, True),
+        ("business", 422, False),
+        ("business", 431, False),
+        ("business", 499, False),
+        ("business", 400, True),
+    ],
+)
+def test_sendcloud_errors_are_safe(kind, status, unknown, monkeypatch, caplog):
+    import modules.security.provider as p
+
+    monkeypatch.setattr(p.settings, "SENDCLOUD_SMS_MAX_ATTEMPTS", 1)
+    with patch("urllib.request.urlopen") as network:
+        response = network.return_value.__enter__.return_value
+        if kind == "http":
+            network.side_effect = p.urllib.error.HTTPError("url", status, "secret 001234", {}, None)
+        elif kind == "connect":
+            network.side_effect = p.urllib.error.URLError(TimeoutError("secret 001234"))
+        elif kind == "connection":
+            network.side_effect = p.urllib.error.URLError("secret 001234")
+        elif kind == "read":
+            response.read.side_effect = TimeoutError("secret 001234")
+        elif kind == "json":
+            response.read.return_value = b"secret 001234 invalid json"
+        elif kind == "structure":
+            response.read.return_value = b"[]"
+        else:
+            response.read.return_value = (
+                '{"result":false,"statusCode":' + str(status) + ',"message":"secret 001234"}'
+            ).encode()
+        with pytest.raises(ProviderError) as error:
+            p.SendCloudSmsProvider("u", "secret", 123).send_code("13800138000", "001234", "bind_phone")
+        assert error.value.outcome_unknown is unknown
+        assert network.call_count == 1
+        for sensitive in ["secret", "001234", "13800138000"]:
+            assert sensitive not in str(error.value) + caplog.text
+        assert caplog.records[-1].error_type
+
+
+@pytest.mark.parametrize("request_id", ["", "x" * 129, 123, "bad\nID"])
+def test_sendcloud_request_id_rejected(request_id):
+    from modules.security.provider import SendCloudSmsProvider
+
+    with patch("urllib.request.urlopen") as network:
+        with pytest.raises(ProviderError):
+            SendCloudSmsProvider("u", "k", 1).send_code("13800138000", "001234", "bind_phone", request_id=request_id)
+        network.assert_not_called()
+
+
+def test_sendcloud_generated_ids_are_distinct():
+    from urllib.parse import parse_qs
+
+    from modules.security.provider import SendCloudSmsProvider
+
+    with patch("urllib.request.urlopen") as network:
+        network.return_value.__enter__.return_value.read.return_value = b'{"result":true,"statusCode":200}'
+        provider = SendCloudSmsProvider("u", "k", 1)
+        for _ in range(2):
+            provider.send_code("13800138000", "001234", "bind_phone")
+        ids = [parse_qs(call.args[0].data.decode())["sendRequestId"][0] for call in network.call_args_list]
+        assert ids[0] != ids[1]
+
+
+@pytest.mark.parametrize("provider_type", ["mock", "sendcloud", "tencent", "typo"])
+def test_sms_disabled_without_injection(monkeypatch, provider_type):
+    import modules.security.provider as p
+
+    p.reset_providers_for_test()
+    monkeypatch.setattr(p.settings, "SMS_ENABLED", False)
+    monkeypatch.setattr(p.settings, "SMS_PROVIDER", provider_type)
+    with pytest.raises(ProviderError):
+        p.get_sms_provider()
+
+
+@pytest.mark.parametrize("phone", ["+8613800138000", "13800138000"])
+def test_sendcloud_mainland_phone(phone):
+    from modules.security.provider import SendCloudSmsProvider
+
+    with patch("urllib.request.urlopen") as network:
+        network.return_value.__enter__.return_value.read.return_value = b'{"result":true,"statusCode":200}'
+        assert SendCloudSmsProvider("u", "k", 1).send_code(phone, "000001", "password_recovery")
+
+
+@pytest.mark.parametrize(
+    "phone,code,ttl,purpose",
+    [
+        ("+1 2025550123", "123456", 300, "bind_phone"),
+        ("13800138000\n", "123456", 300, "bind_phone"),
+        ("abc", "123456", 300, "bind_phone"),
+        ("13800138000", "", 300, "bind_phone"),
+        ("13800138000", "1e0005", 300, "bind_phone"),
+        ("13800138000", 1.23, 300, "bind_phone"),
+        ("13800138000", "123456", 3601, "bind_phone"),
+        ("13800138000", "123456", 1.5, "bind_phone"),
+        ("13800138000", "123456", "300", "bind_phone"),
+        ("13800138000", "123456", 300, "login"),
+    ],
+)
+def test_sendcloud_more_invalid_inputs(phone, code, ttl, purpose):
+    from modules.security.provider import SendCloudSmsProvider
+
+    with patch("urllib.request.urlopen") as network:
+        with pytest.raises(ProviderError):
+            SendCloudSmsProvider("u", "k", 1).send_code(phone, code, purpose, ttl)
+        network.assert_not_called()
+
+
+def test_sms_disable_also_blocks_factory_cached_instance(monkeypatch):
+    import modules.security.provider as p
+
+    p.reset_providers_for_test()
+    monkeypatch.setattr(p.settings, "SMS_ENABLED", True)
+    monkeypatch.setattr(p.settings, "SMS_PROVIDER", "mock")
+    p.get_sms_provider()
+    monkeypatch.setattr(p.settings, "SMS_ENABLED", False)
+    with pytest.raises(ProviderError):
+        p.get_sms_provider()

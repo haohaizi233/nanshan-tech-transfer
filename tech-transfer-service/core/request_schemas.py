@@ -67,16 +67,19 @@ class WechatBindRequest(WechatLoginRequest):
 
 
 class RecoveryStartRequest(RequestBody):
-    account: str = Field(..., min_length=1, description="用户名、手机号或邮箱")
-    channel: str = Field("sms", description="sms / email_otp / email_link")
+    model_config = ConfigDict(extra="forbid", strict=True)
+    account: str = Field(..., min_length=1, max_length=128, description="用户名、手机号或邮箱")
+    channel: Literal["sms", "email_otp", "email_link"] = "sms"
 
 
 class RecoveryVerifyRequest(RequestBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
     challengeId: str = Field(..., description="挑战 UUID")
     code: str = Field(..., min_length=1, max_length=128, description="验证码或重置Token")
 
 
 class RecoveryCompleteRequest(RequestBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
     recoveryGrant: str = Field(..., min_length=1, description="恢复授权凭证")
     newPassword: str = Field(..., min_length=8, max_length=128, description="新密码（8-128位）")
 
@@ -91,11 +94,13 @@ class WechatWebBindRequest(RequestBody):
 
 
 class ContactChallengeRequest(RequestBody):
-    contactType: str = Field(..., description="phone 或 email")
-    contactValue: str = Field(..., min_length=1, description="联系方式号码或邮箱")
+    model_config = ConfigDict(extra="forbid", strict=True)
+    contactType: Literal["phone", "email"]
+    contactValue: str = Field(..., min_length=1, max_length=128, description="联系方式号码或邮箱")
 
 
 class ContactVerifyRequest(RequestBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
     challengeId: str = Field(..., description="挑战 UUID")
     code: str = Field(..., min_length=1, max_length=128, description="收到的验证码")
     contactValue: str = Field(..., min_length=1, description="联系方式号码或邮箱")

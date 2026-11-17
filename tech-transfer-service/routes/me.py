@@ -24,6 +24,8 @@ from modules.security.service import (
     start_contact_binding_challenge,
     verify_and_bind_contact,
 )
+from modules.security.sms_gateway import SendContext, normalize_phone, request_gate
+from modules.security.sms_request import SmsRequestContext, validate_sms_request
 
 router = APIRouter(prefix="/api/tech-transfer/v1/me", tags=["me"])
 
@@ -57,9 +59,19 @@ def get_my_security(user: dict = Depends(identity)):
 
 
 @router.post("/security/contact/challenge", summary="发起绑定安全手机号或安全邮箱挑战（发送验证码）")
-def post_contact_challenge(body: ContactChallengeRequest, request: Request, user: dict = Depends(identity)):
-    check_send_code_rate(request, body.contactValue)
-    return success(start_contact_binding_challenge(user["userId"], body.contactType, body.contactValue))
+def post_contact_challenge(
+    body: ContactChallengeRequest,
+    request: Request,
+    user: dict = Depends(identity),
+    context: SmsRequestContext = Depends(validate_sms_request),
+):
+    ctx = SendContext(context.ip, context.device_id, context.request_id)
+    if body.contactType == "phone":
+        phone = normalize_phone(body.contactValue)
+        request_gate(ctx, str(user["userId"]), phone=phone, purpose="bind_phone")
+    else:
+        check_send_code_rate(request, body.contactValue)
+    return success(start_contact_binding_challenge(user["userId"], body.contactType, body.contactValue, context=ctx))
 
 
 @router.post("/security/contact/verify", summary="核验验证码并确权绑定安全手机号或邮箱")

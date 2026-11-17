@@ -81,6 +81,9 @@ app = FastAPI(
 from core.perf_middleware import PerformanceMiddleware
 
 app.add_middleware(PerformanceMiddleware)
+from modules.security.sms_request import SmsBodyLimitMiddleware
+
+app.add_middleware(SmsBodyLimitMiddleware)
 
 # GZip压缩：减少响应体积（Content Download优化）
 # minimum_size=512：只压缩>512B的响应，小响应不浪费CPU

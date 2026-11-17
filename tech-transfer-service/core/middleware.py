@@ -55,9 +55,8 @@ def _user_is_active(user_id: int) -> bool:
 def _user_session_version(user_id: int) -> int:
     """Check app_user.session_version for instant JWT access token revocation.
 
-    Cached with 30s TTL in auth_cache. When a user resets their password or logs out
-    all sessions, session_version is incremented and cache invalidated immediately.
-    Defaults to 1 if not found or in unit tests without database.
+    Read the database on every request so revocation crosses workers immediately.
+    Database failure must not revive a revoked token by returning version 1.
     """
     from db import get_cursor
 
@@ -73,9 +72,10 @@ def _user_session_version(user_id: int) -> int:
                     return 1
                 return int(row["session_version"])
         except Exception:
-            return 1
+            raise BizError("TT_COMMON_50301", "认证服务暂时不可用", 503) from None
 
-    return auth_cache.cached(("user_session_version", user_id), _query)
+    # Revocation must cross worker/process boundaries immediately.
+    return _query()
 
 
 def _is_admin_role(user_id: int) -> bool:

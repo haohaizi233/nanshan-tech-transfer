@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
 from core.errors import TT_AUTH_40105, TT_COMMON_40102, BizError, bootstrap_credential_invalid
 from core.middleware import identity
@@ -40,9 +42,17 @@ from modules.security.rate_limiter import (
 )
 from modules.security.service import (
     complete_password_recovery,
-    start_password_recovery,
     verify_recovery_challenge,
 )
+from modules.security.sms_gateway import (
+    SendContext,
+    enqueue_recovery_task,
+    normalize_phone,
+    recovery_response,
+    request_gate,
+    run_queued_recovery_task,
+)
+from modules.security.sms_request import SmsRequestContext, validate_sms_request
 
 router = APIRouter(prefix="/api/tech-transfer/v1/auth", tags=["auth"])
 
@@ -76,9 +86,25 @@ def wechat_web_bind(body: WechatWebBindRequest, user: dict = Depends(identity)):
 
 
 @router.post("/recovery/start", summary="发起密码找回（发送短信/邮件验证码或重置链接）")
-def recovery_start(body: RecoveryStartRequest, request: Request):
-    check_recovery_start_rate(request, body.account)
-    return success(start_password_recovery(body.account, body.channel))
+def recovery_start(
+    body: RecoveryStartRequest,
+    request: Request,
+    background: BackgroundTasks,
+    context: SmsRequestContext = Depends(validate_sms_request),
+):
+    ctx = SendContext(context.ip, context.device_id, context.request_id)
+    if body.channel == "sms":
+        try:
+            phone = normalize_phone(body.account)
+        except BizError:
+            phone = None
+        request_gate(ctx, body.account.strip().lower(), phone=phone)
+    else:
+        check_recovery_start_rate(request, body.account)
+    challenge_id = str(uuid.uuid4())
+    enqueue_recovery_task(body.account.strip(),body.channel,challenge_id,ctx)
+    background.add_task(run_queued_recovery_task, challenge_id)
+    return success(recovery_response(challenge_id, body.channel))
 
 
 @router.post("/recovery/verify", summary="核验找回挑战凭证，获取短期重置授权凭证")

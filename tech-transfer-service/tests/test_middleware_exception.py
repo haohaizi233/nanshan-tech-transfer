@@ -179,6 +179,13 @@ class TestIdempotency:
 
 
 class TestMiddlewareIdentity:
+    @pytest.fixture(autouse=True)
+    def session_version_for_identity_unit_tests(self):
+        # This suite tests token/role dispatch, independently of the real DB
+        # revocation tests in test_sms_gateway_postgres.py.
+        with patch("core.middleware._user_session_version", return_value=1):
+            yield
+
     def _make_request(self, auth_header=None):
         from starlette.requests import Request
 

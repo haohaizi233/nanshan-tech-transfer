@@ -11,6 +11,7 @@ Architecture source: 04-backend-domain-design.md §4.5, 05-data-model-design.md 
 
 import json
 
+from core.cooperation_capacity import normalize_cooperation_capacity
 from core.contact_validation import validate_email, validate_phone
 from core.errors import (
     achievement_conflict,
@@ -41,17 +42,11 @@ def _parse_cooperation_capacity(body, fields, partial=False):
             raise bad_request("cooperationPolicy 必须是 parallel 或 exclusive")
         fields["cooperation_policy"] = policy
     if "cooperationCapacity" in body:
-        capacity = body["cooperationCapacity"]
+        capacity = normalize_cooperation_capacity(body["cooperationCapacity"])
         if capacity is None or capacity == "":
             fields["cooperation_capacity"] = None
             fields["cooperation_remaining"] = None
         else:
-            try:
-                capacity = int(capacity)
-            except (TypeError, ValueError):
-                raise bad_request("cooperationCapacity 必须是正整数或空（不限量）")
-            if capacity < 1:
-                raise bad_request("cooperationCapacity 必须大于 0")
             if fields.get("cooperation_policy") == "exclusive" and capacity != 1:
                 raise bad_request("exclusive 仅允许 1 个对接名额")
             fields["cooperation_capacity"] = capacity

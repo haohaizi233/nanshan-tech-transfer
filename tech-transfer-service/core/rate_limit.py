@@ -88,20 +88,37 @@ def _check(key: str, limit: int, window_s: int):
 def _client_ip(request) -> str:
     """真实客户端 IP（N3: trusted-proxy 防 XFF 伪造）。
 
-    只有当 TCP 直连对端（request.client.host）在 TRUSTED_PROXIES 白名单内时，
-    才信任 X-Forwarded-For：反代（Caddy/frp）会把上一跳来源 IP 追加到 XFF 尾部，
-    因此只取 XFF 的最后一跳——首段是客户端自带的，可任意伪造，绝不能用于限流。
+    仅从可信直连代理开始，从右往左跳过明确配置的可信代理，取首个不可信节点。
+    首段是客户端自带的，可任意伪造，绝不能无条件用于限流。
     直连（非可信代理）场景下 XFF 整体忽略，用 TCP 对端 IP 限流，
     否则攻击者伪造 XFF 轮换假 IP 即可完全绕过 IP 维度限流。
     """
+    import ipaddress
+
+    def normalize(host):
+        address = ipaddress.ip_address(host)
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        return str(address)
+
     peer = request.client.host if request.client else "unknown"
+    try:
+        peer = normalize(peer)
+    except ValueError:
+        return peer
     if not _is_trusted_proxy(peer):
         return peer
     xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        last_hop = xff.split(",")[-1].strip()
-        if last_hop:
-            return last_hop
+    if xff and len(xff) <= 2048:
+        current = peer
+        for hop in reversed(xff.split(",")):
+            if not _is_trusted_proxy(current):
+                break
+            try:
+                current = normalize(hop.strip())
+            except ValueError:
+                return peer
+        return current
     return peer
 
 
