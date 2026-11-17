@@ -42,6 +42,7 @@ function createPage(storage = {}, overrides = {}) {
     extractStreamData,
     openEvalTaskStream() { return null },
     getEvaluationTask() { return new Promise(() => {}) },
+    isLoggedIn: () => true,
     AI_FEATURE_ENABLED,
     AppTabbar: {},
     AiGeneratedMark: {},

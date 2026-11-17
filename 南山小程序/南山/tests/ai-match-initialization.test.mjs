@@ -28,6 +28,7 @@ function createPage(storage = {}, overrides = {}) {
     extractStreamData,
     openEvalTaskStream() { return null },
     getEvaluationTask() { return new Promise(() => {}) },
+    isLoggedIn: () => true,
     AI_FEATURE_ENABLED,
     AppTabbar: {},
     AiGeneratedMark: {},
@@ -715,4 +716,88 @@ test('an unknown POST outcome keeps WAL and checks status without resending even
   assert.equal(polls, 1)
   assert.equal(wal.loadActiveTurn(pageStorage(storage), 'anonymous').status, 'pending')
   assert.equal(page.recoveringTurn, true)
+})
+
+
+test('guest AI send prompts login once, preserves draft and never starts a turn', () => {
+  const toasts=[], routes=[], timers=[]
+  const {page}=createPage({}, {isLoggedIn:()=>false, uni:{showToast:o=>toasts.push(o)}, HostBridge:{navigate:r=>routes.push(r)},setTimeout:fn=>timers.push(fn)})
+  page.inputText='介绍机器视觉成果'
+  let calls=0
+  page.dispatchUserText=()=>calls++
+  page.onSend();page.onSend()
+  assert.equal(calls,0)
+  assert.equal(page.inputText,'介绍机器视觉成果')
+  assert.equal(page.typing,false)
+  assert.equal(toasts.length,1)
+  assert.match(toasts[0].title,/请先登录.*AI/)
+  timers[0]()
+  assert.deepEqual(routes,['pages/mine/mine'])
+})
+
+test('guest quick question cannot enter agent, matching or history requests', async () => {
+  let calls=0
+  const {page}=createPage({}, {isLoggedIn:()=>false, uni:{showToast(){}}, HostBridge:{navigate(){}}, setTimeout(){},getChatHistory:async()=>{calls++},chatWithAgent:async()=>{calls++},getMyDemands:async()=>{calls++},matchDemand:async()=>{calls++}})
+  await page.resumeSession()
+  await page.runAgentChat('问题')
+  await page.runMatchSkill()
+  await page.onPickDemand({id:1,title:"需求"})
+  assert.equal(calls,0)
+  assert.equal(page.typing,false)
+  assert.equal(page.inflightTurnId,'')
+})
+
+test('authenticated AI send still dispatches normally', () => {
+  const {page}=createPage({}, {isLoggedIn:()=>true})
+  let sent
+  page.inputText='问题';page.persistQueue=()=>{};page.dispatchUserText=t=>sent=t
+  page.onSend()
+  assert.equal(sent,'问题')
+  assert.equal(page.inputText,'')
+})
+
+test('expired AI session releases the turn and redirects instead of polling', async () => {
+  const storage={}, routes=[], notices=[]
+  let polls=0
+  const {page}=createPage(storage, {
+    chatWithAgent:async()=>{throw Object.assign(new Error('登录已过期'),{code:'TT_AUTH_40104'})},
+    getChatTurn:async()=>{polls++},setTimeout:fn=>{fn();return 1},
+    HostBridge:{navigate:r=>routes.push(r)},
+  })
+  // Keep the real test storage adapter and add the platform toast surface.
+  page.ensureAiLogin=force=>{if(force){notices.push('login');routes.push('pages/mine/mine');return false}return true}
+  page._scope='anonymous';page._alive=true;page._visible=true
+  await page.runAgentChat('保留的问题')
+  assert.equal(polls,0)
+  assert.equal(page.typing,false)
+  assert.equal(page.recoveringTurn,false)
+  assert.equal(page.inputText,'保留的问题')
+  assert.equal(wal.loadActiveTurn(pageStorage(storage),'anonymous'),null)
+  assert.deepEqual(routes,['pages/mine/mine'])
+  assert.equal(notices.length,1)
+})
+
+
+test('expired matching session prompts login without draining queued questions', async () => {
+  const {page}=createPage({}, {getMyDemands:async()=>{throw Object.assign(new Error('expired'),{code:'TT_AUTH_40104'})}})
+  page._alive=true;page._visible=true
+  let prompted=0
+  page.ensureAiLogin=force=>{if(force){prompted++;page._loginRedirecting=true}return !force}
+  page.pendingQueue=[{id:'queued',text:'稍后问题'}]
+  await page.runMatchSkill()
+  assert.equal(prompted,1)
+  assert.equal(page.typing,false)
+  assert.equal(page.inputText,'/匹配')
+  assert.equal(page.pendingQueue.length,1)
+})
+
+test('authentication rejection still redirects after the API clears cached login', async () => {
+  let scope='7', prompted=0
+  const {page}=createPage({}, {getPageStateScope:()=>scope, isLoggedIn:()=>scope==='7',
+    chatWithAgent:async()=>{scope='anonymous';throw Object.assign(new Error('请先登录'),{code:'TT_COMMON_40101'})}})
+  page._scope='7';page._alive=true;page._visible=true
+  page.ensureAiLogin=force=>{if(force)prompted++;return !force}
+  await page.runAgentChat('问题')
+  assert.equal(prompted,1)
+  assert.equal(page.typing,false)
 })

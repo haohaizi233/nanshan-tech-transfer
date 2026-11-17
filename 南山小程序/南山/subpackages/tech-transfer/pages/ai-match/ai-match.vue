@@ -325,7 +325,7 @@
 
 // P0-A: 模块级内存缓存（跨页面切换保持数据）
 const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputText, scrollPos }
-	import { ensureLoginForDock } from '../../api/user.js'
+	import { isLoggedIn } from '../../api/user.js'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 	import { safeNavigateTo } from '../../utils/nav.mjs'
@@ -534,6 +534,21 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	},
 	methods: {
 		formatReplyNodes,
+		isAiAuthError(e) {
+			return e && (e.code === 401 || /^TT_(?:COMMON|AUTH)_401/.test(String(e.code || '')) || /未登录|请先登录|登录已过期/.test(e.message || ''))
+		},
+		ensureAiLogin(force = false) {
+			if (!force && isLoggedIn()) return true
+			if (!this._loginRedirecting) {
+				this._loginRedirecting = true
+				uni.showToast({ title: '请先登录后使用AI助手', icon: 'none', duration: 2000 })
+				setTimeout(() => {
+					this._loginRedirecting = false
+					HostBridge.navigate('pages/mine/mine')
+				}, 400)
+			}
+			return false
+		},
 		stopEvaluationTasks(clear = false) {
 			this._evaluationMonitor?.dispose()
 			this._evaluationMonitor = null
@@ -639,6 +654,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.runAgentChat('介绍这项：' + card.title, reference)
 		},
 		async clearConversation() {
+			if (!this.ensureAiLogin()) return
 			if (this._clearingHistory) return
 			this.stopEvaluationTasks(true)
 			this.stopTurnPolling()
@@ -930,6 +946,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			}
 		},
 		async resumeSession() {
+			if (!isLoggedIn()) return
 			const scope = this._scope
 			const version = this._chatRequestVersion || 0
 			const saved = loadQueueState(uni, this._scope)
@@ -978,7 +995,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			this.pumpQueue()
 		},
 		pumpQueue() {
-			if (!this._alive || !this._visible || this.typing || this.waitingDemandPick || this._clearingHistory) return
+			if (!this._alive || !this._visible || this.typing || this.waitingDemandPick || this._clearingHistory || this._loginRedirecting) return
 			const { queue, item } = dequeueMessage(this.pendingQueue)
 			if (!item) {
 				this.persistQueue()
@@ -1144,6 +1161,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				if (!this.aiEnabled) return
 				const text = (this.inputText || '').trim()
 				if (!text) return
+				if (!this.ensureAiLogin()) return
 				if (this.typing) {
 					const { queue, item, overflow } = enqueueMessage(this.pendingQueue, text, MAX_QUEUE_SIZE)
 					if (overflow) {
@@ -1161,6 +1179,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				this.dispatchUserText(text)
 			},
 			dispatchUserText(text) {
+				if (!this.ensureAiLogin()) return
 				this.waitingDemandPick = false
 				const skill = resolveSkillCommand(text)
 				if (skill && skill.id === 'match') {
@@ -1195,6 +1214,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 				this.runAgentChat(text)
 			},
 			async runAgentChat(text, reference) {
+				if (!this.ensureAiLogin()) return
 				// _commandEcho：斜杠命令的原始输入（如 /评估 3），仅用于气泡回显；
 				// text 是改写后发给 agent 的自然语言
 				const command = this._commandEcho || ''
@@ -1256,6 +1276,22 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 						if ((pollResult === 'pending' || pollResult === 'paused') && this._alive) this.scheduleTurnRecovery()
 					}
 				} catch (e) {
+					// Login may already have been cleared by the API client. Still handle
+                    // this request's auth failure, without redirecting a newly switched account.
+                    if (this.isAiAuthError(e) && this._alive && (this._chatRequestVersion || 0) === version
+                        && this._scope === scope && (!isLoggedIn() || getPageStateScope(uni) === scope)) {
+						acknowledgeTurn(turnId, uni, scope)
+						this.stopTurnPolling()
+						this.typing = false
+						this.recoveringTurn = false
+						this.chatProgress = null
+						this.inflightText = ''
+						this.inflightTurnId = ''
+						this.inputText = command || text
+						this.persistQueue()
+						this.ensureAiLogin(true)
+						return
+					}
 					if (!this.isCurrentChatRequest(version, scope)) return
 					if (e.details?.reason === 'chat_history_cleared') {
 						acknowledgeTurn(turnId, uni, this._scope)
@@ -1297,7 +1333,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			},
 			async runMatchSkill() {
 				if (!this.aiEnabled) return
-				if (!ensureLoginForDock()) {
+				if (!this.ensureAiLogin()) {
 					this.finishTurn()
 					return
 				}
@@ -1323,6 +1359,11 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					})
 				} catch (e) {
 					if (!this._alive) return
+					if (this.isAiAuthError(e)) {
+						this.inputText = '/匹配'
+						this.ensureAiLogin(true)
+						return
+					}
 					this.pushMessage('assistant', (e && e.message) || '需求加载失败，请稍后重试。')
 				} finally {
 					if (!this._alive) return
@@ -1335,6 +1376,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 			},
 			async onPickDemand(demand) {
 				if (!this.aiEnabled || this.typing) return
+				if (!this.ensureAiLogin()) return
 				this.waitingDemandPick = false
 				this.typing = true
 				this.pushMessage('user', '匹配需求：' + demand.title)
@@ -1357,6 +1399,11 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 					await this.loadHistory()
 				} catch (e) {
 					if (!this._alive) return
+					if (this.isAiAuthError(e)) {
+						this.inputText = '/匹配'
+						this.ensureAiLogin(true)
+						return
+					}
 					const code = e && e.code
 					let msg = (e && e.message) || '匹配失败，请稍后重试。'
 					if (code === 'AI_DISABLED') msg = '该功能即将开放'
