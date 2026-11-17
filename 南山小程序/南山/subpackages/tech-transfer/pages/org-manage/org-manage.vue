@@ -26,10 +26,12 @@
 				<view v-if="!members.length && !loadingList" class="list-empty">暂无成员</view>
 				<view v-for="m in members" :key="m.id" class="member-item">
 					<view class="member-info">
-						<text class="member-name">{{ m.userNo || ('成员 #' + m.id) }}</text>
+						<text class="member-name">{{ m.realName || '未填写姓名' }}</text>
+						<text class="member-number">工号：{{ m.userNo || '未分配' }}</text>
 						<text class="member-meta">
 							<text :class="m.role === 'admin' ? 'role-tag admin' : 'role-tag'">{{ m.role === 'admin' ? '管理员' : '成员' }}</text>
 							<text v-if="m.department" class="member-dept">{{ m.department }}</text>
+							<text v-if="m.title" class="member-dept">{{ m.title }}</text>
 						</text>
 					</view>
 					<button
@@ -45,7 +47,8 @@
 				<view v-if="!applications.length && !loadingList" class="list-empty">暂无待审核申请</view>
 				<view v-for="a in applications" :key="a.id" class="member-item">
 					<view class="member-info">
-						<text class="member-name">{{ a.realName || a.userNo || ('申请 #' + a.id) }}</text>
+						<text class="member-name">{{ a.realName || '未填写姓名' }}</text>
+						<text class="member-number">工号：{{ a.userNo || '未分配' }}</text>
 						<text class="member-meta">
 							<text v-if="a.department" class="member-dept">{{ a.department }}</text>
 							<text v-if="a.title" class="member-dept">{{ a.title }}</text>
@@ -115,6 +118,7 @@
 				dialogTitle: '',
 				dialogReason: '',
 				dialogSubmitting: false,
+				listRequestId: 0,
 				dialogAction: null
 			}
 		},
@@ -164,25 +168,32 @@
 			},
 			async loadList() {
 				if (!this.currentOrgId) return
+				const requestId = ++this.listRequestId
+				const orgId = this.currentOrgId
+				const tab = this.tab
+				const isCurrent = () => requestId === this.listRequestId && orgId === this.currentOrgId && tab === this.tab
 				this.loadingList = true
 				try {
 					if (this.tab === 'members') {
-						const data = await getOrgMembers(this.currentOrgId, { status: 'active', page: 1, pageSize: 50 })
+						const data = await getOrgMembers(orgId, { status: 'active', page: 1, pageSize: 50 })
+						if (!isCurrent()) return
 						this.members = data.list || []
 					} else {
-						const data = await getOrgMembershipApplications(this.currentOrgId, { status: 'pending', page: 1, pageSize: 50 })
+						const data = await getOrgMembershipApplications(orgId, { status: 'pending', page: 1, pageSize: 50 })
+						if (!isCurrent()) return
 						this.applications = data.list || []
 						this.pendingCount = data.total || 0
 					}
 					this.markPageStateFresh('list')
 				} catch (e) {
+					if (!isCurrent()) return
 					uni.showToast({ title: (e && e.message) || '加载失败', icon: 'none', duration: 2500 })
 					if (e && (e.code === 'TT_ADMIN_40301' || e.message === '非机构管理员')) {
 						this.adminOrgs = []
 						this.currentOrgId = 0
 					}
 				} finally {
-					this.loadingList = false
+					if (isCurrent()) this.loadingList = false
 				}
 			},
 			approve(a) {
@@ -398,7 +409,19 @@
 		font-weight: 600;
 	}
 
+	.member-number {
+		font-size: 24rpx;
+		color: #666666;
+		margin-top: 8rpx;
+		word-break: break-all;
+	}
+
+	.member-name, .member-dept {
+		word-break: break-all;
+	}
+
 	.member-meta {
+		flex-wrap: wrap;
 		display: flex;
 		flex-direction: row;
 		align-items: center;
@@ -447,6 +470,8 @@
 	}
 
 	.mini-btn {
+		flex-shrink: 0;
+		margin-left: 16rpx;
 		margin: 4rpx 0;
 		font-size: 24rpx;
 		border-radius: 10rpx;

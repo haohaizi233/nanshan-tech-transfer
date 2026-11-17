@@ -1,5 +1,7 @@
 """Organization membership authorization and transactional state machines."""
 
+import re
+
 import psycopg2
 
 from core import auth_cache
@@ -206,7 +208,48 @@ def _list_org_records(admin, org_id, table, status, page, page_size):
         if status is not None:
             sql += " AND a.status = %s"
             params.append(status)
-        return _read_page(cur, "a.*, u.user_no, o.name AS org_name", sql, params, page, page_size)
+        columns = "a.*, u.user_no, o.name AS org_name"
+        if table == "organization_membership":
+            # Scalar subqueries keep count, pagination and membership cardinality unchanged.
+            # Both histories share one timeline; IDs and source break timestamp ties.
+            columns += """, (
+                SELECT json_build_object('name', btrim(n.real_name), 'source', n.source)
+                FROM (
+                    SELECT real_name, reviewed_at, id, 'membership_application' AS source
+                    FROM organization_membership_application
+                    WHERE user_id = a.user_id AND org_id = a.org_id AND status = 'approved'
+                    UNION ALL
+                    SELECT real_name, reviewed_at, id, 'admin_application' AS source
+                    FROM organization_admin_application
+                    WHERE user_id = a.user_id AND org_id = a.org_id AND status = 'approved'
+                ) n
+                WHERE nullif(btrim(n.real_name), '') IS NOT NULL
+                ORDER BY n.reviewed_at DESC NULLS LAST, n.id DESC, n.source DESC
+                LIMIT 1
+            ) AS member_name,
+            (SELECT p.display_name FROM user_profile p WHERE p.user_id = a.user_id) AS profile_name"""
+        result = _read_page(cur, columns, sql, params, page, page_size)
+        if table == "organization_membership":
+            for row in result["list"]:
+                approved = row.pop("memberName")
+                display_name = _member_display_name(row.pop("profileName"), row.get("userNo"))
+                row["realName"] = approved["name"] if approved else display_name
+                row["nameSource"] = (
+                    approved["source"] if approved else ("profile_display_name" if display_name else None)
+                )
+        return result
+
+
+def _member_display_name(value, user_no):
+    """Conservative display fallback; never claims identity verification."""
+    name = (value or "").strip()
+    if not name or name == user_no or name in {"测试用户", "用户", "微信用户", "未命名", "管理员", "admin", "test"}:
+        return None
+    if re.fullmatch(r"[\u3400-\u9fff]{2,16}(?:[·•][\u3400-\u9fff]{1,16})*", name):
+        return name
+    if re.fullmatch(r"[A-Za-z]{2,24}(?:[ .'-][A-Za-z]{1,24}){0,4}", name):
+        return name
+    return None
 
 
 def list_organization_applications(admin: dict, status, page: int, page_size: int) -> dict:
