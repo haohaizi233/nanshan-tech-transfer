@@ -111,19 +111,7 @@
 	import { safeBackWithToast } from '../../utils/nav.mjs'
 	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
-	/** '80–120 万'→{min,max}；'50 万以内'→{max}；'面议'→{negotiable} */
-	function parseBudgetText(text) {
-		const t = (text || '').replace(/\s+/g, '').replace(/万/g, '')
-		if (!t) return {}
-		if (t.indexOf('面议') >= 0) return { budgetNegotiable: true }
-		let m = t.match(/^(\d+(?:\.\d+)?)[–\-~至](\d+(?:\.\d+)?)$/)
-		if (m) return { budgetMinWan: Number(m[1]), budgetMaxWan: Number(m[2]) }
-		m = t.match(/^(\d+(?:\.\d+)?)以内$/)
-		if (m) return { budgetMaxWan: Number(m[1]) }
-		m = t.match(/^(\d+(?:\.\d+)?)以上$/)
-		if (m) return { budgetMinWan: Number(m[1]) }
-		return {}
-	}
+	import { parseDemandBudget } from '../../utils/demand-budget.mjs'
 
 	/** 表单 → DemandUpsertRequest（orgName/categoryName 由后端 get-or-create） */
 	function buildPayload(data) {
@@ -137,7 +125,7 @@
 			contactPhone: data.phone || null,
 			contactEmail: data.email || null,
 			contactWechat: data.wechat || null,
-			...parseBudgetText(data.budget)
+			...parseDemandBudget(data.budget)
 		}
 		const attachments = (data.attachments || [])
 			.map((item, index) => ({ fileId: item.fileId || item.id, role: item.role || 'attachment', caption: item.caption || undefined, sortOrder: index }))
@@ -292,6 +280,9 @@
 				const emailCheck = validateEmail(data.email, { required: false })
 				if (!emailCheck.ok) {
 							return this.showPreviewError(emailCheck.message)
+				}
+				try { parseDemandBudget(data.budget) } catch (error) {
+					return this.showPreviewError(error.message)
 				}
                                 return true
                         },

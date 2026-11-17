@@ -585,3 +585,46 @@ class TestResolveCategoryName:
         fields = {"org_intro": "intro text"}
         with pytest.raises(BizError):
             _resolve_category_name(cur, fields)
+
+
+@pytest.mark.parametrize(
+    "minimum,maximum,negotiable", [(None, 100, True), (0, 100, False), (0, 0, True), (0.5, 1.25, True)]
+)
+def test_budget_create_read_contract(minimum, maximum, negotiable):
+    from contextlib import ExitStack
+
+    from modules.demand import service
+
+    cur = MagicMock()
+    cur.fetchone.return_value = {"id": 900001}
+    row = _sample_demand_row(id=900001)
+
+    def capture_insert(sql, params=None):
+        if "INSERT INTO demand" in sql:
+            row.update(budget_min_wan=params[9], budget_max_wan=params[10], budget_negotiable=params[11])
+
+    cur.execute.side_effect = capture_insert
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(service, "get_cursor", return_value=_mock_cursor_ctx(cur)))
+        for name in ("_resolve_category_name", "_validate_refs", "_sync_attachments", "audit_record"):
+            stack.enter_context(patch.object(service, name))
+        stack.enter_context(patch.object(service, "resolve_content_organization", return_value=None))
+        stack.enter_context(
+            patch.object(
+                service, "get_demand_detail", side_effect=lambda *args: service._row_to_detail(row, {}, 1, True, [])
+            )
+        )
+        detail = service.create_demand(
+            1,
+            "U001",
+            {
+                "title": "budget test",
+                "description": "test",
+                "budgetMinWan": minimum,
+                "budgetMaxWan": maximum,
+                "budgetNegotiable": negotiable,
+            },
+        )
+    assert detail["budgetMinWan"] == minimum
+    assert detail["budgetMaxWan"] == maximum
+    assert detail["budgetNegotiable"] is negotiable

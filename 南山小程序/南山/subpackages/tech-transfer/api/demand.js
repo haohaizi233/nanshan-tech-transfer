@@ -1,3 +1,4 @@
+import { formatDemandBudget } from '../utils/demand-budget.mjs'
 /**
  * 需求 API —— 列表、详情、写接口、我的需求
  * 后端契约：openapi.yaml paths /demands、/me/demands
@@ -56,11 +57,7 @@ export async function getMyDemands(params = {}) {
 
 /** 需求列表/详情 → 卡片展示模型 */
 export function toDemandCard(d) {
-  const budget = d.budgetNegotiable
-    ? '面议'
-    : d.budgetMinWan || d.budgetMaxWan
-      ? (d.budgetMinWan ? `${d.budgetMinWan}–${d.budgetMaxWan || ''}` : `${d.budgetMaxWan || ''}`) + ' 万'
-      : ''
+  const budget = formatDemandBudget(d)
   const meta = getPublicationStatus(d)
   return {
     id: d.id,

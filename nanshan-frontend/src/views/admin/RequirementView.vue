@@ -1,4 +1,5 @@
 <script setup>
+import { formatDemandBudget } from '../../utils/demand-budget.mjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
@@ -33,7 +34,7 @@ const statusClassMap = {
 
 const getStatusClass = status => statusClassMap[status] || 'draft'
 const fmtTime = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '-')
-const getBudget = item => item.budget || (item.budgetNegotiable ? '面议' : '-')
+const getBudget = formatDemandBudget
 const getSubmitter = item => item.submitterName || item.submitterUserNo || '-'
 
 const filters = reactive({ keyword: '', status: '', categoryCode: '' })
