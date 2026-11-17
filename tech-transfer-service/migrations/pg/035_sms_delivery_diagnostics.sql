@@ -16,8 +16,8 @@ CREATE INDEX IF NOT EXISTS idx_security_delivery_request_request_id
 -- Backfill correlation only, never infer success for old 'finished' records.
 UPDATE public.security_delivery_request SET request_id=LEFT(payload->>'request_id',64)
     WHERE request_id IS NULL;
-UPDATE public.security_delivery_request SET state='legacy_finished_unknown',
-    outcome='INTERNAL_ERROR',failure_stage='legacy',failure_reason='legacy_outcome_not_recorded'
+UPDATE public.security_delivery_request SET state='legacy_unknown',
+    outcome='INTERNAL_ERROR',failure_stage='legacy',failure_reason='legacy_outcome_not_recorded',outcome_unknown=true
     WHERE state='finished';
 ALTER TABLE public.auth_challenge
     ADD COLUMN IF NOT EXISTS delivery_status_code INT,
