@@ -48,6 +48,8 @@
 					</text>
 				</view>
 			</view>
+			<text v-if="item._counterpartName" class="sub">{{ item._counterpartPrefix }}{{ item._counterpartName }}</text>
+			<text v-if="item._intentLabel" class="sub">合作意向：{{ item._intentLabel }}</text>
 			<text v-if="item._sub" class="sub">{{ item._sub }}</text>
 			<text v-if="item._statusHint" :class="'review-hint review-hint-' + item._statusCls">{{ item._statusHint }}</text>
 			<text class="desc">{{ item._desc }}</text>
@@ -248,8 +250,9 @@
 						_statusHint: statusHint,
 						_title: sum.title || '意向对接',
 						_desc: sum.desc || sum.orgName || '对接意向',
-						_sub: ((isSent ? '对接对象：' : '来自：') + (item.counterpartDisplayName || '对方'))
-							+ (intentLabel ? ' · 意向：' + intentLabel : '')
+						_counterpartName: item.counterpartDisplayName || '对方用户',
+						_counterpartPrefix: isSent ? '对接对象：' : '来自：',
+						_intentLabel: intentLabel
 					}
 				})
 			},
@@ -577,6 +580,7 @@
 	}
 
 	.card-head {
+		flex-wrap: wrap;
 		display: flex;
 		flex-direction: row;
 		justify-content: space-between;
@@ -585,6 +589,9 @@
 	}
 
 	.card-title {
+		min-width: 0;
+		flex-basis: 100%;
+		overflow-wrap: anywhere;
 		flex: 1;
 		font-size: 32rpx;
 		font-weight: 600;
@@ -593,6 +600,9 @@
 	}
 
 	.badge-wrap {
+		max-width: 100%;
+		flex-wrap: wrap;
+		margin-top: 12rpx;
 		display: flex;
 		flex-direction: row;
 		align-items: center;
@@ -601,6 +611,7 @@
 	}
 
 	.badge {
+		white-space: nowrap;
 		font-size: 22rpx;
 		padding: 4rpx 12rpx;
 		border-radius: 8rpx;
@@ -617,6 +628,7 @@
 	}
 
 	.status-tag {
+		white-space: nowrap;
 		font-size: 22rpx;
 		padding: 4rpx 12rpx;
 		border-radius: 8rpx;
@@ -648,6 +660,8 @@
 	}
 
 	.sub {
+		overflow-wrap: anywhere;
+		word-break: break-all;
 		display: block;
 		font-size: 24rpx;
 		color: #2b73f8;

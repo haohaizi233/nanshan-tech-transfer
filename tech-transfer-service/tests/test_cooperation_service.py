@@ -306,3 +306,118 @@ class TestCreateIntent:
         mock_gc.return_value = _mock_cur_ctx(cur)
         with pytest.raises(BizError):
             create_intent(1, "U001", {"targetType": "achievement", "targetId": 999, "contactShareConsent": True})
+
+
+class TestSafeCounterpartIdentity:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None,
+            "",
+            "  ",
+            "13900000000",
+            "+86 139-0000-0000",
+            "联系13900000000",
+            "a@example.com",
+            "U001",
+            "user_12345",
+            "123456",
+            "账号：1234",
+        ],
+    )
+    def test_invalid(self, value):
+        from modules.cooperation.service import normalize_counterpart_display_name
+
+        assert normalize_counterpart_display_name(value) is None
+
+    @pytest.mark.parametrize("value", ["张先生", "深圳科技有限公司", "Alice", "研发团队2"])
+    def test_valid(self, value):
+        from modules.cooperation.service import normalize_counterpart_display_name
+
+        assert normalize_counterpart_display_name(" " + value + " ") == value
+
+    @pytest.mark.parametrize("viewer,other", [(1, 2), (2, 1)])
+    def test_direct(self, viewer, other):
+        from modules.cooperation.service import _counterpart_display
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"display_name": "13900000000"}
+        assert _counterpart_display(cur, {"initiator_user_id": 1, "target_owner_user_id": 2}, viewer) == "对方用户"
+        assert cur.execute.call_args.args[1][1] == other
+
+    def test_assisted(self):
+        from modules.cooperation.service import _counterpart_display
+
+        cur = MagicMock()
+        row = {"initiator_user_id": 1, "target_owner_user_id": None, "target_org_id": 3}
+        cur.fetchone.return_value = {"name": "深圳科技有限公司"}
+        assert _counterpart_display(cur, row, 1) == "深圳科技有限公司"
+        cur.fetchone.return_value = {"name": "13900000000"}
+        assert _counterpart_display(cur, row, 1) == "目标机构"
+
+    @pytest.mark.parametrize("status", ["pending", "accepted", "confirmed", "completed", "cancelled", "rejected"])
+    @pytest.mark.parametrize("role", ["initiator", "target_owner"])
+    def test_contact_matrix(self, status, role):
+        from modules.cooperation.service import _counterpart_contact
+
+        row = {
+            "status": status,
+            "target_type": "demand",
+            "target_id": 10,
+            "initiator_contact_snapshot": {"displayName": "13900000000", "phone": "13900000000"},
+        }
+        with patch(
+            "modules.cooperation.service._target_contact",
+            return_value={"contactName": "13900000000", "contactPhone": "13900000000"},
+        ):
+            result = _counterpart_contact(MagicMock(), row, role)
+        unlocked = status in ("accepted", "confirmed", "completed") or (role == "target_owner" and status == "pending")
+        assert result["masked"] is (not unlocked)
+        if not unlocked:
+            assert "13900000000" not in json.dumps(result)
+
+    @pytest.mark.parametrize("viewer", [1, 2])
+    @pytest.mark.parametrize("status", ["pending", "accepted", "confirmed", "completed", "cancelled", "rejected"])
+    def test_list_detail_consistency(self, viewer, status):
+        from modules.cooperation.service import get_intent_detail, list_my_intents
+
+        row = {
+            "id": 7,
+            "initiator_user_id": 1,
+            "target_owner_user_id": 2,
+            "target_type": "demand",
+            "target_id": 10,
+            "status": status,
+            "version": 1,
+        }
+        cur = MagicMock()
+
+        def fetch():
+            sql = cur.execute.call_args.args[0]
+            if "COUNT(*)" in sql:
+                return {"c": 1}
+            if "SELECT * FROM cooperation_intent" in sql:
+                return row
+            if "FROM user_profile p" in sql:
+                return {"display_name": "+86 139-0000-0000"}
+            return {"title": "项目", "status": "published"}
+
+        cur.fetchone.side_effect = fetch
+        cur.fetchall.return_value = [row]
+        with patch("modules.cooperation.service.get_cursor", return_value=_mock_cur_ctx(cur)):
+            detail = get_intent_detail(7, viewer)
+            listing = list_my_intents(viewer, {"userId": 999})
+        assert detail["counterpartDisplayName"] == listing["list"][0]["counterpartDisplayName"] == "对方用户"
+        query = next(c for c in cur.execute.call_args_list if "SELECT c.*" in c.args[0])
+        assert query.args[1][:2] == [viewer, viewer]
+
+    def test_verified_target_org_precedence(self):
+        from modules.cooperation.service import _counterpart_display
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"org_name": "深圳科技有限公司", "display_name": "张先生"}
+        row = {"initiator_user_id": 1, "target_owner_user_id": 2, "target_org_id": 3}
+        assert _counterpart_display(cur, row, 1) == "深圳科技有限公司"
+        assert cur.execute.call_count == 1
+        assert cur.execute.call_args.args[1] == (3, 2)
+        assert "m.status='active'" in cur.execute.call_args.args[0]

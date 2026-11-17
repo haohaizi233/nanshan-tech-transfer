@@ -281,6 +281,7 @@ class TestCoopHelpers:
 
         cur = _cur()
         row = _fat(initiator_user_id=1, target_owner_user_id=2)
+        cur.fetchone.return_value = {"display_name": "张三"}
         name = _counterpart_display(cur, row, 1)
         assert name == "张三"
 
@@ -299,14 +300,14 @@ class TestCoopHelpers:
         cur = _cur()
         row = _fat(initiator_user_id=1, target_owner_user_id=None, target_org_id=5)
         cur.fetchone.return_value = {"name": None}
-        assert _counterpart_display(cur, row, 1) is None
+        assert _counterpart_display(cur, row, 1) == "目标机构"
 
     def test_counterpart_display_assisted_no_org_id(self):
         from modules.cooperation.service import _counterpart_display
 
         cur = _cur()
         row = _fat(initiator_user_id=1, target_owner_user_id=None, target_org_id=None)
-        assert _counterpart_display(cur, row, 1) is None
+        assert _counterpart_display(cur, row, 1) == "目标机构"
 
     def test_target_contact_found(self):
         from modules.cooperation.service import _target_contact
@@ -1104,6 +1105,7 @@ class TestMembershipLists:
     @patch("modules.membership.service.get_cursor")
     def test_list_org_members(self, mock_gc):
         cur = _cur()
+        cur.fetchall.return_value = [{"id": 1, "member_name": None, "profile_name": None}]
         _gc(mock_gc, cur)
         from modules.membership.service import list_org_members
 

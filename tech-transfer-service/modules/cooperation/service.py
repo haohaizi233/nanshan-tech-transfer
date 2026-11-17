@@ -22,6 +22,8 @@ Architecture source: 04-backend-domain-design.md §4.8, 05-data-model-design.md 
 """
 
 import json
+import re
+import unicodedata
 
 from core.errors import (
     bad_request,
@@ -263,20 +265,54 @@ def _fmt(dt):
     return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else None
 
 
+def normalize_counterpart_display_name(value: str | None) -> str | None:
+    """Public cooperation identity, never a contact field or internal account ID."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    probe = unicodedata.normalize("NFKC", value)
+    compact = re.sub(r"[\s()+.\-]", "", probe)
+    if not value or "@" in probe or re.search(r"\d{7,}", compact):
+        return None
+    if re.fullmatch(r"\d+", compact) or re.match(
+        r"^(?:u|user|uid|id|account|账号|用户|工号)[\s_:#：-]*\d+", probe, re.I
+    ):
+        return None
+    return value
+
+
 def _counterpart_display(cur, row, user_id: int):
-    """对接对方展示名：direct=对方账号 display_name；assisted=目标机构名（无平台账号）。"""
-    # assisted 时 target_owner_user_id 为 None
+    """Only linked public institutions and safe profile nicknames are identities.
+
+    Never read application real_name or self-declared company_text. A direct
+    target's institution requires active membership; it cannot identify the
+    initiator merely because they contacted that institution.
+    """
     counterpart_id = row["target_owner_user_id"] if row["initiator_user_id"] == user_id else row["initiator_user_id"]
     if counterpart_id is None:
         if row.get("target_org_id"):
-            cur.execute("SELECT name FROM institution WHERE id=%s", (row["target_org_id"],))
+            cur.execute("SELECT name FROM institution WHERE id=%s AND status='active'", (row["target_org_id"],))
             org = cur.fetchone()
-            if org and org.get("name"):
-                return org["name"]
-        return None
-    cur.execute("SELECT display_name FROM user_profile WHERE user_id=%s", (counterpart_id,))
-    p = cur.fetchone()
-    return (p or {}).get("display_name")
+            name = normalize_counterpart_display_name((org or {}).get("name"))
+            if name:
+                return name
+        return "目标机构"
+    target_org_id = row.get("target_org_id") if row["initiator_user_id"] == user_id else None
+    cur.execute(
+        """SELECT p.display_name, (
+            SELECT i.name FROM institution i
+            JOIN organization_membership m ON m.org_id=i.id
+            WHERE m.user_id=p.user_id AND m.status='active'
+              AND i.status='active' AND i.id=%s LIMIT 1
+        ) AS org_name FROM user_profile p WHERE p.user_id=%s""",
+        (target_org_id, counterpart_id),
+    )
+    p = cur.fetchone() or {}
+    return (
+        normalize_counterpart_display_name(p.get("org_name"))
+        or normalize_counterpart_display_name(p.get("display_name"))
+        or "对方用户"
+    )
 
 
 def _decode_contact_snapshot(value):

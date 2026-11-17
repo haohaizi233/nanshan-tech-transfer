@@ -184,6 +184,10 @@
 				<text class="section-title">{{ contactSectionTitle }}</text>
 			</view>
 			<view class="contact-card">
+				<view v-if="intention && intention.counterpartDisplayName" class="contact-row">
+					<text class="contact-label">对接对象</text>
+					<text class="contact-value">{{ intention.counterpartDisplayName }}</text>
+				</view>
 				<view class="contact-row">
 					<text class="contact-label">联系人</text>
 					<text class="contact-value">{{ displayContact.displayName }}{{ displayContact.orgTitle ? '（' + displayContact.orgTitle + '）' : '' }}</text>
