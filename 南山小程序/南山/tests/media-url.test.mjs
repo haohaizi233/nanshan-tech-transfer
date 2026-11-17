@@ -26,7 +26,7 @@ test('local host mode still follows the H5 tunnel origin rule', () => {
       { appEnv: 'local', hostMode: 'local', apiBase: 'http://127.0.0.1:8787' },
       { protocol: 'http:', hostname: '192.168.1.8', port: '8077' },
     ),
-    'http://192.168.1.8:8076',
+    'http://192.168.1.8:8025',
   )
 })
 

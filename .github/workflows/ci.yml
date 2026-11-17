@@ -37,6 +37,7 @@ jobs:
       DB_PASSWORD: test
       DB_NAME: tech_transfer_test
       JWT_SECRET: ci-test-secret-key-for-github-actions-32chars!
+      MEMBER_TEST_DSN: postgresql://mac:test@127.0.0.1:5432/tech_transfer_test
       PYTHONPATH: tech-transfer-service
 
     steps:
@@ -152,3 +153,31 @@ jobs:
         working-directory: tech-transfer-service
         run: |
           ruff format --check --diff .
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            南山小程序/南山/package-lock.json
+            nanshan-frontend/package-lock.json
+      - name: Install miniapp dependencies
+        working-directory: 南山小程序/南山
+        run: npm ci
+      - name: Run miniapp regression tests
+        working-directory: 南山小程序/南山
+        run: node --test tests/*.test.mjs
+      - name: Build H5 and WeChat miniapp
+        working-directory: 南山小程序/南山
+        run: |
+          npm run build:h5
+          npm run build:mp-weixin
+      - name: Build admin frontend
+        working-directory: nanshan-frontend
+        run: |
+          npm ci
+          npm run build

@@ -37,7 +37,8 @@ test('my-list keeps demand reject hints and does not mark matched favorites offl
 })
 
 test('dock-detail keeps the favorite star available after confirmation', () => {
-  assert.match(dock, /:class="favorited \? 'star-btn star-on' : 'star-btn'"/)
+  assert.match(dock, /class="floating-star-btn"[\s\S]*?@click="onToggleFavorite"/)
+  assert.match(dock, /favorited \? '★' : '☆'/)
   assert.match(dock, /async onToggleFavorite\(\)/)
   assert.doesNotMatch(dock, /onToggleFavorite[\s\S]{0,200}status === 'published'/)
 })

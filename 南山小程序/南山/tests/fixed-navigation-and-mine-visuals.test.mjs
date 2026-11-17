@@ -78,7 +78,7 @@ test('lets a profile keep free-form company text while choosing an existing inst
 })
 
 test('uses the certification backdrop and compact actions in one unverified card row', () => {
-  assert.match(mine, /class="org-card-bg" src="\/static\/images\/mine\/org-certification-bg\.png"/)
+  assert.match(mine, /class="org-card-bg" src="\/static\/images\/mine\/org-certification-bg\.jpg"/)
   assert.doesNotMatch(mine, /<image v-if="certification\.status !== 'unverified'" class="org-card-bg"/)
   assert.match(mine, /<button class="org-action-btn" size="mini" @click="goOrgJoin">加入机构<\/button>/)
   assert.match(mine, /<button class="org-action-btn ghost" size="mini" @click="goOrgApply">机构入驻<\/button>/)

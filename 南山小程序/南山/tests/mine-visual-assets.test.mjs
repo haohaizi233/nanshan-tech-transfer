@@ -23,8 +23,8 @@ test('uses the supplied visual resources on the mine page', () => {
     assert.match(mine, new RegExp(`/static/icons/mine/${icon}`))
     assert.equal(existsSync(new URL(`static/icons/mine/${icon}`, root)), true)
   }
-  assert.match(mine, /\/static\/images\/mine\/org-certification-bg\.png/)
-  assert.equal(existsSync(new URL('static/images/mine/org-certification-bg.png', root)), true)
+  assert.match(mine, /\/static\/images\/mine\/org-certification-bg\.jpg/)
+  assert.equal(existsSync(new URL('static/images/mine/org-certification-bg.jpg', root)), true)
 })
 
 test('replaces the home demand and result text glyphs with the supplied icons', () => {
