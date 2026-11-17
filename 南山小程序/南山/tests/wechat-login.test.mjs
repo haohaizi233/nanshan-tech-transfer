@@ -6,6 +6,7 @@ function clientRuntime(overrides = {}) {
   const storage = new Map()
   const requests = []
   const bindings = {
+    syncNotificationSession: () => {},
     HostBridge: {
       getStorage: key => storage.get(key),
       setStorage: (key, value) => storage.set(key, value),

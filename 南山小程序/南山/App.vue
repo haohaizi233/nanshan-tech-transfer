@@ -2,7 +2,7 @@
 	import HostBridge from './host/host-bridge.js'
 	import LocalAdapter from './host/local-adapter.js'
 	import { assertEnvironment } from './config/env-check.js'
-	import { startNotificationPolling, stopNotificationPolling } from './utils/notification-poller.js'
+	import { startNotificationPolling, stopNotificationPolling, installNotificationVisibility, disposeNotificationVisibility } from './utils/notification-poller.js'
 
 	export default {
 		onLaunch: function() {
@@ -21,6 +21,7 @@
 			try {
 				HostBridge.registerAdapter(LocalAdapter)
 				console.log('[App] LocalAdapter registered, HostBridge ready')
+                installNotificationVisibility()
 			} catch (e) {
 				console.error('[App] HostBridge registration failed:', e.message)
 				uni.showModal({
@@ -34,6 +35,7 @@
 			console.log('App Show')
 			startNotificationPolling()
 		},
+		onUnload() { disposeNotificationVisibility() },
 		onHide: function() {
 			console.log('App Hide')
 			stopNotificationPolling()

@@ -10,7 +10,7 @@
 						:src="active === item.key ? item.activeIcon : item.icon"
 						mode="aspectFit"
 					></image>
-					<text v-if="item.key === 'ai' && notificationBadge" class="tabbar-badge">{{ notificationBadgeText }}</text>
+					<text v-if="item.key === 'mine' && notificationBadge > 0" class="tabbar-badge">{{ notificationBadgeText }}</text>
 				</view>
 				<text :class="active === item.key ? 'tabbar-text tabbar-text-active' : 'tabbar-text'">{{ item.label }}</text>
 			</view>

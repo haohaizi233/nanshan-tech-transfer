@@ -32,6 +32,7 @@
 		{
 			"root": "subpackages/tech-transfer",
 			"pages": [
+                {"path":"pages/notifications/notifications","style":{"navigationBarTitleText":"消息通知"}},
 				{
 					"path": "pages/home/home",
 					"style": {

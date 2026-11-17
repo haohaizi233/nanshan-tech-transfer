@@ -1,3 +1,4 @@
+import { syncNotificationSession } from '../../../utils/notification-poller.js'
 /**
  * API 客户端 —— 分包内唯一请求出口
  *
@@ -55,6 +56,7 @@ function saveSession(data, mode) {
   if (data.expiresIn) setStored(TOKEN_EXPIRES_KEY, Date.now() + data.expiresIn * 1000)
   if (data.user) setStored(CURRENT_USER_KEY, data.user)
   if (mode) setStored(AUTH_MODE_KEY, mode)
+  if (mode) syncNotificationSession()
 }
 
 function clearSession() {
@@ -64,6 +66,7 @@ function clearSession() {
   setStored(TOKEN_EXPIRES_KEY, '')
   setStored(CURRENT_USER_KEY, '')
   setStored(AUTH_MODE_KEY, '')
+  syncNotificationSession()
 }
 
 function isTokenValid() {

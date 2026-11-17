@@ -238,6 +238,7 @@
 				</view>
 			</view>
 
+			<button @click="openNotifications">消息通知</button>
 			<view class="module-grid">
 				<view class="module-box" @click="goMyList('demand')">
 					<image class="module-icon" src="/static/icons/mine/demand.png" mode="aspectFit"></image>
@@ -629,6 +630,7 @@
 			return this.refresh()
 		},
 		methods: {
+            openNotifications() { uni.navigateTo({url:'/subpackages/tech-transfer/pages/notifications/notifications'}) },
 			loadPrivacySetting() {
 				// #ifdef MP-WEIXIN
 				if (typeof wx !== 'undefined' && typeof wx.getPrivacySetting === 'function') {
