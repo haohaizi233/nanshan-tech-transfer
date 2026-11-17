@@ -78,7 +78,14 @@ jobs:
       - name: Run tests with coverage
         working-directory: tech-transfer-service
         run: |
-          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 -v
+          pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=75 -v --tb=long 2>&1 | tee /tmp/pytest_output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::group::Failed tests detail"
+            grep -E "FAILED|ERROR|assert" /tmp/pytest_output.txt | head -50
+            echo "::endgroup::"
+          fi
+          exit $EXIT_CODE
 
       - name: Run nanshan-ai-agent tests
         working-directory: nanshan-ai-agent
