@@ -14,7 +14,10 @@ import hashlib
 import hmac
 import logging
 import secrets
+import time
 import uuid
+from contextlib import contextmanager
+from datetime import datetime
 
 from config import settings
 from core import auth_cache
@@ -35,6 +38,23 @@ logger = logging.getLogger("nanshan.security.service")
 RECOVERY_GRANT_EXPIRES_SECONDS = 300
 CHALLENGE_EXPIRES_SECONDS = 300
 MAX_CHALLENGE_ATTEMPTS = 5
+
+
+def _expired(value) -> bool:
+    return (value.timestamp() if isinstance(value, datetime) else float(value)) <= time.time()
+
+
+@contextmanager
+def _challenge_transaction():
+    """Persist failed attempt/expiry transitions before reporting a business error."""
+    failure = None
+    with get_cursor(commit=True) as cur:
+        try:
+            yield cur
+        except BizError as exc:
+            failure = exc
+    if failure is not None:
+        raise failure
 
 
 def _fingerprint(contact: str) -> str:
@@ -65,7 +85,7 @@ def _mask_contact(value: str, contact_type: str) -> str:
     return "****"
 
 
-def start_password_recovery(account: str, channel: str) -> dict:
+def start_password_recovery(account: str, channel: str, *, challenge_id: str | None = None, context=None) -> dict:
     """发起找回密码流程。
 
     防账号枚举设计：
@@ -79,6 +99,13 @@ def start_password_recovery(account: str, channel: str) -> dict:
     channel = channel.lower().strip()
     if channel not in {"sms", "email_otp", "email_link"}:
         raise bad_request("不支持的找回渠道，仅支持 sms / email_otp / email_link")
+
+    if channel == "sms":
+        from modules.security.sms_gateway import SendContext, start_sms_recovery
+
+        return start_sms_recovery(
+            account_norm, challenge_id or str(uuid.uuid4()), context or SendContext("internal", None, str(uuid.uuid4()))
+        )
 
     contact_type = "phone" if channel == "sms" else "email"
 
@@ -136,7 +163,7 @@ def start_password_recovery(account: str, channel: str) -> dict:
         }
 
     # 4. 生成挑战凭证
-    challenge_id = str(uuid.uuid4())
+    challenge_id = challenge_id or str(uuid.uuid4())
     masked = _mask_contact(target_contact, contact_type)
     fp = _fingerprint(target_contact)
 
@@ -216,7 +243,7 @@ def verify_recovery_challenge(challenge_id: str, code: str) -> dict:
     if not c_id or not raw_code:
         raise bad_request("缺少 challengeId 或验证凭据")
 
-    with get_cursor(commit=True) as cur:
+    with _challenge_transaction() as cur:
         cur.execute(
             """
             SELECT id, user_id, purpose, channel, destination_fingerprint, code_hash,
@@ -236,6 +263,10 @@ def verify_recovery_challenge(challenge_id: str, code: str) -> dict:
         if row["status"] != "pending":
             raise bad_request("验证码已使用或已失效，请重新获取")
 
+        if _expired(row["expires_at"]):
+            cur.execute("UPDATE auth_challenge SET status = 'expired' WHERE id = %s", (c_id,))
+            raise bad_request("验证码已过期，请重新获取")
+
         if row["attempt_count"] >= row["max_attempts"]:
             cur.execute("UPDATE auth_challenge SET status = 'failed' WHERE id = %s", (c_id,))
             raise bad_request("验证错误次数超限，请重新获取验证码")
@@ -248,6 +279,14 @@ def verify_recovery_challenge(challenge_id: str, code: str) -> dict:
             SELECT normalized_value FROM account_contact
             WHERE user_id = %s AND contact_type = %s AND status = 'active'
               AND verified_at IS NOT NULL
+              AND (contact_type <> 'phone' OR verification_method IN ('sms','wechat','manual'))
+              AND EXISTS (SELECT 1 FROM app_user au JOIN user_credential uc ON uc.user_id=au.id
+                  WHERE au.id=account_contact.user_id AND au.status='active' AND au.deleted_at IS NULL
+                  AND uc.status='active' AND uc.password_configured=true AND uc.password_hash IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM user_role ur WHERE ur.user_id=account_contact.user_id
+                  AND ur.role_code IN ('admin','platform_admin','org_admin'))
+              AND NOT EXISTS (SELECT 1 FROM organization_membership om
+                  WHERE om.user_id=account_contact.user_id AND om.role='admin' AND om.status='active')
             LIMIT 1
             """,
             (user_id, contact_type),
@@ -258,11 +297,15 @@ def verify_recovery_challenge(challenge_id: str, code: str) -> dict:
             raise bad_request("安全联系方式已失效")
 
         destination = contact_row["normalized_value"]
+        if not hmac.compare_digest(_fingerprint(destination), row["destination_fingerprint"]):
+            raise bad_request("安全联系方式已变更")
         expected_hash = _hmac_code(c_id, "password_recovery", destination, raw_code)
 
         if not hmac.compare_digest(expected_hash, row["code_hash"]):
             cur.execute(
-                "UPDATE auth_challenge SET attempt_count = attempt_count + 1 WHERE id = %s",
+                """UPDATE auth_challenge SET attempt_count = attempt_count + 1,
+                   status = CASE WHEN attempt_count + 1 >= max_attempts THEN 'locked' ELSE status END
+                   WHERE id = %s""",
                 (c_id,),
             )
             remaining = row["max_attempts"] - (row["attempt_count"] + 1)
@@ -323,7 +366,7 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict:
             (grant_hash,),
         )
         grant = cur.fetchone()
-        if not grant or grant["status"] != "active":
+        if not grant or grant["status"] != "active" or _expired(grant["expires_at"]):
             raise bad_request("重置授权凭证无效或已被使用")
 
         user_id = grant["user_id"]
@@ -334,7 +377,13 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict:
             SELECT au.status AS user_status, uc.status AS cred_status, uc.password_hash
             FROM app_user au
             JOIN user_credential uc ON uc.user_id = au.id
-            WHERE au.id = %s AND au.deleted_at IS NULL FOR UPDATE
+            WHERE au.id = %s AND au.deleted_at IS NULL
+              AND uc.password_configured=true AND uc.password_hash IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM user_role ur WHERE ur.user_id=au.id
+                  AND ur.role_code IN ('admin','platform_admin','org_admin'))
+              AND NOT EXISTS (SELECT 1 FROM organization_membership om
+                  WHERE om.user_id=au.id AND om.role='admin' AND om.status='active')
+            FOR UPDATE
             """,
             (user_id,),
         )
@@ -362,6 +411,11 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict:
             """,
             (grant["id"],),
         )
+        cur.execute(
+            "UPDATE auth_challenge SET status = 'consumed', consumed_at = NOW() "
+            "WHERE id = (SELECT challenge_id FROM recovery_grant WHERE id = %s)",
+            (grant["id"],),
+        )
 
         # 5. 递增用户全局 session_version，使已有全部 Access Token 即刻失效
         cur.execute(
@@ -384,7 +438,6 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict:
         )
 
         # 7. 立即清理缓存
-        auth_cache.invalidate_user(user_id)
 
         # 8. 审计记录
         audit_record(
@@ -395,6 +448,7 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict:
             cur=cur,
         )
 
+    auth_cache.invalidate_user(user_id)
     return {"ok": True, "message": "密码重置成功，请重新登录"}
 
 
@@ -474,11 +528,16 @@ def get_security_summary(user_id: int) -> dict:
     }
 
 
-def start_contact_binding_challenge(user_id: int, contact_type: str, contact_value: str) -> dict:
+def start_contact_binding_challenge(user_id: int, contact_type: str, contact_value: str, *, context=None) -> dict:
     """发起安全手机号/邮箱绑定挑战（发送验证码）。"""
     contact_type = contact_type.lower().strip()
     if contact_type not in {"phone", "email"}:
         raise bad_request("联系方式类型仅支持 phone 或 email")
+
+    if contact_type == "phone":
+        from modules.security.sms_gateway import SendContext, start_sms_binding
+
+        return start_sms_binding(user_id, contact_value, context or SendContext("internal", None, str(uuid.uuid4())))
 
     if contact_type == "phone":
         valid_val = validate_phone(contact_value, required=True)
@@ -544,11 +603,11 @@ def verify_and_bind_contact(user_id: int, challenge_id: str, code: str, contact_
     if not c_id or not raw_code or not val:
         raise bad_request("参数不完整")
 
-    with get_cursor(commit=True) as cur:
+    with _challenge_transaction() as cur:
         cur.execute(
             """
             SELECT id, user_id, purpose, channel, destination_fingerprint, code_hash,
-                   status, attempt_count, max_attempts
+                   status, attempt_count, max_attempts, expires_at
             FROM auth_challenge
             WHERE id = %s AND user_id = %s FOR UPDATE
             """,
@@ -559,6 +618,14 @@ def verify_and_bind_contact(user_id: int, challenge_id: str, code: str, contact_
             raise bad_request("挑战不存在或已失效")
 
         contact_type = "phone" if row["channel"] == "sms" else "email"
+        if row["purpose"] != f"bind_{contact_type}":
+            raise bad_request("挑战类型不匹配")
+        if _expired(row["expires_at"]):
+            cur.execute("UPDATE auth_challenge SET status = 'expired' WHERE id = %s", (c_id,))
+            raise bad_request("验证码已过期")
+        if row["attempt_count"] >= row["max_attempts"]:
+            cur.execute("UPDATE auth_challenge SET status = 'locked' WHERE id = %s", (c_id,))
+            raise bad_request("验证错误次数超限")
         normalized_val = (
             validate_phone(val, required=True)
             if contact_type == "phone"
@@ -566,12 +633,19 @@ def verify_and_bind_contact(user_id: int, challenge_id: str, code: str, contact_
         )
 
         expected_hash = _hmac_code(c_id, row["purpose"], normalized_val, raw_code)
+        if not hmac.compare_digest(_fingerprint(normalized_val), row["destination_fingerprint"]):
+            raise bad_request("联系方式与挑战不匹配")
         if not hmac.compare_digest(expected_hash, row["code_hash"]):
-            cur.execute("UPDATE auth_challenge SET attempt_count = attempt_count + 1 WHERE id = %s", (c_id,))
+            cur.execute(
+                """UPDATE auth_challenge SET attempt_count = attempt_count + 1,
+                status = CASE WHEN attempt_count + 1 >= max_attempts THEN 'locked' ELSE status END
+                WHERE id = %s""",
+                (c_id,),
+            )
             raise bad_request("验证码不正确")
 
         # 挑战置为 verified
-        cur.execute("UPDATE auth_challenge SET status = 'verified' WHERE id = %s", (c_id,))
+        cur.execute("UPDATE auth_challenge SET status = 'consumed', consumed_at = NOW() WHERE id = %s", (c_id,))
 
         # 绑定联系方式：先撤销旧同类型联系方式
         cur.execute(
@@ -585,10 +659,10 @@ def verify_and_bind_contact(user_id: int, challenge_id: str, code: str, contact_
 
         cur.execute(
             """
-            INSERT INTO account_contact (user_id, contact_type, normalized_value, verified_at, status)
-            VALUES (%s, %s, %s, NOW(), 'active')
+            INSERT INTO account_contact (user_id, contact_type, normalized_value, verified_at, status, verification_method)
+            VALUES (%s, %s, %s, NOW(), 'active', %s)
             """,
-            (user_id, contact_type, normalized_val),
+            (user_id, contact_type, normalized_val, "sms" if contact_type == "phone" else "email"),
         )
 
         # 同步更新 user_credential.phone（若为手机号）以支持小程序直接手机号登录

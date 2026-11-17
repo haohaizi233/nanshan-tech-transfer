@@ -97,6 +97,32 @@ class Settings(BaseSettings):
     TENCENT_SMS_SIGN_NAME: str = "南山科转通"
     TENCENT_SMS_TEMPLATE_ID: str = ""
 
+    # SMS risk policy
+    SMS_RISK_ENGINE_ENABLED: bool = True
+    SMS_RISK_HMAC_SECRET: str = ""
+    SMS_CODE_TTL_SECONDS: int = 300
+    SMS_CODE_MAX_ATTEMPTS: int = 5
+    SMS_PHONE_COOLDOWN_SECONDS: int = 60
+    SMS_PHONE_LIMIT_10M: int = 3
+    SMS_PHONE_LIMIT_1H: int = 5
+    SMS_PHONE_LIMIT_DAY: int = 10
+    SMS_IP_LIMIT_1M: int = 10
+    SMS_IP_LIMIT_1H: int = 60
+    SMS_IP_LIMIT_DAY: int = 200
+    SMS_IP_DISTINCT_PHONE_LIMIT_1H: int = 10
+    SMS_DEVICE_LIMIT_1H: int = 10
+    SMS_DEVICE_LIMIT_DAY: int = 20
+    SMS_REQUIRE_VERIFIED_CONTACT: bool = True
+    SMS_SERVICE_CLIENTS: dict[str, str] = {}
+    SMS_REQUEST_MAX_BYTES: int = 4096
+    SMS_SERVICE_TIMESTAMP_WINDOW_SECONDS: int = 300
+    SMS_LIVE_TEST_ENABLED: bool = False
+    SMS_BUSINESS_TIMEZONE: str = "Asia/Shanghai"
+    SMS_ACCOUNT_LIMIT_1H: int = 5
+    SMS_ACCOUNT_LIMIT_DAY: int = 10
+    SMS_DEVICE_DISTINCT_PHONE_LIMIT_10M: int = 5
+    SENDCLOUD_SMS_MAX_ATTEMPTS: int = 3
+
     # ── 邮件服务（EmailProvider：mock / tencent / smtp）─────
     EMAIL_ENABLED: bool = False
     EMAIL_PROVIDER: str = "mock"
@@ -280,6 +306,40 @@ class Settings(BaseSettings):
             raise ValueError(f"LOG_LEVEL 必须是 DEBUG/INFO/WARNING/ERROR/CRITICAL 之一，当前: {v}")
         return level
 
+    @field_validator(
+        "SMS_CODE_TTL_SECONDS",
+        "SMS_CODE_MAX_ATTEMPTS",
+        "SMS_PHONE_COOLDOWN_SECONDS",
+        "SMS_PHONE_LIMIT_10M",
+        "SMS_PHONE_LIMIT_1H",
+        "SMS_PHONE_LIMIT_DAY",
+        "SMS_IP_LIMIT_1M",
+        "SMS_IP_LIMIT_1H",
+        "SMS_IP_LIMIT_DAY",
+        "SMS_IP_DISTINCT_PHONE_LIMIT_1H",
+        "SMS_DEVICE_LIMIT_1H",
+        "SMS_DEVICE_LIMIT_DAY",
+        "SMS_ACCOUNT_LIMIT_1H",
+        "SMS_ACCOUNT_LIMIT_DAY",
+        "SMS_DEVICE_DISTINCT_PHONE_LIMIT_10M",
+        "SMS_REQUEST_MAX_BYTES",
+        "SMS_SERVICE_TIMESTAMP_WINDOW_SECONDS",
+        "SENDCLOUD_SMS_MAX_ATTEMPTS",
+    )
+    @classmethod
+    def _validate_sms_positive(cls, value):
+        if value < 1:
+            raise ValueError("SMS limits must be positive")
+        return value
+
+    @field_validator("SMS_BUSINESS_TIMEZONE")
+    @classmethod
+    def _validate_sms_timezone(cls, value):
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(value)
+        return value
+
     @field_validator("MAX_REQUEST_SECONDS")
     @classmethod
     def _validate_max_request_seconds(cls, v: float) -> float:
@@ -416,6 +476,8 @@ def assert_environment():
         sys.stderr.write(f"[WARN] {env} 环境未配置 CORS_ORIGINS，跨域前端将被浏览器拦截（同源部署可忽略）\n")
     if settings.SMS_ENABLED and settings.SMS_PROVIDER == "mock":
         violations.append("生产环境启用了 SMS_ENABLED 但 SMS_PROVIDER 仍为 mock")
+    if settings.SMS_ENABLED and not settings.REDIS_ENABLED:
+        violations.append("生产短信安全网关必须显式配置 REDIS_ENABLED=true")
     if settings.EMAIL_ENABLED and settings.EMAIL_PROVIDER == "mock":
         violations.append("生产环境启用了 EMAIL_ENABLED 但 EMAIL_PROVIDER 仍为 mock")
     if violations:

@@ -17,25 +17,40 @@ import hashlib
 import hmac
 import json
 import logging
+import random
+import re
 import smtplib
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+from dataclasses import dataclass
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
 
 from config import settings
+from core.contact_validation import is_valid_phone
 from core.errors import BizError
 
 logger = logging.getLogger("nanshan.security.provider")
 
 
 class ProviderError(BizError):
-    def __init__(self, message: str, code: str = "TT_COMMON_50301", status: int = 503):
+    def __init__(
+        self, message: str, code: str = "TT_COMMON_50301", status: int = 503, *, outcome_unknown: bool = False
+    ):
         super().__init__(code, message, status)
+        self.outcome_unknown = outcome_unknown
+
+
+@dataclass(frozen=True)
+class SmsReceipt:
+    accepted: bool
+    provider_ids: tuple[str, ...]
+    request_id: str
 
 
 # ── SMS Provider ─────────────────────────────────────────────
@@ -43,9 +58,17 @@ class ProviderError(BizError):
 
 class SmsProvider(abc.ABC):
     @abc.abstractmethod
-    def send_code(self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        """发送短信验证码。返回 True 表示投递成功，失败抛出 ProviderError。"""
+    def send_code(
+        self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, request_id: str | None = None
+    ) -> bool:
+        """发送短信验证码。返回 True 表示服务商接受请求（不代表最终送达），失败抛出 ProviderError。"""
         pass
+
+    def send_task(
+        self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, send_request_id: str
+    ) -> SmsReceipt:
+        accepted = self.send_code(phone, code, purpose, expires_in_seconds)
+        return SmsReceipt(bool(accepted), (), send_request_id)
 
 
 class MockSmsProvider(SmsProvider):
@@ -65,7 +88,9 @@ class MockSmsProvider(SmsProvider):
                 return msg["code"]
         return None
 
-    def send_code(self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
+    def send_code(
+        self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, request_id: str | None = None
+    ) -> bool:
         if self.should_fail:
             raise ProviderError("模拟短信网关发送失败")
         self.sent_messages.append(
@@ -77,7 +102,7 @@ class MockSmsProvider(SmsProvider):
                 "sent_at": time.time(),
             }
         )
-        logger.info("[MockSmsProvider] 发送验证码至 %s: %s (purpose=%s)", phone, code, purpose)
+        logger.info("[MockSmsProvider] 验证码已记录 (purpose=%s)", purpose)
         return True
 
 
@@ -102,7 +127,9 @@ class TencentSmsProvider(SmsProvider):
         if not (self.secret_id and self.secret_key and self.sdk_app_id and self.sign_name):
             raise ProviderError("腾讯云短信配置不完整，缺少密钥或签名配置")
 
-    def send_code(self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
+    def send_code(
+        self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, request_id: str | None = None
+    ) -> bool:
         # 手机号规范化为 E.164 格式（大陆加 +86）
         formatted_phone = phone if phone.startswith("+") else f"+86{phone}"
         minutes = max(1, expires_in_seconds // 60)
@@ -172,10 +199,17 @@ class TencentSmsProvider(SmsProvider):
             return json.loads(resp.read().decode("utf-8"))
 
 
+def sign_sendcloud_params(params: dict[str, Any], sms_key: str) -> str:
+    """Sign raw values before form encoding; never include credentials in params."""
+    raw = "&".join(f"{key}={params[key]}" for key in sorted(params) if key not in {"signature", "smsKey"})
+    return hashlib.sha256(f"{sms_key}&{raw}&{sms_key}".encode()).hexdigest()
+
+
 class SendCloudSmsProvider(SmsProvider):
     """SendCloud 短信发送适配器（SHA256 签名，stdlib 实现，零第三方库依赖）。"""
 
     API_URL = "https://api.sendcloud.net/smsapi/send"
+    STATUS_URL = "https://api.sendcloud.net/smsapi/status/query"
 
     def __init__(
         self,
@@ -188,47 +222,163 @@ class SendCloudSmsProvider(SmsProvider):
         self.sms_key = str(sms_key or "").strip()
         self.template_id = str(template_id or "").strip()
         self.timeout = timeout
+        self.max_attempts = min(3, max(1, int(getattr(settings, "SENDCLOUD_SMS_MAX_ATTEMPTS", 3))))
         if not (self.sms_user and self.sms_key):
             raise ProviderError("SendCloud 短信配置不完整，缺少 SMS_USER 或 SMS_KEY")
         if not self.template_id:
             raise ProviderError("SendCloud 短信配置不完整，缺少 SENDCLOUD_SMS_TEMPLATE_ID")
 
-    def send_code(self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        clean_phone = phone.replace("+86", "").replace("-", "").strip()
-        minutes = max(1, expires_in_seconds // 60)
-        vars_payload = json.dumps({"%code%": code, "%time%": str(minutes), "code": code})
+    def send_code(
+        self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, request_id: str | None = None
+    ) -> bool:
+        self.send_task(
+            phone,
+            code,
+            purpose,
+            expires_in_seconds,
+            send_request_id=str(uuid.uuid4()) if request_id is None else request_id,
+        )
+        return True
+
+    def send_task(
+        self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, send_request_id: str
+    ) -> SmsReceipt:
+        if purpose not in {"password_recovery", "reset_password", "bind_phone"}:
+            raise ProviderError("不支持的短信用途")
+        if (
+            not isinstance(send_request_id, str)
+            or not 1 <= len(send_request_id) <= 128
+            or any(ord(c) < 32 or ord(c) == 127 for c in send_request_id)
+        ):
+            raise ProviderError("短信请求 ID 格式错误")
+        if not isinstance(phone, str) or any(ord(c) < 32 or ord(c) == 127 for c in phone):
+            raise ProviderError("手机号格式错误")
+        clean_phone = phone.strip()
+        if clean_phone.startswith("+86"):
+            clean_phone = clean_phone[3:]
+        if (
+            not is_valid_phone(clean_phone)
+            or not clean_phone.isascii()
+            or not clean_phone.startswith(tuple("1" + str(i) for i in range(3, 10)))
+        ):
+            raise ProviderError("仅支持中国大陆手机号")
+        if not isinstance(code, str) or re.fullmatch(r"[0-9]{6}", code) is None:
+            raise ProviderError("验证码须为六位数字字符串")
+        if type(expires_in_seconds) is not int or not 1 <= expires_in_seconds <= 3600:
+            raise ProviderError("验证码有效期须为 1 至 3600 秒的整数")
+        # Template 942819 has a fixed five-minute message and only %code%.
+        # Challenge Service remains authoritative for actual expiration.
+        vars_payload = json.dumps({"%code%": code}, ensure_ascii=False, separators=(",", ":"))
         payload = {
             "smsUser": self.sms_user,
             "templateId": self.template_id,
             "phone": clean_phone,
             "vars": vars_payload,
+            "sendRequestId": send_request_id,
         }
-        sorted_keys = sorted(payload.keys())
-        param_str = "&".join(f"{key}={payload[key]}" for key in sorted_keys)
-        sign_str = f"{self.sms_key}&{param_str}&{self.sms_key}"
-        signature = hashlib.sha256(sign_str.encode("utf-8")).hexdigest()
-        payload["signature"] = signature
+        payload["signature"] = sign_sendcloud_params(payload, self.sms_key)
 
+        for attempt in range(self.max_attempts):
+            phase = "connect"
+            try:
+                data_bytes = urllib.parse.urlencode(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    self.API_URL,
+                    data=data_bytes,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    phase = "read"
+                    raw_response = resp.read()
+                try:
+                    resp_data = json.loads(raw_response.decode("utf-8"))
+                except (ValueError, UnicodeError):
+                    self._send_error("invalid_json", unknown=True)
+                if (
+                    not isinstance(resp_data, dict)
+                    or type(resp_data.get("result")) is not bool
+                    or type(resp_data.get("statusCode")) is not int
+                ):
+                    self._send_error("invalid_structure", unknown=True)
+                if resp_data["result"] is not True or resp_data["statusCode"] != 200:
+                    status = resp_data["statusCode"]
+                    category = (
+                        "signature"
+                        if status in {421, 422, 4722}
+                        else "template"
+                        if status in set(range(431, 444))
+                        else "quota"
+                        if status == 499
+                        else "business"
+                    )
+                    self._send_error(category, status=status, unknown=status == 400)
+                if not isinstance(resp_data.get("info", {}), dict):
+                    self._send_error("invalid_structure", unknown=True)
+                ids = resp_data.get("info", {}).get("smsIds", [])
+                if isinstance(ids, str):
+                    ids = [ids]
+                if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+                    self._send_error("invalid_structure", unknown=True)
+                return SmsReceipt(True, tuple(ids), send_request_id)
+            except ProviderError:
+                raise
+            except urllib.error.HTTPError as exc:
+                self._send_error(
+                    "http_4xx" if 400 <= exc.code < 500 else "http_5xx", status=exc.code, unknown=exc.code >= 500
+                )
+            except (TimeoutError, urllib.error.URLError, OSError) as exc:
+                timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+                category = phase + "_timeout" if timed_out else "connection"
+                logger.warning("SendCloud transport error", extra={"error_type": category, "outcome_unknown": True})
+                if attempt + 1 == self.max_attempts:
+                    raise ProviderError("短信发送状态待核对，请勿重复发起", outcome_unknown=True) from None
+                time.sleep(min(0.25 * (2**attempt) + random.random() * 0.1, 1.0))
+        raise ProviderError("短信发送状态待核对，请勿重复发起", outcome_unknown=True)
+
+    @staticmethod
+    def _send_error(category: str, *, status: int | None = None, unknown: bool = False):
+        logger.warning(
+            "SendCloud request error",
+            extra={"error_type": category, "provider_status": status, "outcome_unknown": unknown},
+        )
+        raise ProviderError(
+            "短信发送状态待核对，请勿重复发起" if unknown else "短信服务暂时不可用，请稍后重试", outcome_unknown=unknown
+        ) from None
+
+    def query_status(
+        self, provider_ids: list[str], *, days: int = 1, start: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        """Internal SendCloud status query; callers must keep this off public endpoints."""
+        if not provider_ids or any(not str(item) for item in provider_ids):
+            raise ProviderError("缺少服务商短信 ID")
+        payload: dict[str, Any] = {
+            "smsUser": self.sms_user,
+            "smsIds": ";".join(map(str, provider_ids)),
+            "days": str(days),
+            "start": str(start),
+            "limit": str(limit),
+        }
+        keys = sorted(payload)
+        sign = f"{self.sms_key}&" + "&".join(f"{key}={payload[key]}" for key in keys) + f"&{self.sms_key}"
+        payload["signature"] = hashlib.sha256(sign.encode()).hexdigest()
+        req = urllib.request.Request(
+            self.STATUS_URL,
+            data=urllib.parse.urlencode(payload).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
         try:
-            data_bytes = urllib.parse.urlencode(payload).encode("utf-8")
-            req = urllib.request.Request(
-                self.API_URL,
-                data=data_bytes,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                method="POST",
-            )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                resp_data = json.loads(resp.read().decode("utf-8"))
-            if not resp_data.get("result") or resp_data.get("statusCode") != 200:
-                err_msg = resp_data.get("message") or "未知错误"
-                logger.error("SendCloud 短信发送失败: %s (resp=%s)", err_msg, resp_data)
-                raise ProviderError(f"短信发送失败: {err_msg}")
-            return True
+                body = json.loads(resp.read().decode())
+            if not body.get("result") or body.get("statusCode") != 200:
+                raise ProviderError("短信状态查询失败", outcome_unknown=False)
+            info = body.get("info", {})
+            return {"accepted": True, "records": info.get("voList", []) if isinstance(info, dict) else []}
         except ProviderError:
             raise
-        except Exception as e:
-            logger.error("SendCloud 短信接口请求异常: %s", e)
-            raise ProviderError("短信服务暂时不可用，请稍后重试") from None
+        except Exception:
+            raise ProviderError("短信状态暂时不可用", outcome_unknown=True) from None
 
 
 # ── Email Provider ───────────────────────────────────────────
@@ -422,19 +572,24 @@ class TencentSesProvider(EmailProvider):
 
 # ── Provider 单例工厂 ─────────────────────────────────────────
 
+_sms_provider_injected = False
 _sms_provider_instance: SmsProvider | None = None
 _email_provider_instance: EmailProvider | None = None
 
 
 def get_sms_provider() -> SmsProvider:
     global _sms_provider_instance
+    provider_type = (settings.SMS_PROVIDER or "").lower()
+    # Explicit dependency injection is allowed only outside production-like environments.
+    if settings.is_production_like and (provider_type == "mock" or isinstance(_sms_provider_instance, MockSmsProvider)):
+        raise ProviderError("生产环境禁止使用模拟短信服务")
+    if not settings.is_production_like and _sms_provider_injected and _sms_provider_instance is not None:
+        return _sms_provider_instance
+    if not settings.SMS_ENABLED:
+        raise ProviderError("短信找回功能暂未开放")
     if _sms_provider_instance is not None:
         return _sms_provider_instance
 
-    if not settings.SMS_ENABLED and settings.SMS_PROVIDER != "mock":
-        raise ProviderError("短信找回功能暂未开放")
-
-    provider_type = (settings.SMS_PROVIDER or "mock").lower()
     if provider_type == "sendcloud":
         _sms_provider_instance = SendCloudSmsProvider(
             sms_user=settings.SENDCLOUD_SMS_USER or settings.SMS_USER,
@@ -449,8 +604,10 @@ def get_sms_provider() -> SmsProvider:
             sign_name=settings.TENCENT_SMS_SIGN_NAME,
             template_id=settings.TENCENT_SMS_TEMPLATE_ID,
         )
-    else:
+    elif provider_type == "mock" and settings.APP_ENV in {"local", "development"}:
         _sms_provider_instance = MockSmsProvider()
+    else:
+        raise ProviderError("短信服务商配置无效")
 
     return _sms_provider_instance
 
@@ -486,6 +643,7 @@ def get_email_provider() -> EmailProvider:
 
 def reset_providers_for_test(sms: SmsProvider | None = None, email: EmailProvider | None = None):
     """测试用注入/重置 Provider。"""
-    global _sms_provider_instance, _email_provider_instance
+    global _sms_provider_instance, _email_provider_instance, _sms_provider_injected
+    _sms_provider_injected = sms is not None
     _sms_provider_instance = sms
     _email_provider_instance = email

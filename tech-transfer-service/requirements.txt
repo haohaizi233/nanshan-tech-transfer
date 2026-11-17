@@ -1,4 +1,5 @@
 fastapi>=0.115.0
+tzdata>=2025.1
 uvicorn[standard]>=0.30.0
 psycopg2-binary>=2.9.0
 pydantic>=2.8.0
@@ -15,3 +16,4 @@ opencc-python-reimplemented>=0.1.7
 # 批量导入：仅在 tools/import_achievement_documents.py 使用，先进入 staging，绝不直接发布。
 python-pptx>=1.0.2
 pypdf>=5.0.0
+redis>=5.0.0
