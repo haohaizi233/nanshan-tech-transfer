@@ -75,3 +75,41 @@ def test_request_unavailable_distinguished_from_rate_limit():
         with pytest.raises(BizError) as error:
             g.request_gate(CTX, "unused")
     assert error.value.http_status == 503
+
+
+def test_queue_claim_database_error_is_logged_safely(caplog):
+    with patch.object(g, "get_cursor", side_effect=RuntimeError("private-db-secret")):
+        assert g.run_queued_recovery_task("task-test") is False
+    assert caplog.records[-1].stage == "queue_claim"
+    assert caplog.records[-1].reason_code == "database_unavailable"
+    assert "private-db-secret" not in caplog.text
+
+
+def test_queue_enqueue_failure_is_not_reported_as_accepted(caplog):
+    from core.errors import BizError
+
+    with patch.object(g, "get_cursor", side_effect=RuntimeError("private-db-secret")):
+        with pytest.raises(BizError) as error:
+            g.enqueue_recovery_task("unused", "sms", "task-test", CTX)
+    assert error.value.http_status == 503
+    assert caplog.records[-1].stage == "queue_enqueue"
+    assert caplog.records[-1].request_id == "request-test"
+    assert "private-db-secret" not in caplog.text
+
+
+def test_queue_write_failure_retains_unknown_outcome(caplog):
+    cur = MagicMock()
+    cur.fetchone.return_value = {
+        "payload": {"account": "unused", "channel": "sms", "ip": "ip", "device_id": None, "request_id": "request-test"}
+    }
+    result = g.DeliveryTaskResult("task-test", "COMPLETED", provider_called=True)
+    with (
+        patch.object(g, "get_cursor") as gc,
+        patch.object(g, "run_recovery_task", return_value=result),
+        patch.object(g, "_persist_task_result", side_effect=RuntimeError("private-db-secret")),
+    ):
+        gc.return_value.__enter__.return_value = cur
+        assert g.run_queued_recovery_task("task-test") is False
+    assert caplog.records[-1].stage == "queue_persist"
+    assert caplog.records[-1].outcome_unknown is True
+    assert "private-db-secret" not in caplog.text

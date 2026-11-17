@@ -110,6 +110,59 @@ LIMIT 2
 """
 
 
+def eligibility_reason(account):
+    """Internal read-only diagnosis. Never expose qualification in public responses."""
+    with get_cursor() as cur:
+        cur.execute(
+            """SELECT au.id,au.status,au.deleted_at,uc.status AS credential_status,
+            uc.password_configured,uc.password_hash IS NOT NULL AS has_password,
+            EXISTS(SELECT 1 FROM user_role ur WHERE ur.user_id=au.id
+                AND ur.role_code IN ('admin','platform_admin','org_admin')) OR
+            EXISTS(SELECT 1 FROM organization_membership om WHERE om.user_id=au.id
+                AND om.role='admin' AND om.status='active') AS privileged
+            FROM app_user au LEFT JOIN user_credential uc ON uc.user_id=au.id
+            WHERE uc.username=%s OR uc.phone=%s OR EXISTS(SELECT 1 FROM account_contact ac
+                WHERE ac.user_id=au.id AND ac.normalized_value=%s) LIMIT 2""",
+            (account, account, account),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return "account_not_found"
+        if len(rows) > 1:
+            return "contact_conflict"
+        user = rows[0]
+        if user["deleted_at"] is not None:
+            return "account_deleted"
+        if user["status"] != "active":
+            return "account_disabled"
+        if user["privileged"]:
+            return "privileged_account_restricted"
+        if user["credential_status"] != "active" or not user["password_configured"] or not user["has_password"]:
+            return "credential_not_configured"
+        cur.execute(
+            """SELECT normalized_value,status,verified_at,verification_method
+            FROM account_contact WHERE user_id=%s AND contact_type='phone'""",
+            (user["id"],),
+        )
+        trusted = [
+            c
+            for c in cur.fetchall()
+            if c["status"] == "active"
+            and c["verified_at"] is not None
+            and c["verification_method"] in {"sms", "wechat", "manual"}
+        ]
+        if not trusted:
+            return "contact_not_verified"
+        if len(trusted) != 1:
+            return "contact_conflict"
+        cur.execute(
+            """SELECT user_id FROM account_contact WHERE contact_type='phone' AND normalized_value=%s
+            AND status='active' AND verified_at IS NOT NULL AND user_id<>%s LIMIT 1""",
+            (trusted[0]["normalized_value"], user["id"]),
+        )
+        return "contact_conflict" if cur.fetchone() else "eligible"
+
+
 def start_sms_recovery(account: str, challenge_id: str, context: SendContext, engine=None, *, return_result=False):
     engine = engine or _engine()
     account = account.strip()
@@ -129,11 +182,15 @@ def start_sms_recovery(account: str, challenge_id: str, context: SendContext, en
     if len(rows) != 1:
         _audit("recovery.ineligible", context, challenge_id, decision="DENY")
         if return_result:
+            try:
+                reason = "contact_conflict" if len(rows) > 1 else eligibility_reason(account)
+            except Exception:
+                raise DeliveryStageError("eligibility", "database_unavailable") from None
             return DeliveryTaskResult(
                 challenge_id,
                 "INELIGIBLE",
                 "eligibility",
-                "contact_conflict" if len(rows) > 1 else "no_eligible_account",
+                reason if reason != "eligible" else "eligibility_changed",
             )
         return recovery_response(challenge_id, "sms")
     target = rows[0]
@@ -360,25 +417,45 @@ def enqueue_recovery_task(account, channel, challenge_id, context):
         "device_id": context.device_id,
         "request_id": context.request_id,
     }
-    with get_cursor(commit=True) as cur:
-        cur.execute(
-            "INSERT INTO security_delivery_request(id,payload,request_id) VALUES(%s,%s::jsonb,%s)",
-            (challenge_id, json.dumps(payload), context.request_id),
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO security_delivery_request(id,payload,request_id) VALUES(%s,%s::jsonb,%s)",
+                (challenge_id, json.dumps(payload), context.request_id),
+            )
+    except Exception as exc:
+        task_event(
+            logger,
+            DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "queue_enqueue", "database_unavailable"),
+            context.request_id,
+            "queue_enqueue_failed",
+            type(exc).__name__,
         )
+        raise BizError("TT_COMMON_50301", "验证服务暂时不可用，请稍后重试", 503) from None
 
 
 def run_queued_recovery_task(challenge_id):
-    with get_cursor(commit=True) as cur:
-        cur.execute(
-            """UPDATE security_delivery_request SET state='processing',claimed_at=NOW()
-            WHERE id=%s AND state='queued' AND created_at>NOW()-INTERVAL '5 minutes'
-            RETURNING payload""",
-            (challenge_id,),
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE security_delivery_request SET state='processing',claimed_at=NOW()
+                WHERE id=%s AND state='queued' AND created_at>NOW()-INTERVAL '5 minutes'
+                RETURNING payload""",
+                (challenge_id,),
+            )
+            row = cur.fetchone()
+    except Exception as exc:
+        task_event(
+            logger,
+            DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "queue_claim", "database_unavailable", retryable=True),
+            None,
+            "queue_claim_failed",
+            type(exc).__name__,
         )
-        row = cur.fetchone()
+        return False
     if not row:
         return False
-    data = row["payload"]
+    data = row["payload"] if isinstance(row["payload"], dict) else {}
     # Never regenerate a code for processing/unknown tasks after a worker crash.
     try:
         result = run_recovery_task(
@@ -392,6 +469,21 @@ def run_queued_recovery_task(challenge_id):
     except Exception as exc:
         result = DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "task", "unexpected_worker_exception")
         task_event(logger, result, data.get("request_id"), "worker_error", type(exc).__name__)
+    try:
+        return _persist_task_result(challenge_id, result, data.get("request_id"))
+    except Exception as exc:
+        failed = replace(
+            result,
+            outcome="INTERNAL_ERROR",
+            failure_stage="queue_persist",
+            failure_reason="database_write_failed",
+            outcome_unknown=result.provider_called or result.outcome_unknown,
+        )
+        task_event(logger, failed, data.get("request_id"), "queue_persist_failed", type(exc).__name__)
+        return False
+
+
+def _persist_task_result(challenge_id, result, request_id):
     with get_cursor(commit=True) as cur:
         cur.execute(
             """UPDATE security_delivery_request SET state=%s,outcome=%s,failure_stage=%s,failure_reason=%s,
@@ -416,7 +508,7 @@ def run_queued_recovery_task(challenge_id):
             "sms.task_result",
             "security_delivery_request",
             resource_id=challenge_id,
-            request_id=data.get("request_id"),
+            request_id=request_id,
             details={
                 "outcome": result.outcome,
                 "stage": result.failure_stage,
@@ -445,8 +537,13 @@ def process_pending_recovery_tasks(limit=50):
 
 def cleanup_delivery_tasks():
     with get_cursor(commit=True) as cur:
-        cur.execute("""UPDATE security_delivery_request SET state='expired',finished_at=NOW()
-            WHERE state IN ('queued','processing') AND created_at<NOW()-INTERVAL '5 minutes'""")
+        cur.execute("""UPDATE security_delivery_request SET state='expired',outcome='INTERNAL_ERROR',
+            failure_stage='queue',failure_reason='queued_request_expired',finished_at=NOW()
+            WHERE state='queued' AND created_at<NOW()-INTERVAL '5 minutes'""")
+        cur.execute("""UPDATE security_delivery_request SET state='unknown',outcome='PROVIDER_UNKNOWN',
+            failure_stage='worker',failure_reason='worker_interrupted',outcome_unknown=true,
+            retryable=false,finished_at=NOW()
+            WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-INTERVAL '5 minutes'""")
         cur.execute("DELETE FROM security_delivery_request WHERE created_at<NOW()-INTERVAL '7 days'")
 
 
@@ -462,8 +559,10 @@ def reconcile_sms_delivery(challenge_id: str):
             "SELECT provider_message_ids,send_state FROM auth_challenge WHERE id=%s AND channel='sms'", (challenge_id,)
         )
         row = cur.fetchone()
-    if not row or row["send_state"] in {"delivered", "delivery_failed", "rejected"}:
+    if not row:
         return None
+    if row["send_state"] in {"delivered", "delivery_failed", "rejected"}:
+        return {"state": row["send_state"]}
     ids = row["provider_message_ids"]
     if not ids:
         return {"state": "unknown", "requires_manual_review": True}
@@ -475,6 +574,15 @@ def reconcile_sms_delivery(challenge_id: str):
     if not records:
         return {"state": row["send_state"]}
     codes = [int(r["statusCode"]) for r in records]
+    reason_code = next(
+        (
+            str(r.get("sendLog"))
+            for r in records
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(r.get("sendLog", "")))
+            and not re.search(r"1[3-9][0-9]{9}", str(r.get("sendLog", "")))
+        ),
+        None,
+    )
     state = (
         "delivered"
         if len(records) == len(ids) and all(c == 200 for c in codes)
@@ -483,17 +591,43 @@ def reconcile_sms_delivery(challenge_id: str):
         else row["send_state"]
     )
     if state not in {"delivered", "delivery_failed"}:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                "UPDATE auth_challenge SET delivery_status_code=%s WHERE id=%s AND send_state IN ('accepted','unknown')",
+                (codes[-1], challenge_id),
+            )
         return {"state": state}
     with get_cursor(commit=True) as cur:
         cur.execute(
-            """UPDATE auth_challenge SET send_state=%s,
+            """UPDATE auth_challenge SET send_state=%s,delivery_status_code=%s,delivery_reason_code=%s,
             status=CASE WHEN %s='delivery_failed' AND status='pending' THEN 'failed' ELSE status END
             WHERE id=%s AND send_state IN ('accepted','unknown')""",
-            (state, state, challenge_id),
+            (
+                state,
+                200 if state == "delivered" else next(c for c in codes if 400 <= c < 600),
+                reason_code,
+                state,
+                challenge_id,
+            ),
         )
         if cur.rowcount:
             audit_record(
-                "sms." + state, "auth_challenge", resource_id=challenge_id, details={"status_codes": codes}, cur=cur
+                "sms." + state,
+                "auth_challenge",
+                resource_id=challenge_id,
+                details={"status_codes": codes, "reason_code": reason_code},
+                cur=cur,
+            )
+            cur.execute(
+                """UPDATE security_delivery_request SET failure_stage=%s,failure_reason=%s,
+                provider_status=%s,outcome=%s WHERE id=%s AND provider_called=true""",
+                (
+                    "delivery" if state == "delivery_failed" else None,
+                    "sendcloud_delivery_failed" if state == "delivery_failed" else None,
+                    200 if state == "delivered" else next(c for c in codes if 400 <= c < 600),
+                    "DELIVERY_FAILED" if state == "delivery_failed" else "COMPLETED",
+                    challenge_id,
+                ),
             )
     if state == "delivered":
         _engine().transition(challenge_id, "delivered")

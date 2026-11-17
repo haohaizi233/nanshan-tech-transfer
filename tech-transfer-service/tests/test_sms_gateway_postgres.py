@@ -26,7 +26,7 @@ from modules.security.sms_risk import DecisionAction, RiskDecision
 
 
 @pytest.fixture
-def pg(monkeypatch):
+def pg(monkeypatch, request):
     if not os.getenv("SMS_TEST_POSTGRES") and not os.getenv("SMS_TEST_POSTGRES_DSN"):
         pytest.skip("real PostgreSQL requires explicit SMS_TEST_POSTGRES=1 or DSN")
     dsn = os.getenv("SMS_TEST_POSTGRES_DSN")
@@ -48,6 +48,16 @@ def pg(monkeypatch):
     conn.autocommit = True
     with conn.cursor() as c:
         c.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+
+        def cleanup():
+            conn.rollback()
+            assert schema.startswith("sms_test_") and len(schema) == 41
+            with conn.cursor() as own:
+                own.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+            conn.close()
+            auth_cache.clear()
+
+        request.addfinalizer(cleanup)
         c.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
         c.execute("""
         CREATE FUNCTION set_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -61,7 +71,11 @@ def pg(monkeypatch):
         CREATE TABLE audit_log(actor_user_id BIGINT,actor_user_no TEXT,action TEXT,resource_type TEXT,
           resource_id TEXT,details JSONB,ip_address TEXT,request_id TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
         """)
-        for name in ["033_unified_account_security.sql", "034_sms_security_gateway.sql"]:
+        for name in [
+            "033_unified_account_security.sql",
+            "034_sms_security_gateway.sql",
+            "035_sms_delivery_diagnostics.sql",
+        ]:
             migration = (Path(__file__).parents[1] / "migrations" / "pg" / name).read_text(encoding="utf-8")
             c.execute(migration.replace("public.", schema + "."))
         c.execute("INSERT INTO app_user(id) VALUES (1)")
@@ -98,11 +112,6 @@ def pg(monkeypatch):
     monkeypatch.setattr(gateway.settings, "SMS_ENABLED", True)
     auth_cache.clear()
     yield cursor
-    assert schema.startswith("sms_test_") and len(schema) == 41
-    with conn.cursor() as c:
-        c.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
-    conn.close()
-    auth_cache.clear()
 
 
 @pytest.fixture
@@ -265,12 +274,13 @@ def test_durable_queue_parallel_claim_only_once(pg, sender):
     cid = str(uuid.uuid4())
     gateway.enqueue_recovery_task("unknown", "sms", cid, gateway.SendContext("ip", None, "r"))
     with patch.object(gateway, "run_recovery_task") as worker:
+        worker.return_value = gateway.DeliveryTaskResult(cid, "COMPLETED")
         with ThreadPoolExecutor(max_workers=8) as pool:
             claims = list(pool.map(lambda _: gateway.run_queued_recovery_task(cid), range(16)))
         assert sum(claims) == 1 and worker.call_count == 1
     with pg() as c:
         c.execute("SELECT state FROM security_delivery_request WHERE id=%s", (cid,))
-        assert c.fetchone()["state"] == "finished"
+        assert c.fetchone()["state"] == "completed"
 
 
 def test_unknown_provider_result_keeps_challenge_and_quota(pg, sender):
@@ -285,3 +295,121 @@ def test_unknown_provider_result_keeps_challenge_and_quota(pg, sender):
     with pg() as c:
         c.execute("SELECT status,send_state FROM auth_challenge")
         assert dict(c.fetchone()) == {"status": "pending", "send_state": "unknown"}
+
+
+@pytest.mark.parametrize(
+    "scenario,expected",
+    [
+        ("accepted", "completed"),
+        ("rejected", "failed"),
+        ("unknown", "unknown"),
+        ("risk", "blocked"),
+        ("config", "config_error"),
+        ("ineligible", "ineligible"),
+        ("database", "failed_internal"),
+    ],
+)
+def test_actual_queue_states_and_request_id_diagnosis(pg, sender, monkeypatch, scenario, expected):
+    from unittest.mock import patch
+
+    from modules.security import sms_diagnostics
+    from modules.security.provider import ProviderError
+
+    provider, engine = sender
+    cid = str(uuid.uuid4())
+    rid = str(uuid.uuid4())
+    monkeypatch.setattr(gateway, "_engine", lambda: engine)
+    monkeypatch.setattr(sms_diagnostics, "get_cursor", pg)
+    if scenario in {"rejected", "unknown"}:
+        provider.send_task = MagicMock(
+            side_effect=ProviderError(
+                "safe",
+                outcome_unknown=scenario == "unknown",
+                reason_code="network_timeout" if scenario == "unknown" else "insufficient_balance",
+                provider_status=499 if scenario == "rejected" else None,
+                request_attempted=True,
+            )
+        )
+    elif scenario == "risk":
+        engine.reserve.return_value = RiskDecision(DecisionAction.THROTTLE, "sms.phone.cooldown")
+    elif scenario == "config":
+        monkeypatch.setattr(gateway.settings, "SMS_ENABLED", False)
+    account = "unknown" if scenario == "ineligible" else "13800138000"
+    gateway.enqueue_recovery_task(account, "sms", cid, gateway.SendContext("ip", None, rid))
+    if scenario == "database":
+        with patch.object(
+            gateway, "start_sms_recovery", side_effect=gateway.DeliveryStageError("eligibility", "database_unavailable")
+        ):
+            gateway.run_queued_recovery_task(cid)
+    else:
+        gateway.run_queued_recovery_task(cid)
+    with pg() as c:
+        c.execute("SELECT state FROM security_delivery_request WHERE id=%s", (cid,))
+        assert c.fetchone()["state"] == expected
+    diagnosis = sms_diagnostics.diagnose(request_id=rid)["tasks"][0]
+    assert diagnosis["task_state"] == expected
+    assert diagnosis["request_id"] == rid
+    assert gateway.run_queued_recovery_task(cid) is False
+
+
+def test_worker_crash_after_acceptance_is_not_resent(pg, sender, monkeypatch):
+    from unittest.mock import patch
+
+    monkeypatch.setattr(gateway, "_engine", lambda: sender[1])
+    cid = str(uuid.uuid4())
+    gateway.enqueue_recovery_task("13800138000", "sms", cid, gateway.SendContext("ip", None, "crash-request"))
+    run = gateway.run_recovery_task
+
+    def crash(*args):
+        run(*args)
+        raise SystemExit("simulated_worker_termination")
+
+    with patch.object(gateway, "run_recovery_task", side_effect=crash), pytest.raises(SystemExit):
+        gateway.run_queued_recovery_task(cid)
+    assert len(sender[0].sent_messages) == 1
+    with pg(commit=True) as c:
+        c.execute("UPDATE security_delivery_request SET claimed_at=NOW()-INTERVAL '10 minutes' WHERE id=%s", (cid,))
+    gateway.cleanup_delivery_tasks()
+    assert gateway.run_queued_recovery_task(cid) is False
+    assert len(sender[0].sent_messages) == 1
+    with pg() as c:
+        c.execute("SELECT state,failure_reason,outcome_unknown FROM security_delivery_request WHERE id=%s", (cid,))
+        assert dict(c.fetchone()) == {
+            "state": "unknown",
+            "failure_reason": "worker_interrupted",
+            "outcome_unknown": True,
+        }
+
+
+def test_provider_delivery_failure_persists_original_diagnostic(pg, sender, monkeypatch):
+    provider, engine = sender
+    monkeypatch.setattr(gateway, "_engine", lambda: engine)
+    cid = str(uuid.uuid4())
+    gateway.enqueue_recovery_task("13800138000", "sms", cid, gateway.SendContext("ip", None, "delivery-request"))
+    gateway.run_queued_recovery_task(cid)
+    with pg(commit=True) as c:
+        c.execute("UPDATE auth_challenge SET provider_message_ids='[\"mock-message\"]' WHERE id=%s", (cid,))
+    provider.query_status = MagicMock(
+        return_value={"records": [{"smsId": "mock-message", "statusCode": 590, "sendLog": "4121"}]}
+    )
+    assert gateway.reconcile_sms_delivery(cid)["state"] == "delivery_failed"
+    with pg() as c:
+        c.execute("SELECT delivery_status_code,delivery_reason_code FROM auth_challenge WHERE id=%s", (cid,))
+        assert dict(c.fetchone()) == {"delivery_status_code": 590, "delivery_reason_code": "4121"}
+        c.execute("SELECT state,outcome,provider_status FROM security_delivery_request WHERE id=%s", (cid,))
+        assert dict(c.fetchone()) == {"state": "completed", "outcome": "DELIVERY_FAILED", "provider_status": 590}
+
+
+def test_old_finished_rows_migrate_to_unknown_idempotently(pg):
+    cid = str(uuid.uuid4())
+    with pg(commit=True) as c:
+        c.execute("INSERT INTO security_delivery_request(id,payload,state) VALUES(%s,'{}','finished')", (cid,))
+        c.execute("SELECT current_schema() AS name")
+        schema = c.fetchone()["name"]
+        migration = (Path(__file__).parents[1] / "migrations" / "pg" / "035_sms_delivery_diagnostics.sql").read_text(
+            encoding="utf-8"
+        )
+        c.execute(migration.replace("public.", schema + "."))
+        c.execute(migration.replace("public.", schema + "."))
+        c.execute("SELECT state,outcome_unknown FROM security_delivery_request WHERE id=%s", (cid,))
+        assert dict(c.fetchone()) == {"state": "legacy_unknown", "outcome_unknown": True}

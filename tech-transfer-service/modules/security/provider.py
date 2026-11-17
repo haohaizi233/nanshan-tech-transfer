@@ -318,7 +318,11 @@ class SendCloudSmsProvider(SmsProvider):
                     status = resp_data["statusCode"]
                     category = self._classify_status(status)
                     self._send_error(
-                        category, status=status, unknown=status == 400, attempted=True, retryable=status in {501, 502}
+                        category,
+                        status=status,
+                        unknown=status in {311, 400},
+                        attempted=True,
+                        retryable=status in {501, 502},
                     )
                 if not isinstance(resp_data.get("info", {}), dict):
                     self._send_error("invalid_response", unknown=True, attempted=True)
@@ -332,7 +336,7 @@ class SendCloudSmsProvider(SmsProvider):
                 raise
             except urllib.error.HTTPError as exc:
                 self._send_error(
-                    "provider_rejected",
+                    "http_5xx" if exc.code >= 500 else "http_4xx",
                     status=exc.code,
                     unknown=exc.code >= 500,
                     attempted=True,
@@ -359,7 +363,9 @@ class SendCloudSmsProvider(SmsProvider):
             return "signature"
         if status == 432:
             return "template_not_approved"
-        if status in {*range(431, 444), 4340}:
+        if status in {441, 442, 443}:
+            return "invalid_parameters"
+        if status in {*range(431, 441), 4340}:
             return "template"
         if status in {471, 472, 4721, 4723, 474}:
             return "config_error"
@@ -371,6 +377,8 @@ class SendCloudSmsProvider(SmsProvider):
             return "ip_restricted"
         if status == 400:
             return "duplicate_request"
+        if status == 311:
+            return "partial_acceptance"
         if status in {*range(401, 418), *range(451, 486), 491, 496, 497, 498}:
             return "invalid_parameters"
         return "provider_rejected"
@@ -394,9 +402,12 @@ class SendCloudSmsProvider(SmsProvider):
             "invalid_parameters",
             "provider_rejected",
             "duplicate_request",
+            "partial_acceptance",
             "invalid_response",
             "network_timeout",
             "config_error",
+            "http_4xx",
+            "http_5xx",
         }
         reason = category if category in allow else "provider_rejected"
         logger.warning(

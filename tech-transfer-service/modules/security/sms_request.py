@@ -5,7 +5,6 @@ import hmac
 import json
 import re
 import time
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +12,7 @@ from fastapi import HTTPException, Request
 
 from config import settings
 from core.rate_limit import _client_ip, _is_trusted_proxy
+from core.response import get_request_id
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,7 @@ async def validate_sms_request(request: Request) -> SmsRequestContext:
 
     device = headers.get("x-device-id") or payload.get("deviceId")
     device = device_risk_adapter.identify(device)
-    return SmsRequestContext(_client_ip(request), device, source, str(uuid.uuid4()))
+    return SmsRequestContext(_client_ip(request), device, source, get_request_id())
 
 
 class SmsBodyLimitMiddleware:

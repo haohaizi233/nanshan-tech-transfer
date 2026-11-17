@@ -39,6 +39,17 @@ async def test_valid_public_context():
 
 
 @pytest.mark.asyncio
+async def test_delivery_context_uses_response_request_id():
+    from core.response import set_request_id
+
+    set_request_id("request-correlation-test")
+    try:
+        assert (await validate_sms_request(req())).request_id == "request-correlation-test"
+    finally:
+        set_request_id("")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("body", [b"[]", b"x" * 4097])
 async def test_rejects_invalid_or_oversized_body(body):
     with pytest.raises(HTTPException):

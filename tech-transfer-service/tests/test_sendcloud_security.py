@@ -90,6 +90,7 @@ def test_sendcloud_smsids_field(monkeypatch):
     [
         (590, "provider_rejected"),
         (400, "duplicate_request"),
+        (311, "partial_acceptance"),
         (432, "template_not_approved"),
         (499, "insufficient_balance"),
     ],
@@ -103,7 +104,7 @@ def test_provider_status_classification(monkeypatch, status, reason):
     assert error.value.reason_code == reason
     assert error.value.provider_status == status
     assert error.value.request_attempted is True
-    assert error.value.outcome_unknown is (status == 400)
+    assert error.value.outcome_unknown is (status in {311, 400})
 
 
 def test_accepted_without_sms_ids_is_still_accepted(monkeypatch):
