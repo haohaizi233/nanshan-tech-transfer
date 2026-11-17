@@ -407,14 +407,14 @@
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="sendRecoveryChallenge">获取验证码</button>
 				</view>
 				<view v-else-if="recoveryStep === 2" class="dialog-body">
-					<text class="dialog-desc">已发送验证码至：{{ recoveryDestinationMasked || '已绑定联系方式' }}</text>
+					<text class="dialog-desc">验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至该联系方式。请检查短信或邮箱；如未收到，可稍后重试或切换已绑定的验证方式。</text>
 					<view class="form-item">
 						<text class="label">6位验证码</text>
 						<input class="input" type="number" maxlength="6" v-model="recoveryCode" placeholder="请输入验证码" />
 					</view>
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="verifyRecoveryCode">验证并下一步</button>
 					<view class="countdown-row">
-						<text v-if="recoveryCountdown > 0" class="countdown-text">{{ recoveryCountdown }}秒后可重新获取</text>
+						<text v-if="recoveryCountdown > 0" class="countdown-text">{{ recoveryCountdown }}秒后可重新提交请求</text>
 						<text v-else class="resend-text" @click="sendRecoveryChallenge">重新获取验证码</text>
 					</view>
 				</view>
@@ -899,7 +899,7 @@
 					const res = await startPasswordRecovery(acc, this.recoveryChannel)
 					this.recoveryChallengeId = res.challengeId
 					this.recoveryDestinationMasked = res.destinationMasked || ''
-					uni.showToast({ title: res.message || '若账号已绑定有效联系方式，验证信息已发送', icon: 'none', duration: 2500 })
+					uni.showToast({ title: '验证请求已提交；如果账号存在且绑定了可用安全联系方式，验证码将发送', icon: 'none', duration: 2500 })
 					this.recoveryStep = 2
 					this.recoveryCountdown = 60
 					if (this.recoveryTimer) clearInterval(this.recoveryTimer)

@@ -203,17 +203,17 @@ const goLogin = () => {
       <!-- 步骤2：输入验证码（或邮件链接说明） -->
       <div v-else-if="step === 2" class="form-body">
         <div v-if="form.channel === 'email_link'" class="email-notice-box">
-          <p class="notice-title">重置链接已发送</p>
+          <p class="notice-title">验证请求已提交</p>
           <p class="notice-desc">
-            若您的账号绑定了安全邮箱，系统已向该邮箱派发一次性重置链接，链接在 5 分钟内有效。
+            如果账号存在且绑定了可用的安全邮箱，系统将发送一次性重置链接。请检查邮箱（包括垃圾邮件）；链接有效期以邮件内容为准。
           </p>
-          <p class="notice-tip">请前往您的电子邮箱查收邮件并点击链接完成密码重置。</p>
+          <p class="notice-tip">请求处理可能需要一些时间。如未收到，请稍后重试或使用其他已绑定的安全联系方式。</p>
           <button class="primary-btn" @click="goLogin">返回登录页</button>
         </div>
 
         <div v-else>
           <div class="dest-tip">
-            验证码已发送至预留安全联系方式 <span class="highlight">{{ form.maskedDestination || '***' }}</span>
+            验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至该联系方式。请检查短信或邮箱；如未收到，可稍后重试或切换已绑定的验证方式。
           </div>
 
           <div class="form-item">
@@ -233,7 +233,7 @@ const goLogin = () => {
                 :disabled="countdown > 0 || loading"
                 @click="handleSendChallenge"
               >
-                {{ countdown > 0 ? `${countdown}秒后重发` : '重新获取' }}
+                {{ countdown > 0 ? `${countdown}秒后可重新提交请求` : '重新获取' }}
               </button>
             </div>
           </div>

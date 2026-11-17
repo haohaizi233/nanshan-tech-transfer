@@ -40,10 +40,23 @@ logger = logging.getLogger("nanshan.security.provider")
 
 class ProviderError(BizError):
     def __init__(
-        self, message: str, code: str = "TT_COMMON_50301", status: int = 503, *, outcome_unknown: bool = False
+        self,
+        message: str,
+        code: str = "TT_COMMON_50301",
+        status: int = 503,
+        *,
+        outcome_unknown: bool = False,
+        reason_code: str = "provider_error",
+        provider_status: int | None = None,
+        retryable: bool = False,
+        request_attempted: bool = False,
     ):
         super().__init__(code, message, status)
         self.outcome_unknown = outcome_unknown
+        self.reason_code = reason_code
+        self.provider_status = provider_status
+        self.retryable = retryable
+        self.request_attempted = request_attempted
 
 
 @dataclass(frozen=True)
@@ -224,9 +237,9 @@ class SendCloudSmsProvider(SmsProvider):
         self.timeout = timeout
         self.max_attempts = min(3, max(1, int(getattr(settings, "SENDCLOUD_SMS_MAX_ATTEMPTS", 3))))
         if not (self.sms_user and self.sms_key):
-            raise ProviderError("SendCloud 短信配置不完整，缺少 SMS_USER 或 SMS_KEY")
+            raise ProviderError("SendCloud 短信配置不完整，缺少 SMS_USER 或 SMS_KEY", reason_code="config_error")
         if not self.template_id:
-            raise ProviderError("SendCloud 短信配置不完整，缺少 SENDCLOUD_SMS_TEMPLATE_ID")
+            raise ProviderError("SendCloud 短信配置不完整，缺少 SENDCLOUD_SMS_TEMPLATE_ID", reason_code="config_error")
 
     def send_code(
         self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, request_id: str | None = None
@@ -294,56 +307,109 @@ class SendCloudSmsProvider(SmsProvider):
                 try:
                     resp_data = json.loads(raw_response.decode("utf-8"))
                 except (ValueError, UnicodeError):
-                    self._send_error("invalid_json", unknown=True)
+                    self._send_error("invalid_response", unknown=True, attempted=True)
                 if (
                     not isinstance(resp_data, dict)
                     or type(resp_data.get("result")) is not bool
                     or type(resp_data.get("statusCode")) is not int
                 ):
-                    self._send_error("invalid_structure", unknown=True)
+                    self._send_error("invalid_response", unknown=True, attempted=True)
                 if resp_data["result"] is not True or resp_data["statusCode"] != 200:
                     status = resp_data["statusCode"]
-                    category = (
-                        "signature"
-                        if status in {421, 422, 4722}
-                        else "template"
-                        if status in set(range(431, 444))
-                        else "quota"
-                        if status == 499
-                        else "business"
+                    category = self._classify_status(status)
+                    self._send_error(
+                        category, status=status, unknown=status == 400, attempted=True, retryable=status in {501, 502}
                     )
-                    self._send_error(category, status=status, unknown=status == 400)
                 if not isinstance(resp_data.get("info", {}), dict):
-                    self._send_error("invalid_structure", unknown=True)
+                    self._send_error("invalid_response", unknown=True, attempted=True)
                 ids = resp_data.get("info", {}).get("smsIds", [])
                 if isinstance(ids, str):
                     ids = [ids]
                 if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
-                    self._send_error("invalid_structure", unknown=True)
+                    self._send_error("invalid_response", unknown=True, attempted=True)
                 return SmsReceipt(True, tuple(ids), send_request_id)
             except ProviderError:
                 raise
             except urllib.error.HTTPError as exc:
                 self._send_error(
-                    "http_4xx" if 400 <= exc.code < 500 else "http_5xx", status=exc.code, unknown=exc.code >= 500
+                    "provider_rejected",
+                    status=exc.code,
+                    unknown=exc.code >= 500,
+                    attempted=True,
+                    retryable=exc.code >= 500,
                 )
             except (TimeoutError, urllib.error.URLError, OSError) as exc:
                 timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
                 category = phase + "_timeout" if timed_out else "connection"
                 logger.warning("SendCloud transport error", extra={"error_type": category, "outcome_unknown": True})
                 if attempt + 1 == self.max_attempts:
-                    raise ProviderError("短信发送状态待核对，请勿重复发起", outcome_unknown=True) from None
+                    raise ProviderError(
+                        "短信发送状态待核对，请勿重复发起",
+                        outcome_unknown=True,
+                        reason_code="network_timeout" if timed_out else "network_error",
+                        retryable=False,
+                        request_attempted=True,
+                    ) from None
                 time.sleep(min(0.25 * (2**attempt) + random.random() * 0.1, 1.0))
         raise ProviderError("短信发送状态待核对，请勿重复发起", outcome_unknown=True)
 
     @staticmethod
-    def _send_error(category: str, *, status: int | None = None, unknown: bool = False):
+    def _classify_status(status: int) -> str:
+        if status in {421, 422, 4722}:
+            return "signature"
+        if status == 432:
+            return "template_not_approved"
+        if status in {*range(431, 444), 4340}:
+            return "template"
+        if status in {471, 472, 4721, 4723, 474}:
+            return "config_error"
+        if status in {473, 602}:
+            return "permission"
+        if status == 499:
+            return "insufficient_balance"
+        if status == 601:
+            return "ip_restricted"
+        if status == 400:
+            return "duplicate_request"
+        if status in {*range(401, 418), *range(451, 486), 491, 496, 497, 498}:
+            return "invalid_parameters"
+        return "provider_rejected"
+
+    @staticmethod
+    def _send_error(
+        category: str,
+        *,
+        status: int | None = None,
+        unknown: bool = False,
+        attempted: bool = False,
+        retryable: bool = False,
+    ):
+        allow = {
+            "signature",
+            "template_not_approved",
+            "template",
+            "permission",
+            "insufficient_balance",
+            "ip_restricted",
+            "invalid_parameters",
+            "provider_rejected",
+            "duplicate_request",
+            "invalid_response",
+            "network_timeout",
+            "config_error",
+        }
+        reason = category if category in allow else "provider_rejected"
         logger.warning(
             "SendCloud request error",
-            extra={"error_type": category, "provider_status": status, "outcome_unknown": unknown},
+            extra={"error_type": reason, "provider_status": status, "outcome_unknown": unknown},
         )
         raise ProviderError(
-            "短信发送状态待核对，请勿重复发起" if unknown else "短信服务暂时不可用，请稍后重试", outcome_unknown=unknown
+            "短信发送状态待核对，请勿重复发起" if unknown else "短信服务暂时不可用，请稍后重试",
+            outcome_unknown=unknown,
+            reason_code=reason,
+            provider_status=status,
+            retryable=retryable,
+            request_attempted=attempted,
         ) from None
 
     def query_status(

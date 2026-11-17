@@ -40,6 +40,8 @@ def test_send_task_receipt_and_stable_retry(monkeypatch):
     assert receipt.provider_ids == ("provider-1",)
 
     assert parse_qs(calls[0])["sendRequestId"] == ["stable-id"]
+    fields = parse_qs(calls[0])
+    assert fields["vars"] == ['{"%code%":"123456"}']
     assert calls[0] == calls[1]
 
 
@@ -59,6 +61,9 @@ def test_business_rejection_not_retried_and_sanitized(monkeypatch, caplog):
         provider.send_task("13800138000", "123456", "reset_password", send_request_id="stable")
     assert len(calls) == 1
     assert not error.value.outcome_unknown
+    assert error.value.reason_code == "invalid_parameters"
+    assert error.value.provider_status == 411
+    assert error.value.request_attempted is True
     assert "123456" not in str(error.value)
 
 
@@ -78,3 +83,50 @@ def test_sendcloud_smsids_field(monkeypatch):
     monkeypatch.setattr(p.urllib.request, "urlopen", lambda *a, **k: R())
     x = p.SendCloudSmsProvider("u", "k", 123).send_task("13800138000", "123456", "bind_phone", send_request_id="abc")
     assert x.provider_ids == ("a", "b")
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        (590, "provider_rejected"),
+        (400, "duplicate_request"),
+        (432, "template_not_approved"),
+        (499, "insufficient_balance"),
+    ],
+)
+def test_provider_status_classification(monkeypatch, status, reason):
+    import modules.security.provider as p
+
+    monkeypatch.setattr(p.urllib.request, "urlopen", lambda *a, **k: Response({"result": False, "statusCode": status}))
+    with pytest.raises(ProviderError) as error:
+        SendCloudSmsProvider("u", "k", 123).send_task("13800138000", "123456", "bind_phone", send_request_id="abc")
+    assert error.value.reason_code == reason
+    assert error.value.provider_status == status
+    assert error.value.request_attempted is True
+    assert error.value.outcome_unknown is (status == 400)
+
+
+def test_accepted_without_sms_ids_is_still_accepted(monkeypatch):
+    import modules.security.provider as p
+
+    monkeypatch.setattr(
+        p.urllib.request, "urlopen", lambda *a, **k: Response({"result": True, "statusCode": 200, "info": {}})
+    )
+    receipt = SendCloudSmsProvider("u", "k", 123).send_task(
+        "13800138000", "123456", "bind_phone", send_request_id="abc"
+    )
+    assert receipt.accepted and receipt.provider_ids == () and receipt.request_id == "abc"
+
+
+def test_invalid_json_is_unknown_and_attempted(monkeypatch):
+    import modules.security.provider as p
+
+    class R(Response):
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr(p.urllib.request, "urlopen", lambda *a, **k: R({}))
+    with pytest.raises(ProviderError) as error:
+        SendCloudSmsProvider("u", "k", 123).send_task("13800138000", "123456", "bind_phone", send_request_id="abc")
+    assert error.value.reason_code == "invalid_response" and error.value.outcome_unknown
+    assert error.value.request_attempted

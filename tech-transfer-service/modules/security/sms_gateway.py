@@ -10,14 +10,16 @@ import json
 import logging
 import re
 import secrets
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from config import settings
 from core.errors import BizError, bad_request
 from db import get_cursor
 from modules.audit.service import record as audit_record
 from modules.security.provider import ProviderError, get_sms_provider
+from modules.security.sms_delivery import DeliveryStageError, DeliveryTaskResult, risk_reason, task_event
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,8 @@ def request_gate(context: SendContext, account: str, phone=None, purpose="reset_
     )
     if not _allowed(decision):
         # Same response independent of eligibility; no bypass from human verification.
+        if "redis" in getattr(decision, "rule_id", ""):
+            raise BizError("TT_COMMON_50301", "安全验证服务暂时不可用，请稍后重试", 503)
         raise BizError("TT_COMMON_42901", "操作过于频繁或需要额外安全验证，请稍后重试", 429)
 
 
@@ -106,23 +110,43 @@ LIMIT 2
 """
 
 
-def start_sms_recovery(account: str, challenge_id: str, context: SendContext, engine=None):
+def start_sms_recovery(account: str, challenge_id: str, context: SendContext, engine=None, *, return_result=False):
     engine = engine or _engine()
     account = account.strip()
     if account.startswith("+86") or re.fullmatch(r"[0-9 -]+", account):
         try:
             account = normalize_phone(account)
         except BizError:
+            if return_result:
+                return DeliveryTaskResult(challenge_id, "INELIGIBLE", "eligibility", "invalid_account_format")
             return recovery_response(challenge_id, "sms")
-    with get_cursor() as cur:
-        cur.execute(ELIGIBLE_SQL, (account, account))
-        rows = cur.fetchall()
+    try:
+        with get_cursor() as cur:
+            cur.execute(ELIGIBLE_SQL, (account, account))
+            rows = cur.fetchall()
+    except Exception:
+        raise DeliveryStageError("eligibility", "database_unavailable") from None
     if len(rows) != 1:
         _audit("recovery.ineligible", context, challenge_id, decision="DENY")
+        if return_result:
+            return DeliveryTaskResult(
+                challenge_id,
+                "INELIGIBLE",
+                "eligibility",
+                "contact_conflict" if len(rows) > 1 else "no_eligible_account",
+            )
         return recovery_response(challenge_id, "sms")
     target = rows[0]
     phone = normalize_phone(target["normalized_value"])
-    _send(target["user_id"], phone, "password_recovery", challenge_id, context, engine)
+    receipt = _send(target["user_id"], phone, "password_recovery", challenge_id, context, engine)
+    if return_result:
+        return DeliveryTaskResult(
+            challenge_id,
+            "COMPLETED",
+            provider_ids=receipt.provider_ids,
+            provider_called=True,
+            challenge_id=challenge_id,
+        )
     return recovery_response(challenge_id, "sms")
 
 
@@ -153,11 +177,16 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
     from modules.security.service import _fingerprint, _hmac_code
 
     if not settings.SMS_ENABLED:
-        raise ProviderError("短信服务未启用")
+        raise DeliveryStageError("config", "sms_disabled")
+    try:
+        provider = get_sms_provider()
+    except ProviderError as exc:
+        raise DeliveryStageError("config", getattr(exc, "reason_code", "provider_config_invalid")) from None
     decision = engine.reserve(phone, str(user_id), context.ip, context.device_id, challenge_id)
     if not _allowed(decision):
         _audit(getattr(decision, "rule_id", "send.limit"), context, challenge_id, decision="THROTTLE")
-        raise BizError("TT_COMMON_42901", "操作过于频繁，请稍后重试", 429)
+        rule = getattr(decision, "rule_id", "sms.risk.blocked")
+        raise DeliveryStageError("risk", risk_reason(rule), risk_rule_id=rule)
     code = f"{secrets.randbelow(1_000_000):06d}"
     ttl = settings.SMS_CODE_TTL_SECONDS
     try:
@@ -197,9 +226,8 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
             )
     except Exception:
         engine.transition(challenge_id, "rejected")
-        raise
+        raise DeliveryStageError("challenge_create", "database_write_failed") from None
     try:
-        provider = get_sms_provider()
         receipt = provider.send_task(
             phone,
             code,
@@ -213,11 +241,41 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
         unknown = not isinstance(exc, ProviderError) or getattr(exc, "outcome_unknown", False)
         state = "unknown" if unknown else "rejected"
         # Ambiguous delivery is not retried by creating a fresh OTP.
-        _set_send_state(challenge_id, state, [], context)
         engine.transition(challenge_id, state)
-        raise ProviderError("短信发送状态待核对" if unknown else "短信服务暂时不可用") from None
-    _set_send_state(challenge_id, "accepted", list(receipt.provider_ids), context)
+        try:
+            _set_send_state(challenge_id, state, [], context)
+        except Exception:
+            raise DeliveryStageError(
+                "receipt_persist",
+                "database_write_failed",
+                outcome_unknown=unknown,
+                provider_called=getattr(exc, "request_attempted", unknown),
+                provider_status=getattr(exc, "provider_status", None),
+            ) from None
+        if isinstance(exc, ProviderError):
+            raise DeliveryStageError(
+                "provider",
+                getattr(exc, "reason_code", "provider_rejected"),
+                outcome_unknown=unknown,
+                provider_called=getattr(exc, "request_attempted", unknown),
+                provider_status=getattr(exc, "provider_status", None),
+                retryable=getattr(exc, "retryable", False),
+            ) from None
+        raise DeliveryStageError(
+            "provider", "unexpected_provider_error", outcome_unknown=True, provider_called=True
+        ) from None
+    try:
+        _set_send_state(challenge_id, "accepted", list(receipt.provider_ids), context)
+    except Exception:
+        raise DeliveryStageError(
+            "receipt_persist",
+            "database_write_failed",
+            provider_ids=receipt.provider_ids,
+            provider_called=True,
+            outcome_unknown=True,
+        ) from None
     engine.transition(challenge_id, "accepted")
+    return receipt
 
 
 def _set_send_state(challenge_id, state, provider_ids, context):
@@ -241,15 +299,56 @@ def _set_send_state(challenge_id, state, provider_ids, context):
 
 def run_recovery_task(account, channel, challenge_id, context):
     """Run after uniform HTTP response. Never expose business/provider outcome."""
+    start = time.monotonic()
+    exception_type = None
     try:
         if channel == "sms":
-            start_sms_recovery(account, challenge_id, context)
+            result = start_sms_recovery(account, challenge_id, context, return_result=True)
         else:
             from modules.security.service import start_password_recovery
 
-            start_password_recovery(account, channel, challenge_id=challenge_id)
-    except Exception:
-        logger.warning("Recovery task did not complete request_id=%s", context.request_id)
+            value = start_password_recovery(account, channel, challenge_id=challenge_id)
+            result = DeliveryTaskResult(
+                challenge_id,
+                "COMPLETED" if value.get("challengeId") else "INELIGIBLE",
+                challenge_id=value.get("challengeId"),
+            )
+        if not isinstance(result, DeliveryTaskResult):
+            raise TypeError("delivery_result_missing")
+    except ProviderError as exc:
+        exception_type = type(exc).__name__
+        stage = getattr(exc, "stage", "provider")
+        unknown = exc.outcome_unknown
+        outcome = (
+            "RISK_BLOCKED"
+            if stage == "risk"
+            else "CONFIG_ERROR"
+            if stage == "config"
+            else "INTERNAL_ERROR"
+            if stage in {"eligibility", "challenge_create", "receipt_persist"}
+            else "PROVIDER_UNKNOWN"
+            if unknown
+            else "PROVIDER_REJECTED"
+        )
+        result = DeliveryTaskResult(
+            challenge_id,
+            outcome,
+            stage,
+            getattr(exc, "reason_code", "provider_error"),
+            provider_status=getattr(exc, "provider_status", None),
+            provider_ids=getattr(exc, "provider_ids", ()),
+            retryable=getattr(exc, "retryable", False),
+            outcome_unknown=unknown,
+            risk_rule_id=getattr(exc, "risk_rule_id", None),
+            provider_called=getattr(exc, "request_attempted", False),
+            challenge_id=challenge_id if stage not in {"risk", "config", "eligibility"} else None,
+        )
+    except Exception as exc:
+        exception_type = type(exc).__name__
+        result = DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "task", "unexpected_exception")
+    result = replace(result, elapsed_ms=max(0, int((time.monotonic() - start) * 1000)))
+    task_event(logger, result, context.request_id, "task_result", exception_type)
+    return result
 
 
 def enqueue_recovery_task(account, channel, challenge_id, context):
@@ -263,8 +362,8 @@ def enqueue_recovery_task(account, channel, challenge_id, context):
     }
     with get_cursor(commit=True) as cur:
         cur.execute(
-            "INSERT INTO security_delivery_request(id,payload) VALUES(%s,%s::jsonb)",
-            (challenge_id, json.dumps(payload)),
+            "INSERT INTO security_delivery_request(id,payload,request_id) VALUES(%s,%s::jsonb,%s)",
+            (challenge_id, json.dumps(payload), context.request_id),
         )
 
 
@@ -281,12 +380,54 @@ def run_queued_recovery_task(challenge_id):
         return False
     data = row["payload"]
     # Never regenerate a code for processing/unknown tasks after a worker crash.
-    run_recovery_task(
-        data["account"], data["channel"], challenge_id, SendContext(data["ip"], data["device_id"], data["request_id"])
-    )
+    try:
+        result = run_recovery_task(
+            data["account"],
+            data["channel"],
+            challenge_id,
+            SendContext(data["ip"], data["device_id"], data["request_id"]),
+        )
+        if not isinstance(result, DeliveryTaskResult):
+            raise TypeError("delivery_result_missing")
+    except Exception as exc:
+        result = DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "task", "unexpected_worker_exception")
+        task_event(logger, result, data.get("request_id"), "worker_error", type(exc).__name__)
     with get_cursor(commit=True) as cur:
         cur.execute(
-            "UPDATE security_delivery_request SET state='finished',finished_at=NOW() WHERE id=%s", (challenge_id,)
+            """UPDATE security_delivery_request SET state=%s,outcome=%s,failure_stage=%s,failure_reason=%s,
+              provider_status=%s,risk_rule_id=%s,provider_ids=%s::jsonb,outcome_unknown=%s,retryable=%s,
+              elapsed_ms=%s,provider_called=%s,finished_at=NOW() WHERE id=%s AND state='processing'""",
+            (
+                result.queue_state,
+                result.outcome,
+                result.failure_stage,
+                result.failure_reason,
+                result.provider_status,
+                result.risk_rule_id,
+                json.dumps(result.provider_ids),
+                result.outcome_unknown,
+                result.retryable,
+                result.elapsed_ms,
+                result.provider_called,
+                challenge_id,
+            ),
+        )
+        audit_record(
+            "sms.task_result",
+            "security_delivery_request",
+            resource_id=challenge_id,
+            request_id=data.get("request_id"),
+            details={
+                "outcome": result.outcome,
+                "stage": result.failure_stage,
+                "reason_code": result.failure_reason,
+                "risk_rule_id": result.risk_rule_id,
+                "provider_status": result.provider_status,
+                "outcome_unknown": result.outcome_unknown,
+                "provider_called": result.provider_called,
+                "elapsed_ms": result.elapsed_ms,
+            },
+            cur=cur,
         )
     return True
 
