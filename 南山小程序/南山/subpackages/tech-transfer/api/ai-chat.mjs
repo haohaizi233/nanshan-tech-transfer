@@ -3,6 +3,29 @@
  * 需求匹配走 /匹配 技能；自由问答由真实 agent 返回介绍、推荐与平台操作指导。
  */
 
+// 使用节点而非拼接 HTML，模型输出不能注入标签或事件属性。
+export function formatReplyNodes(value) {
+  return String(value ?? '').replace(/\r\n?/g, '\n').split('\n')
+    .map(line => line.trim()).filter(Boolean).map(line => {
+      const heading = line.match(/^#{1,6}\s+(.+)$/)
+      const list = /^(?:[-*+]\s+|\d+[.、)]\s*)/.test(line)
+      const quote = /^>\s?/.test(line)
+      const content = heading ? heading[1] : quote ? line.replace(/^>\s?/, '') : line
+      const children = content.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean).map(part => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return { name: 'strong', children: [{ type: 'text', text: part.slice(2, -2) }] }
+        }
+        if (part.startsWith('`') && part.endsWith('`')) {
+          return { name: 'code', attrs: { style: 'background:#f1f5f9;padding:0 4px;border-radius:3px;' }, children: [{ type: 'text', text: part.slice(1, -1) }] }
+        }
+        return { type: 'text', text: part }
+      })
+      const style = 'margin:0 0 12px;line-height:1.85;word-break:break-word;'
+        + (heading ? 'font-weight:600;font-size:1.08em;' : list ? 'padding-left:1em;' : quote ? 'border-left:3px solid #cbd5e1;padding-left:12px;color:#64748b;' : 'text-indent:2em;')
+      return { name: 'div', attrs: { style }, children }
+    })
+}
+
 export const WELCOME =
   '你好，我是南山科转通 AI 助手。本页回答由人工智能生成，仅供参考。\n\n我可以查找和介绍成果、结合场景推荐并说明依据，也能介绍平台功能、指导发布、收藏、认证和对接操作。你可以问「介绍机器视觉成果」「推荐用于工业质检的成果」「怎么发布需求」。信息不足时我会追问，不会编造成果或效果。也可输入 / 调用命令：/评估（AI 评估成果）、/搜索（找成果或需求）、/匹配（按我的已发布需求推荐技术成果）、/帮助（查看全部命令）。'
 

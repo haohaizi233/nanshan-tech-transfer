@@ -12,6 +12,7 @@
 			<text class="header__title">AI 智能匹配</text>
 			<text class="header__desc">对话描述需求，或输入 / 调用技能</text>
 			<AiGeneratedMark class="header__mark" />
+			<text class="header__scope">检索提示：匹配结果不包含您自己发布的需求和成果。</text>
 			<text class="header__desc" @click="clearConversation">清空对话</text>
 		</view>
 
@@ -41,14 +42,15 @@
 					<AiGeneratedMark v-if="msg.role !== 'user'" mode="badge" />
 					<view :class="bubbleClass(msg)">
 						<text v-if="isCommandMessage(msg)" class="bubble__command-tag">⚡ 命令</text>
-						<text class="bubble__text">{{ displayText(msg) }}</text>
+						<text v-if="msg.role === 'user'" class="bubble__text">{{ displayText(msg) }}</text>
+						<rich-text v-else class="reply-rich-text" :nodes="formatReplyNodes(displayText(msg))" :selectable="true" />
 					</view>
 				</view>
 
 				<view v-else class="msg msg--bot msg--block">
 					<AiGeneratedMark mode="badge" />
 					<view class="panel">
-						<text v-if="msg.content && msg.type !== 'help-commands'" class="panel__text">{{ msg.content }}</text>
+						<rich-text v-if="msg.content && msg.type !== 'help-commands'" class="reply-rich-text panel__reply" :nodes="formatReplyNodes(msg.content)" :selectable="true" />
 
 						<view v-if="msg.type === 'demand-empty'" class="panel__actions">
 							<button class="primary-btn" size="mini" @click="goPostDemand">去发布需求</button>
@@ -290,6 +292,7 @@
 		buildHelpText,
 		buildHelpCommands,
 		formatAgentReply,
+		formatReplyNodes,
 		cardNavigateTarget
 	} from '../../api/ai-chat.mjs'
 	import {
@@ -530,6 +533,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		this.persistQueue()
 	},
 	methods: {
+		formatReplyNodes,
 		stopEvaluationTasks(clear = false) {
 			this._evaluationMonitor?.dispose()
 			this._evaluationMonitor = null
@@ -1447,6 +1451,26 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		margin-top: 16rpx;
 	}
 
+	.header__scope {
+		display: block;
+		margin-top: 12rpx;
+		font-size: 24rpx;
+		line-height: 1.6;
+		color: #64748b;
+	}
+
+	.reply-rich-text {
+		display: block;
+		font-size: 28rpx;
+		color: #334155;
+		line-height: 1.85;
+		overflow-wrap: anywhere;
+	}
+
+	.panel__reply {
+		margin-bottom: 16rpx;
+	}
+
 	.chat-scroll {
 		flex: 1 1 auto;
 		height: 0;
@@ -1482,6 +1506,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	}
 
 	.bubble--bot {
+		max-width: 100%;
 		background: #ffffff;
 		border: 1rpx solid #e8ecf2;
 		border-top-left-radius: 8rpx;
