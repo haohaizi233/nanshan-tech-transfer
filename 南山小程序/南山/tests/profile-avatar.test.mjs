@@ -67,5 +67,6 @@ test('initial password uses the same whitespace normalization as password login'
   await api.setInitialPassword(' 12345678 ')
   assert.equal(api.calls[0][3].newPassword, '12345678')
   await assert.rejects(api.setInitialPassword(' short '), /8/)
-  assert.equal(api.calls.length, 2)
+  // The password POST revokes the session; no profile GET follows it.
+  assert.equal(api.calls.length, 1)
 })
