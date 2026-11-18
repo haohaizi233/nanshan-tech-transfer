@@ -656,11 +656,11 @@
 	/* 通用卡片：方框区分每条记录 */
 	.card {
 		background-color: #ffffff;
-		border-radius: 16rpx;
-		border: 1rpx solid #e8ecf2;
-		padding: 28rpx;
+		border-radius: 20rpx;
+		border: 1rpx solid #edf1f7;
+		padding: 30rpx;
 		margin-bottom: 24rpx;
-		box-shadow: 0 4rpx 16rpx rgba(20, 40, 80, 0.04);
+		box-shadow: 0 6rpx 20rpx rgba(15, 34, 67, 0.04);
 	}
 
 	.card-head {
@@ -781,6 +781,10 @@
 
 	.info-text-user-text {
 		text-indent: 2em;
+		line-height: 1.75;
+		text-align: justify;
+		word-break: break-word;
+		color: #4a5568;
 	}
 
 	.info-text-muted {

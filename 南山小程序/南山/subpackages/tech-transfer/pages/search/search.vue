@@ -74,7 +74,7 @@
 							<text>认证</text>
 						</view>
 					</view>
-					<text class="desc">{{ item.demandDesc }}</text>
+					<rich-text v-if="item.demandDesc" class="desc card-rich-desc" :nodes="formatCardRichNodes(item.demandDesc)" />
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn dock-btn" size="mini" style="margin-left: auto !important; margin-right: 0 !important;" @click.stop="openDetail('demand', item.id)">我要对接</button>
 					</view>
@@ -95,7 +95,7 @@
 							<text>认证</text>
 						</view>
 					</view>
-					<text v-if="item.techIntro" class="desc">{{ item.techIntro }}</text>
+					<rich-text v-if="item.techIntro" class="desc card-rich-desc" :nodes="formatCardRichNodes(item.techIntro)" />
 					<view v-if="item.canDock" class="card-foot">
 						<button class="btn dock-btn" size="mini" style="margin-left: auto !important; margin-right: 0 !important;" @click.stop="openDetail('result', item.id)">我要对接</button>
 					</view>
@@ -125,6 +125,7 @@
 	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
 	import { getDemands, toDemandCard } from '../../api/demand.js'
 	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
+	import { formatCardRichNodes } from '../../utils/card-rich-text.mjs'
 
 	export default {
 		mixins: [createPageStateMixin({
@@ -192,6 +193,9 @@
 			}
 		},
 		methods: {
+			formatCardRichNodes(text) {
+				return formatCardRichNodes(text)
+			},
 			loadHistory() {
 				this.demandHistory = getDemandSearchHistory() || []
 				this.resultHistory = getResultSearchHistory() || []
@@ -497,10 +501,11 @@
 
 	.card {
 		background: #ffffff;
-		border-radius: 16rpx;
-		padding: 28rpx;
-		margin-bottom: 20rpx;
-		border: 1rpx solid #e8ecf2;
+		border-radius: 20rpx;
+		padding: 30rpx;
+		margin-bottom: 24rpx;
+		border: 1rpx solid #edf1f7;
+		box-shadow: 0 6rpx 20rpx rgba(15, 34, 67, 0.04);
 	}
 
 	.card-head {
@@ -558,11 +563,17 @@
 		margin-right: 0;
 	}
 
-	.desc {
+	.desc,
+	.card-rich-desc {
 		display: block;
 		font-size: 26rpx;
-		color: #333333;
-		line-height: 1.5;
+		color: #4a5568;
+		line-height: 1.75;
+		text-align: justify;
+		word-break: break-word;
+		text-indent: 2em;
+		margin-top: 10rpx;
+		margin-bottom: 12rpx;
 	}
 
 	.card-foot {

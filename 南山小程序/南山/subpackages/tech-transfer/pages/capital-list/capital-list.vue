@@ -345,10 +345,11 @@
 	.card,
 	.org-card {
 		background: #ffffff;
-		border-radius: 16rpx;
-		border: 1rpx solid #e8ecf2;
-		padding: 28rpx;
-		margin-bottom: 20rpx;
+		border-radius: 20rpx;
+		border: 1rpx solid #edf1f7;
+		padding: 30rpx;
+		margin-bottom: 24rpx;
+		box-shadow: 0 6rpx 20rpx rgba(15, 34, 67, 0.04);
 	}
 
 	.org-card__top {
@@ -453,8 +454,11 @@
 	.block__text {
 		display: block;
 		font-size: 26rpx;
-		color: #555555;
-		line-height: 1.55;
+		color: #4a5568;
+		line-height: 1.75;
+		text-align: justify;
+		word-break: break-word;
+		text-indent: 2em;
 	}
 
 	.contact {

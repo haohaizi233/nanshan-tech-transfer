@@ -416,10 +416,11 @@ export default {
 
 .card {
   background: #fff;
-  border-radius: 16rpx;
-  border: 1rpx solid #e8ecf2;
-  padding: 28rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid #edf1f7;
+  padding: 30rpx;
   margin-bottom: 24rpx;
+  box-shadow: 0 6rpx 20rpx rgba(15, 34, 67, 0.04);
 }
 
 .industry-bar {
@@ -522,11 +523,13 @@ export default {
 .tech-intro {
 	display: block;
 	font-size: 26rpx;
-	color: #555;
-	line-height: 1.5;
+	color: #4a5568;
+	line-height: 1.75;
 	margin-bottom: 16rpx;
 	/* 人工填写的摘要与详情正文使用相同的两字符首行缩进。 */
 	text-indent: 2em;
+	text-align: justify;
+	word-break: break-word;
 	-webkit-line-clamp: 2;
 	overflow: hidden;
 	text-overflow: ellipsis;

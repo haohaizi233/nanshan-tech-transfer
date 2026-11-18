@@ -1840,6 +1840,9 @@
   width: 100%;
   height: 100%;
   opacity: 0.92;
+  mix-blend-mode: multiply;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, transparent 22%, #000000 68%);
+  mask-image: linear-gradient(to right, transparent 0%, transparent 22%, #000000 68%);
 }
 
 	.org-card-content {

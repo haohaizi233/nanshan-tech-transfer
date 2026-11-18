@@ -576,10 +576,11 @@ export default {
 
 .card {
   background: #fff;
-  border-radius: 16rpx;
-  border: 1rpx solid #e8ecf2;
-  padding: 28rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid #edf1f7;
+  padding: 30rpx;
   margin-bottom: 24rpx;
+  box-shadow: 0 6rpx 20rpx rgba(15, 34, 67, 0.04);
 }
 
 .card-head {
@@ -636,9 +637,11 @@ export default {
 .tech-intro {
   display: block;
   font-size: 26rpx;
-  color: #555;
+  color: #4a5568;
 	text-indent: 2em;
-  line-height: 1.5;
+  line-height: 1.75;
+  text-align: justify;
+  word-break: break-word;
 }
 
 .load-more {

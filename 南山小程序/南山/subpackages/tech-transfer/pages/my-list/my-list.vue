@@ -52,7 +52,7 @@
 			<text v-if="item._intentLabel" class="sub">合作意向：{{ item._intentLabel }}</text>
 			<text v-if="item._sub" class="sub">{{ item._sub }}</text>
 			<text v-if="item._statusHint" :class="'review-hint review-hint-' + item._statusCls">{{ item._statusHint }}</text>
-			<text class="desc">{{ item._desc }}</text>
+			<rich-text v-if="item._desc" class="desc card-rich-desc" :nodes="formatCardRichNodes(item._desc)" />
 			<!-- AI 评估入口摘要：已有评估直接展示最近结果（总分 + 等级），不再永远是“AI 评估” -->
 			<view v-if="pageType === 'result' && aiEnabled && item._eval" class="eval-summary">
 				<text class="eval-summary__label">AI 评估</text>
@@ -92,6 +92,7 @@
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 	import { createPageStateMixin, getPageStateScope, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
+	import { formatCardRichNodes } from '../../utils/card-rich-text.mjs'
 	import {
 		getMyFavorites,
 		removeFavorite,
@@ -195,6 +196,9 @@
 			}
 		},
 		methods: {
+			formatCardRichNodes(text) {
+				return formatCardRichNodes(text)
+			},
 			currentListContext() {
 				return JSON.stringify([this.pageType, this.publicationTab, this.intentTab])
 			},
@@ -573,10 +577,11 @@
 
 	.card {
 		background: #ffffff;
-		border-radius: 16rpx;
-		padding: 28rpx;
-		margin-bottom: 20rpx;
-		border: 1rpx solid #e8ecf2;
+		border-radius: 20rpx;
+		padding: 30rpx;
+		margin-bottom: 24rpx;
+		border: 1rpx solid #edf1f7;
+		box-shadow: 0 6rpx 20rpx rgba(15, 34, 67, 0.04);
 	}
 
 	.card-head {
@@ -682,11 +687,17 @@
 	.review-hint-draft,
 	.review-hint-accepted { color: #666666; }
 
-	.desc {
+	.desc,
+	.card-rich-desc {
 		display: block;
 		font-size: 26rpx;
 		color: #444444;
-		line-height: 1.5;
+		line-height: 1.75;
+		text-align: justify;
+		word-break: break-word;
+		text-indent: 2em;
+		margin-top: 10rpx;
+		margin-bottom: 12rpx;
 	}
 
 	/* AI 评估入口摘要：最近一次评估的总分 + 等级 */
@@ -722,14 +733,27 @@
 	}
 
 	.card-foot {
-		margin-top: 16rpx;
+		margin-top: 20rpx;
 		display: flex;
 		justify-content: flex-end;
+		gap: 16rpx;
+	}
+
+	.btn {
+		background: #2b73f8 !important;
+		color: #ffffff !important;
+		border-radius: 32rpx !important;
+		font-size: 26rpx !important;
+		padding: 0 28rpx !important;
+		height: 60rpx !important;
+		line-height: 60rpx !important;
+		margin: 0 !important;
+		border: none !important;
 	}
 
 	.btn.ghost {
-		background: #ffffff !important;
-		color: #666666 !important;
-		border: 1rpx solid #dddddd !important;
+		background: #f8fafc !important;
+		color: #555555 !important;
+		border: 1rpx solid #dcdfe6 !important;
 	}
 </style>
