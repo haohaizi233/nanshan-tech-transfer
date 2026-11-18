@@ -13,6 +13,7 @@ import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
+import time as _time
 from enum import StrEnum
 from functools import lru_cache
 from zoneinfo import ZoneInfo
@@ -55,7 +56,8 @@ def day_bucket(now: datetime, timezone: str) -> tuple[str, int]:
 # denied attempts, bounded at limit+1. Daily keys expire at business midnight.
 REQUEST_LUA = """
 local spec=cjson.decode(ARGV[1]); local member=ARGV[2]
-local t=redis.call('TIME'); local now=tonumber(t[1])+tonumber(t[2])/1000000
+local now=tonumber(ARGV[3]) or 0
+if now<=0 then local t=redis.call('TIME'); now=tonumber(t[1])+tonumber(t[2])/1000000 end
 local result={'ALLOW','sms.allow','0'}
 for _,r in ipairs(spec.rates) do
  local n=0
@@ -86,7 +88,8 @@ if redis.call('EXISTS',s.uncertainty)==1 then return {'THROTTLE','sms.phone.pend
 for _,r in ipairs(s.cooldowns) do
  if redis.call('EXISTS',r.key)==1 then return {'THROTTLE',r.rule,tostring(redis.call('TTL',r.key))} end
 end
-local t=redis.call('TIME'); local now=tonumber(t[1])+tonumber(t[2])/1000000
+local now=tonumber(ARGV[3]) or 0
+if now<=0 then local t=redis.call('TIME'); now=tonumber(t[1])+tonumber(t[2])/1000000 end
 for _,r in ipairs(s.rates) do
  redis.call('ZREMRANGEBYSCORE',r.key,'-inf',now-r.window)
  if redis.call('ZCARD',r.key)>=r.limit then return {'THROTTLE',r.rule,tostring(r.window)} end
@@ -164,7 +167,8 @@ class SmsRiskEngine:
         )
 
     def _eval(self, script, spec):
-        result = self._client().eval(script, 1, self.prefix + "anchor", json.dumps(spec), uuid.uuid4().hex)
+        now_ts = str(_time.time())
+        result = self._client().eval(script, 1, self.prefix + "anchor", json.dumps(spec), uuid.uuid4().hex, now_ts)
         return RiskDecision(DecisionAction(result[0]), result[1], int(result[2]))
 
     def check_request(self, ip, account, device_id, phone=None, purpose="reset_password"):
