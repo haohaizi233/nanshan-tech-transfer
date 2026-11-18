@@ -181,16 +181,22 @@ def start_sms_recovery(account: str, challenge_id: str, context: SendContext, en
         raise DeliveryStageError("eligibility", "database_unavailable") from None
     if len(rows) != 1:
         _audit("recovery.ineligible", context, challenge_id, decision="DENY")
+        try:
+            ineligible_reason = "contact_conflict" if len(rows) > 1 else eligibility_reason(account)
+        except Exception:
+            ineligible_reason = "diagnosis_failed"
+        logger.info(
+            "找回密码请求未派发短信：账号不符合确权资格 (reason=%s, challenge_id=%s)；"
+            "接口按防枚举规范返回统一提示，未向供应商发信",
+            ineligible_reason,
+            challenge_id,
+        )
         if return_result:
-            try:
-                reason = "contact_conflict" if len(rows) > 1 else eligibility_reason(account)
-            except Exception:
-                raise DeliveryStageError("eligibility", "database_unavailable") from None
             return DeliveryTaskResult(
                 challenge_id,
                 "INELIGIBLE",
                 "eligibility",
-                reason if reason != "eligible" else "eligibility_changed",
+                ineligible_reason if ineligible_reason != "eligible" else "eligibility_changed",
             )
         return recovery_response(challenge_id, "sms")
     target = rows[0]

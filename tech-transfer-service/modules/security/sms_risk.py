@@ -172,6 +172,8 @@ class SmsRiskEngine:
             return RiskDecision(DecisionAction.DENY, "sms.risk.disabled")
         if purpose not in {"reset_password", "bind_phone"}:
             return RiskDecision(DecisionAction.DENY, "sms.purpose.disabled")
+        if self.redis is None and not self.config.REDIS_ENABLED and self.config.APP_ENV in {"local", "development"}:
+            return RiskDecision(DecisionAction.ALLOW, "sms.allow.dev_mode")
         try:
             day, ttl = self._day()
             rates = []
@@ -241,6 +243,8 @@ class SmsRiskEngine:
     def reserve(self, phone, account, ip, device_id, reservation_id):
         if not self.config.SMS_RISK_ENGINE_ENABLED or not self.config.SMS_REQUIRE_VERIFIED_CONTACT:
             return RiskDecision(DecisionAction.DENY, "sms.policy.disabled")
+        if self.redis is None and not self.config.REDIS_ENABLED and self.config.APP_ENV in {"local", "development"}:
+            return RiskDecision(DecisionAction.ALLOW, "sms.quota.dev_mode")
         try:
             day, ttl = self._day()
             c = self.config
@@ -320,6 +324,8 @@ class SmsRiskEngine:
     def transition(self, reservation_id, state):
         if state not in {"accepted", "rejected", "unknown", "delivered"}:
             raise ValueError("invalid reservation state")
+        if self.redis is None and not self.config.REDIS_ENABLED and self.config.APP_ENV in {"local", "development"}:
+            return True
         try:
             return bool(self._client().eval(TRANSITION_LUA, 1, self._key("reservation", reservation_id), state))
         except Exception:
