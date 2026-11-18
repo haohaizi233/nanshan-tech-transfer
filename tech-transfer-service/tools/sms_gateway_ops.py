@@ -62,6 +62,7 @@ def main():
         if not args.phone:
             parser.error("--phone is required for diagnose-phone")
         from modules.security.provider import get_sms_provider
+
         provider = get_sms_provider()
         if not hasattr(provider, "query_status"):
             parser.error("Provider does not support status query")
@@ -69,7 +70,10 @@ def main():
         if clean_phone.startswith("+86"):
             clean_phone = clean_phone[3:]
         # 查询最近 3 天的投递记录
-        import urllib.parse, urllib.request, hashlib
+        import hashlib
+        import urllib.parse
+        import urllib.request
+
         payload = {
             "smsUser": provider.sms_user,
             "days": "3",
@@ -83,7 +87,7 @@ def main():
             provider.STATUS_URL,
             data=urllib.parse.urlencode(payload).encode(),
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST"
+            method="POST",
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -91,47 +95,73 @@ def main():
             all_records = data.get("info", {}).get("voList", []) if data.get("result") else []
             phone_records = [r for r in all_records if str(r.get("receiver", "")).endswith(clean_phone[-11:])]
             if not phone_records:
-                print(json.dumps({
-                    "phone": clean_phone,
-                    "records_found": 0,
-                    "message": "近3天在SendCloud未找到该号码的投递记录；请确认是否曾通过API发起发送"
-                }, ensure_ascii=False, indent=2))
+                print(
+                    json.dumps(
+                        {
+                            "phone": clean_phone,
+                            "records_found": 0,
+                            "message": "近3天在SendCloud未找到该号码的投递记录；请确认是否曾通过API发起发送",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
             else:
                 summary = []
                 for r in phone_records:
                     status_code = r.get("statusCode")
                     send_log = r.get("sendLog")
-                    diag = "投递成功" if status_code == 200 else "运营商通道/签名拦截(4121)，需联系SendCloud工单报备" if str(send_log) == "4121" else f"投递失败({status_code}/{send_log})"
-                    summary.append({
-                        "request_time": r.get("requestTime"),
-                        "status": r.get("status"),
-                        "status_code": status_code,
-                        "send_log": send_log,
-                        "template_id": r.get("templateId"),
-                        "diagnosis": diag
-                    })
-                print(json.dumps({
-                    "phone": clean_phone,
-                    "records_found": len(phone_records),
-                    "latest": summary[0] if summary else None,
-                    "all_recent": summary
-                }, ensure_ascii=False, indent=2))
+                    diag = (
+                        "投递成功"
+                        if status_code == 200
+                        else "运营商通道/签名拦截(4121)，需联系SendCloud工单报备"
+                        if str(send_log) == "4121"
+                        else f"投递失败({status_code}/{send_log})"
+                    )
+                    summary.append(
+                        {
+                            "request_time": r.get("requestTime"),
+                            "status": r.get("status"),
+                            "status_code": status_code,
+                            "send_log": send_log,
+                            "template_id": r.get("templateId"),
+                            "diagnosis": diag,
+                        }
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "phone": clean_phone,
+                            "records_found": len(phone_records),
+                            "latest": summary[0] if summary else None,
+                            "all_recent": summary,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
         except Exception as e:
             print(json.dumps({"error": str(e), "message": "查询SendCloud状态失败"}, ensure_ascii=False))
     elif args.action == "direct-send":
         if not args.phone:
             parser.error("--phone is required for direct-send")
         from modules.security.provider import get_sms_provider
+
         provider = get_sms_provider()
         test_code = args.code or "123456"
         task_id = args.challenge_id or str(uuid.uuid4())
         receipt = provider.send_task(args.phone, test_code, "bind_phone", 300, send_request_id=task_id)
-        print(json.dumps({
-            "status": "accepted" if receipt.accepted else "failed",
-            "provider_ids": list(receipt.provider_ids),
-            "request_id": receipt.request_id,
-            "message": "SendCloud request accepted. Use reconcile or status/query to verify downstream delivery."
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "status": "accepted" if receipt.accepted else "failed",
+                    "provider_ids": list(receipt.provider_ids),
+                    "request_id": receipt.request_id,
+                    "message": "SendCloud request accepted. Use reconcile or status/query to verify downstream delivery.",
+                },
+                ensure_ascii=False,
+            )
+        )
     elif args.action == "config-check":
         print(json.dumps(config_check(), ensure_ascii=False))
     elif args.action == "queue-check":
