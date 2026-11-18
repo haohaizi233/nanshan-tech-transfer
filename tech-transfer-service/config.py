@@ -149,6 +149,15 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "postgres123"  # 本地开发默认值；staging/production 必须由环境提供
     DB_NAME: str = "tech_transfer"
 
+    @field_validator("DB_PASSWORD", mode="before")
+    @classmethod
+    def _fallback_db_password(cls, v):
+        if not v or v == "postgres123":
+            alt = os.environ.get("DB_PWD") or os.environ.get("DB_PWD_READONLY")
+            if alt:
+                return alt
+        return v
+
     # ── DB 连接池（T007：psycopg2 ThreadedConnectionPool，进程内）──
     # 规模约束：uvicorn worker 数 × DB_POOL_MAX ≤ PostgreSQL max_connections；
     # 本地默认单 worker；「我的」页会并发打出十余个 /me/* 查询，max=20 留余量
