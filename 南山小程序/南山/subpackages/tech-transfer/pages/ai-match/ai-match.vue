@@ -108,24 +108,6 @@
 									<text class="agent-card__advice-label">AI适配解读（供参考）</text>
 									<text class="agent-card__advice-text">{{ card.advisorInsight }}</text>
 								</view>
-								<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
-								<view v-if="card.evaluationView" class="chat-evaluation" @click.stop>
-									<text class="chat-evaluation__status">{{ card.evaluationView.label }}</text>
-									<text v-if="card.evaluationView.totalScore != null" class="chat-evaluation__score">综合评分：{{ card.evaluationView.totalScore }} 分</text>
-									<view v-if="card.evaluationView.dimensions.length" class="agent-card__meta">
-										<text v-for="dimension in card.evaluationView.dimensions" :key="dimension.key" class="meta-chip">{{ dimension.label || dimensionLabel(dimension.key) }}：{{ dimension.score }}</text>
-									</view>
-									<text v-if="card.evaluationView.conclusion" class="chat-evaluation__text">{{ card.evaluationView.conclusion }}</text>
-									<text v-for="(highlight, index) in card.evaluationView.highlights" :key="'highlight-' + index" class="chat-evaluation__text">· {{ highlight }}</text>
-									<view v-for="(section, index) in card.evaluationView.sections" :key="'section-' + index" class="chat-evaluation__section">
-										<text class="chat-evaluation__heading">{{ section.heading }}</text>
-										<text class="chat-evaluation__text">{{ section.content }}</text>
-									</view>
-									<button size="mini" @click.stop="openCard(card)">查看完整评估</button>
-								</view>
-								<button v-if="referenceForCard(msg, card)" size="mini" :disabled="typing" @click.stop="introduceCard(msg, card)">介绍这项</button>
-								<button v-if="card.pickAction === 'evaluate' || card.pickAction === 'view-evaluation'" size="mini" :disabled="typing" @click.stop="pickEvaluate(card)">{{ card.pickAction === 'view-evaluation' ? '查看评估' : '评估这个' }}</button>
-
 								<view v-if="card.card_type === 'achievement'" class="agent-card__meta">
 									<text v-if="card.maturity && card.maturity.label" class="meta-chip">成熟度：{{ card.maturity.label }}</text>
 									<text v-if="card.price && card.price.text" class="meta-chip">价格：{{ card.price.text }}</text>
@@ -149,6 +131,41 @@
 								<view v-if="card.advisorCautions && card.advisorCautions.length" class="agent-card__advice agent-card__advice--caution">
 									<text class="agent-card__advice-label">待确认</text>
 									<text v-for="(concern, index) in card.advisorCautions" :key="index" class="agent-card__advice-text">{{ concern }}</text>
+								</view>
+
+								<view v-if="card.evaluationView" class="chat-evaluation" @click.stop>
+									<text class="chat-evaluation__status">{{ card.evaluationView.label }}</text>
+									<text v-if="card.evaluationView.totalScore != null" class="chat-evaluation__score">综合评分：{{ card.evaluationView.totalScore }} 分</text>
+									<view v-if="card.evaluationView.dimensions.length" class="agent-card__meta">
+										<text v-for="dimension in card.evaluationView.dimensions" :key="dimension.key" class="meta-chip">{{ dimension.label || dimensionLabel(dimension.key) }}：{{ dimension.score }}</text>
+									</view>
+									<text v-if="card.evaluationView.conclusion" class="chat-evaluation__text">{{ card.evaluationView.conclusion }}</text>
+									<text v-for="(highlight, index) in card.evaluationView.highlights" :key="'highlight-' + index" class="chat-evaluation__text">· {{ highlight }}</text>
+									<view v-for="(section, index) in card.evaluationView.sections" :key="'section-' + index" class="chat-evaluation__section">
+										<text class="chat-evaluation__heading">{{ section.heading }}</text>
+										<text class="chat-evaluation__text">{{ section.content }}</text>
+									</view>
+									<button class="chat-evaluation__btn" size="mini" @click.stop="openCard(card)">查看完整评估</button>
+								</view>
+
+								<view class="agent-card__foot" @click.stop>
+									<text class="agent-card__views">浏览 {{ cardViewCount(card) }} 次</text>
+									<view v-if="referenceForCard(msg, card) || (card.pickAction === 'evaluate' || card.pickAction === 'view-evaluation')" class="agent-card__actions">
+										<button
+											v-if="referenceForCard(msg, card)"
+											class="agent-card__btn agent-card__btn--intro"
+											size="mini"
+											:disabled="typing"
+											@click.stop="introduceCard(msg, card)"
+										>介绍这项</button>
+										<button
+											v-if="card.pickAction === 'evaluate' || card.pickAction === 'view-evaluation'"
+											class="agent-card__btn agent-card__btn--primary"
+											size="mini"
+											:disabled="typing"
+											@click.stop="pickEvaluate(card)"
+										>{{ card.pickAction === 'view-evaluation' ? '查看评估' : '评估这个' }}</button>
+									</view>
 								</view>
 							</view>
 						</view>
@@ -1421,11 +1438,95 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	.agent-card__advice-label { display: block; font-size: 23rpx; color: #51627a; font-weight: 600; margin-bottom: 6rpx; }
 	.agent-card__advice-text { display: block; font-size: 24rpx; line-height: 1.65; color: #40516b; white-space: pre-wrap; overflow-wrap: anywhere; }
 	.agent-card__advice--caution { padding: 12rpx; background: #fff8ed; border-radius: 10rpx; }
+	.agent-card__foot {
+		margin-top: 20rpx;
+		padding-top: 16rpx;
+		border-top: 1rpx solid #eef2f8;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		box-sizing: border-box;
+	}
+
 	.agent-card__views {
-		display: block;
-		margin-top: 12rpx;
 		font-size: 22rpx;
 		color: #888888;
+		line-height: 1.4;
+	}
+
+	.agent-card__actions {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.agent-card__btn,
+	.chat-evaluation__btn {
+		margin: 0 !important;
+		padding: 0 20rpx !important;
+		height: 52rpx !important;
+		line-height: 50rpx !important;
+		font-size: 24rpx !important;
+		font-weight: 500 !important;
+		border-radius: 26rpx !important;
+		display: inline-flex !important;
+		align-items: center !important;
+		justify-content: center !important;
+		box-sizing: border-box !important;
+		white-space: nowrap !important;
+		border: 1rpx solid transparent !important;
+		transition: all 0.2s ease;
+	}
+
+	.agent-card__actions .agent-card__btn + .agent-card__btn {
+		margin-left: 12rpx !important;
+	}
+
+	.agent-card__btn::after,
+	.chat-evaluation__btn::after,
+	uni-button.agent-card__btn::after,
+	uni-button.chat-evaluation__btn::after {
+		border: none !important;
+	}
+
+	.agent-card__btn--intro {
+		background: #ffffff !important;
+		color: #2b73f8 !important;
+		border-color: #c9dbff !important;
+	}
+
+	.agent-card__btn--intro:active {
+		background: #f0f5ff !important;
+	}
+
+	.agent-card__btn--primary {
+		background: #2b73f8 !important;
+		color: #ffffff !important;
+		border-color: #2b73f8 !important;
+		box-shadow: 0 2rpx 8rpx rgba(43, 115, 248, 0.25) !important;
+	}
+
+	.agent-card__btn--primary:active {
+		background: #2062d6 !important;
+	}
+
+	.agent-card__btn[disabled],
+	.chat-evaluation__btn[disabled] {
+		opacity: 0.5 !important;
+		cursor: not-allowed !important;
+		box-shadow: none !important;
+	}
+
+	.chat-evaluation__btn {
+		margin-top: 14rpx !important;
+		background: #ffffff !important;
+		color: #2b73f8 !important;
+		border-color: #c9dbff !important;
+	}
+
+	.chat-evaluation__btn:active {
+		background: #f0f5ff !important;
 	}
 	page {
 		height: 100%;
