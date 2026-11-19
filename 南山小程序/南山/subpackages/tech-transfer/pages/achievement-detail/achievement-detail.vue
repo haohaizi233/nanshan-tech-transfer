@@ -147,7 +147,6 @@
           <text v-if="detail.priceMinWan" class="price-amount">
             {{ detail.priceMinWan }}{{ detail.priceMaxWan ? ' – ' + detail.priceMaxWan : '' }} 万
           </text>
-          <text v-else-if="detail.pricingMode === 'negotiable'" class="price-amount price-negotiable">面议</text>
         </view>
       </view>
 
