@@ -100,13 +100,27 @@ app.add_middleware(
 )
 
 
-# ── 安全响应头（防点击劫持 / MIME 嗅探 / 降级）────────────────
+# ── 安全响应头（防点击劫持 / MIME 嗅探 / 降级 / 敏感页防 Referer 泄露）────
 @app.middleware("http")
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    path = request.url.path or ""
+    is_sensitive_security_path = path.startswith(
+        (
+            "/reset-password",
+            "/forgot-password",
+            f"{settings.API_PREFIX}/auth/recovery",
+            f"{settings.API_PREFIX}/me/security",
+        )
+    )
+    response.headers["Referrer-Policy"] = (
+        "no-referrer" if is_sensitive_security_path else "strict-origin-when-cross-origin"
+    )
+    if is_sensitive_security_path:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
     # E11: HSTS — 部署 HTTPS 后强制浏览器只走 TLS
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # 限制内嵌 iframe；API 响应不需要 CSP，仅对 HTML 页面设 frame-ancestors
@@ -160,6 +174,8 @@ if (_admin_dist / "index.html").is_file():
     @app.get("/", include_in_schema=False)
     @app.get("/login", include_in_schema=False)
     @app.get("/register", include_in_schema=False)
+    @app.get("/forgot-password", include_in_schema=False)
+    @app.get("/reset-password", include_in_schema=False)
     @app.get("/admin", include_in_schema=False)
     @app.get("/admin/{full_path:path}", include_in_schema=False)
     def admin_spa(full_path: str = ""):

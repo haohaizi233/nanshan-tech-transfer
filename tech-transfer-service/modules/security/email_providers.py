@@ -505,7 +505,7 @@ class SmtpEmailProvider(EmailProvider):
                     server.login(self.user, self.password)
                 phase = "data"
                 refused = server.sendmail(self.from_email, [to_email], msg.as_string())
-                if refused:
+                if isinstance(refused, dict) and refused:
                     refusal = refused.get(to_email) or next(iter(refused.values()))
                     code = int(refusal[0]) if isinstance(refusal, tuple) and refusal else 550
                     reason, retryable = self._classify_smtp_code(code, default_perm="SMTP_RECIPIENT_REJECTED")

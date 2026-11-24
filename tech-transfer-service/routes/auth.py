@@ -2,6 +2,8 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
+from config import settings
+from core.contact_validation import normalize_email
 from core.errors import TT_AUTH_40105, TT_COMMON_40102, BizError, bootstrap_credential_invalid
 from core.middleware import identity
 from core.rate_limit import check_ip_rate, check_register_rate
@@ -36,12 +38,11 @@ from modules.identity.wechat_web import (
     handle_web_callback,
     wechat_web_enabled,
 )
-from modules.security.rate_limiter import (
-    check_recovery_start_rate,
-    check_verify_challenge_rate,
-)
+from modules.security.email_gateway import email_request_gate
+from modules.security.rate_limiter import check_verify_challenge_rate
 from modules.security.service import (
     complete_password_recovery,
+    get_recovery_capabilities,
     verify_recovery_challenge,
 )
 from modules.security.sms_gateway import (
@@ -85,6 +86,11 @@ def wechat_web_bind(body: WechatWebBindRequest, user: dict = Depends(identity)):
     return success(bind_web_wechat(user["userId"], body.bindingTicket))
 
 
+@router.get("/recovery/capabilities", summary="查询密码找回可用验证渠道能力")
+def recovery_capabilities():
+    return success(get_recovery_capabilities())
+
+
 @router.post("/recovery/start", summary="发起密码找回（发送短信/邮件验证码或重置链接）")
 def recovery_start(
     body: RecoveryStartRequest,
@@ -100,7 +106,20 @@ def recovery_start(
             phone = None
         request_gate(ctx, body.account.strip().lower(), phone=phone)
     else:
-        check_recovery_start_rate(request, body.account)
+        if not settings.EMAIL_ENABLED:
+            raise BizError("TT_COMMON_50301", "邮箱安全验证功能暂未开放", 503)
+        norm_email = None
+        if "@" in body.account:
+            try:
+                norm_email = normalize_email(body.account)
+            except BizError:
+                norm_email = None
+        email_request_gate(
+            ctx,
+            body.account.strip().lower(),
+            email=norm_email,
+            purpose="password_recovery",
+        )
     challenge_id = str(uuid.uuid4())
     enqueue_recovery_task(body.account.strip(), body.channel, challenge_id, ctx)
     background.add_task(run_queued_recovery_task, challenge_id)

@@ -65,8 +65,14 @@ def _desensitize_upstream_body(text: str, limit: int = 300) -> str:
     return text
 
 
+_SENSITIVE_QUERY_RE = re.compile(
+    r"((?:token|recoveryGrant|stepUpGrant|code|grant)=)[^&\s]+",
+    re.IGNORECASE,
+)
+
+
 class _DropNotFoundAccessLog(logging.Filter):
-    """过滤公网扫描 404 与高频通知摘要的成功 access log。"""
+    """过滤公网扫描 404 与高频通知摘要的成功 access log，并脱敏敏感查询参数。"""
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Uvicorn access logger 的参数顺序固定为：
@@ -75,6 +81,10 @@ class _DropNotFoundAccessLog(logging.Filter):
         if not isinstance(args, tuple) or len(args) < 5:
             return True
         method, full_path, status = args[1], str(args[2]), args[4]
+        if _SENSITIVE_QUERY_RE.search(full_path):
+            redacted_path = _SENSITIVE_QUERY_RE.sub(r"\1[REDACTED]", full_path)
+            record.args = (args[0], method, redacted_path, *args[3:])
+            full_path = redacted_path
         if status == 404:
             return False
         # 角标按产品要求高频轮询。成功响应不携带诊断价值，保留 4xx/5xx 便于排障。
@@ -222,6 +232,11 @@ def register_exception_handlers(app: FastAPI) -> None:
             )
         resp = error(e.code, e.message, e.http_status, safe_details)
         _attach_upstream_headers(resp, safe_details)
+        retry_after = getattr(e, "retry_after", None)
+        if retry_after is None and isinstance(safe_details, dict):
+            retry_after = safe_details.get("retryAfter")
+        if isinstance(retry_after, int) and retry_after > 0:
+            resp.headers["Retry-After"] = str(retry_after)
         return resp
 
     @app.exception_handler(RequestValidationError)

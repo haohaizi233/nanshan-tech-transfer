@@ -158,6 +158,7 @@ class SmsBodyLimitMiddleware:
             "/auth/recovery/complete",
             "/me/security/contact/challenge",
             "/me/security/contact/verify",
+            "/me/security/step-up/challenge",
         )
         if scope["type"] != "http" or not any(scope.get("path", "").endswith(p) for p in paths):
             return await self.app(scope, receive, send)

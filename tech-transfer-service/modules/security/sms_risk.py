@@ -1,182 +1,37 @@
 """Atomic SMS request frequency and cost reservations. Redis failure closes sends.
 
-Redis TIME is authoritative. All keys use one cluster hash slot. Random ZSET
-members prevent simultaneous requests collapsing into one timestamp entry.
+Builds on shared `modules.security.risk_engine.BaseRiskEngine` while preserving
+100% of existing SMS rule IDs, Redis keys, and SmsRiskEngine signatures.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
-import math
-import time as _time
-import uuid
-from dataclasses import dataclass
-from datetime import datetime, time, timedelta
-from enum import StrEnum
 from functools import lru_cache
-from zoneinfo import ZoneInfo
 
-
-class DecisionAction(StrEnum):
-    ALLOW = "ALLOW"
-    CHALLENGE = "CHALLENGE"
-    THROTTLE = "THROTTLE"
-    DENY = "DENY"
-
-
-@dataclass(frozen=True)
-class RiskDecision:
-    action: DecisionAction
-    rule_id: str = "sms.allow"
-    retry_after: int = 0
-
-    @property
-    def risk_score(self):
-        return {
-            DecisionAction.ALLOW: 0,
-            DecisionAction.CHALLENGE: 50,
-            DecisionAction.THROTTLE: 80,
-            DecisionAction.DENY: 100,
-        }[self.action]
-
-    @property
-    def risk_level(self):
-        return "low" if self.risk_score == 0 else "medium" if self.risk_score == 50 else "high"
-
-
-def day_bucket(now: datetime, timezone: str) -> tuple[str, int]:
-    local = now.astimezone(ZoneInfo(timezone))
-    end = datetime.combine(local.date() + timedelta(days=1), time(), tzinfo=local.tzinfo)
-    return local.date().isoformat(), max(1, math.ceil(end.timestamp() - now.timestamp()))
-
-
-# Specs carry only digests. Count all request dimensions atomically, including
-# denied attempts, bounded at limit+1. Daily keys expire at business midnight.
-REQUEST_LUA = """
-local spec=cjson.decode(ARGV[1]); local member=ARGV[2]
-local now=tonumber(ARGV[3]) or 0
-if now<=0 then local t=redis.call('TIME'); now=tonumber(t[1])+tonumber(t[2])/1000000 end
-local result={'ALLOW','sms.allow','0'}
-for _,r in ipairs(spec.rates) do
- local n=0
- if r.daily then
-  n=tonumber(redis.call('GET',r.key) or '0')
-  if n<=r.limit then redis.call('INCR',r.key); redis.call('EXPIRE',r.key,r.ttl) end
- else
-  redis.call('ZREMRANGEBYSCORE',r.key,'-inf',now-r.window)
-  n=redis.call('ZCARD',r.key)
-  if n<=r.limit then redis.call('ZADD',r.key,now,member); redis.call('EXPIRE',r.key,r.window+1) end
- end
- if n>=r.limit and result[1]=='ALLOW' then result={r.action,r.rule,tostring(r.ttl or r.window)} end
-end
-for _,r in ipairs(spec.distinct) do
- redis.call('ZREMRANGEBYSCORE',r.key,'-inf',now-r.window)
- local present=redis.call('ZSCORE',r.key,r.value)
- local n=redis.call('ZCARD',r.key)
- if present or n<=r.limit then redis.call('ZADD',r.key,now,r.value); redis.call('EXPIRE',r.key,r.window+1) end
- if not present and n>=r.limit and result[1]=='ALLOW' then result={'CHALLENGE',r.rule,tostring(r.window)} end
-end
-return result
-"""
-
-RESERVE_LUA = """
-local s=cjson.decode(ARGV[1]); local member=ARGV[2]
-if redis.call('EXISTS',s.reservation)==1 then return {'DENY','sms.task.duplicate','0'} end
-if redis.call('EXISTS',s.uncertainty)==1 then return {'THROTTLE','sms.phone.pending_outcome',tostring(redis.call('TTL',s.uncertainty))} end
-for _,r in ipairs(s.cooldowns) do
- if redis.call('EXISTS',r.key)==1 then return {'THROTTLE',r.rule,tostring(redis.call('TTL',r.key))} end
-end
-local now=tonumber(ARGV[3]) or 0
-if now<=0 then local t=redis.call('TIME'); now=tonumber(t[1])+tonumber(t[2])/1000000 end
-for _,r in ipairs(s.rates) do
- redis.call('ZREMRANGEBYSCORE',r.key,'-inf',now-r.window)
- if redis.call('ZCARD',r.key)>=r.limit then return {'THROTTLE',r.rule,tostring(r.window)} end
-end
-for _,r in ipairs(s.budgets) do
- if tonumber(redis.call('GET',r.key) or '0')>=r.limit then return {'THROTTLE',r.rule,tostring(r.ttl)} end
-end
-for _,r in ipairs(s.distinct) do
- redis.call('ZREMRANGEBYSCORE',r.key,'-inf',now-r.window)
- if not redis.call('ZSCORE',r.key,r.value) and redis.call('ZCARD',r.key)>=r.limit then
-  return {'CHALLENGE',r.rule,tostring(r.window)}
- end
-end
-for _,r in ipairs(s.cooldowns) do redis.call('SET',r.key,member,'EX',r.ttl) end
-for _,r in ipairs(s.rates) do redis.call('ZADD',r.key,now,member); redis.call('EXPIRE',r.key,r.window+1) end
-for _,r in ipairs(s.budgets) do redis.call('INCR',r.key); redis.call('EXPIRE',r.key,r.ttl) end
-for _,r in ipairs(s.distinct) do redis.call('ZADD',r.key,now,r.value); redis.call('EXPIRE',r.key,r.window+1) end
-redis.call('SET',s.uncertainty,member,'EX',s.uncertainty_ttl)
-redis.call('SET',s.reservation,cjson.encode({state='reserved',budgets=s.budgets,uncertainty=s.uncertainty,member=member}),'EX',172800)
-return {'ALLOW','sms.quota.reserved','0'}
-"""
-
-TRANSITION_LUA = """
-local raw=redis.call('GET',KEYS[1]); if not raw then return 0 end
-local s=cjson.decode(raw); local target=ARGV[1]
-if s.state==target then return 1 end
-local ok=(s.state=='reserved' and (target=='accepted' or target=='unknown' or target=='rejected'))
- or (s.state=='unknown' and (target=='accepted' or target=='delivered'))
- or (s.state=='accepted' and target=='delivered')
-if not ok then return 0 end
-if target~='unknown' and redis.call('GET',s.uncertainty)==s.member then redis.call('DEL',s.uncertainty) end
-if target=='rejected' then
- for _,r in ipairs(s.budgets) do
-  if tonumber(redis.call('GET',r.key) or '0')>0 then redis.call('DECR',r.key) end
- end
-end
-s.state=target
-redis.call('SET',KEYS[1],cjson.encode(s),'KEEPTTL')
-return 1
-""".replace(
-    "redis.call('SET',KEYS[1],cjson.encode(s),'KEEPTTL')",
-    "local ttl=redis.call('TTL',KEYS[1]); redis.call('SET',KEYS[1],cjson.encode(s),'EX',math.max(1,ttl))",
+from modules.security.risk_engine import (
+    REQUEST_LUA,
+    RESERVE_LUA,
+    TRANSITION_LUA,
+    BaseRiskEngine,
+    DecisionAction,
+    RiskDecision,
+    day_bucket,
 )
 
 
-class SmsRiskEngine:
+class SmsRiskEngine(BaseRiskEngine):
     def __init__(self, redis_client=None, secret=None, config=None, prefix="sms:{gateway}:"):
         if config is None:
             from config import settings as config
-        self.config = config
-        self.redis = redis_client
-        self.secret = (secret or config.SMS_RISK_HMAC_SECRET or config.JWT_SECRET).encode()
-        self.prefix = prefix
-
-    def _digest(self, kind, value):
-        return hmac.new(self.secret, (kind + ":" + str(value)).encode(), hashlib.sha256).hexdigest()
-
-    def _key(self, kind, value):
-        return self.prefix + kind + ":" + self._digest(kind, value)
-
-    def _client(self):
-        if self.redis is None:
-            import redis
-
-            self.redis = redis.Redis.from_url(
-                self.config.REDIS_URL, decode_responses=True, protocol=2, socket_connect_timeout=2, socket_timeout=2
-            )
-        return self.redis
-
-    def _day(self):
-        # Same day computation on all instances using Redis server clock.
-        sec, micro = self._client().time()
-        return day_bucket(
-            datetime.fromtimestamp(int(sec) + int(micro) / 1e6, ZoneInfo("UTC")), self.config.SMS_BUSINESS_TIMEZONE
-        )
-
-    def _eval(self, script, spec):
-        now_ts = str(_time.time())
-        result = self._client().eval(script, 1, self.prefix + "anchor", json.dumps(spec), uuid.uuid4().hex, now_ts)
-        return RiskDecision(DecisionAction(result[0]), result[1], int(result[2]))
+        effective_secret = secret or config.SMS_RISK_HMAC_SECRET or config.JWT_SECRET
+        super().__init__(redis_client=redis_client, secret=effective_secret, config=config, prefix=prefix)
 
     def check_request(self, ip, account, device_id, phone=None, purpose="reset_password"):
         if not self.config.SMS_RISK_ENGINE_ENABLED:
             return RiskDecision(DecisionAction.DENY, "sms.risk.disabled")
         if purpose not in {"reset_password", "bind_phone"}:
             return RiskDecision(DecisionAction.DENY, "sms.purpose.disabled")
-        if self.redis is None and not self.config.REDIS_ENABLED and self.config.APP_ENV in {"local", "development"}:
+        if self._is_dev_bypass_allowed():
             return RiskDecision(DecisionAction.ALLOW, "sms.allow.dev_mode")
         try:
             day, ttl = self._day()
@@ -217,7 +72,7 @@ class SmsRiskEngine:
                 daily("device", device_id, c.SMS_DEVICE_LIMIT_DAY)
             if phone:
                 distinct = self._distinct(ip, device_id, phone)
-            return self._eval(REQUEST_LUA, {"rates": rates, "distinct": distinct})
+            return self._eval(REQUEST_LUA, {"allow_rule": "sms.allow", "rates": rates, "distinct": distinct})
         except Exception:
             return RiskDecision(DecisionAction.DENY, "sms.redis.unavailable")
 
@@ -247,7 +102,7 @@ class SmsRiskEngine:
     def reserve(self, phone, account, ip, device_id, reservation_id):
         if not self.config.SMS_RISK_ENGINE_ENABLED or not self.config.SMS_REQUIRE_VERIFIED_CONTACT:
             return RiskDecision(DecisionAction.DENY, "sms.policy.disabled")
-        if self.redis is None and not self.config.REDIS_ENABLED and self.config.APP_ENV in {"local", "development"}:
+        if self._is_dev_bypass_allowed():
             return RiskDecision(DecisionAction.ALLOW, "sms.quota.dev_mode")
         try:
             day, ttl = self._day()
@@ -313,6 +168,9 @@ class SmsRiskEngine:
             return self._eval(
                 RESERVE_LUA,
                 {
+                    "dup_rule": "sms.task.duplicate",
+                    "pending_rule": "sms.phone.pending_outcome",
+                    "ok_rule": "sms.quota.reserved",
                     "reservation": self._key("reservation", reservation_id),
                     "uncertainty": self._key("pending_outcome", phone),
                     "uncertainty_ttl": c.SMS_CODE_TTL_SECONDS,
@@ -326,16 +184,21 @@ class SmsRiskEngine:
             return RiskDecision(DecisionAction.DENY, "sms.redis.unavailable")
 
     def transition(self, reservation_id, state):
-        if state not in {"accepted", "rejected", "unknown", "delivered"}:
-            raise ValueError("invalid reservation state")
-        if self.redis is None and not self.config.REDIS_ENABLED and self.config.APP_ENV in {"local", "development"}:
-            return True
-        try:
-            return bool(self._client().eval(TRANSITION_LUA, 1, self._key("reservation", reservation_id), state))
-        except Exception:
-            return False
+        return self._transition_key(reservation_id, state)
 
 
 @lru_cache(maxsize=1)
 def get_sms_risk_engine():
     return SmsRiskEngine()
+
+
+__all__ = [
+    "REQUEST_LUA",
+    "RESERVE_LUA",
+    "TRANSITION_LUA",
+    "DecisionAction",
+    "RiskDecision",
+    "SmsRiskEngine",
+    "day_bucket",
+    "get_sms_risk_engine",
+]

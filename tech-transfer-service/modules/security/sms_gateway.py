@@ -18,10 +18,16 @@ from config import settings
 from core.errors import BizError, bad_request
 from db import get_cursor
 from modules.audit.service import record as audit_record
+from modules.security.delivery_models import DeliveryStageError, DeliveryTaskResult, risk_reason, task_event
+from modules.security.eligibility import SMS_ELIGIBLE_SQL as ELIGIBLE_SQL
+from modules.security.eligibility import sms_eligibility_reason as _shared_sms_eligibility_reason
 from modules.security.provider import ProviderError, get_sms_provider
-from modules.security.sms_delivery import DeliveryStageError, DeliveryTaskResult, risk_reason, task_event
 
 logger = logging.getLogger(__name__)
+
+
+def eligibility_reason(account: str) -> str:
+    return _shared_sms_eligibility_reason(account, cursor_factory=get_cursor)
 
 
 @dataclass(frozen=True)
@@ -87,80 +93,6 @@ def request_gate(context: SendContext, account: str, phone=None, purpose="reset_
         if "redis" in getattr(decision, "rule_id", ""):
             raise BizError("TT_COMMON_50301", "安全验证服务暂时不可用，请稍后重试", 503)
         raise BizError("TT_COMMON_42901", "操作过于频繁或需要额外安全验证，请稍后重试", 429)
-
-
-ELIGIBLE_SQL = """
-SELECT au.id AS user_id, ac.normalized_value
-FROM app_user au
-JOIN user_credential uc ON uc.user_id = au.id AND uc.status = 'active'
-JOIN account_contact ac ON ac.user_id = au.id AND ac.contact_type = 'phone'
-    AND ac.status = 'active' AND ac.verified_at IS NOT NULL
-    AND ac.verification_method IN ('sms','wechat','manual')
-WHERE au.deleted_at IS NULL AND au.status = 'active'
-  AND uc.password_configured = true AND uc.password_hash IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM user_role ur WHERE ur.user_id = au.id
-                  AND ur.role_code IN ('admin','platform_admin','org_admin'))
-  AND NOT EXISTS (SELECT 1 FROM organization_membership om WHERE om.user_id = au.id
-                  AND om.role = 'admin' AND om.status = 'active')
-  AND NOT EXISTS (SELECT 1 FROM account_contact other WHERE other.contact_type = 'phone'
-                  AND other.status = 'active' AND other.verified_at IS NOT NULL
-                  AND other.normalized_value = ac.normalized_value AND other.user_id <> au.id)
-  AND (uc.username = %s OR ac.normalized_value = %s)
-LIMIT 2
-"""
-
-
-def eligibility_reason(account):
-    """Internal read-only diagnosis. Never expose qualification in public responses."""
-    with get_cursor() as cur:
-        cur.execute(
-            """SELECT au.id,au.status,au.deleted_at,uc.status AS credential_status,
-            uc.password_configured,uc.password_hash IS NOT NULL AS has_password,
-            EXISTS(SELECT 1 FROM user_role ur WHERE ur.user_id=au.id
-                AND ur.role_code IN ('admin','platform_admin','org_admin')) OR
-            EXISTS(SELECT 1 FROM organization_membership om WHERE om.user_id=au.id
-                AND om.role='admin' AND om.status='active') AS privileged
-            FROM app_user au LEFT JOIN user_credential uc ON uc.user_id=au.id
-            WHERE uc.username=%s OR uc.phone=%s OR EXISTS(SELECT 1 FROM account_contact ac
-                WHERE ac.user_id=au.id AND ac.normalized_value=%s) LIMIT 2""",
-            (account, account, account),
-        )
-        rows = cur.fetchall()
-        if not rows:
-            return "account_not_found"
-        if len(rows) > 1:
-            return "contact_conflict"
-        user = rows[0]
-        if user["deleted_at"] is not None:
-            return "account_deleted"
-        if user["status"] != "active":
-            return "account_disabled"
-        if user["privileged"]:
-            return "privileged_account_restricted"
-        if user["credential_status"] != "active" or not user["password_configured"] or not user["has_password"]:
-            return "credential_not_configured"
-        cur.execute(
-            """SELECT normalized_value,status,verified_at,verification_method
-            FROM account_contact WHERE user_id=%s AND contact_type='phone'""",
-            (user["id"],),
-        )
-        trusted = [
-            c
-            for c in cur.fetchall()
-            if c["status"] == "active"
-            and c["verified_at"] is not None
-            and c["verification_method"] in {"sms", "wechat", "manual"}
-        ]
-        if not trusted:
-            return "contact_not_verified"
-        if len(trusted) != 1:
-            return "contact_conflict"
-        cur.execute(
-            """SELECT user_id FROM account_contact WHERE contact_type='phone' AND normalized_value=%s
-            AND status='active' AND verified_at IS NOT NULL AND user_id<>%s LIMIT 1""",
-            (trusted[0]["normalized_value"], user["id"]),
-        )
-        return "contact_conflict" if cur.fetchone() else "eligible"
 
 
 def start_sms_recovery(account: str, challenge_id: str, context: SendContext, engine=None, *, return_result=False):
@@ -367,6 +299,10 @@ def run_recovery_task(account, channel, challenge_id, context):
     try:
         if channel == "sms":
             result = start_sms_recovery(account, challenge_id, context, return_result=True)
+        elif channel in {"email_otp", "email_link"}:
+            from modules.security.email_gateway import start_email_recovery
+
+            result = start_email_recovery(account, channel, challenge_id, context, return_result=True)
         else:
             from modules.security.service import start_password_recovery
 
@@ -375,6 +311,8 @@ def run_recovery_task(account, channel, challenge_id, context):
                 challenge_id,
                 "COMPLETED" if value.get("challengeId") else "INELIGIBLE",
                 challenge_id=value.get("challengeId"),
+                channel=channel,
+                purpose="password_recovery",
             )
         if not isinstance(result, DeliveryTaskResult):
             raise TypeError("delivery_result_missing")
@@ -405,10 +343,20 @@ def run_recovery_task(account, channel, challenge_id, context):
             risk_rule_id=getattr(exc, "risk_rule_id", None),
             provider_called=getattr(exc, "request_attempted", False),
             challenge_id=challenge_id if stage not in {"risk", "config", "eligibility"} else None,
+            channel=channel,
+            purpose="password_recovery",
+            provider=getattr(exc, "provider_name", None),
         )
     except Exception as exc:
         exception_type = type(exc).__name__
-        result = DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "task", "unexpected_exception")
+        result = DeliveryTaskResult(
+            challenge_id,
+            "INTERNAL_ERROR",
+            "task",
+            "unexpected_exception",
+            channel=channel,
+            purpose="password_recovery",
+        )
     result = replace(result, elapsed_ms=max(0, int((time.monotonic() - start) * 1000)))
     task_event(logger, result, context.request_id, "task_result", exception_type)
     return result
@@ -494,7 +442,9 @@ def _persist_task_result(challenge_id, result, request_id):
         cur.execute(
             """UPDATE security_delivery_request SET state=%s,outcome=%s,failure_stage=%s,failure_reason=%s,
               provider_status=%s,risk_rule_id=%s,provider_ids=%s::jsonb,outcome_unknown=%s,retryable=%s,
-              elapsed_ms=%s,provider_called=%s,finished_at=NOW() WHERE id=%s AND state='processing'""",
+              elapsed_ms=%s,provider_called=%s,finished_at=NOW(),
+              payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'
+              WHERE id=%s AND state='processing'""",
             (
                 result.queue_state,
                 result.outcome,
@@ -510,12 +460,26 @@ def _persist_task_result(challenge_id, result, request_id):
                 challenge_id,
             ),
         )
+        # 兼容仅运行到 035 的测试 schema：存在 036 列时再补充写入 channel / purpose / provider
+        try:
+            cur.execute("SAVEPOINT sp_delivery_036")
+            cur.execute(
+                """UPDATE security_delivery_request SET channel=%s, purpose=%s, provider=%s
+                WHERE id=%s""",
+                (result.channel, result.purpose, result.provider, challenge_id),
+            )
+            cur.execute("RELEASE SAVEPOINT sp_delivery_036")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_delivery_036")
         audit_record(
-            "sms.task_result",
+            "sms.task_result" if result.channel == "sms" else "email.task_result",
             "security_delivery_request",
             resource_id=challenge_id,
             request_id=request_id,
             details={
+                "channel": result.channel,
+                "purpose": result.purpose,
+                "provider": result.provider,
                 "outcome": result.outcome,
                 "stage": result.failure_stage,
                 "reason_code": result.failure_reason,
@@ -551,6 +515,17 @@ def cleanup_delivery_tasks():
             retryable=false,finished_at=NOW()
             WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-INTERVAL '5 minutes'""")
         cur.execute("DELETE FROM security_delivery_request WHERE created_at<NOW()-INTERVAL '7 days'")
+        cur.execute("""UPDATE auth_challenge SET status='expired'
+            WHERE status IN ('pending_send','pending') AND expires_at<=NOW()""")
+        cur.execute("""UPDATE recovery_grant SET status='expired'
+            WHERE status='active' AND expires_at<=NOW()""")
+        try:
+            cur.execute("SAVEPOINT sp_cleanup_stepup_036")
+            cur.execute("""UPDATE step_up_grant SET status='expired'
+                WHERE status='active' AND expires_at<=NOW()""")
+            cur.execute("RELEASE SAVEPOINT sp_cleanup_stepup_036")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_cleanup_stepup_036")
 
 
 def reconcile_sms_delivery(challenge_id: str):

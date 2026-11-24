@@ -97,6 +97,7 @@ class ContactChallengeRequest(RequestBody):
     model_config = ConfigDict(extra="forbid", strict=True)
     contactType: Literal["phone", "email"]
     contactValue: str = Field(..., min_length=1, max_length=128, description="联系方式号码或邮箱")
+    stepUpGrant: str | None = Field(None, min_length=1, max_length=256, description="换绑安全邮箱二次认证凭证")
 
 
 class ContactVerifyRequest(RequestBody):
@@ -104,6 +105,23 @@ class ContactVerifyRequest(RequestBody):
     challengeId: str = Field(..., description="挑战 UUID")
     code: str = Field(..., min_length=1, max_length=128, description="收到的验证码")
     contactValue: str = Field(..., min_length=1, description="联系方式号码或邮箱")
+    stepUpGrant: str | None = Field(None, min_length=1, max_length=256, description="换绑安全邮箱二次认证凭证")
+
+
+class StepUpChallengeRequest(RequestBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    purpose: Literal["rebind_email", "rebind_phone"] = "rebind_email"
+    method: Literal["old_email_otp", "old_phone_otp"]
+
+
+class StepUpVerifyRequest(RequestBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    purpose: Literal["rebind_email", "rebind_phone"] = "rebind_email"
+    method: Literal["password", "old_email_otp", "old_phone_otp", "recent_auth"]
+    currentPassword: str | None = Field(None, max_length=128)
+    challengeId: str | None = Field(None, max_length=64)
+    code: str | None = Field(None, max_length=128)
+    targetContact: str | None = Field(None, max_length=128)
 
 
 # ── me ──────────────────────────────────────────────────────
