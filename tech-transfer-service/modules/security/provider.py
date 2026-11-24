@@ -19,44 +19,30 @@ import json
 import logging
 import random
 import re
-import smtplib
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
-from email.header import Header
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Any
 
 from config import settings
 from core.contact_validation import is_valid_phone
-from core.errors import BizError
+from modules.security.delivery_models import (
+    DeliveryProviderError,
+    DeliveryReceipt,
+    ProviderCapabilities,
+    ProviderError,
+)
+from modules.security.email_providers import (
+    EmailProvider,
+    MockEmailProvider,
+    SmtpEmailProvider,
+    TencentSesProvider,
+)
 
 logger = logging.getLogger("nanshan.security.provider")
-
-
-class ProviderError(BizError):
-    def __init__(
-        self,
-        message: str,
-        code: str = "TT_COMMON_50301",
-        status: int = 503,
-        *,
-        outcome_unknown: bool = False,
-        reason_code: str = "provider_error",
-        provider_status: int | None = None,
-        retryable: bool = False,
-        request_attempted: bool = False,
-    ):
-        super().__init__(code, message, status)
-        self.outcome_unknown = outcome_unknown
-        self.reason_code = reason_code
-        self.provider_status = provider_status
-        self.retryable = retryable
-        self.request_attempted = request_attempted
 
 
 @dataclass(frozen=True)
@@ -458,200 +444,44 @@ class SendCloudSmsProvider(SmsProvider):
             raise ProviderError("短信状态暂时不可用", outcome_unknown=True) from None
 
 
-# ── Email Provider ───────────────────────────────────────────
-
-
-class EmailProvider(abc.ABC):
-    @abc.abstractmethod
-    def send_code(self, email: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        """发送邮件验证码。"""
-        pass
-
-    @abc.abstractmethod
-    def send_reset_link(self, email: str, reset_url: str, expires_in_seconds: int = 300) -> bool:
-        """发送一次性密码重置链接。"""
-        pass
-
-
-class MockEmailProvider(EmailProvider):
-    """测试/开发用内存邮件服务商。"""
-
-    def __init__(self):
-        self.sent_emails: list[dict[str, Any]] = []
-        self.should_fail: bool = False
-
-    def clear(self):
-        self.sent_emails.clear()
-        self.should_fail = False
-
-    def get_last_code(self, email: str) -> str | None:
-        for item in reversed(self.sent_emails):
-            if item["email"] == email and "code" in item:
-                return item["code"]
-        return None
-
-    def get_last_link(self, email: str) -> str | None:
-        for item in reversed(self.sent_emails):
-            if item["email"] == email and "reset_url" in item:
-                return item["reset_url"]
-        return None
-
-    def send_code(self, email: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        if self.should_fail:
-            raise ProviderError("模拟邮件服务发送失败")
-        self.sent_emails.append(
-            {
-                "email": email,
-                "code": code,
-                "purpose": purpose,
-                "type": "code",
-                "expires_in_seconds": expires_in_seconds,
-                "sent_at": time.time(),
-            }
-        )
-        logger.info("[MockEmailProvider] 发送验证码至 %s: %s", email, code)
-        return True
-
-    def send_reset_link(self, email: str, reset_url: str, expires_in_seconds: int = 300) -> bool:
-        if self.should_fail:
-            raise ProviderError("模拟邮件服务发送失败")
-        self.sent_emails.append(
-            {
-                "email": email,
-                "reset_url": reset_url,
-                "type": "link",
-                "expires_in_seconds": expires_in_seconds,
-                "sent_at": time.time(),
-            }
-        )
-        logger.info("[MockEmailProvider] 发送重置链接至 %s: %s", email, reset_url)
-        return True
-
-
-class SmtpEmailProvider(EmailProvider):
-    """基于标准 SMTP 发送邮件。"""
-
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
-        use_ssl: bool = True,
-        timeout: int = 10,
-    ):
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
-        self.use_ssl = use_ssl
-        self.timeout = timeout
-
-    def _send(self, to_email: str, subject: str, html_content: str):
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = Header(subject, "utf-8")
-        msg["From"] = Header(f"南山科转通 <{self.user}>", "utf-8")
-        msg["To"] = Header(to_email, "utf-8")
-        msg.attach(MIMEText(html_content, "html", "utf-8"))
-
-        try:
-            if self.use_ssl:
-                server = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout)
-            else:
-                server = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
-                server.starttls()
-            with server:
-                if self.user and self.password:
-                    server.login(self.user, self.password)
-                server.sendmail(self.user, [to_email], msg.as_string())
-            return True
-        except Exception as e:
-            logger.error("SMTP 发送邮件失败: %s", e)
-            raise ProviderError("邮件发送失败，请稍后重试") from None
-
-    def send_code(self, email: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        minutes = max(1, expires_in_seconds // 60)
-        subject = "【南山科转通】身份安全验证码"
-        html = f"""
-        <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-            <h2>南山科转通 · 身份验证</h2>
-            <p>您好，您正在进行身份验证操作，验证码为：</p>
-            <p style="font-size: 24px; font-weight: bold; color: #0256FF; letter-spacing: 4px;">{code}</p>
-            <p style="color: #666; font-size: 13px;">该验证码 {minutes} 分钟内有效。如非本人操作，请忽略此邮件。</p>
-        </div>
-        """
-        return self._send(email, subject, html)
-
-    def send_reset_link(self, email: str, reset_url: str, expires_in_seconds: int = 300) -> bool:
-        minutes = max(1, expires_in_seconds // 60)
-        subject = "【南山科转通】密码找回与重置"
-        html = f"""
-        <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-            <h2>南山科转通 · 密码重置</h2>
-            <p>您好，您申请了重置南山科转通账号密码。请点击下方链接完成设置：</p>
-            <p><a href="{reset_url}" style="display: inline-block; padding: 10px 20px; background: #0256FF; color: #fff; text-decoration: none; border-radius: 4px;">立即重置密码</a></p>
-            <p style="color: #888; font-size: 12px;">若按钮无法点击，请复制以下链接到浏览器地址栏打开：<br>{reset_url}</p>
-            <p style="color: #666; font-size: 13px;">该链接 {minutes} 分钟内有效且仅可使用一次。如非本人操作，请尽快登录检查账号安全。</p>
-        </div>
-        """
-        return self._send(email, subject, html)
-
-
-class TencentSesProvider(EmailProvider):
-    """腾讯云 SES 邮件推送服务商（TC3-HMAC-SHA256 签名）。"""
-
-    def __init__(self, secret_id: str, secret_key: str, from_email: str, timeout: int = 5):
-        self.secret_id = secret_id
-        self.secret_key = secret_key
-        self.from_email = from_email
-        self.timeout = timeout
-        if not (self.secret_id and self.secret_key and self.from_email):
-            raise ProviderError("腾讯云 SES 配置不完整")
-
-    def send_code(self, email: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        minutes = max(1, expires_in_seconds // 60)
-        subject = "【南山科转通】身份安全验证码"
-        html = f"<p>您的南山科转通安全验证码为 <b>{code}</b>，{minutes}分钟内有效。</p>"
-        return self._send_ses(email, subject, html)
-
-    def send_reset_link(self, email: str, reset_url: str, expires_in_seconds: int = 300) -> bool:
-        minutes = max(1, expires_in_seconds // 60)
-        subject = "【南山科转通】密码重置链接"
-        html = f'<p>请点击以下链接完成密码重置（{minutes}分钟内有效）：<a href="{reset_url}">{reset_url}</a></p>'
-        return self._send_ses(email, subject, html)
-
-    def _send_ses(self, to_email: str, subject: str, html_content: str) -> bool:
-        payload = {
-            "FromEmailAddress": self.from_email,
-            "Destination": [to_email],
-            "Subject": subject,
-            "Simple": {"Html": html_content},
-        }
-        # 复用 Tencent TC3 签名请求
-        helper = TencentSmsProvider(
-            secret_id=self.secret_id,
-            secret_key=self.secret_key,
-            sdk_app_id="dummy",
-            sign_name="dummy",
-            template_id="dummy",
-        )
-        try:
-            resp = helper._tc3_request("ses.tencentcloudapi.com", "ses", "SendEmail", "2020-10-02", payload)
-            if "Response" in resp and "MessageId" in resp["Response"]:
-                return True
-            raise ProviderError(f"SES 邮件发送响应异常: {resp}")
-        except ProviderError:
-            raise
-        except Exception as e:
-            logger.error("腾讯云 SES 发送失败: %s", e)
-            raise ProviderError("邮件服务暂时不可用，请稍后重试") from None
+# ── Email Provider（定义于 modules/security/email_providers.py）──
+# 保留模块导出兼容：EmailProvider, MockEmailProvider, SmtpEmailProvider,
+# TencentSesProvider, DeliveryReceipt, ProviderCapabilities, DeliveryProviderError.
 
 
 # ── Provider 单例工厂 ─────────────────────────────────────────
 
+_ALLOWED_EMAIL_PROVIDERS = frozenset({"mock", "smtp", "tencent"})
+
 _sms_provider_injected = False
 _sms_provider_instance: SmsProvider | None = None
+_email_provider_injected = False
 _email_provider_instance: EmailProvider | None = None
+_email_provider_fingerprint: tuple[Any, ...] | None = None
+
+
+def _email_config_fingerprint(provider_type: str) -> tuple[Any, ...]:
+    return (
+        settings.APP_ENV,
+        provider_type,
+        settings.SMTP_HOST,
+        settings.SMTP_PORT,
+        settings.SMTP_USER,
+        settings.SMTP_PASSWORD,
+        settings.SMTP_FROM_EMAIL,
+        settings.SMTP_FROM_NAME,
+        settings.SMTP_USE_SSL,
+        settings.SMTP_TIMEOUT_SECONDS,
+        settings.SMTP_MAX_ATTEMPTS,
+        settings.TENCENT_SES_SECRET_ID,
+        settings.TENCENT_SES_SECRET_KEY,
+        settings.TENCENT_SES_FROM_EMAIL,
+        settings.TENCENT_SES_REGION,
+        settings.TENCENT_SES_ENDPOINT,
+        settings.TENCENT_SES_TIMEOUT_SECONDS,
+        settings.TENCENT_SES_TEMPLATE_ID_OTP,
+        settings.TENCENT_SES_TEMPLATE_ID_RESET,
+    )
 
 
 def get_sms_provider() -> SmsProvider:
@@ -690,37 +520,105 @@ def get_sms_provider() -> SmsProvider:
 
 
 def get_email_provider() -> EmailProvider:
-    global _email_provider_instance
-    if _email_provider_instance is not None:
+    """严格注册邮件服务商，绝不静默回退 Mock 或绕过 EMAIL_ENABLED。
+
+    校验顺序：
+    1. 运行环境校验（staging/production 禁止 Mock 或测试注入）
+    2. EMAIL_ENABLED 开关校验（false 时即使已缓存也拒绝）
+    3. 非生产测试注入边界校验
+    4. Provider 白名单校验（mock / smtp / tencent）
+    5. 配置完整性与缓存合法性校验
+    6. 获取或初始化 Provider
+    """
+    global _email_provider_instance, _email_provider_fingerprint
+
+    provider_type = (settings.EMAIL_PROVIDER or "").strip().lower()
+
+    # 1. 运行环境校验（最高优先级：staging/production 严禁 Mock 或测试注入实例）
+    if settings.is_production_like:
+        if provider_type == "mock" or isinstance(_email_provider_instance, MockEmailProvider):
+            raise ProviderError("生产环境禁止使用模拟邮件服务", reason_code="CONFIG_ERROR")
+        if _email_provider_injected:
+            raise ProviderError("生产环境禁止使用测试注入邮件服务", reason_code="CONFIG_ERROR")
+
+    # 2. EMAIL_ENABLED 开关校验（防止已缓存实例或 mock 绕过开关）
+    if not settings.EMAIL_ENABLED:
+        raise ProviderError("邮箱安全验证功能暂未开放", reason_code="CHANNEL_DISABLED")
+
+    # 3. 显式非生产测试注入边界
+    if not settings.is_production_like and _email_provider_injected and _email_provider_instance is not None:
         return _email_provider_instance
 
-    if not settings.EMAIL_ENABLED and settings.EMAIL_PROVIDER != "mock":
-        raise ProviderError("邮箱找回功能暂未开放")
+    # 4. Provider 白名单校验（严禁未知名称静默回退 Mock）
+    if provider_type not in _ALLOWED_EMAIL_PROVIDERS:
+        raise ProviderError("邮件服务商配置无效", reason_code="CONFIG_ERROR")
+    if provider_type == "mock" and settings.APP_ENV not in {"local", "development"}:
+        raise ProviderError("非本地开发环境禁止使用模拟邮件服务", reason_code="CONFIG_ERROR")
 
-    provider_type = (settings.EMAIL_PROVIDER or "mock").lower()
+    # 5. 缓存合法性校验（配置变化或 Mock 残留立即失效重建）
+    fingerprint = _email_config_fingerprint(provider_type)
+    if _email_provider_instance is not None and _email_provider_fingerprint == fingerprint:
+        return _email_provider_instance
+
+    # 6. 配置完整性校验与初始化（绝不捕获异常后静默回退 Mock）
     if provider_type == "tencent":
-        _email_provider_instance = TencentSesProvider(
+        instance: EmailProvider = TencentSesProvider(
             secret_id=settings.TENCENT_SES_SECRET_ID,
             secret_key=settings.TENCENT_SES_SECRET_KEY,
             from_email=settings.TENCENT_SES_FROM_EMAIL,
+            region=settings.TENCENT_SES_REGION,
+            endpoint=settings.TENCENT_SES_ENDPOINT,
+            timeout=settings.TENCENT_SES_TIMEOUT_SECONDS,
+            otp_template_id=settings.TENCENT_SES_TEMPLATE_ID_OTP,
+            reset_template_id=settings.TENCENT_SES_TEMPLATE_ID_RESET,
         )
     elif provider_type == "smtp":
-        _email_provider_instance = SmtpEmailProvider(
+        instance = SmtpEmailProvider(
             host=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
             user=settings.SMTP_USER,
             password=settings.SMTP_PASSWORD,
             use_ssl=settings.SMTP_USE_SSL,
+            timeout=settings.SMTP_TIMEOUT_SECONDS,
+            from_email=settings.SMTP_FROM_EMAIL,
+            from_name=settings.SMTP_FROM_NAME,
+            max_attempts=settings.SMTP_MAX_ATTEMPTS,
         )
     else:
-        _email_provider_instance = MockEmailProvider()
+        instance = MockEmailProvider()
 
+    _email_provider_instance = instance
+    _email_provider_fingerprint = fingerprint
     return _email_provider_instance
 
 
 def reset_providers_for_test(sms: SmsProvider | None = None, email: EmailProvider | None = None):
     """测试用注入/重置 Provider。"""
     global _sms_provider_instance, _email_provider_instance, _sms_provider_injected
+    global _email_provider_injected, _email_provider_fingerprint
     _sms_provider_injected = sms is not None
     _sms_provider_instance = sms
+    _email_provider_injected = email is not None
     _email_provider_instance = email
+    _email_provider_fingerprint = None
+
+
+__all__ = [
+    "DeliveryProviderError",
+    "DeliveryReceipt",
+    "EmailProvider",
+    "MockEmailProvider",
+    "MockSmsProvider",
+    "ProviderCapabilities",
+    "ProviderError",
+    "SendCloudSmsProvider",
+    "SmsProvider",
+    "SmsReceipt",
+    "SmtpEmailProvider",
+    "TencentSesProvider",
+    "TencentSmsProvider",
+    "get_email_provider",
+    "get_sms_provider",
+    "reset_providers_for_test",
+    "sign_sendcloud_params",
+]

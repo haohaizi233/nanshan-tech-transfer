@@ -129,11 +129,51 @@ class Settings(BaseSettings):
     TENCENT_SES_SECRET_ID: str = ""
     TENCENT_SES_SECRET_KEY: str = ""
     TENCENT_SES_FROM_EMAIL: str = ""
+    TENCENT_SES_REGION: str = "ap-hongkong"
+    TENCENT_SES_ENDPOINT: str = "ses.tencentcloudapi.com"
+    TENCENT_SES_TIMEOUT_SECONDS: int = 10
+    TENCENT_SES_TEMPLATE_ID_OTP: int = 0
+    TENCENT_SES_TEMPLATE_ID_RESET: int = 0
     SMTP_HOST: str = ""
     SMTP_PORT: int = 465
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "南山科转通"
     SMTP_USE_SSL: bool = True
+    SMTP_TIMEOUT_SECONDS: int = 10
+    SMTP_MAX_ATTEMPTS: int = 2
+
+    # ── 安全密钥隔离（OTP / 联系方式盲索引 / Step-up）──────────
+    SECURITY_OTP_HMAC_SECRET: str = ""
+    SECURITY_CONTACT_HMAC_SECRET: str = ""
+    STEP_UP_GRANT_TTL_SECONDS: int = 300
+    STEP_UP_RECENT_AUTH_SECONDS: int = 300
+
+    # ── Email Gateway 策略与多维风控 ───────────────────────────
+    EMAIL_CODE_TTL_SECONDS: int = 300
+    EMAIL_LINK_TTL_SECONDS: int = 300
+    EMAIL_CODE_MAX_ATTEMPTS: int = 5
+    EMAIL_RISK_ENGINE_ENABLED: bool = True
+    EMAIL_RISK_HMAC_SECRET: str = ""
+    EMAIL_REQUIRE_VERIFIED_CONTACT: bool = True
+    EMAIL_SECURITY_NOTIFICATION_ENABLED: bool = False
+    EMAIL_LIVE_TEST_ENABLED: bool = False
+    EMAIL_COOLDOWN_SECONDS: int = 60
+    EMAIL_LIMIT_10M: int = 3
+    EMAIL_LIMIT_1H: int = 5
+    EMAIL_LIMIT_DAY: int = 15
+    EMAIL_IP_LIMIT_1M: int = 10
+    EMAIL_IP_LIMIT_1H: int = 50
+    EMAIL_IP_LIMIT_DAY: int = 200
+    EMAIL_ACCOUNT_LIMIT_1H: int = 5
+    EMAIL_ACCOUNT_LIMIT_DAY: int = 15
+    EMAIL_DEVICE_LIMIT_1H: int = 20
+    EMAIL_DEVICE_LIMIT_DAY: int = 50
+    EMAIL_IP_DISTINCT_LIMIT_1H: int = 10
+    EMAIL_DEVICE_DISTINCT_LIMIT_10M: int = 5
+    EMAIL_GLOBAL_DAILY_BUDGET: int = 5000
+    EMAIL_DOMAIN_ANOMALY_LIMIT_10M: int = 50
 
     # ── 前端页面地址（用于生成密码重置链接与扫码回调）──────
     FRONTEND_URL: str = "http://localhost:5173"
@@ -349,6 +389,44 @@ class Settings(BaseSettings):
         ZoneInfo(value)
         return value
 
+    @field_validator(
+        "SMTP_TIMEOUT_SECONDS",
+        "SMTP_MAX_ATTEMPTS",
+        "TENCENT_SES_TIMEOUT_SECONDS",
+        "STEP_UP_GRANT_TTL_SECONDS",
+        "STEP_UP_RECENT_AUTH_SECONDS",
+        "EMAIL_CODE_TTL_SECONDS",
+        "EMAIL_LINK_TTL_SECONDS",
+        "EMAIL_CODE_MAX_ATTEMPTS",
+        "EMAIL_COOLDOWN_SECONDS",
+        "EMAIL_LIMIT_10M",
+        "EMAIL_LIMIT_1H",
+        "EMAIL_LIMIT_DAY",
+        "EMAIL_IP_LIMIT_1M",
+        "EMAIL_IP_LIMIT_1H",
+        "EMAIL_IP_LIMIT_DAY",
+        "EMAIL_ACCOUNT_LIMIT_1H",
+        "EMAIL_ACCOUNT_LIMIT_DAY",
+        "EMAIL_DEVICE_LIMIT_1H",
+        "EMAIL_DEVICE_LIMIT_DAY",
+        "EMAIL_IP_DISTINCT_LIMIT_1H",
+        "EMAIL_DEVICE_DISTINCT_LIMIT_10M",
+        "EMAIL_GLOBAL_DAILY_BUDGET",
+        "EMAIL_DOMAIN_ANOMALY_LIMIT_10M",
+    )
+    @classmethod
+    def _validate_email_positive(cls, value):
+        if value < 1:
+            raise ValueError("Email limits and timeouts must be positive")
+        return value
+
+    @field_validator("SMTP_PORT")
+    @classmethod
+    def _validate_smtp_port(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError("SMTP_PORT 必须在 1-65535 之间")
+        return value
+
     @field_validator("MAX_REQUEST_SECONDS")
     @classmethod
     def _validate_max_request_seconds(cls, v: float) -> float:
@@ -462,6 +540,35 @@ _WEAK_SECRETS = {
 _WEAK_DB_PASSWORDS = {"123456", "postgres123", "password", "postgres", "root", ""}
 
 
+def validate_frontend_reset_base_url(raw_url: str, *, production_like: bool = False) -> str:
+    """校验用于拼接密码重置链接的受信任前端基地址。
+
+    禁止用户控制域名、内嵌凭证、query/fragment 或开放重定向；
+    staging/production 必须使用非回环 HTTPS 地址。
+    """
+    from urllib.parse import urlsplit
+
+    text = (raw_url or "").strip()
+    if not text or any(ord(c) < 32 or ord(c) == 127 or c.isspace() for c in text):
+        raise ValueError("FRONTEND_URL 不能为空或包含空白/控制字符")
+    parsed = urlsplit(text)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+        raise ValueError("FRONTEND_URL 必须是合法的 http/https 地址")
+    if parsed.username or parsed.password:
+        raise ValueError("FRONTEND_URL 不允许包含账号密码信息")
+    if parsed.query or parsed.fragment:
+        raise ValueError("FRONTEND_URL 不允许包含查询参数或片段")
+    host = parsed.hostname.lower()
+    if production_like:
+        if scheme != "https":
+            raise ValueError("staging/production 环境 FRONTEND_URL 必须使用 https")
+        if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or host.endswith(".local"):
+            raise ValueError(f"staging/production 环境 FRONTEND_URL 不允许指向本地地址 ({host})")
+    path = parsed.path.rstrip("/")
+    return f"{scheme}://{parsed.netloc}{path}"
+
+
 def assert_environment():
     """staging/production 启动断言：弱配置直接终止进程（sys.exit(1)）。"""
     if not settings.is_production_like:
@@ -487,8 +594,38 @@ def assert_environment():
         violations.append("生产环境启用了 SMS_ENABLED 但 SMS_PROVIDER 仍为 mock")
     if settings.SMS_ENABLED and not settings.REDIS_ENABLED:
         violations.append("生产短信安全网关必须显式配置 REDIS_ENABLED=true")
-    if settings.EMAIL_ENABLED and settings.EMAIL_PROVIDER == "mock":
-        violations.append("生产环境启用了 EMAIL_ENABLED 但 EMAIL_PROVIDER 仍为 mock")
+    if settings.EMAIL_ENABLED:
+        email_provider = (settings.EMAIL_PROVIDER or "").strip().lower()
+        if email_provider == "mock":
+            violations.append("生产环境启用了 EMAIL_ENABLED 但 EMAIL_PROVIDER 仍为 mock")
+        elif email_provider not in {"smtp", "tencent"}:
+            violations.append(f"生产环境 EMAIL_PROVIDER 无效或不支持: {settings.EMAIL_PROVIDER}")
+        if not settings.REDIS_ENABLED:
+            violations.append("生产邮件安全网关必须显式配置 REDIS_ENABLED=true")
+        if not settings.EMAIL_RISK_ENGINE_ENABLED:
+            violations.append("生产邮件安全网关必须启用 EMAIL_RISK_ENGINE_ENABLED=true")
+        if not settings.EMAIL_REQUIRE_VERIFIED_CONTACT:
+            violations.append("生产邮件安全网关必须启用 EMAIL_REQUIRE_VERIFIED_CONTACT=true")
+        if email_provider == "smtp":
+            if not settings.SMTP_HOST.strip():
+                violations.append("启用 SMTP 时必须配置 SMTP_HOST")
+            if not settings.SMTP_USER.strip() or not settings.SMTP_PASSWORD.strip():
+                violations.append("启用 SMTP 时必须配置 SMTP_USER 与 SMTP_PASSWORD")
+        elif email_provider == "tencent":
+            if (
+                not settings.TENCENT_SES_SECRET_ID.strip()
+                or not settings.TENCENT_SES_SECRET_KEY.strip()
+                or not settings.TENCENT_SES_FROM_EMAIL.strip()
+                or not settings.TENCENT_SES_REGION.strip()
+            ):
+                violations.append(
+                    "启用腾讯云 SES 时必须配置 TENCENT_SES_SECRET_ID / TENCENT_SES_SECRET_KEY / "
+                    "TENCENT_SES_FROM_EMAIL / TENCENT_SES_REGION"
+                )
+        try:
+            validate_frontend_reset_base_url(settings.FRONTEND_URL, production_like=True)
+        except ValueError as exc:
+            violations.append(str(exc))
     if violations:
         sys.stderr.write(
             f"[FATAL] 环境保护断言失败（{env}）：\n  - "
