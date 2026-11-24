@@ -1,39 +1,42 @@
 # 南山科转通统一身份认证系统自动化测试报告
 
-## 1. 测试综述与执行环境
+> [!NOTE]
+> **Email Security Gateway 最新全量测试、真实 PostgreSQL/Redis 并发集成与性能基准报告已更新至独立文档**：[docs/auth/email-gateway/09-test-report.md](./email-gateway/09-test-report.md)。以下同步更新最新分支 `feat/email-security-gateway` 实测摘要，并修正历史文档中不再适用的内存限流降级描述（生产/`REDIS_ENABLED=true` 现已强制 Fail-Closed）。
 
-- **测试执行时间**：2026-11-16
-- **代码分支**：`feat/unified-auth-recovery`
-- **审查基准 SHA**：`e53d8fbb37cd18c4b1a5a84bbaae52f4048c16a1`
-- **实际远端 HEAD SHA**：`7efffea12eb59a30137cde6633b7cfa9ed1c7ec1`
-- **操作系统**：Windows 11 / Windows Server
-- **Python 环境**：Python 3.13.17 (`.venv/Scripts/python.exe`), Pytest 9.1.1, Coverage 7.1.0
-- **Node.js 环境**：Node v22+, Vite 8.2.2
+## 1. 测试综述与最新实测执行环境
+
+- **最新验证日期**：2026-11-24
+- **代码分支**：`feat/email-security-gateway`
+- **远端 `main` 基准 SHA**：`ef95927431ae101063eae9b3a4bcec24ffd42a27`
+- **操作系统与依赖**：Windows + Python 3.13.17 (`pytest 9.1.1`, `pytest-cov 7.1.0`), PostgreSQL (`SMS_TEST_POSTGRES=1`), Redis (`SMS_TEST_REDIS_URL=redis://127.0.0.1:6379/15`), Node.js / Vite 8.2.2
 
 ---
 
-## 2. 测试执行汇总表
+## 2. 最新测试执行汇总表
 
-| 测试工程 / 模块 | 测试套件 / 命令 | 用例总数 | 通过数 | 跳过数 | 失败数 | 耗时 | 状态 |
+| 测试工程 / 模块 | 测试套件 / 命令 | 用例总数 | 通过数 | 跳过 / 说明 | 失败数 | 耗时 / 覆盖率 | 状态 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **后端核心认证与业务服务** (`tech-transfer-service`) | `pytest -q` | 2305 | 2274 | 31 (需PG真实连接) | 0 | 17.06s | **PASSED** |
-| **新增统一身份与安全专用测试** (`tech-transfer-service`) | `pytest tests/test_unified_auth_recovery.py` | 15 | 15 | 0 | 0 | 0.57s | **PASSED** |
-| **前端 Vue 3 单元测试** (`nanshan-frontend`) | `node --test tests/*.test.mjs` | 10 | 10 | 0 | 0 | 0.28s | **PASSED** |
-| **前端生产环境构建** (`nanshan-frontend`) | `npm run build` | 100 模块 | 100 | 0 | 0 | 0.44s | **PASSED** |
-| **小程序认证与安全测试** (`南山小程序/南山`) | `node --test tests/unified-auth-security.test.mjs ...` | 14 | 14 | 0 | 0 | 0.33s | **PASSED** |
+| **后端全量测试 + 覆盖率** (`tech-transfer-service`) | `SMS_TEST_POSTGRES=1 SMS_TEST_REDIS_URL=... pytest -p no:cacheprovider --cov=. --cov-fail-under=75 -q` | 2568 | **2537** | 31 (`test_ai_chat_runs_pg.py` 需 `AI_CHAT_TEST_DATABASE_URL`) | 0 | 44.72s / **89.11%** | **PASSED** |
+| **安全网关 PG/Redis 联合回归** (`tech-transfer-service`) | `tests/test_email_*.py` + `test_sms_*.py` + `test_sendcloud_security.py` + `test_unified_auth_recovery.py` + `test_wechat_login.py` + `test_middleware_exception.py` + `test_core_comprehensive.py` | 373 | **373** | 0 | 0 | 30.22s | **PASSED** |
+| **新增 Email Gateway 专项套件** (`tech-transfer-service`) | `tests/test_email_*.py` (10 个测试模块，含真实 PG + Redis) | 45 | **45** | 0 | 0 | 11.14s | **PASSED** |
+| **前端 Vue 3 单元测试与构建** (`nanshan-frontend`) | `node --test src/utils/*.test.mjs` + `npm run build` | 38 | **38** | 0 | 0 | 429.56ms / 391ms build | **PASSED** |
+| **小程序回归测试与双端编译** (`南山小程序/南山`) | `node --test tests/*.test.mjs` + `build:h5` + `build:mp-weixin` | 416 | **416** | 0 | 0 | 2213.77ms + 双端 build DONE | **PASSED** |
+| **真实外部公网 SMTP/SES 投递** | — | — | — | 未授权外发（遵循安全规范未触发） | — | — | **`NOT RUN`** |
 
 ---
 
-## 3. 详细测试用例清单与验证点
+## 3. 历史测试条目演进说明 (`test_unified_auth_recovery.py`)
 
-### 3.1 后端专项安全测试 (`test_unified_auth_recovery.py`)
+原报告第 3 节条目 `3. test_rate_limiter_memory_fallback` 已随 `SecurityRateLimiter` 生产 **Fail-Closed** 安全加固演进：
+- 在 `APP_ENV in ("staging", "production")` 或 `REDIS_ENABLED=true` 时，Redis 异常不再静默降级至进程内存 `_mem_buckets`，而是显式返回 HTTP 503 `TT_COMMON_50301`（由 `tests/test_email_risk.py::test_email_risk_and_rate_limiter_fail_closed_on_redis_failure` 验证）；
+- 邮件重置链接回归测试 `test_recovery_start_valid_account_email_link` 已更新为校验 URL Fragment (`reset-password#challengeId=...&token=...`) 与 `email_gateway` 统一资格/风控流程。
 
 1. `test_mock_sms_provider_and_registry`
    - 验证服务商工厂模式与 MockSmsProvider 发送、捕获与验证码提取。
 2. `test_mock_email_provider`
    - 验证邮件服务商抽象与 MockEmailProvider 发送结果。
-3. `test_rate_limiter_memory_fallback`
-   - 验证滑动窗口限流器在无 Redis 时平滑降级至内存滑动窗口，超出阈值精确拒止。
+3. `test_email_risk_and_rate_limiter_fail_closed_on_redis_failure`（替代原内存静默降级预期）
+   - 仅当非生产且 `REDIS_ENABLED=false` 时允许内存窗口；生产环境或启用 Redis 时强制 Fail-Closed 返回 503 (`TT_COMMON_50301`)。
 4. `test_start_password_recovery_anti_enumeration`
    - 验证账号不存在或未绑定有效安全联系方式时，接口模拟恒定耗时并返回完全一致的成功消息，零账号枚举泄露。
 5. `test_verify_recovery_challenge_failure_cap`
@@ -81,12 +84,12 @@
 cd tech-transfer-service
 python -m pytest -q
 
-# 3. 运行后端安全专项测试
-python -m pytest tests/test_unified_auth_recovery.py -v
+# 3. 运行后端 Email + 统一安全专项测试（含真实 PostgreSQL 与 Redis）
+SMS_TEST_POSTGRES=1 SMS_TEST_REDIS_URL=redis://127.0.0.1:6379/15 python -m pytest -p no:cacheprovider tests/test_email_*.py tests/test_unified_auth_recovery.py -v
 
 # 4. 运行前端 Vue 3 测试与打包构建
 cd ../nanshan-frontend
-node --test tests/*.test.mjs
+node --test src/utils/*.test.mjs
 npm run build
 
 # 5. 运行小程序测试

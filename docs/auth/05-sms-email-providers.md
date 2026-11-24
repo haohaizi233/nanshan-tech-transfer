@@ -43,28 +43,42 @@ class SmsProvider(abc.ABC):
 
 ## 3. 邮件服务商 (EmailProvider)
 
-### 3.1 接口契约
+### 3.1 接口契约 (`EmailProvider`)
+完整 Email Security Gateway 规范与结构化回执模型详见：[docs/auth/email-gateway/02-email-provider-contracts.md](./email-gateway/02-email-provider-contracts.md)。
+
 ```python
 class EmailProvider(abc.ABC):
-    @abc.abstractmethod
-    def send_code(self, email: str, code: str, purpose: str, expires_in_seconds: int = 300) -> bool:
-        """发送邮件 6 位 OTP 验证码。"""
+    provider_name: str = "base"
+    capabilities: ProviderCapabilities
 
     @abc.abstractmethod
-    def send_reset_link(self, email: str, reset_url: str, expires_in_seconds: int = 300) -> bool:
-        """发送一次性密码重置链接。"""
+    def send_code(self, email: str, code: str, purpose: str, expires_in_seconds: int = 300, *, request_id: str | None = None) -> bool:
+        """发送邮件 6 位 OTP 验证码。True 仅表示服务商受理请求，不代表最终送达。"""
+
+    @abc.abstractmethod
+    def send_reset_link(self, email: str, reset_url: str, expires_in_seconds: int = 300, *, request_id: str | None = None) -> bool:
+        """发送一次性密码重置链接（URL Fragment）。"""
+
+    def send_code_task(...) -> DeliveryReceipt: ...
+    def send_reset_link_task(...) -> DeliveryReceipt: ...
+    def send_notification_task(...) -> DeliveryReceipt: ...
+    def query_status(...) -> dict[str, Any]: ...
 ```
 
-### 3.2 支持的服务商实现
-1. **腾讯云 SES (TencentSesProvider)**：
+### 3.2 支持的服务商实现与严格注册 (`get_email_provider()`)
+`EMAIL_PROVIDER` 仅允许 `mock`（仅非生产环境）、`smtp`、`tencent`，任何未知名称、初始化异常或配置缺失**绝不静默回退 Mock**；`EMAIL_ENABLED=false` 时即使存在已缓存实例也强制拒绝发信：
+1. **腾讯云 SES (`TencentSesProvider`)**：
    - `EMAIL_ENABLED=true`
    - `EMAIL_PROVIDER=tencent`
    - `TENCENT_SES_SECRET_ID` / `TENCENT_SES_SECRET_KEY`
    - `TENCENT_SES_FROM_EMAIL`：经过腾讯云验证的企业发信域名（如 `service@notice.nanshan-tech.com`）
-2. **标准 SMTP (SmtpEmailProvider)**：
+   - `TENCENT_SES_REGION`（必填请求头 `X-TC-Region`，默认 `ap-hongkong`）、`TENCENT_SES_ENDPOINT=ses.tencentcloudapi.com`
+   - 使用 `SendEmail` (2020-10-02) 与 `TC3-HMAC-SHA256` 签名；支持 `GetSendEmailStatus` 状态核对（需 `capabilities.delivery_status_query=True`）。
+2. **标准 SMTP (`SmtpEmailProvider`)**：
    - `EMAIL_ENABLED=true`
    - `EMAIL_PROVIDER=smtp`
-   - `SMTP_HOST`、`SMTP_PORT` (默认 465 SSL)、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_USE_SSL=true`
+   - `SMTP_HOST`、`SMTP_PORT` (默认 465 SSL)、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM_EMAIL`、`SMTP_USE_SSL=true`
+   - 强制 TLS ≥ 1.2 + 证书/主机名校验、头注入阻断，且 `DATA` 提交后断连/超时标记 `PROVIDER_OUTCOME_UNKNOWN` 并禁止自动重发。
 
 ---
 

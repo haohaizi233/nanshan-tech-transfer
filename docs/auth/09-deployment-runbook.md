@@ -25,12 +25,19 @@ pg_dump -h $DB_HOST -p $DB_PORT -U $DB_USER -Fc -d $DB_NAME > /backup/nanshan_pr
 
 ## 2. 数据库迁移执行 (Database Migration)
 
-迁移脚本为：`tech-transfer-service/migrations/pg/033_unified_account_security.sql`。
-该脚本设计为严格幂等操作，包含 `IF NOT EXISTS` 与冲突保护。
+按顺序执行增量幂等迁移（`033`–`036`，包含 `IF NOT EXISTS`、历史未决挑战收敛与冲突保护）：
+1. `tech-transfer-service/migrations/pg/033_unified_account_security.sql`
+2. `tech-transfer-service/migrations/pg/034_sms_security_gateway.sql`
+3. `tech-transfer-service/migrations/pg/035_sms_delivery_diagnostics.sql`
+4. `tech-transfer-service/migrations/pg/036_email_security_gateway.sql`
+
+> 完整 Email Security Gateway 部署、DNS (SPF/DKIM/DMARC) 与回滚详情见：[docs/auth/email-gateway/10-deployment-runbook.md](./email-gateway/10-deployment-runbook.md)。
 
 ### 2.1 执行迁移
 ```bash
-psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f migrations/pg/033_unified_account_security.sql
+for f in 033_unified_account_security.sql 034_sms_security_gateway.sql 035_sms_delivery_diagnostics.sql 036_email_security_gateway.sql; do
+  psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -v ON_ERROR_STOP=1 -f "migrations/pg/$f"
+done
 ```
 
 ### 2.2 迁移后校验
@@ -73,13 +80,17 @@ TENCENTCLOUD_SMS_SIGN_NAME=南山科转通
 TENCENTCLOUD_SMS_TEMPLATE_ID=1234567
 SMS_OTP_EXPIRY_SECONDS=300
 
-# --- 邮件服务 (腾讯云 SES 或 SMTP) ---
+# --- 邮件服务 (腾讯云 SES 或 SMTP；EMAIL_PROVIDER 仅支持 tencent / smtp / non-prod mock) ---
 EMAIL_ENABLED=true
-EMAIL_PROVIDER=tencent_ses
-TENCENTCLOUD_SES_SECRET_ID=AKIDxxxxxxxxxxxxxxxxxxxx
-TENCENTCLOUD_SES_SECRET_KEY=yyyyyyyyyyyyyyyyyyyyyyyy
-TENCENTCLOUD_SES_FROM_EMAIL=service@mail.nanshan-tech.com
-EMAIL_OTP_EXPIRY_SECONDS=300
+EMAIL_PROVIDER=tencent
+TENCENT_SES_SECRET_ID=AKIDxxxxxxxxxxxxxxxxxxxx
+TENCENT_SES_SECRET_KEY=yyyyyyyyyyyyyyyyyyyyyyyy
+TENCENT_SES_FROM_EMAIL=service@mail.nanshan-tech.com
+TENCENT_SES_REGION=ap-hongkong
+TENCENT_SES_ENDPOINT=ses.tencentcloudapi.com
+EMAIL_CODE_TTL_SECONDS=300
+EMAIL_LINK_TTL_SECONDS=300
+EMAIL_CODE_MAX_ATTEMPTS=5
 
 # 或使用标准企业 SMTP：
 # EMAIL_PROVIDER=smtp
@@ -87,7 +98,9 @@ EMAIL_OTP_EXPIRY_SECONDS=300
 # SMTP_PORT=465
 # SMTP_USER=service@mail.nanshan-tech.com
 # SMTP_PASSWORD=xxxxxxxxxxxx
+# SMTP_FROM_EMAIL=service@mail.nanshan-tech.com
 # SMTP_USE_SSL=true
+# SMTP_TIMEOUT_SECONDS=10
 ```
 
 ### 3.2 微信开放平台 PC 扫码登录 (外部依赖)
@@ -106,7 +119,7 @@ AUTH_CACHE_TTL_SECONDS=30
 ```
 
 > [!WARNING]
-> 生产环境启动时，`config.assert_environment()` 会执行严格校验。若 `ENV=production` 下启用了 `mock` 服务商或未配置必要的安全秘钥，服务将直接拒绝启动以保护生产安全。
+> 生产环境启动时，`config.assert_environment()` 会执行严格校验。若 `APP_ENV=production` / `staging` 下启用了 `mock` 服务商、`REDIS_ENABLED=false`、`FRONTEND_URL` 非受信任 `https://`（如 `localhost`）或缺少必要服务商凭证/强秘钥，服务将直接拒绝启动；同时 `SecurityRateLimiter` 与风控引擎严格 Fail-Closed。
 
 ---
 

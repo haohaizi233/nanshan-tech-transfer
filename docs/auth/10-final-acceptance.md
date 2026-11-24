@@ -15,12 +15,11 @@
 ## 2. 9 项核心验收标准逐项核验结果 (Checklist A-I)
 
 ### 验收项 1：代码是否可在无真实第三方凭证下完整运行自动化测试？
-- **验收结论**：**完全达标 (PASSED)**
+- **验收结论**：**完全达标 (PASSED)**（真实外部 SMTP/SES 公网发信在未授权前严格标注为 `NOT RUN`）
 - **代码与机制证据**：
-  - 抽象并实现了服务商适配层 `SmsProvider`、`EmailProvider` 与微信 PC 扫码客户端；
-  - 默认及测试环境下自动注入 `MockSmsProvider` 与 `MockEmailProvider`，在内存中安全捕获派发的消息并支持测试验证；
-  - 限流器支持 Redis 与内存双模滑动窗口，在无外部 Redis 依赖时自动降级至线程安全的内存滑动窗口；
-  - 运行 `pytest` 运行全部 2,305 个后端用例，2,274 个通过，0 失败，总覆盖率达到 89.75%（大幅超过 75% 阈值）。
+  - 抽象并实现了服务商适配层 `SmsProvider`、`EmailProvider` (`MockEmailProvider` / `SmtpEmailProvider` / `TencentSesProvider`) 与微信 PC 扫码客户端；
+  - 严格非生产测试注入边界下通过 `reset_providers_for_test()` 注入 `MockSmsProvider` 与 `MockEmailProvider` 执行离线全量断言，**绝不在 `staging` / `production` 暴露 Mock**；
+  - `SecurityRateLimiter` 与风控引擎仅在显式 `local`/`development` 且 `REDIS_ENABLED=false` 时允许本地内存模式；生产或启用 Redis 时严格执行 **Fail-Closed**，已补充真实 PostgreSQL 与 Redis 集成自动化回归。
 
 ---
 
@@ -117,8 +116,13 @@
 ### 验收项 9：外部依赖未配置项的清晰标识与环境断言：
 - **验收结论**：**完全达标 (PASSED)**
 - **代码与机制证据**：
-  - 在 `config.py` 与 `modules/security/provider.py` 中，当腾讯云 SMS、SES 或微信开放平台缺少密钥时，系统在开发与测试环境下自动安全禁用或切换至 Mock 替身；
-  - 在 `config.py` 的 `assert_environment()` 中加入强制环境门禁：在 `ENV=production` 下若尝试启用 `mock` 或缺少必填服务商密钥，服务立即抛出异常拒绝启动，杜绝测试替身意外泄漏为生产入口。
+  - 在 `config.py`、`modules/security/provider.py` 与 `routes/auth.py` 中，当 `EMAIL_ENABLED=false`、`SMS_ENABLED=false` 或 `EMAIL_PROVIDER` 未知/缺少凭证时，系统严格拒绝服务并关闭对应通道，绝不静默回退 `Mock`；
+  - `config.assert_environment()` 在 `APP_ENV=production` / `staging` 下强制校验 `SMS_PROVIDER`/`EMAIL_PROVIDER`、`REDIS_ENABLED=true`、`FRONTEND_URL` 受信任 `https://` 与必要凭证，不符合条件直接中止启动。
+
+---
+
+> [!NOTE]
+> **后续 Email Security Gateway 专项建设验收更新**：详见新增交付子目录 [docs/auth/email-gateway/12-final-acceptance.md](./email-gateway/12-final-acceptance.md)（含 A01–A30 逐项源码与实测证据矩阵，真实公网 SMTP/SES 投递标注 `NOT RUN`）。
 
 ---
 
