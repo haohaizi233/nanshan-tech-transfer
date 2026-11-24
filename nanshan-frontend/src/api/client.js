@@ -153,7 +153,7 @@ async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn40
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
   const buildHeaders = () => {
     const headers = {}
-    if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$/.test(url.pathname)) {
+    if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$|\/me\/security\/step-up\/challenge$/.test(url.pathname)) {
       headers['X-Client-Source'] = 'h5'
       const deviceId = getDeviceInstanceId()
       if (deviceId) headers['X-Device-Id'] = deviceId
@@ -234,6 +234,11 @@ async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn40
     error.status = resp.status
     error.details = payload.details
     error.requestId = payload.requestId
+    const retryHeader = resp.headers.get('Retry-After')
+    const parsedRetry = retryHeader ? Number.parseInt(retryHeader, 10) : Number(payload?.details?.retryAfter || 0)
+    if (Number.isFinite(parsedRetry) && parsedRetry > 0) {
+      error.retryAfter = parsedRetry
+    }
     if (!skipErrorToast) notifyError(error)
     throw error
   }

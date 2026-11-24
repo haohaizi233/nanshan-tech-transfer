@@ -1,16 +1,32 @@
 <script setup>
-import { computed, onUnmounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
+import {
+  normalizeRecoveryCapabilities,
+  resolveRetryAfterSeconds,
+  sanitizeOtpCode,
+} from '../../utils/emailSecurity.js'
 
 const router = useRouter()
 
 // 步骤：1-输入账号与渠道 2-验证凭证 3-设置新密码 4-完成
 const step = ref(1)
 const loading = ref(false)
+const capsLoaded = ref(false)
 const errorMsg = ref('')
 const countdown = ref(0)
 let timer = null
+let requestSeq = 0
+
+const capabilities = reactive({
+  sms: true,
+  emailOtp: false,
+  emailLink: false,
+  hasAny: true,
+  codeTtlSeconds: 300,
+  cooldownSeconds: 60,
+})
 
 const form = reactive({
   account: '',
@@ -26,28 +42,124 @@ const form = reactive({
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
-const startCountdown = () => {
-  countdown.value = 60
-  if (timer) clearInterval(timer)
+const clearTimer = () => {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+
+const clearSensitiveState = () => {
+  form.challengeId = ''
+  form.maskedDestination = ''
+  form.code = ''
+  form.recoveryGrant = ''
+  form.newPassword = ''
+  form.confirmPassword = ''
+}
+
+const resetStaleChallenge = () => {
+  requestSeq += 1
+  form.challengeId = ''
+  form.maskedDestination = ''
+  form.code = ''
+  form.recoveryGrant = ''
+  errorMsg.value = ''
+}
+
+const startCountdown = (seconds = capabilities.cooldownSeconds || 60) => {
+  const duration = Math.max(1, Number(seconds) || 60)
+  countdown.value = duration
+  clearTimer()
   timer = setInterval(() => {
     if (countdown.value > 0) {
       countdown.value--
     } else {
-      clearInterval(timer)
-      timer = null
+      clearTimer()
     }
   }, 1000)
 }
 
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+const loadCapabilities = async () => {
+  try {
+    const res = await api('/auth/recovery/capabilities', {
+      skipAuthRefresh: true,
+      skipErrorToast: true,
+    })
+    const norm = normalizeRecoveryCapabilities(res)
+    capabilities.sms = norm.sms
+    capabilities.emailOtp = norm.emailOtp
+    capabilities.emailLink = norm.emailLink
+    capabilities.hasAny = norm.hasAny
+    capabilities.codeTtlSeconds = norm.codeTtlSeconds
+    capabilities.cooldownSeconds = norm.cooldownSeconds
+    if (norm.defaultChannel && !isChannelEnabled(form.channel)) {
+      form.channel = norm.defaultChannel
+    }
+  } catch {
+    // 能力探测失败时保持保守默认，服务端仍会独立校验功能开关
+  } finally {
+    capsLoaded.value = true
+  }
+}
+
+const isChannelEnabled = (ch) => {
+  if (ch === 'sms') return capabilities.sms
+  if (ch === 'email_otp') return capabilities.emailOtp
+  if (ch === 'email_link') return capabilities.emailLink
+  return false
+}
+
+watch(
+  () => form.channel,
+  () => {
+    resetStaleChallenge()
+    clearTimer()
+    countdown.value = 0
+    if (step.value > 1 && step.value < 4) {
+      step.value = 1
+    }
+  }
+)
+
+watch(
+  () => form.account,
+  () => {
+    if (form.challengeId || form.recoveryGrant) {
+      resetStaleChallenge()
+    }
+  }
+)
+
+onMounted(() => {
+  loadCapabilities()
 })
 
+onUnmounted(() => {
+  clearTimer()
+  clearSensitiveState()
+})
+
+const onOtpInput = (event) => {
+  const cleaned = sanitizeOtpCode(event?.target?.value ?? form.code)
+  form.code = cleaned
+}
+
 const handleSendChallenge = async () => {
+  if (loading.value) return
+  if (!capabilities.hasAny) {
+    errorMsg.value = '系统暂未启用在线自助找回密码通道，请联系管理员'
+    return
+  }
+  if (!isChannelEnabled(form.channel)) {
+    errorMsg.value = '当前所选验证通道未启用，请切换其他可用验证方式'
+    return
+  }
   if (!form.account.trim()) {
     errorMsg.value = '请输入登录账号、安全手机号或安全邮箱'
     return
   }
+  const currentSeq = ++requestSeq
   loading.value = true
   errorMsg.value = ''
   try {
@@ -59,26 +171,38 @@ const handleSendChallenge = async () => {
       },
       skipAuthRefresh: true,
     })
+    if (currentSeq !== requestSeq) return
     form.challengeId = res.challengeId || ''
     form.maskedDestination = res.maskedDestination || ''
-    startCountdown()
-    if (form.channel === 'email_link') {
-      step.value = 2 // 邮件链接直接展示前往邮箱查收提示
-    } else {
-      step.value = 2 // 前往输入验证码
-    }
+    form.code = ''
+    form.recoveryGrant = ''
+    startCountdown(capabilities.cooldownSeconds)
+    step.value = 2
   } catch (err) {
+    if (currentSeq !== requestSeq) return
+    const retryAfter = resolveRetryAfterSeconds(err, 0)
+    if (retryAfter > 0) startCountdown(retryAfter)
     errorMsg.value = err.message || '发送验证信息失败，请稍后重试'
   } finally {
-    loading.value = false
+    if (currentSeq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
 const handleVerifyCode = async () => {
-  if (!form.code.trim()) {
-    errorMsg.value = '请输入验证码'
+  if (loading.value) return
+  const cleanCode = sanitizeOtpCode(form.code)
+  form.code = cleanCode
+  if (cleanCode.length !== 6) {
+    errorMsg.value = '请输入完整的 6 位数字验证码'
     return
   }
+  if (!form.challengeId) {
+    errorMsg.value = '验证会话已过期，请返回重新获取验证码'
+    return
+  }
+  const currentSeq = ++requestSeq
   loading.value = true
   errorMsg.value = ''
   try {
@@ -86,20 +210,27 @@ const handleVerifyCode = async () => {
       method: 'POST',
       body: {
         challengeId: form.challengeId,
-        code: form.code.trim(),
+        code: cleanCode,
       },
       skipAuthRefresh: true,
     })
+    if (currentSeq !== requestSeq) return
     form.recoveryGrant = res.recoveryGrant
-    step.value = 3 // 进入设置新密码步骤
+    step.value = 3
   } catch (err) {
+    if (currentSeq !== requestSeq) return
+    const retryAfter = resolveRetryAfterSeconds(err, 0)
+    if (retryAfter > 0) startCountdown(retryAfter)
     errorMsg.value = err.message || '验证码校验失败'
   } finally {
-    loading.value = false
+    if (currentSeq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
 const handleResetPassword = async () => {
+  if (loading.value) return
   if (form.newPassword.length < 8 || form.newPassword.length > 128) {
     errorMsg.value = '新密码长度须为 8-128 位'
     return
@@ -119,7 +250,9 @@ const handleResetPassword = async () => {
       },
       skipAuthRefresh: true,
     })
-    step.value = 4 // 完成
+    clearSensitiveState()
+    clearTimer()
+    step.value = 4
   } catch (err) {
     errorMsg.value = err.message || '重置密码失败'
   } finally {
@@ -128,6 +261,7 @@ const handleResetPassword = async () => {
 }
 
 const goLogin = () => {
+  clearSensitiveState()
   router.push('/login')
 }
 </script>
@@ -174,25 +308,37 @@ const goLogin = () => {
         <div class="form-item">
           <label>选择验证方式</label>
           <div class="channel-picker">
-            <label class="channel-option" :class="{ selected: form.channel === 'sms' }">
-              <input v-model="form.channel" type="radio" value="sms" />
-              <span>短信验证码</span>
+            <label
+              class="channel-option"
+              :class="{ selected: form.channel === 'sms', disabled: !capabilities.sms }"
+            >
+              <input v-model="form.channel" type="radio" value="sms" :disabled="!capabilities.sms" />
+              <span>短信验证码{{ !capabilities.sms && capsLoaded ? '（未启用）' : '' }}</span>
             </label>
-            <label class="channel-option" :class="{ selected: form.channel === 'email_otp' }">
-              <input v-model="form.channel" type="radio" value="email_otp" />
-              <span>邮箱验证码</span>
+            <label
+              class="channel-option"
+              :class="{ selected: form.channel === 'email_otp', disabled: !capabilities.emailOtp }"
+            >
+              <input v-model="form.channel" type="radio" value="email_otp" :disabled="!capabilities.emailOtp" />
+              <span>邮箱验证码{{ !capabilities.emailOtp && capsLoaded ? '（未启用）' : '' }}</span>
             </label>
-            <label class="channel-option" :class="{ selected: form.channel === 'email_link' }">
-              <input v-model="form.channel" type="radio" value="email_link" />
-              <span>邮件重置链接</span>
+            <label
+              class="channel-option"
+              :class="{ selected: form.channel === 'email_link', disabled: !capabilities.emailLink }"
+            >
+              <input v-model="form.channel" type="radio" value="email_link" :disabled="!capabilities.emailLink" />
+              <span>邮件重置链接{{ !capabilities.emailLink && capsLoaded ? '（未启用）' : '' }}</span>
             </label>
           </div>
+          <p v-if="capsLoaded && !capabilities.hasAny" class="form-error">
+            当前平台暂未开放短信及邮件自助找回密码功能，请联系管理员协助重置。
+          </p>
         </div>
 
         <p v-if="errorMsg" class="form-error">{{ errorMsg }}</p>
 
-        <button class="primary-btn" :disabled="loading" @click="handleSendChallenge">
-          {{ loading ? '发送中…' : '下一步，发送验证信息' }}
+        <button class="primary-btn" :disabled="loading || (capsLoaded && !capabilities.hasAny)" @click="handleSendChallenge">
+          {{ loading ? '提交中…' : '下一步，发送验证信息' }}
         </button>
 
         <div class="bottom-action">
@@ -203,29 +349,32 @@ const goLogin = () => {
       <!-- 步骤2：输入验证码（或邮件链接说明） -->
       <div v-else-if="step === 2" class="form-body">
         <div v-if="form.channel === 'email_link'" class="email-notice-box">
-          <p class="notice-title">验证请求已提交</p>
+          <p class="notice-title">重置请求已受理</p>
           <p class="notice-desc">
-            如果账号存在且绑定了可用的安全邮箱，系统将发送一次性重置链接。请检查邮箱（包括垃圾邮件）；链接有效期以邮件内容为准。
+            如果账号存在且已绑定可用的安全邮箱，系统将尝试发送一次性密码重置链接。请检查您的收件箱及垃圾邮件夹。
           </p>
-          <p class="notice-tip">请求处理可能需要一些时间。如未收到，请稍后重试或使用其他已绑定的安全联系方式。</p>
+          <p class="notice-tip">请求受理不代表邮件已立即到达；若数分钟后仍未收到，可返回更换其他验证方式。</p>
           <button class="primary-btn" @click="goLogin">返回登录页</button>
         </div>
 
         <div v-else>
           <div class="dest-tip">
-            验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至该联系方式。请检查短信或邮箱；如未收到，可稍后重试或切换已绑定的验证方式。
+            验证请求已受理。如果该账号存在且已绑定可用的安全联系方式，6 位验证码将发送至对应地址（约 {{ Math.max(1, Math.floor(capabilities.codeTtlSeconds / 60)) }} 分钟内有效）。
           </div>
 
           <div class="form-item">
-            <label>验证码</label>
+            <label>6 位验证码</label>
             <div class="code-row">
               <input
-                v-model="form.code"
+                :value="form.code"
                 type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
                 maxlength="6"
-                placeholder="请输入6位验证码"
+                placeholder="请输入6位数字验证码"
                 class="input-control"
                 :disabled="loading"
+                @input="onOtpInput"
               />
               <button
                 type="button"
@@ -233,7 +382,7 @@ const goLogin = () => {
                 :disabled="countdown > 0 || loading"
                 @click="handleSendChallenge"
               >
-                {{ countdown > 0 ? `${countdown}秒后可重新提交请求` : '重新获取' }}
+                {{ countdown > 0 ? `${countdown}秒后可重试` : '重新提交' }}
               </button>
             </div>
           </div>
@@ -259,6 +408,7 @@ const goLogin = () => {
               v-model="form.newPassword"
               :type="showPassword ? 'text' : 'password'"
               placeholder="请输入新密码（8-128位）"
+              autocomplete="new-password"
               class="input-control"
               :disabled="loading"
             />
@@ -275,6 +425,7 @@ const goLogin = () => {
               v-model="form.confirmPassword"
               :type="showConfirmPassword ? 'text' : 'password'"
               placeholder="请再次输入新密码"
+              autocomplete="new-password"
               class="input-control"
               :disabled="loading"
             />
@@ -315,7 +466,7 @@ const goLogin = () => {
 }
 .recovery-card {
   width: 100%;
-  max-width: 520px;
+  max-width: 540px;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
@@ -404,15 +555,16 @@ const goLogin = () => {
 }
 .channel-picker {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 .channel-option {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
   gap: 6px;
-  padding: 10px;
+  padding: 10px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   cursor: pointer;
@@ -425,6 +577,11 @@ const goLogin = () => {
   background: #f0f5ff;
   color: #0256ff;
   font-weight: 500;
+}
+.channel-option.disabled {
+  opacity: 0.48;
+  background: #f8fafc;
+  cursor: not-allowed;
 }
 .channel-option input {
   display: none;
@@ -484,6 +641,7 @@ const goLogin = () => {
 .form-error {
   color: #ef4444;
   font-size: 13px;
+  margin-top: 8px;
   margin-bottom: 12px;
 }
 .bottom-action {
@@ -504,10 +662,7 @@ const goLogin = () => {
   font-size: 14px;
   color: #475569;
   margin-bottom: 18px;
-}
-.highlight {
-  color: #0256ff;
-  font-weight: 600;
+  line-height: 1.6;
 }
 .email-notice-box {
   text-align: center;

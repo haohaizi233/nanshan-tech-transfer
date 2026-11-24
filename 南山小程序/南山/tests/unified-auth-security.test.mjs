@@ -5,6 +5,9 @@ import {
 	setInitialPassword,
 	changePassword,
 	getSecurityInfo,
+	getRecoveryCapabilities,
+	startSecurityStepUpChallenge,
+	verifySecurityStepUp,
 	sendSecurityContactChallenge,
 	verifySecurityContact,
 	revokeAllUserSessions,
@@ -39,6 +42,9 @@ test('user.js exports all required security APIs', () => {
 	assert.equal(typeof setInitialPassword, 'function')
 	assert.equal(typeof changePassword, 'function')
 	assert.equal(typeof getSecurityInfo, 'function')
+	assert.equal(typeof getRecoveryCapabilities, 'function')
+	assert.equal(typeof startSecurityStepUpChallenge, 'function')
+	assert.equal(typeof verifySecurityStepUp, 'function')
 	assert.equal(typeof sendSecurityContactChallenge, 'function')
 	assert.equal(typeof verifySecurityContact, 'function')
 	assert.equal(typeof revokeAllUserSessions, 'function')
@@ -58,4 +64,16 @@ test('mine.vue contains forgot password entry and unified account security setti
 	assert.match(source, /showContactModal/)
 	assert.match(source, /showPasswordModal/)
 	assert.match(source, /showRecoveryModal/)
+})
+
+test('mine.vue uses email_otp recovery channel, capabilities gate, and stepUpGrant rebinding', () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	assert.match(source, /selectRecoveryChannel\('email_otp'\)/)
+	assert.doesNotMatch(source, /recoveryChannel\s*=\s*'email'[^_]/)
+	assert.doesNotMatch(source, /recoveryChannel\s*===?\s*'email'[^_]/)
+	assert.match(source, /getRecoveryCapabilities/)
+	assert.match(source, /startSecurityStepUpChallenge/)
+	assert.match(source, /verifySecurityStepUp/)
+	assert.match(source, /contactStepUpGrant/)
+	assert.match(source, /stepUpMethodLabel/)
 })

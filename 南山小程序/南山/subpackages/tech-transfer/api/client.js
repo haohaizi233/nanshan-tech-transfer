@@ -324,7 +324,7 @@ export async function apiRequest(method, path, query, body, options = {}) {
   }
 
   const headers = { ...options.headers }
-  if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$/.test(path)) {
+  if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$|\/me\/security\/step-up\/challenge$/.test(path)) {
     // Resettable random app instance, not a MAC/OpenID or authentication proof.
     let deviceId = getStored('tt_device_instance_v1')
     if (typeof deviceId !== 'string' || !/^[a-z0-9-]{16,80}$/.test(deviceId)) {
@@ -362,6 +362,8 @@ export async function apiRequest(method, path, query, body, options = {}) {
   err.code = res.code
   err.requestId = res.requestId
   err.details = res.details
+  const retryAfter = Number.parseInt(String((res.details && res.details.retryAfter) || ''), 10)
+  if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter
   throw err
 }
 
@@ -377,6 +379,8 @@ export async function publicRequest(method, path, query, body) {
   err.code = res.code
   err.requestId = res.requestId
   err.details = res.details
+  const retryAfter = Number.parseInt(String((res.details && res.details.retryAfter) || ''), 10)
+  if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter
   throw err
 }
 

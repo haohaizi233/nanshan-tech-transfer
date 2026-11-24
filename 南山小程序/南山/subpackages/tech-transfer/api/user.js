@@ -278,26 +278,59 @@ export async function changePassword(currentPassword, newPassword) {
 	return apiRequest('POST', '/me/password', null, { currentPassword: cur, newPassword: next })
 }
 
-/** 获取安全中心概要信息（已验证联系方式、密码配置状态等） */
+/** 获取安全中心概要信息（已验证联系方式、密码配置状态、渠道能力与二次认证方式） */
 export async function getSecurityInfo() {
 	return apiRequest('GET', '/me/security')
 }
 
-/** 发起安全联系方式绑定挑战（发送验证码） */
-export async function sendSecurityContactChallenge(contactType, contactValue) {
-	return apiRequest('POST', '/me/security/contact/challenge', null, {
-		contactType,
-		contactValue: String(contactValue || '').trim()
+/** 查询找回密码可用渠道能力（SMS / 邮箱验证码 / 邮件链接） */
+export async function getRecoveryCapabilities() {
+	return publicRequest('GET', '/auth/recovery/capabilities')
+}
+
+/** 发起敏感操作二次认证验证码挑战 */
+export async function startSecurityStepUpChallenge(purpose = 'rebind_email', method = 'old_email_otp') {
+	return apiRequest('POST', '/me/security/step-up/challenge', null, { purpose, method })
+}
+
+/** 核验敏感操作二次认证凭据并获取短期 Step-up Grant */
+export async function verifySecurityStepUp({
+	purpose = 'rebind_email',
+	method = 'password',
+	currentPassword = null,
+	challengeId = null,
+	code = null,
+	targetContact = null,
+} = {}) {
+	return apiRequest('POST', '/me/security/step-up/verify', null, {
+		purpose,
+		method,
+		currentPassword,
+		challengeId,
+		code: code ? String(code).trim() : null,
+		targetContact: targetContact ? String(targetContact).trim() : null,
 	})
 }
 
-/** 提交验证码确认绑定安全联系方式 */
-export async function verifySecurityContact(challengeId, code, contactValue) {
-	return apiRequest('POST', '/me/security/contact/verify', null, {
+/** 发起安全联系方式绑定/换绑挑战（发送验证码） */
+export async function sendSecurityContactChallenge(contactType, contactValue, stepUpGrant = null) {
+	const body = {
+		contactType,
+		contactValue: String(contactValue || '').trim()
+	}
+	if (stepUpGrant) body.stepUpGrant = stepUpGrant
+	return apiRequest('POST', '/me/security/contact/challenge', null, body)
+}
+
+/** 提交验证码确认绑定/换绑安全联系方式 */
+export async function verifySecurityContact(challengeId, code, contactValue, stepUpGrant = null) {
+	const body = {
 		challengeId,
 		code: String(code || '').trim(),
 		contactValue: String(contactValue || '').trim()
-	})
+	}
+	if (stepUpGrant) body.stepUpGrant = stepUpGrant
+	return apiRequest('POST', '/me/security/contact/verify', null, body)
 }
 
 /** 吊销所有已登录会话（除当前请求外） */

@@ -288,20 +288,20 @@
 			<view class="security-item">
 				<view class="security-meta">
 					<text class="security-title">安全手机</text>
-					<text class="security-sub">{{ (securityInfo && securityInfo.phone && securityInfo.phone.masked) ? securityInfo.phone.masked : '未绑定有效手机号' }}</text>
+					<text class="security-sub">{{ (securityInfo && securityInfo.phone && (securityInfo.phone.value || securityInfo.phone.masked)) ? (securityInfo.phone.value || securityInfo.phone.masked) : '未绑定有效手机号' }}</text>
 				</view>
-				<button class="security-btn" size="mini" @click="openContactModal('phone')">
-					{{ (securityInfo && securityInfo.phone) ? '更换' : '绑定' }}
+				<button class="security-btn" size="mini" :disabled="!smsFeatureEnabled" @click="openContactModal('phone')">
+					{{ !smsFeatureEnabled ? '未启用' : (securityInfo && securityInfo.phone ? '更换' : '绑定') }}
 				</button>
 			</view>
 
 			<view class="security-item">
 				<view class="security-meta">
 					<text class="security-title">安全邮箱</text>
-					<text class="security-sub">{{ (securityInfo && securityInfo.email && securityInfo.email.masked) ? securityInfo.email.masked : '未绑定有效邮箱' }}</text>
+					<text class="security-sub">{{ (securityInfo && securityInfo.email && (securityInfo.email.value || securityInfo.email.masked)) ? (securityInfo.email.value || securityInfo.email.masked) : '未绑定有效邮箱' }}</text>
 				</view>
-				<button class="security-btn" size="mini" @click="openContactModal('email')">
-					{{ (securityInfo && securityInfo.email) ? '更换' : '绑定' }}
+				<button class="security-btn" size="mini" :disabled="!emailFeatureEnabled" @click="openContactModal('email')">
+					{{ !emailFeatureEnabled ? '未启用' : (securityInfo && securityInfo.email ? '更换' : '绑定') }}
 				</button>
 			</view>
 
@@ -331,23 +331,55 @@
 			</view>
 		</view>
 
-		<!-- 弹窗 1：安全联系方式（手机/邮箱）绑定 -->
+		<!-- 弹窗 1：安全联系方式（手机/邮箱）绑定与换绑（含二次认证） -->
 		<view v-if="showContactModal" class="dialog-mask" @click="closeContactModal">
 			<view class="dialog-panel" @click.stop>
 				<view class="dialog-header">
-					<text class="dialog-title">{{ contactModalType === 'phone' ? '绑定安全手机' : '绑定安全邮箱' }}</text>
+					<text class="dialog-title">
+						{{ contactModalStep === 'stepUp' ? '换绑二次身份认证' : (contactModalType === 'phone' ? '绑定安全手机' : (securityInfo && securityInfo.email && securityInfo.email.verified ? '更换安全邮箱' : '绑定安全邮箱')) }}
+					</text>
 					<text class="dialog-close" @click="closeContactModal">×</text>
 				</view>
-				<view class="dialog-body">
+				<view v-if="contactModalStep === 'stepUp'" class="dialog-body">
+					<text class="dialog-desc">更换已确权安全邮箱前，需先完成一次身份复核验证。</text>
+					<view v-if="(securityInfo.stepUpMethods || []).length > 1" class="form-item">
+						<text class="label">验证方式</text>
+						<view class="channel-picker">
+							<view
+								v-for="m in (securityInfo.stepUpMethods || [])"
+								:key="m"
+								:class="['channel-tab', contactStepUpMethod === m ? 'active' : '']"
+								@click="contactStepUpMethod = m"
+							>
+								{{ stepUpMethodLabel(m) }}
+							</view>
+						</view>
+					</view>
+					<view v-if="contactStepUpMethod === 'password'" class="form-item">
+						<text class="label">当前密码</text>
+						<input class="input" password maxlength="128" v-model="contactStepUpPassword" placeholder="请输入当前登录密码" />
+					</view>
+					<view v-else-if="contactStepUpMethod === 'old_email_otp' || contactStepUpMethod === 'old_phone_otp'" class="form-item">
+						<text class="label">原安全{{ contactStepUpMethod === 'old_email_otp' ? '邮箱' : '手机' }}验证码</text>
+						<view class="code-input-row">
+							<input class="input code-input" type="text" maxlength="6" :value="contactStepUpCode" @input="onContactStepUpCodeInput" placeholder="6位数字验证码" />
+							<button class="send-code-btn" size="mini" :disabled="contactStepUpCountdown > 0 || contactModalBusy" @click="sendStepUpChallenge">
+								{{ contactStepUpCountdown > 0 ? contactStepUpCountdown + 's' : '获取验证码' }}
+							</button>
+						</view>
+					</view>
+					<button class="primary-action-btn" :disabled="contactModalBusy" @click="submitStepUpVerify">验证并继续</button>
+				</view>
+				<view v-else class="dialog-body">
 					<text class="dialog-desc">绑定并通过验证后，该联系方式可用于找回密码与安全通知</text>
 					<view class="form-item">
-						<text class="label">{{ contactModalType === 'phone' ? '手机号' : '邮箱地址' }}</text>
+						<text class="label">{{ contactModalType === 'phone' ? '手机号' : '新邮箱地址' }}</text>
 						<input class="input" :type="contactModalType === 'phone' ? 'number' : 'text'" v-model="contactModalValue" :placeholder="contactModalType === 'phone' ? '请输入11位手机号' : '请输入邮箱地址'" />
 					</view>
 					<view class="form-item">
 						<text class="label">验证码</text>
 						<view class="code-input-row">
-							<input class="input code-input" type="number" maxlength="6" v-model="contactModalCode" placeholder="6位验证码" />
+							<input class="input code-input" type="text" maxlength="6" :value="contactModalCode" @input="onContactCodeInput" placeholder="6位数字验证码" />
 							<button class="send-code-btn" size="mini" :disabled="contactModalCountdown > 0 || contactModalBusy" @click="sendContactChallenge">
 								{{ contactModalCountdown > 0 ? contactModalCountdown + 's' : '获取验证码' }}
 							</button>
@@ -392,25 +424,29 @@
 					<text class="dialog-close" @click="closeRecoveryModal">×</text>
 				</view>
 				<view v-if="recoveryStep === 1" class="dialog-body">
-					<text class="dialog-desc">请输入注册账号或手机号，并通过已验证联系方式获取验证码</text>
+					<text class="dialog-desc">请输入注册账号、安全手机号或安全邮箱，并通过已确权方式完成身份验证</text>
 					<view class="form-item">
-						<text class="label">账号 / 手机号</text>
-						<input class="input" v-model="recoveryAccount" placeholder="请输入用户名或手机号" />
+						<text class="label">账号 / 手机号 / 邮箱</text>
+						<input class="input" :value="recoveryAccount" @input="onRecoveryAccountInput" placeholder="请输入用户名、手机号或邮箱" />
 					</view>
 					<view class="form-item">
 						<text class="label">接收通道</text>
 						<view class="channel-picker">
-							<view :class="['channel-tab', recoveryChannel === 'sms' ? 'active' : '']" @click="recoveryChannel = 'sms'">短信验证码</view>
-							<view :class="['channel-tab', recoveryChannel === 'email' ? 'active' : '']" @click="recoveryChannel = 'email'">邮件验证码</view>
+							<view :class="['channel-tab', recoveryChannel === 'sms' ? 'active' : '', !recoveryCapabilities.sms ? 'disabled' : '']" @click="selectRecoveryChannel('sms')">
+								短信验证码{{ !recoveryCapabilities.sms ? '（未启用）' : '' }}
+							</view>
+							<view :class="['channel-tab', recoveryChannel === 'email_otp' ? 'active' : '', !recoveryCapabilities.emailOtp ? 'disabled' : '']" @click="selectRecoveryChannel('email_otp')">
+								邮箱验证码{{ !recoveryCapabilities.emailOtp ? '（未启用）' : '' }}
+							</view>
 						</view>
 					</view>
-					<button class="primary-action-btn" :disabled="recoveryBusy" @click="sendRecoveryChallenge">获取验证码</button>
+					<button class="primary-action-btn" :disabled="recoveryBusy || (!recoveryCapabilities.sms && !recoveryCapabilities.emailOtp)" @click="sendRecoveryChallenge">获取验证码</button>
 				</view>
 				<view v-else-if="recoveryStep === 2" class="dialog-body">
-					<text class="dialog-desc">验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至该联系方式。请检查短信或邮箱；如未收到，可稍后重试或切换已绑定的验证方式。</text>
+					<text class="dialog-desc">验证请求已受理。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
 					<view class="form-item">
-						<text class="label">6位验证码</text>
-						<input class="input" type="number" maxlength="6" v-model="recoveryCode" placeholder="请输入验证码" />
+						<text class="label">6位数字验证码</text>
+						<input class="input" type="text" maxlength="6" :value="recoveryCode" @input="onRecoveryCodeInput" placeholder="请输入6位验证码" />
 					</view>
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="verifyRecoveryCode">验证并下一步</button>
 					<view class="countdown-row">
@@ -454,6 +490,9 @@
 			setInitialPassword,
 			changePassword,
 			getSecurityInfo,
+			getRecoveryCapabilities,
+			startSecurityStepUpChallenge,
+			verifySecurityStepUp,
 			sendSecurityContactChallenge,
 			verifySecurityContact,
 			revokeAllUserSessions,
@@ -522,11 +561,21 @@
 					email: null,
 					wechatBound: false,
 					passwordConfigured: true,
+					capabilities: { smsEnabled: true, emailEnabled: true },
+					stepUpMethods: ['password'],
 					sessionVersion: 1
 				},
 				sessionRevokeBusy: false,
 				showContactModal: false,
 				contactModalType: 'phone',
+				contactModalStep: 'bind',
+				contactStepUpMethod: 'password',
+				contactStepUpPassword: '',
+				contactStepUpChallengeId: null,
+				contactStepUpCode: '',
+				contactStepUpCountdown: 0,
+				contactStepUpTimer: null,
+				contactStepUpGrant: null,
 				contactModalValue: '',
 				contactModalCode: '',
 				contactModalChallengeId: null,
@@ -542,6 +591,7 @@
 				recoveryStep: 1,
 				recoveryAccount: '',
 				recoveryChannel: 'sms',
+				recoveryCapabilities: { sms: true, emailOtp: false, emailLink: false, cooldownSeconds: 60 },
 				recoveryCode: '',
 				recoveryChallengeId: null,
 				recoveryDestinationMasked: '',
@@ -551,6 +601,7 @@
 				recoveryCountdown: 0,
 				recoveryTimer: null,
 				recoveryBusy: false,
+				recoveryRequestSeq: 0,
 				profile: null,
 				authPhone: '',
 				authForm: {
@@ -622,6 +673,14 @@
 			},
 			displayCompany() {
 				return this.certifiedOrgName || (this.profile && this.profile.company) || ''
+			},
+			emailFeatureEnabled() {
+				if (!this.securityInfo || !this.securityInfo.capabilities) return true
+				return this.securityInfo.capabilities.emailEnabled !== false
+			},
+			smsFeatureEnabled() {
+				if (!this.securityInfo || !this.securityInfo.capabilities) return true
+				return this.securityInfo.capabilities.smsEnabled !== false
 			}
 		},
 		onShow() {
@@ -630,6 +689,12 @@
 			this.loadPrivacySetting()
 			// #endif
 			return this.refresh()
+		},
+		onUnload() {
+			this.clearSecurityTimers()
+		},
+		beforeUnmount() {
+			this.clearSecurityTimers()
 		},
 		methods: {
             openNotifications() { uni.navigateTo({url:'/subpackages/tech-transfer/pages/notifications/notifications'}) },
@@ -696,23 +761,165 @@
 					console.error('[mine] loadSecurityInfo error:', e)
 				}
 			},
+			clearSecurityTimers() {
+				if (this.contactModalTimer) {
+					clearInterval(this.contactModalTimer)
+					this.contactModalTimer = null
+				}
+				if (this.contactStepUpTimer) {
+					clearInterval(this.contactStepUpTimer)
+					this.contactStepUpTimer = null
+				}
+				if (this.recoveryTimer) {
+					clearInterval(this.recoveryTimer)
+					this.recoveryTimer = null
+				}
+			},
+			stepUpMethodLabel(method) {
+				const labels = {
+					password: '验证登录密码',
+					old_email_otp: '原邮箱验证码',
+					old_phone_otp: '原手机验证码',
+					recent_auth: '近期安全会话'
+				}
+				return labels[method] || method
+			},
+			onContactStepUpCodeInput(e) {
+				this.contactStepUpCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
+			},
+			onContactCodeInput(e) {
+				this.contactModalCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
+			},
 			openContactModal(type) {
+				if (type === 'email' && !this.emailFeatureEnabled) {
+					uni.showToast({ title: '安全邮箱功能当前未启用', icon: 'none' })
+					return
+				}
+				if (type === 'phone' && !this.smsFeatureEnabled) {
+					uni.showToast({ title: '短信验证码功能当前未启用', icon: 'none' })
+					return
+				}
 				this.contactModalType = type
 				this.contactModalValue = ''
 				this.contactModalCode = ''
 				this.contactModalChallengeId = null
 				this.contactModalCountdown = 0
+				this.contactStepUpPassword = ''
+				this.contactStepUpChallengeId = null
+				this.contactStepUpCode = ''
+				this.contactStepUpCountdown = 0
+				this.contactStepUpGrant = null
 				if (this.contactModalTimer) {
 					clearInterval(this.contactModalTimer)
 					this.contactModalTimer = null
+				}
+				if (this.contactStepUpTimer) {
+					clearInterval(this.contactStepUpTimer)
+					this.contactStepUpTimer = null
+				}
+				const needStepUp = type === 'email' && Boolean(this.securityInfo && this.securityInfo.email && this.securityInfo.email.verified)
+				if (needStepUp) {
+					const methods = (this.securityInfo && Array.isArray(this.securityInfo.stepUpMethods) && this.securityInfo.stepUpMethods.length > 0)
+						? this.securityInfo.stepUpMethods
+						: ['password']
+					this.contactStepUpMethod = methods[0]
+					this.contactModalStep = 'stepUp'
+				} else {
+					this.contactModalStep = 'bind'
 				}
 				this.showContactModal = true
 			},
 			closeContactModal() {
 				this.showContactModal = false
+				this.contactStepUpPassword = ''
+				this.contactStepUpCode = ''
+				this.contactStepUpGrant = null
+				this.contactModalCode = ''
 				if (this.contactModalTimer) {
 					clearInterval(this.contactModalTimer)
 					this.contactModalTimer = null
+				}
+				if (this.contactStepUpTimer) {
+					clearInterval(this.contactStepUpTimer)
+					this.contactStepUpTimer = null
+				}
+			},
+			async sendStepUpChallenge() {
+				if (this.contactModalBusy) return
+				this.contactModalBusy = true
+				try {
+					const res = await startSecurityStepUpChallenge('rebind_email', this.contactStepUpMethod)
+					this.contactStepUpChallengeId = res.challengeId
+					uni.showToast({ title: '二次认证验证码已发送', icon: 'success' })
+					this.contactStepUpCountdown = 60
+					if (this.contactStepUpTimer) clearInterval(this.contactStepUpTimer)
+					this.contactStepUpTimer = setInterval(() => {
+						if (this.contactStepUpCountdown <= 1) {
+							clearInterval(this.contactStepUpTimer)
+							this.contactStepUpTimer = null
+							this.contactStepUpCountdown = 0
+						} else {
+							this.contactStepUpCountdown -= 1
+						}
+					}, 1000)
+				} catch (e) {
+					if (e && e.retryAfter > 0) {
+						this.contactStepUpCountdown = Math.min(3600, Number(e.retryAfter) || 60)
+						if (this.contactStepUpTimer) clearInterval(this.contactStepUpTimer)
+						this.contactStepUpTimer = setInterval(() => {
+							if (this.contactStepUpCountdown <= 1) {
+								clearInterval(this.contactStepUpTimer)
+								this.contactStepUpTimer = null
+								this.contactStepUpCountdown = 0
+							} else {
+								this.contactStepUpCountdown -= 1
+							}
+						}, 1000)
+					}
+					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+				} finally {
+					this.contactModalBusy = false
+				}
+			},
+			async submitStepUpVerify() {
+				if (this.contactModalBusy) return
+				const method = this.contactStepUpMethod
+				if (method === 'password' && !this.contactStepUpPassword) {
+					uni.showToast({ title: '请输入当前登录密码', icon: 'none' })
+					return
+				}
+				if (method === 'old_email_otp' || method === 'old_phone_otp') {
+					if (!this.contactStepUpChallengeId) {
+						uni.showToast({ title: '请先获取二次认证验证码', icon: 'none' })
+						return
+					}
+					if ((this.contactStepUpCode || '').trim().length !== 6) {
+						uni.showToast({ title: '请输入6位数字验证码', icon: 'none' })
+						return
+					}
+				}
+				this.contactModalBusy = true
+				try {
+					const res = await verifySecurityStepUp({
+						purpose: 'rebind_email',
+						method,
+						currentPassword: method === 'password' ? this.contactStepUpPassword : null,
+						challengeId: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpChallengeId : null,
+						code: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpCode : null
+					})
+					if (!res || !res.stepUpGrant) {
+						uni.showToast({ title: '二次认证未返回有效凭据', icon: 'none' })
+						return
+					}
+					this.contactStepUpGrant = res.stepUpGrant
+					this.contactStepUpPassword = ''
+					this.contactStepUpCode = ''
+					this.contactModalStep = 'bind'
+					uni.showToast({ title: '身份复核通过，请输入新邮箱', icon: 'none' })
+				} catch (e) {
+					uni.showToast({ title: e.message || '二次身份认证失败', icon: 'none' })
+				} finally {
+					this.contactModalBusy = false
 				}
 			},
 			async sendContactChallenge() {
@@ -723,7 +930,7 @@
 				}
 				this.contactModalBusy = true
 				try {
-					const res = await sendSecurityContactChallenge(this.contactModalType, val)
+					const res = await sendSecurityContactChallenge(this.contactModalType, val, this.contactStepUpGrant)
 					this.contactModalChallengeId = res.challengeId
 					uni.showToast({ title: '验证码已发送', icon: 'success' })
 					this.contactModalCountdown = 60
@@ -738,6 +945,19 @@
 						}
 					}, 1000)
 				} catch (e) {
+					if (e && e.retryAfter > 0) {
+						this.contactModalCountdown = Math.min(3600, Number(e.retryAfter) || 60)
+						if (this.contactModalTimer) clearInterval(this.contactModalTimer)
+						this.contactModalTimer = setInterval(() => {
+							if (this.contactModalCountdown <= 1) {
+								clearInterval(this.contactModalTimer)
+								this.contactModalTimer = null
+								this.contactModalCountdown = 0
+							} else {
+								this.contactModalCountdown -= 1
+							}
+						}, 1000)
+					}
 					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
 				} finally {
 					this.contactModalBusy = false
@@ -760,7 +980,7 @@
 				}
 				this.contactModalBusy = true
 				try {
-					await verifySecurityContact(this.contactModalChallengeId, code, val)
+					await verifySecurityContact(this.contactModalChallengeId, code, val, this.contactStepUpGrant)
 					uni.showToast({ title: '绑定成功', icon: 'success' })
 					this.closeContactModal()
 					await this.loadSecurityInfo()
@@ -867,7 +1087,7 @@
 			openRecoveryModal() {
 				this.recoveryStep = 1
 				this.recoveryAccount = this.authForm.phone || ''
-				this.recoveryChannel = 'sms'
+				this.recoveryChannel = this.recoveryCapabilities.sms ? 'sms' : (this.recoveryCapabilities.emailOtp ? 'email_otp' : 'sms')
 				this.recoveryCode = ''
 				this.recoveryChallengeId = null
 				this.recoveryDestinationMasked = ''
@@ -880,45 +1100,120 @@
 					this.recoveryTimer = null
 				}
 				this.showRecoveryModal = true
+				this.loadRecoveryCapabilities()
+			},
+			async loadRecoveryCapabilities() {
+				const seq = ++this.recoveryRequestSeq
+				try {
+					const caps = await getRecoveryCapabilities()
+					if (seq !== this.recoveryRequestSeq || !caps) return
+					const normalized = {
+						sms: Boolean(caps.sms),
+						emailOtp: Boolean(caps.emailOtp),
+						emailLink: Boolean(caps.emailLink),
+						cooldownSeconds: Number(caps.cooldownSeconds) > 0 ? Number(caps.cooldownSeconds) : 60
+					}
+					this.recoveryCapabilities = normalized
+					if (this.recoveryChannel === 'sms' && !normalized.sms && normalized.emailOtp) {
+						this.recoveryChannel = 'email_otp'
+					} else if (this.recoveryChannel === 'email_otp' && !normalized.emailOtp && normalized.sms) {
+						this.recoveryChannel = 'sms'
+					}
+				} catch {
+					// Keep safe fallback capabilities if public capability query fails transiently
+				}
+			},
+			selectRecoveryChannel(ch) {
+				if (ch === 'sms' && !this.recoveryCapabilities.sms) {
+					uni.showToast({ title: '短信找回通道当前未启用', icon: 'none' })
+					return
+				}
+				if (ch === 'email_otp' && !this.recoveryCapabilities.emailOtp) {
+					uni.showToast({ title: '邮箱验证码找回通道当前未启用', icon: 'none' })
+					return
+				}
+				if (this.recoveryChannel !== ch) {
+					this.recoveryChannel = ch
+					this.recoveryChallengeId = null
+					this.recoveryCode = ''
+					this.recoveryGrant = null
+					this.recoveryDestinationMasked = ''
+				}
+			},
+			onRecoveryAccountInput(e) {
+				this.recoveryAccount = String((e && e.detail && e.detail.value) || '')
+				this.recoveryChallengeId = null
+				this.recoveryCode = ''
+				this.recoveryGrant = null
+				this.recoveryDestinationMasked = ''
+			},
+			onRecoveryCodeInput(e) {
+				this.recoveryCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
 			},
 			closeRecoveryModal() {
 				this.showRecoveryModal = false
+				this.recoveryRequestSeq += 1
+				this.recoveryNewPassword = ''
+				this.recoveryConfirmPassword = ''
+				this.recoveryCode = ''
+				this.recoveryGrant = null
 				if (this.recoveryTimer) {
 					clearInterval(this.recoveryTimer)
 					this.recoveryTimer = null
 				}
 			},
+			startRecoveryCountdown(seconds) {
+				const secs = Math.max(1, Math.min(3600, Number(seconds) || 60))
+				this.recoveryCountdown = secs
+				if (this.recoveryTimer) clearInterval(this.recoveryTimer)
+				this.recoveryTimer = setInterval(() => {
+					if (this.recoveryCountdown <= 1) {
+						clearInterval(this.recoveryTimer)
+						this.recoveryTimer = null
+						this.recoveryCountdown = 0
+					} else {
+						this.recoveryCountdown -= 1
+					}
+				}, 1000)
+			},
 			async sendRecoveryChallenge() {
+				if (this.recoveryBusy) return
 				const acc = (this.recoveryAccount || '').trim()
 				if (!acc) {
-					uni.showToast({ title: '请输入账号或手机号', icon: 'none' })
+					uni.showToast({ title: '请输入账号、手机号或邮箱', icon: 'none' })
 					return
 				}
+				if (this.recoveryChannel === 'sms' && !this.recoveryCapabilities.sms) {
+					uni.showToast({ title: '短信找回通道当前未启用', icon: 'none' })
+					return
+				}
+				if (this.recoveryChannel === 'email_otp' && !this.recoveryCapabilities.emailOtp) {
+					uni.showToast({ title: '邮箱验证码找回通道当前未启用', icon: 'none' })
+					return
+				}
+				const seq = ++this.recoveryRequestSeq
 				this.recoveryBusy = true
 				try {
 					const res = await startPasswordRecovery(acc, this.recoveryChannel)
+					if (seq !== this.recoveryRequestSeq || !this.showRecoveryModal) return
 					this.recoveryChallengeId = res.challengeId
 					this.recoveryDestinationMasked = res.destinationMasked || ''
+					this.recoveryCode = ''
+					this.recoveryGrant = null
 					uni.showToast({ title: '验证请求已提交；如果账号存在且绑定了可用安全联系方式，验证码将发送', icon: 'none', duration: 2500 })
 					this.recoveryStep = 2
-					this.recoveryCountdown = 60
-					if (this.recoveryTimer) clearInterval(this.recoveryTimer)
-					this.recoveryTimer = setInterval(() => {
-						if (this.recoveryCountdown <= 1) {
-							clearInterval(this.recoveryTimer)
-							this.recoveryTimer = null
-							this.recoveryCountdown = 0
-						} else {
-							this.recoveryCountdown -= 1
-						}
-					}, 1000)
+					this.startRecoveryCountdown((this.recoveryCapabilities && this.recoveryCapabilities.cooldownSeconds) || 60)
 				} catch (e) {
+					if (e && e.retryAfter > 0) {
+						this.startRecoveryCountdown(e.retryAfter)
+					}
 					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
 				} finally {
 					this.recoveryBusy = false
 				}
 			},
 			async verifyRecoveryCode() {
+				if (this.recoveryBusy) return
 				const code = (this.recoveryCode || '').trim()
 				if (!this.recoveryChallengeId) {
 					uni.showToast({ title: '请先获取验证码', icon: 'none' })
@@ -928,9 +1223,11 @@
 					uni.showToast({ title: '请输入6位验证码', icon: 'none' })
 					return
 				}
+				const seq = ++this.recoveryRequestSeq
 				this.recoveryBusy = true
 				try {
 					const res = await verifyPasswordRecovery(this.recoveryChallengeId, code)
+					if (seq !== this.recoveryRequestSeq || !this.showRecoveryModal) return
 					if (res && res.recoveryGrant) {
 						this.recoveryGrant = res.recoveryGrant
 						this.recoveryStep = 3
@@ -944,6 +1241,7 @@
 				}
 			},
 			async submitRecoveryNewPassword() {
+				if (this.recoveryBusy) return
 				const next = this.recoveryNewPassword.trim()
 				const confirm = this.recoveryConfirmPassword.trim()
 				if (next.length < 8 || next.length > 128) {
@@ -2245,6 +2543,12 @@
 		color: #2563eb;
 		font-weight: 600;
 		border: 1rpx solid #bfdbfe;
+	}
+	.channel-tab.disabled {
+		opacity: 0.5;
+	}
+	.security-btn[disabled] {
+		opacity: 0.55;
 	}
 	.primary-action-btn {
 		margin-top: 24rpx;

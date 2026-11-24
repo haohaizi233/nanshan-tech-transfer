@@ -1,61 +1,69 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api/client'
+import { parseResetCredentialsFromLocation } from '../../utils/emailSecurity.js'
 
 const route = useRoute()
 const router = useRouter()
 
-const loading = ref(true)
+const hasValidParams = ref(false)
 const submitting = ref(false)
 const errorMsg = ref('')
-const verified = ref(false)
 const resetSuccess = ref(false)
 
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
-const form = reactive({
+// 敏感凭据仅存组件内存；绝不写入 localStorage / sessionStorage；页面卸载立即清空
+const credentials = reactive({
+  challengeId: '',
+  token: '',
   recoveryGrant: '',
+})
+
+const form = reactive({
   newPassword: '',
   confirmPassword: '',
 })
 
-onMounted(async () => {
-  const challengeId = route.query.challengeId
-  const token = route.query.token
+const clearSensitiveState = () => {
+  credentials.challengeId = ''
+  credentials.token = ''
+  credentials.recoveryGrant = ''
+  form.newPassword = ''
+  form.confirmPassword = ''
+}
+
+onMounted(() => {
+  // 页面加载仅读取 URL Fragment/Query 并立即清理地址栏，严禁自动触发 POST /recovery/verify，
+  // 防止邮件安全扫描器、链接预览预加载提前消费一次性重置 Token。
+  const { challengeId, token } = parseResetCredentialsFromLocation({
+    hash: typeof window !== 'undefined' ? window.location.hash : '',
+    query: route.query,
+  })
+
+  if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+    window.history.replaceState({}, document.title, window.location.pathname)
+  }
 
   if (!challengeId || !token) {
-    loading.value = false
+    hasValidParams.value = false
     errorMsg.value = '重置链接无效或已缺少凭据，请重新申请密码找回'
     return
   }
 
-  // 立即从浏览器地址栏移除敏感 token 参数，防止通过 Referer 或浏览器历史泄露
-  if (window.history && window.history.replaceState) {
-    const cleanUrl = window.location.pathname
-    window.history.replaceState({}, document.title, cleanUrl)
-  }
+  credentials.challengeId = challengeId
+  credentials.token = token
+  hasValidParams.value = true
+})
 
-  try {
-    const res = await api('/auth/recovery/verify', {
-      method: 'POST',
-      body: {
-        challengeId: String(challengeId),
-        code: String(token),
-      },
-      skipAuthRefresh: true,
-    })
-    form.recoveryGrant = res.recoveryGrant
-    verified.value = true
-  } catch (err) {
-    errorMsg.value = err.message || '重置链接已失效或已被使用，请重新申请'
-  } finally {
-    loading.value = false
-  }
+onUnmounted(() => {
+  clearSensitiveState()
 })
 
 const handleComplete = async () => {
+  if (submitting.value) return
   if (form.newPassword.length < 8 || form.newPassword.length > 128) {
     errorMsg.value = '新密码长度须为 8-128 位'
     return
@@ -64,26 +72,45 @@ const handleComplete = async () => {
     errorMsg.value = '两次输入的新密码不一致'
     return
   }
+
   submitting.value = true
   errorMsg.value = ''
   try {
+    // 1. 仅在用户主动确认提交后核验一次性链接 Token 并换取短期 Recovery Grant
+    if (!credentials.recoveryGrant) {
+      const verifyRes = await api('/auth/recovery/verify', {
+        method: 'POST',
+        body: {
+          challengeId: credentials.challengeId,
+          code: credentials.token,
+        },
+        skipAuthRefresh: true,
+      })
+      credentials.recoveryGrant = verifyRes.recoveryGrant
+      credentials.token = ''
+    }
+
+    // 2. 使用 Recovery Grant 完成密码重置并吊销全部旧会话
     await api('/auth/recovery/complete', {
       method: 'POST',
       body: {
-        recoveryGrant: form.recoveryGrant,
+        recoveryGrant: credentials.recoveryGrant,
         newPassword: form.newPassword,
       },
       skipAuthRefresh: true,
     })
+
+    clearSensitiveState()
     resetSuccess.value = true
   } catch (err) {
-    errorMsg.value = err.message || '重置密码失败，请重试'
+    errorMsg.value = err.message || '重置链接已失效或密码更新失败，请重新申请'
   } finally {
     submitting.value = false
   }
 }
 
 const goLogin = () => {
+  clearSensitiveState()
   router.push('/login')
 }
 </script>
@@ -96,13 +123,9 @@ const goLogin = () => {
         <p class="subtitle">南山科转通统一安全中心</p>
       </div>
 
-      <div v-if="loading" class="loading-state">
-        <p>正在核验重置授权凭证，请稍候…</p>
-      </div>
-
-      <div v-else-if="!verified && errorMsg" class="error-state">
+      <div v-if="!hasValidParams && !resetSuccess" class="error-state">
         <div class="error-icon">!</div>
-        <h3>链接已失效</h3>
+        <h3>链接无效</h3>
         <p class="error-desc">{{ errorMsg }}</p>
         <button class="primary-btn" @click="router.push('/forgot-password')">重新申请找回密码</button>
       </div>
@@ -117,6 +140,10 @@ const goLogin = () => {
       </div>
 
       <form v-else class="form-body" @submit.prevent="handleComplete">
+        <div class="safe-notice">
+          为防止邮件预加载或安全扫描器误触发，请在下方主动填写并确认提交新密码以完成重置。
+        </div>
+
         <div class="form-item">
           <label>设置新密码</label>
           <div class="password-wrapper">
@@ -124,6 +151,7 @@ const goLogin = () => {
               v-model="form.newPassword"
               :type="showPassword ? 'text' : 'password'"
               placeholder="请输入新密码（8-128位）"
+              autocomplete="new-password"
               class="input-control"
               :disabled="submitting"
             />
@@ -140,6 +168,7 @@ const goLogin = () => {
               v-model="form.confirmPassword"
               :type="showConfirmPassword ? 'text' : 'password'"
               placeholder="请再次输入新密码"
+              autocomplete="new-password"
               class="input-control"
               :disabled="submitting"
             />
@@ -152,8 +181,14 @@ const goLogin = () => {
         <p v-if="errorMsg" class="form-error">{{ errorMsg }}</p>
 
         <button class="primary-btn" type="submit" :disabled="submitting">
-          {{ submitting ? '提交中…' : '确认并更新密码' }}
+          {{ submitting ? '确认并提交中…' : '确认并重置密码' }}
         </button>
+
+        <div class="bottom-action">
+          <button type="button" class="back-link" @click="router.push('/forgot-password')">
+            链接已失效？重新申请找回密码
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -178,7 +213,7 @@ const goLogin = () => {
 }
 .card-header {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 .card-header h2 {
   font-size: 22px;
@@ -189,7 +224,16 @@ const goLogin = () => {
   font-size: 14px;
   color: #64748b;
 }
-.loading-state,
+.safe-notice {
+  background: #f0f5ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
 .error-state {
   text-align: center;
   padding: 30px 0;
@@ -269,6 +313,20 @@ const goLogin = () => {
   color: #ef4444;
   font-size: 13px;
   margin-bottom: 12px;
+}
+.bottom-action {
+  text-align: center;
+  margin-top: 16px;
+}
+.back-link {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+}
+.back-link:hover {
+  color: #0256ff;
 }
 .success-box {
   text-align: center;
