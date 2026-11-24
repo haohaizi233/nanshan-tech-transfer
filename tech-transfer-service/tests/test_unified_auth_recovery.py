@@ -33,11 +33,14 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_security_test():
+    from config import settings as _settings
+
     sms = MockSmsProvider()
     email = MockEmailProvider()
     reset_providers_for_test(sms, email)
     limiter.reset_for_test()
-    yield
+    with patch.object(_settings, "REDIS_ENABLED", False):
+        yield
     reset_providers_for_test(None, None)
     limiter.reset_for_test()
 
@@ -146,12 +149,18 @@ def test_recovery_start_valid_account_email_link():
     em = MockEmailProvider()
     reset_providers_for_test(email=em)
 
-    with patch("modules.security.service.get_cursor") as mock_gc:
+    from config import settings as _settings
+    from modules.security.risk_engine import DecisionAction, RiskDecision
+
+    with (
+        patch("modules.security.email_gateway.get_cursor") as mock_gc,
+        patch("modules.security.email_gateway._engine") as engine,
+        patch("modules.security.email_gateway.audit_record"),
+        patch.object(_settings, "EMAIL_ENABLED", True),
+    ):
+        engine.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
         cur = MagicMock()
-        cur.fetchone.side_effect = [
-            {"user_id": 102, "user_status": "active"},
-            {"normalized_value": "user@nanshan.com"},
-        ]
+        cur.fetchall.return_value = [{"user_id": 102, "normalized_value": "user@nanshan.com"}]
         mock_gc.return_value.__enter__.return_value = cur
 
         resp = start_password_recovery("user@nanshan.com", "email_link")
@@ -159,7 +168,9 @@ def test_recovery_start_valid_account_email_link():
         assert resp["challengeId"] is not None
         assert len(em.sent_emails) == 1
         assert em.sent_emails[0]["type"] == "link"
-        assert "reset-password?challengeId=" in em.sent_emails[0]["reset_url"]
+        assert "reset-password#challengeId=" in em.sent_emails[0]["reset_url"]
+        assert "&token=" in em.sent_emails[0]["reset_url"]
+        assert "reset-password?challengeId=" not in em.sent_emails[0]["reset_url"]
 
 
 # ── 3. 挑战核验与 Recovery Grant 签发测试 ────────────────────────

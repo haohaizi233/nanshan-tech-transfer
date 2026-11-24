@@ -26,6 +26,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       APP_ENV: local
@@ -74,6 +83,15 @@ jobs:
           DB_NAME: tech_transfer_test
         run: |
           python run_migration.py || echo "Migration skipped or failed (non-critical for unit tests)"
+
+      - name: Run security gateway PostgreSQL & Redis integration tests
+        working-directory: tech-transfer-service
+        env:
+          SMS_TEST_POSTGRES: "1"
+          SMS_TEST_POSTGRES_DSN: postgresql://mac:test@127.0.0.1:5432/tech_transfer_test
+          SMS_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+        run: |
+          pytest -p no:cacheprovider tests/test_sms_gateway_postgres.py tests/test_sms_risk.py tests/test_email_gateway_postgres.py tests/test_email_risk.py -q
 
       - name: Run tests with coverage
         working-directory: tech-transfer-service
@@ -199,4 +217,5 @@ jobs:
         working-directory: nanshan-frontend
         run: |
           npm ci
+          node --test src/utils/*.test.mjs
           npm run build

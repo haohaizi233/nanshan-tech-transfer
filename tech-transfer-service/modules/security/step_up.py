@@ -290,7 +290,7 @@ def issue_step_up_grant(
                           AND om.role='admin' AND om.status='active') AS privileged
             FROM app_user au
             LEFT JOIN user_credential uc ON uc.user_id = au.id
-            WHERE au.id = %s FOR UPDATE
+            WHERE au.id = %s FOR UPDATE OF au
             """,
             (user_id,),
         )
