@@ -51,7 +51,7 @@ def hash_password(password: str) -> str:
     normalized = _normalize_password(password)
     if _HAS_ARGON2 and _ph is not None:
         try:
-            return _ph.hash(normalized)
+            return str(_ph.hash(normalized))
         except Exception:
             pass
     # 降级至 PBKDF2
@@ -74,7 +74,7 @@ def verify_password(password: str, stored: str) -> bool:
         if not _HAS_ARGON2 or _ph is None:
             return False
         try:
-            return _ph.verify(stored, normalized)
+            return bool(_ph.verify(stored, normalized))
         except (VerifyMismatchError, Exception):
             return False
 
@@ -101,7 +101,7 @@ def needs_rehash(stored: str) -> bool:
         if not stored.startswith("$argon2"):
             return True
         try:
-            return _ph.check_needs_rehash(stored)
+            return bool(_ph.check_needs_rehash(stored))
         except Exception:
             return True
     return False

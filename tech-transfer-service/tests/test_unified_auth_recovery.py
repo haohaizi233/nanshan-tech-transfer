@@ -186,9 +186,8 @@ def test_verify_challenge_success_and_grant_issuance():
 
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
-        # 1. 查找 auth_challenge
-        # 2. 查找 account_contact
         cur.fetchone.side_effect = [
+            {"user_id": 101},
             {
                 "id": challenge_id,
                 "user_id": 101,
@@ -221,6 +220,7 @@ def test_verify_challenge_wrong_code_increments_attempt():
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
         cur.fetchone.side_effect = [
+            {"user_id": 101},
             {
                 "id": challenge_id,
                 "user_id": 101,
@@ -241,7 +241,7 @@ def test_verify_challenge_wrong_code_increments_attempt():
 
         with pytest.raises(BizError) as exc_info:
             verify_recovery_challenge(challenge_id, "000000")
-        assert "验证码不正确" in exc_info.value.message
+        assert "验证凭据无效或已失效" in exc_info.value.message
 
 
 # ── 4. 密码重置单事务执行与会话即时失效 ──────────────────────────
@@ -253,10 +253,10 @@ def test_complete_recovery_atomic_transaction():
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
         cur.fetchone.side_effect = [
-            # 1. 查询 recovery_grant
+            {"user_id": 101, "challenge_id": None},
+            {"user_status": "active"},
+            {"cred_status": "active", "password_configured": True, "password_hash": "old_hash"},
             {"id": "grant-uuid-1", "user_id": 101, "status": "active", "expires_at": time.time() + 300},
-            # 2. 查询 app_user / user_credential
-            {"user_status": "active", "cred_status": "active", "password_hash": "old_hash"},
         ]
         mock_gc.return_value.__enter__.return_value = cur
 
@@ -275,12 +275,17 @@ def test_complete_recovery_consumed_grant_rejected():
 
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
-        cur.fetchone.return_value = {
-            "id": "grant-uuid-2",
-            "user_id": 101,
-            "status": "consumed",
-            "expires_at": time.time() + 300,
-        }
+        cur.fetchone.side_effect = [
+            {"user_id": 101, "challenge_id": None},
+            {"user_status": "active"},
+            {"cred_status": "active", "password_configured": True, "password_hash": "old_hash"},
+            {
+                "id": "grant-uuid-2",
+                "user_id": 101,
+                "status": "consumed",
+                "expires_at": time.time() + 300,
+            },
+        ]
         mock_gc.return_value.__enter__.return_value = cur
 
         with pytest.raises(BizError) as exc_info:
@@ -360,7 +365,10 @@ def test_wechat_web_callback_mock_login():
 
 
 def test_security_summary_and_revoke_all_sessions():
-    with patch("modules.security.service.get_cursor") as mock_gc:
+    with (
+        patch("modules.security.service.get_cursor") as mock_gc,
+        patch("modules.security.step_up.get_cursor") as mock_su_gc,
+    ):
         cur = MagicMock()
         cur.fetchone.return_value = {"username": "admin", "password_configured": True, "wechat_bound": False}
         cur.fetchall.side_effect = [
@@ -368,6 +376,11 @@ def test_security_summary_and_revoke_all_sessions():
             [],
         ]
         mock_gc.return_value.__enter__.return_value = cur
+
+        cur_su = MagicMock()
+        cur_su.fetchone.return_value = {"password_configured": True, "has_password": True, "privileged": True}
+        cur_su.fetchall.return_value = []
+        mock_su_gc.return_value.__enter__.return_value = cur_su
 
         summary = get_security_summary(1)
         assert summary["passwordConfigured"] is True
@@ -434,6 +447,7 @@ def test_api_recovery_flow_e2e():
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
         cur.fetchone.side_effect = [
+            {"user_id": 200},
             {
                 "id": challenge_id,
                 "user_id": 200,
@@ -463,8 +477,17 @@ def test_api_recovery_flow_e2e():
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
         cur.fetchone.side_effect = [
-            {"id": "grant-1", "user_id": 200, "status": "active", "expires_at": time.time() + 300},
-            {"user_status": "active", "cred_status": "active", "password_hash": "dummy"},
+            {"user_id": 200, "challenge_id": challenge_id},
+            {"user_status": "active"},
+            {"cred_status": "active", "password_configured": True, "password_hash": "dummy"},
+            {"id": challenge_id, "status": "verified"},
+            {
+                "id": "grant-1",
+                "user_id": 200,
+                "challenge_id": challenge_id,
+                "status": "active",
+                "expires_at": time.time() + 300,
+            },
         ]
         mock_gc.return_value.__enter__.return_value = cur
 

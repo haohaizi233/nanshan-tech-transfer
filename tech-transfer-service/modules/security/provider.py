@@ -84,7 +84,7 @@ class MockSmsProvider(SmsProvider):
     def get_last_code(self, phone: str) -> str | None:
         for msg in reversed(self.sent_messages):
             if msg["phone"] == phone:
-                return msg["code"]
+                return str(msg["code"])
         return None
 
     def send_code(
@@ -153,7 +153,7 @@ class TencentSmsProvider(SmsProvider):
             logger.error("腾讯云短信接口请求异常: %s", e)
             raise ProviderError("短信服务暂时不可用，请稍后重试") from None
 
-    def _tc3_request(self, host: str, service: str, action: str, version: str, payload: dict) -> dict:
+    def _tc3_request(self, host: str, service: str, action: str, version: str, payload: dict) -> dict[str, Any]:
         canonical_uri = "/"
         canonical_querystring = ""
         canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-tc-action:{action.lower()}\n"
@@ -195,7 +195,8 @@ class TencentSmsProvider(SmsProvider):
 
         req = urllib.request.Request(f"https://{host}", data=payload_bytes, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
+            return dict(data) if isinstance(data, dict) else {}
 
 
 def sign_sendcloud_params(params: dict[str, Any], sms_key: str) -> str:

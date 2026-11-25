@@ -45,7 +45,7 @@ def test_expired_recovery_code_is_rejected():
     r = row()
     r["expires_at"] = time.time() - 1
     cur = MagicMock()
-    cur.fetchone.side_effect = [r, {"normalized_value": "13800138000"}]
+    cur.fetchone.side_effect = [{"user_id": 11}, r, {"normalized_value": "13800138000"}]
     with patch.object(service, "get_cursor") as gc:
         gc.return_value.__enter__.return_value = cur
         with pytest.raises(BizError):
@@ -54,7 +54,7 @@ def test_expired_recovery_code_is_rejected():
 
 def test_wrong_attempt_commits_before_error_is_raised():
     cur = MagicMock()
-    cur.fetchone.side_effect = [row(), {"normalized_value": "13800138000"}]
+    cur.fetchone.side_effect = [{"user_id": 11}, row(), {"normalized_value": "13800138000"}]
     commits = []
 
     @contextmanager
@@ -64,12 +64,12 @@ def test_wrong_attempt_commits_before_error_is_raised():
 
     with patch.object(service, "get_cursor", cursor), pytest.raises(BizError):
         service.verify_recovery_challenge("1", "000000")
-    assert commits == [True]
+    assert commits == [False, True]
 
 
 def test_bind_rejects_recovery_purpose():
     cur = MagicMock()
-    cur.fetchone.return_value = row()
+    cur.fetchone.side_effect = [{"id": 11}, row()]
     with patch.object(service, "get_cursor") as gc:
         gc.return_value.__enter__.return_value = cur
         with pytest.raises(BizError):
@@ -79,8 +79,10 @@ def test_bind_rejects_recovery_purpose():
 def test_expired_recovery_grant_rejected_before_password_write():
     cur = MagicMock()
     cur.fetchone.side_effect = [
+        {"user_id": 11, "challenge_id": None},
+        {"user_status": "active"},
+        {"cred_status": "active", "password_configured": True, "password_hash": "old"},
         {"id": "g", "user_id": 11, "status": "active", "expires_at": time.time() - 1},
-        {"user_status": "active", "cred_status": "active", "password_hash": "old"},
     ]
     with patch.object(service, "get_cursor") as gc:
         gc.return_value.__enter__.return_value = cur

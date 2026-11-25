@@ -336,12 +336,22 @@
 			<view class="dialog-panel" @click.stop>
 				<view class="dialog-header">
 					<text class="dialog-title">
-						{{ contactModalStep === 'stepUp' ? '换绑二次身份认证' : (contactModalType === 'phone' ? '绑定安全手机' : (securityInfo && securityInfo.email && securityInfo.email.verified ? '更换安全邮箱' : '绑定安全邮箱')) }}
+						{{
+							contactModalStep === 'stepUp'
+								? (isRebindEmail ? '更换安全邮箱 · 二次认证' : '绑定安全邮箱 · 身份授权')
+								: (contactModalType === 'phone' ? '绑定安全手机' : (isRebindEmail ? '更换安全邮箱' : '绑定安全邮箱'))
+						}}
 					</text>
 					<text class="dialog-close" @click="closeContactModal">×</text>
 				</view>
 				<view v-if="contactModalStep === 'stepUp'" class="dialog-body">
-					<text class="dialog-desc">更换已确权安全邮箱前，需先完成一次身份复核验证。</text>
+					<text class="dialog-desc">
+						{{ isRebindEmail ? '更换已确权安全邮箱前，须先填写目标新邮箱并完成二次身份认证。' : '首次绑定安全邮箱须先确认目标邮箱并完成本次会话身份授权。' }}
+					</text>
+					<view class="form-item">
+						<text class="label">{{ isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址' }}</text>
+						<input class="input" type="text" :value="contactModalValue" @input="onTargetEmailInput" placeholder="请先输入要绑定的邮箱地址" />
+					</view>
 					<view v-if="(securityInfo.stepUpMethods || []).length > 1" class="form-item">
 						<text class="label">验证方式</text>
 						<view class="channel-picker">
@@ -373,8 +383,12 @@
 				<view v-else class="dialog-body">
 					<text class="dialog-desc">绑定并通过验证后，该联系方式可用于找回密码与安全通知</text>
 					<view class="form-item">
-						<text class="label">{{ contactModalType === 'phone' ? '手机号' : '新邮箱地址' }}</text>
-						<input class="input" :type="contactModalType === 'phone' ? 'number' : 'text'" v-model="contactModalValue" :placeholder="contactModalType === 'phone' ? '请输入11位手机号' : '请输入邮箱地址'" />
+						<text class="label">{{ contactModalType === 'phone' ? '手机号' : '已授权目标邮箱' }}</text>
+						<input v-if="contactModalType === 'phone'" class="input" type="number" v-model="contactModalValue" placeholder="请输入11位手机号" />
+						<view v-else class="code-input-row">
+							<input class="input code-input" type="text" :value="contactModalValue" disabled />
+							<button class="send-code-btn" size="mini" :disabled="contactModalBusy" @click="resetEmailStepUpTarget">更换目标</button>
+						</view>
 					</view>
 					<view class="form-item">
 						<text class="label">验证码</text>
@@ -499,6 +513,8 @@
 			startPasswordRecovery,
 			verifyPasswordRecovery,
 			completePasswordRecovery,
+			createSecurityIdempotencyKey,
+			shouldReuseSecurityIdempotencyKey,
 			listCachedAccounts,
 			getSessionPhone,
 			SUBJECT_TYPE_OPTIONS,
@@ -576,11 +592,13 @@
 				contactStepUpCountdown: 0,
 				contactStepUpTimer: null,
 				contactStepUpGrant: null,
+				contactStepUpIdempotencyKey: null,
 				contactModalValue: '',
 				contactModalCode: '',
 				contactModalChallengeId: null,
 				contactModalCountdown: 0,
 				contactModalTimer: null,
+				contactModalIdempotencyKey: null,
 				contactModalBusy: false,
 				showPasswordModal: false,
 				isSettingInitial: false,
@@ -596,6 +614,7 @@
 				recoveryChallengeId: null,
 				recoveryDestinationMasked: '',
 				recoveryGrant: null,
+				recoveryIdempotencyKey: null,
 				recoveryNewPassword: '',
 				recoveryConfirmPassword: '',
 				recoveryCountdown: 0,
@@ -673,6 +692,9 @@
 			},
 			displayCompany() {
 				return this.certifiedOrgName || (this.profile && this.profile.company) || ''
+			},
+			isRebindEmail() {
+				return this.contactModalType === 'email' && Boolean(this.securityInfo && this.securityInfo.email && this.securityInfo.email.verified)
 			},
 			emailFeatureEnabled() {
 				if (!this.securityInfo || !this.securityInfo.capabilities) return true
@@ -804,10 +826,12 @@
 				this.contactModalCode = ''
 				this.contactModalChallengeId = null
 				this.contactModalCountdown = 0
+				this.contactModalIdempotencyKey = null
 				this.contactStepUpPassword = ''
 				this.contactStepUpChallengeId = null
 				this.contactStepUpCode = ''
 				this.contactStepUpCountdown = 0
+				this.contactStepUpIdempotencyKey = null
 				this.contactStepUpGrant = null
 				if (this.contactModalTimer) {
 					clearInterval(this.contactModalTimer)
@@ -817,7 +841,7 @@
 					clearInterval(this.contactStepUpTimer)
 					this.contactStepUpTimer = null
 				}
-				const needStepUp = type === 'email' && Boolean(this.securityInfo && this.securityInfo.email && this.securityInfo.email.verified)
+				const needStepUp = type === 'email'
 				if (needStepUp) {
 					const methods = (this.securityInfo && Array.isArray(this.securityInfo.stepUpMethods) && this.securityInfo.stepUpMethods.length > 0)
 						? this.securityInfo.stepUpMethods
@@ -829,12 +853,42 @@
 				}
 				this.showContactModal = true
 			},
+			onTargetEmailInput(e) {
+				this.contactModalValue = String((e && e.detail && e.detail.value) || '')
+				this.contactStepUpChallengeId = null
+				this.contactStepUpCode = ''
+				this.contactStepUpGrant = null
+				this.contactStepUpIdempotencyKey = null
+				this.contactModalIdempotencyKey = null
+			},
+			resetEmailStepUpTarget() {
+				this.contactStepUpChallengeId = null
+				this.contactStepUpCode = ''
+				this.contactStepUpGrant = null
+				this.contactStepUpIdempotencyKey = null
+				this.contactModalChallengeId = null
+				this.contactModalCode = ''
+				this.contactModalCountdown = 0
+				this.contactStepUpCountdown = 0
+				this.contactModalIdempotencyKey = null
+				if (this.contactModalTimer) {
+					clearInterval(this.contactModalTimer)
+					this.contactModalTimer = null
+				}
+				if (this.contactStepUpTimer) {
+					clearInterval(this.contactStepUpTimer)
+					this.contactStepUpTimer = null
+				}
+				this.contactModalStep = 'stepUp'
+			},
 			closeContactModal() {
 				this.showContactModal = false
 				this.contactStepUpPassword = ''
 				this.contactStepUpCode = ''
 				this.contactStepUpGrant = null
+				this.contactStepUpIdempotencyKey = null
 				this.contactModalCode = ''
+				this.contactModalIdempotencyKey = null
 				if (this.contactModalTimer) {
 					clearInterval(this.contactModalTimer)
 					this.contactModalTimer = null
@@ -846,9 +900,24 @@
 			},
 			async sendStepUpChallenge() {
 				if (this.contactModalBusy) return
+				const targetEmail = (this.contactModalValue || '').trim()
+				if (!targetEmail) {
+					uni.showToast({ title: '请先输入目标邮箱地址', icon: 'none' })
+					return
+				}
+				if (!this.contactStepUpIdempotencyKey) {
+					this.contactStepUpIdempotencyKey = createSecurityIdempotencyKey('su')
+				}
 				this.contactModalBusy = true
 				try {
-					const res = await startSecurityStepUpChallenge('rebind_email', this.contactStepUpMethod)
+					const purpose = this.isRebindEmail ? 'rebind_email' : 'bind_email'
+					const res = await startSecurityStepUpChallenge(
+						purpose,
+						this.contactStepUpMethod,
+						targetEmail,
+						this.contactStepUpIdempotencyKey
+					)
+					this.contactStepUpIdempotencyKey = null
 					this.contactStepUpChallengeId = res.challengeId
 					uni.showToast({ title: '二次认证验证码已发送', icon: 'success' })
 					this.contactStepUpCountdown = 60
@@ -863,6 +932,9 @@
 						}
 					}, 1000)
 				} catch (e) {
+					if (!shouldReuseSecurityIdempotencyKey(e)) {
+						this.contactStepUpIdempotencyKey = null
+					}
 					if (e && e.retryAfter > 0) {
 						this.contactStepUpCountdown = Math.min(3600, Number(e.retryAfter) || 60)
 						if (this.contactStepUpTimer) clearInterval(this.contactStepUpTimer)
@@ -883,6 +955,11 @@
 			},
 			async submitStepUpVerify() {
 				if (this.contactModalBusy) return
+				const targetEmail = (this.contactModalValue || '').trim()
+				if (!targetEmail) {
+					uni.showToast({ title: '请先输入目标邮箱地址', icon: 'none' })
+					return
+				}
 				const method = this.contactStepUpMethod
 				if (method === 'password' && !this.contactStepUpPassword) {
 					uni.showToast({ title: '请输入当前登录密码', icon: 'none' })
@@ -900,9 +977,11 @@
 				}
 				this.contactModalBusy = true
 				try {
+					const purpose = this.isRebindEmail ? 'rebind_email' : 'bind_email'
 					const res = await verifySecurityStepUp({
-						purpose: 'rebind_email',
+						purpose,
 						method,
+						targetContact: targetEmail,
 						currentPassword: method === 'password' ? this.contactStepUpPassword : null,
 						challengeId: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpChallengeId : null,
 						code: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpCode : null
@@ -914,8 +993,10 @@
 					this.contactStepUpGrant = res.stepUpGrant
 					this.contactStepUpPassword = ''
 					this.contactStepUpCode = ''
+					this.contactStepUpIdempotencyKey = null
+					this.contactModalIdempotencyKey = null
 					this.contactModalStep = 'bind'
-					uni.showToast({ title: '身份复核通过，请输入新邮箱', icon: 'none' })
+					uni.showToast({ title: this.isRebindEmail ? '身份复核通过，请发送新邮箱验证码' : '身份授权通过，请验证目标邮箱', icon: 'none' })
 				} catch (e) {
 					uni.showToast({ title: e.message || '二次身份认证失败', icon: 'none' })
 				} finally {
@@ -928,9 +1009,18 @@
 					uni.showToast({ title: this.contactModalType === 'phone' ? '请输入手机号' : '请输入邮箱', icon: 'none' })
 					return
 				}
+				if (!this.contactModalIdempotencyKey) {
+					this.contactModalIdempotencyKey = createSecurityIdempotencyKey('bind')
+				}
 				this.contactModalBusy = true
 				try {
-					const res = await sendSecurityContactChallenge(this.contactModalType, val, this.contactStepUpGrant)
+					const res = await sendSecurityContactChallenge(
+						this.contactModalType,
+						val,
+						this.contactStepUpGrant,
+						this.contactModalIdempotencyKey
+					)
+					this.contactModalIdempotencyKey = null
 					this.contactModalChallengeId = res.challengeId
 					uni.showToast({ title: '验证码已发送', icon: 'success' })
 					this.contactModalCountdown = 60
@@ -945,6 +1035,9 @@
 						}
 					}, 1000)
 				} catch (e) {
+					if (!shouldReuseSecurityIdempotencyKey(e)) {
+						this.contactModalIdempotencyKey = null
+					}
 					if (e && e.retryAfter > 0) {
 						this.contactModalCountdown = Math.min(3600, Number(e.retryAfter) || 60)
 						if (this.contactModalTimer) clearInterval(this.contactModalTimer)
@@ -1092,6 +1185,7 @@
 				this.recoveryChallengeId = null
 				this.recoveryDestinationMasked = ''
 				this.recoveryGrant = null
+				this.recoveryIdempotencyKey = null
 				this.recoveryNewPassword = ''
 				this.recoveryConfirmPassword = ''
 				this.recoveryCountdown = 0
@@ -1138,6 +1232,7 @@
 					this.recoveryCode = ''
 					this.recoveryGrant = null
 					this.recoveryDestinationMasked = ''
+					this.recoveryIdempotencyKey = null
 				}
 			},
 			onRecoveryAccountInput(e) {
@@ -1146,6 +1241,7 @@
 				this.recoveryCode = ''
 				this.recoveryGrant = null
 				this.recoveryDestinationMasked = ''
+				this.recoveryIdempotencyKey = null
 			},
 			onRecoveryCodeInput(e) {
 				this.recoveryCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
@@ -1157,6 +1253,7 @@
 				this.recoveryConfirmPassword = ''
 				this.recoveryCode = ''
 				this.recoveryGrant = null
+				this.recoveryIdempotencyKey = null
 				if (this.recoveryTimer) {
 					clearInterval(this.recoveryTimer)
 					this.recoveryTimer = null
@@ -1191,10 +1288,14 @@
 					uni.showToast({ title: '邮箱验证码找回通道当前未启用', icon: 'none' })
 					return
 				}
+				if (!this.recoveryIdempotencyKey) {
+					this.recoveryIdempotencyKey = createSecurityIdempotencyKey('rec')
+				}
 				const seq = ++this.recoveryRequestSeq
 				this.recoveryBusy = true
 				try {
-					const res = await startPasswordRecovery(acc, this.recoveryChannel)
+					const res = await startPasswordRecovery(acc, this.recoveryChannel, this.recoveryIdempotencyKey)
+					this.recoveryIdempotencyKey = null
 					if (seq !== this.recoveryRequestSeq || !this.showRecoveryModal) return
 					this.recoveryChallengeId = res.challengeId
 					this.recoveryDestinationMasked = res.destinationMasked || ''
@@ -1204,6 +1305,9 @@
 					this.recoveryStep = 2
 					this.startRecoveryCountdown((this.recoveryCapabilities && this.recoveryCapabilities.cooldownSeconds) || 60)
 				} catch (e) {
+					if (!shouldReuseSecurityIdempotencyKey(e)) {
+						this.recoveryIdempotencyKey = null
+					}
 					if (e && e.retryAfter > 0) {
 						this.startRecoveryCountdown(e.retryAfter)
 					}

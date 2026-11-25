@@ -3,9 +3,11 @@ import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import {
+  createIdempotencyKey,
   normalizeRecoveryCapabilities,
   resolveRetryAfterSeconds,
   sanitizeOtpCode,
+  shouldReuseIdempotencyKeyOnError,
 } from '../../utils/emailSecurity.js'
 
 const router = useRouter()
@@ -18,6 +20,7 @@ const errorMsg = ref('')
 const countdown = ref(0)
 let timer = null
 let requestSeq = 0
+let challengeIdempotencyKey = ''
 
 const capabilities = reactive({
   sms: true,
@@ -50,6 +53,7 @@ const clearTimer = () => {
 }
 
 const clearSensitiveState = () => {
+  challengeIdempotencyKey = ''
   form.challengeId = ''
   form.maskedDestination = ''
   form.code = ''
@@ -60,6 +64,7 @@ const clearSensitiveState = () => {
 
 const resetStaleChallenge = () => {
   requestSeq += 1
+  challengeIdempotencyKey = ''
   form.challengeId = ''
   form.maskedDestination = ''
   form.code = ''
@@ -159,12 +164,16 @@ const handleSendChallenge = async () => {
     errorMsg.value = '请输入登录账号、安全手机号或安全邮箱'
     return
   }
+  if (!challengeIdempotencyKey) {
+    challengeIdempotencyKey = createIdempotencyKey('rec')
+  }
   const currentSeq = ++requestSeq
   loading.value = true
   errorMsg.value = ''
   try {
     const res = await api('/auth/recovery/start', {
       method: 'POST',
+      headers: { 'Idempotency-Key': challengeIdempotencyKey },
       body: {
         account: form.account.trim(),
         channel: form.channel,
@@ -172,6 +181,7 @@ const handleSendChallenge = async () => {
       skipAuthRefresh: true,
     })
     if (currentSeq !== requestSeq) return
+    challengeIdempotencyKey = ''
     form.challengeId = res.challengeId || ''
     form.maskedDestination = res.maskedDestination || ''
     form.code = ''
@@ -180,6 +190,9 @@ const handleSendChallenge = async () => {
     step.value = 2
   } catch (err) {
     if (currentSeq !== requestSeq) return
+    if (!shouldReuseIdempotencyKeyOnError(err)) {
+      challengeIdempotencyKey = ''
+    }
     const retryAfter = resolveRetryAfterSeconds(err, 0)
     if (retryAfter > 0) startCountdown(retryAfter)
     errorMsg.value = err.message || '发送验证信息失败，请稍后重试'
@@ -359,7 +372,7 @@ const goLogin = () => {
 
         <div v-else>
           <div class="dest-tip">
-            验证请求已受理。如果该账号存在且已绑定可用的安全联系方式，6 位验证码将发送至对应地址（约 {{ Math.max(1, Math.floor(capabilities.codeTtlSeconds / 60)) }} 分钟内有效）。
+            验证请求已提交。如果该账号存在且已绑定可用的安全联系方式，6 位验证码将发送至对应地址（约 {{ Math.max(1, Math.floor(capabilities.codeTtlSeconds / 60)) }} 分钟内有效）。
           </div>
 
           <div class="form-item">
@@ -382,7 +395,7 @@ const goLogin = () => {
                 :disabled="countdown > 0 || loading"
                 @click="handleSendChallenge"
               >
-                {{ countdown > 0 ? `${countdown}秒后可重试` : '重新提交' }}
+                {{ countdown > 0 ? `${countdown}秒后可重新提交请求` : '重新提交' }}
               </button>
             </div>
           </div>

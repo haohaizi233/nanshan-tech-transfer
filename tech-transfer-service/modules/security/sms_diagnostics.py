@@ -219,7 +219,7 @@ def risk_snapshot(*, account=None, phone=None, ip=None, device_id=None, task_id=
     client = redis_client()
     engine = SmsRiskEngine(client)
     try:
-        pairs = []
+        pairs: list[tuple[str, str]] = []
         if phone:
             pairs.extend(
                 (label, engine._key(kind, phone))

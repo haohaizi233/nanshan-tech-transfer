@@ -110,13 +110,14 @@ class ContactVerifyRequest(RequestBody):
 
 class StepUpChallengeRequest(RequestBody):
     model_config = ConfigDict(extra="forbid", strict=True)
-    purpose: Literal["rebind_email", "rebind_phone"] = "rebind_email"
+    purpose: Literal["bind_email", "rebind_email", "bind_phone", "rebind_phone"] = "rebind_email"
     method: Literal["old_email_otp", "old_phone_otp"]
+    targetContact: str | None = Field(None, max_length=128)
 
 
 class StepUpVerifyRequest(RequestBody):
     model_config = ConfigDict(extra="forbid", strict=True)
-    purpose: Literal["rebind_email", "rebind_phone"] = "rebind_email"
+    purpose: Literal["bind_email", "rebind_email", "bind_phone", "rebind_phone"] = "rebind_email"
     method: Literal["password", "old_email_otp", "old_phone_otp", "recent_auth"]
     currentPassword: str | None = Field(None, max_length=128)
     challengeId: str | None = Field(None, max_length=64)

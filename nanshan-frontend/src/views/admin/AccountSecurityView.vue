@@ -6,8 +6,10 @@ import { alertDialog, confirmDialog } from '../../utils/appDialog.js'
 import { useAuthStore } from '../../stores/auth'
 import {
   STEP_UP_METHOD_LABELS,
+  createIdempotencyKey,
   resolveRetryAfterSeconds,
   sanitizeOtpCode,
+  shouldReuseIdempotencyKeyOnError,
 } from '../../utils/emailSecurity.js'
 
 const router = useRouter()
@@ -41,6 +43,7 @@ const stepUpForm = reactive({
   challengeId: '',
   code: '',
   maskedDestination: '',
+  idempotencyKey: '',
 })
 
 const bindForm = reactive({
@@ -48,12 +51,14 @@ const bindForm = reactive({
   challengeId: '',
   code: '',
   stepUpGrant: '',
+  idempotencyKey: '',
 })
 
 const availableStepUpMethods = computed(() => securityData.value?.stepUpMethods || [])
 const emailEnabled = computed(() => Boolean(securityData.value?.capabilities?.emailEnabled))
 const smsEnabled = computed(() => Boolean(securityData.value?.capabilities?.smsEnabled))
 const isRebindEmail = computed(() => bindType.value === 'email' && Boolean(securityData.value?.email?.verified))
+const stepUpPurpose = computed(() => (isRebindEmail.value ? 'rebind_email' : 'bind_email'))
 
 const clearTimers = () => {
   if (timer) {
@@ -75,10 +80,12 @@ const resetModalMemory = () => {
   stepUpForm.challengeId = ''
   stepUpForm.code = ''
   stepUpForm.maskedDestination = ''
+  stepUpForm.idempotencyKey = ''
   bindForm.contactValue = ''
   bindForm.challengeId = ''
   bindForm.code = ''
   bindForm.stepUpGrant = ''
+  bindForm.idempotencyKey = ''
 }
 
 const startCountdown = (seconds = 60) => {
@@ -130,7 +137,7 @@ onUnmounted(() => {
 const openBindModal = (type) => {
   resetModalMemory()
   bindType.value = type
-  if (type === 'email' && securityData.value?.email?.verified) {
+  if (type === 'email') {
     bindStage.value = 'stepUp'
     const methods = availableStepUpMethods.value
     stepUpForm.method = methods.length ? methods[0] : 'password'
@@ -146,6 +153,32 @@ const closeBindModal = () => {
   resetModalMemory()
 }
 
+const onTargetEmailEdited = () => {
+  stepUpForm.challengeId = ''
+  stepUpForm.code = ''
+  stepUpForm.maskedDestination = ''
+  stepUpForm.idempotencyKey = ''
+  bindForm.stepUpGrant = ''
+  bindForm.idempotencyKey = ''
+  bindError.value = ''
+}
+
+const resetEmailStepUpTarget = () => {
+  clearTimers()
+  countdown.value = 0
+  stepUpCountdown.value = 0
+  stepUpForm.challengeId = ''
+  stepUpForm.code = ''
+  stepUpForm.maskedDestination = ''
+  stepUpForm.idempotencyKey = ''
+  bindForm.stepUpGrant = ''
+  bindForm.challengeId = ''
+  bindForm.code = ''
+  bindForm.idempotencyKey = ''
+  bindError.value = ''
+  bindStage.value = 'stepUp'
+}
+
 const onStepUpOtpInput = (event) => {
   stepUpForm.code = sanitizeOtpCode(event?.target?.value ?? stepUpForm.code)
 }
@@ -156,21 +189,35 @@ const onBindOtpInput = (event) => {
 
 const handleSendStepUpCode = async () => {
   if (bindLoading.value) return
+  const targetEmail = bindForm.contactValue.trim()
+  if (!targetEmail) {
+    bindError.value = '请先输入要绑定的目标邮箱地址'
+    return
+  }
+  if (!stepUpForm.idempotencyKey) {
+    stepUpForm.idempotencyKey = createIdempotencyKey('su')
+  }
   bindLoading.value = true
   bindError.value = ''
   try {
     const res = await api('/me/security/step-up/challenge', {
       method: 'POST',
+      headers: { 'Idempotency-Key': stepUpForm.idempotencyKey },
       body: {
-        purpose: 'rebind_email',
+        purpose: stepUpPurpose.value,
         method: stepUpForm.method,
+        targetContact: targetEmail,
       },
     })
+    stepUpForm.idempotencyKey = ''
     stepUpForm.challengeId = res.challengeId || ''
     stepUpForm.maskedDestination = res.maskedDestination || ''
     stepUpForm.code = ''
     startStepUpCountdown(60)
   } catch (err) {
+    if (!shouldReuseIdempotencyKeyOnError(err)) {
+      stepUpForm.idempotencyKey = ''
+    }
     const retryAfter = resolveRetryAfterSeconds(err, 0)
     if (retryAfter > 0) startStepUpCountdown(retryAfter)
     bindError.value = err.message || '发送二次验证验证码失败'
@@ -181,6 +228,11 @@ const handleSendStepUpCode = async () => {
 
 const handleVerifyStepUp = async () => {
   if (bindLoading.value) return
+  const targetEmail = bindForm.contactValue.trim()
+  if (!targetEmail) {
+    bindError.value = '请先输入要绑定的目标邮箱地址'
+    return
+  }
   if (stepUpForm.method === 'password' && !stepUpForm.currentPassword) {
     bindError.value = '请输入当前登录密码'
     return
@@ -201,8 +253,9 @@ const handleVerifyStepUp = async () => {
     const res = await api('/me/security/step-up/verify', {
       method: 'POST',
       body: {
-        purpose: 'rebind_email',
+        purpose: stepUpPurpose.value,
         method: stepUpForm.method,
+        targetContact: targetEmail,
         currentPassword: stepUpForm.method === 'password' ? stepUpForm.currentPassword : null,
         challengeId:
           stepUpForm.method === 'old_email_otp' || stepUpForm.method === 'old_phone_otp'
@@ -217,6 +270,8 @@ const handleVerifyStepUp = async () => {
     bindForm.stepUpGrant = res.stepUpGrant || ''
     stepUpForm.currentPassword = ''
     stepUpForm.code = ''
+    stepUpForm.idempotencyKey = ''
+    bindForm.idempotencyKey = ''
     bindStage.value = 'bind'
   } catch (err) {
     bindError.value = err.message || '二次身份认证失败'
@@ -231,6 +286,9 @@ const handleSendBindCode = async () => {
     bindError.value = bindType.value === 'phone' ? '请输入11位手机号' : '请输入邮箱地址'
     return
   }
+  if (!bindForm.idempotencyKey) {
+    bindForm.idempotencyKey = createIdempotencyKey('bind')
+  }
   bindLoading.value = true
   bindError.value = ''
   try {
@@ -243,12 +301,17 @@ const handleSendBindCode = async () => {
     }
     const res = await api('/me/security/contact/challenge', {
       method: 'POST',
+      headers: { 'Idempotency-Key': bindForm.idempotencyKey },
       body,
     })
+    bindForm.idempotencyKey = ''
     bindForm.challengeId = res.challengeId
     bindForm.code = ''
     startCountdown(60)
   } catch (err) {
+    if (!shouldReuseIdempotencyKeyOnError(err)) {
+      bindForm.idempotencyKey = ''
+    }
     const retryAfter = resolveRetryAfterSeconds(err, 0)
     if (retryAfter > 0) startCountdown(retryAfter)
     bindError.value = err.message || '发送验证码失败'
@@ -422,16 +485,32 @@ const handleRevokeAllSessions = async () => {
         <h3>
           {{
             bindStage === 'stepUp'
-              ? '安全邮箱换绑 · 二次身份认证'
+              ? (isRebindEmail ? '更换安全邮箱 · 二次身份认证' : '绑定安全邮箱 · 身份授权')
               : (bindType === 'phone' ? '绑定安全手机号' : (isRebindEmail ? '更换安全邮箱' : '绑定安全邮箱'))
           }}
         </h3>
 
-        <!-- 阶段 1：换绑二次身份认证 -->
+        <!-- 阶段 1：目标邮箱确认与二次身份认证（首次绑定与换绑均强制） -->
         <div v-if="bindStage === 'stepUp'">
           <p class="modal-tip">
-            检测到当前账号已绑定安全邮箱（{{ securityData.email?.value }}）。为防止会话盗用风险，更换前须先完成二次身份认证。
+            {{
+              isRebindEmail
+                ? `检测到当前账号已绑定安全邮箱（${securityData.email?.value || ''}）。更换前须先输入目标新邮箱并完成二次身份认证。`
+                : '首次绑定安全邮箱须先输入目标邮箱地址并完成本次会话身份授权。'
+            }}
           </p>
+
+          <div class="form-item">
+            <label>{{ isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址' }}</label>
+            <input
+              v-model="bindForm.contactValue"
+              type="email"
+              class="input-control"
+              placeholder="请先输入要绑定的邮箱地址"
+              :disabled="bindLoading || stepUpCountdown > 0"
+              @input="onTargetEmailEdited"
+            />
+          </div>
 
           <div v-if="availableStepUpMethods.length > 1" class="form-item">
             <label>选择验证方式</label>
@@ -491,19 +570,36 @@ const handleRevokeAllSessions = async () => {
           </div>
         </div>
 
-        <!-- 阶段 2：输入新联系方式并核验 OTP -->
+        <!-- 阶段 2：核验目标联系方式 OTP -->
         <div v-else>
           <p class="modal-tip">系统将发送一次性 6 位验证码以确权归属，完成验证后方可作为安全凭证使用。</p>
 
           <div class="form-item">
-            <label>{{ bindType === 'phone' ? '手机号' : '新邮箱地址' }}</label>
+            <label>{{ bindType === 'phone' ? '手机号' : '已授权目标邮箱' }}</label>
             <input
+              v-if="bindType === 'phone'"
               v-model="bindForm.contactValue"
               type="text"
               class="input-control"
-              :placeholder="bindType === 'phone' ? '请输入11位大陆手机号' : '请输入常用邮箱地址'"
+              placeholder="请输入11位大陆手机号"
               :disabled="bindLoading || countdown > 0"
             />
+            <div v-else class="code-row">
+              <input
+                :value="bindForm.contactValue"
+                type="email"
+                class="input-control"
+                disabled
+              />
+              <button
+                type="button"
+                class="code-btn"
+                :disabled="bindLoading"
+                @click="resetEmailStepUpTarget"
+              >
+                修改目标邮箱
+              </button>
+            </div>
           </div>
 
           <div class="form-item">

@@ -159,6 +159,8 @@ def _patch_all_get_cursor(stack: ExitStack, dsn: str, schema: str) -> None:
         "modules.security.step_up.get_cursor",
         "modules.security.email_diagnostics.get_cursor",
         "modules.security.eligibility.get_cursor",
+        "modules.security.idempotency.get_cursor",
+        "modules.identity.service.get_cursor",
     ):
         stack.enter_context(patch(target, _factory))
 
@@ -180,10 +182,12 @@ def pg_schema():
                 "034_sms_security_gateway.sql",
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
+                "037_phase_r_security_hardening.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
-            # 幂等重跑 036 验证无报错
+            # 幂等重跑 036 与 037 验证无报错
             _apply_sql(cur, schema, (MIGRATION_DIR / "036_email_security_gateway.sql").read_text(encoding="utf-8"))
+            _apply_sql(cur, schema, (MIGRATION_DIR / "037_phase_r_security_hardening.sql").read_text(encoding="utf-8"))
         with ExitStack() as stack:
             _patch_all_get_cursor(stack, PG_DSN, schema)
             auth_cache._cache.clear()
@@ -371,6 +375,15 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
             target_contact="shared-target@qq.com",
         )["stepUpGrant"]
 
+        grant22 = issue_step_up_grant(
+            22,
+            purpose="bind_email",
+            method="password",
+            session_fingerprint=sess22,
+            current_password="InitPass!123",
+            target_contact="shared-target@qq.com",
+        )["stepUpGrant"]
+
         r21 = start_email_binding(
             21,
             "shared-target@qq.com",
@@ -386,6 +399,7 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
             22,
             "shared-target@qq.com",
             SendContext("192.0.2.22", "d22", str(uuid.uuid4())),
+            step_up_grant=grant22,
             session_fingerprint=sess22,
             engine=engine,
         )
@@ -410,7 +424,7 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
                     conflict_codes.append(exc.http_status)
 
         t1 = threading.Thread(target=_bind_worker, args=(21, r21["challengeId"], code21, grant21, sess21))
-        t2 = threading.Thread(target=_bind_worker, args=(22, r22["challengeId"], code22, None, sess22))
+        t2 = threading.Thread(target=_bind_worker, args=(22, r22["challengeId"], code22, grant22, sess22))
         t1.start()
         t2.start()
         t1.join(timeout=10)
@@ -439,9 +453,11 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
                 (stale_id,),
             )
             cur.execute(
-                """INSERT INTO step_up_grant(id, user_id, purpose, method, session_fingerprint, grant_hash, status, expires_at)
-                VALUES (%s, 21, 'rebind_email', 'password', 's', %s, 'active', NOW() - INTERVAL '5 minutes')""",
-                (expired_grant_id, "h-" + uuid.uuid4().hex),
+                """INSERT INTO step_up_grant(
+                    id, user_id, purpose, method, session_fingerprint, target_fingerprint, grant_hash, status, expires_at
+                )
+                VALUES (%s, 21, 'rebind_email', 'password', 's', %s, %s, 'active', NOW() - INTERVAL '5 minutes')""",
+                (expired_grant_id, "tf-" + uuid.uuid4().hex, "h-" + uuid.uuid4().hex),
             )
         cleanup_delivery_tasks()
         with _schema_cursor(PG_DSN, schema, commit=False) as cur:
@@ -487,6 +503,7 @@ def run_pg_redis_benchmark(iterations: int = 30) -> dict[str, object]:
                 "034_sms_security_gateway.sql",
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
+                "037_phase_r_security_hardening.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 

@@ -335,8 +335,10 @@ export async function apiRequest(method, path, query, body, options = {}) {
     headers['X-Device-Id'] = deviceId
   }
   if (method === 'POST' || method === 'PATCH') {
-    headers['X-Idempotency-Key'] =
-      'tt_' + Date.now() + '_' + Math.floor(Math.random() * 100000)
+    if (!headers['X-Idempotency-Key']) {
+      headers['X-Idempotency-Key'] =
+        'tt_' + Date.now() + '_' + Math.floor(Math.random() * 100000)
+    }
   }
 
   const requestOpts = { method, path, query, body, headers }

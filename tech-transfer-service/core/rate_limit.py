@@ -95,20 +95,20 @@ def _client_ip(request) -> str:
     """
     import ipaddress
 
-    def normalize(host):
+    def normalize(host: str) -> str:
         address = ipaddress.ip_address(host)
         if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
             address = address.ipv4_mapped
         return str(address)
 
-    peer = request.client.host if request.client else "unknown"
+    peer = str(request.client.host) if request.client else "unknown"
     try:
         peer = normalize(peer)
     except ValueError:
         return peer
     if not _is_trusted_proxy(peer):
         return peer
-    xff = request.headers.get("x-forwarded-for", "")
+    xff = str(request.headers.get("x-forwarded-for", "") or "")
     if xff and len(xff) <= 2048:
         current = peer
         for hop in reversed(xff.split(",")):

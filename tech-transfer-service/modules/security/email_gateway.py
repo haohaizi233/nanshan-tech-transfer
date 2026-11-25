@@ -3,20 +3,20 @@
 职责：
 1. 邮件渠道请求风控门禁 (`email_request_gate`)；
 2. 邮箱密码找回 (`start_email_recovery`：统一资格检查、防枚举、结构化回执)；
-3. 安全邮箱首次绑定与换绑 (`start_email_binding`：Step-up 二次认证校验、发送失败立即闭环)；
-4. 行锁串行化 + 事务外投递 + 未知状态保守不重发 + 结构化诊断与低基数指标。
+3. 安全邮箱首次绑定与换绑 (`start_email_binding`：强制 Step-up 二次认证校验、发送失败立即闭环)；
+4. 统一锁顺序 + 事务外投递 (`reserved -> sending -> accepted/unknown/rejected`) + CAS 回执核对（严格校验历史 Provider 身份）。
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 import secrets
 import time
 import uuid
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from config import settings, validate_frontend_reset_base_url
 from core.contact_validation import normalize_email
@@ -34,9 +34,11 @@ from modules.security.delivery_models import (
 from modules.security.eligibility import EMAIL_ELIGIBLE_SQL, email_eligibility_reason
 from modules.security.provider import get_email_provider
 from modules.security.sms_gateway import SendContext, normalize_phone, recovery_response
-from modules.security.state_machine import assert_send_state_transition
+from modules.security.state_machine import transition_delivery_state
+from modules.security.step_up import SessionAuthContext, validate_step_up_grant
 
 logger = logging.getLogger("nanshan.security.email_gateway")
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _engine():
@@ -47,7 +49,7 @@ def _engine():
 
 def _allowed(decision) -> bool:
     value = getattr(decision, "action", getattr(decision, "decision", decision))
-    return getattr(value, "value", value) == "ALLOW"
+    return str(getattr(value, "value", value)) == "ALLOW"
 
 
 def _audit(rule: str, context: SendContext, challenge_id=None, **details):
@@ -75,7 +77,7 @@ def email_request_gate(
     norm_email: str | None = None
     if email:
         try:
-            norm_email = normalize_email(email)
+            norm_email = str(normalize_email(email))
         except BizError:
             norm_email = email.strip().lower()
     decision = eng.check_request(context.ip, account, context.device_id, email=norm_email, purpose=purpose)
@@ -131,7 +133,7 @@ def start_email_recovery(
 
     if "@" in lookup:
         try:
-            lookup = normalize_email(lookup)
+            lookup = str(normalize_email(lookup))
         except BizError:
             _ = hashlib.pbkdf2_hmac("sha256", lookup.encode("utf-8"), b"salt_dummy", 1000)
             if return_result:
@@ -194,7 +196,7 @@ def start_email_recovery(
         return recovery_response(challenge_id, ch)
 
     target = rows[0]
-    target_email = normalize_email(target["normalized_value"])
+    target_email = str(normalize_email(target["normalized_value"]))
     receipt = _send_email(
         target["user_id"],
         target_email,
@@ -225,18 +227,22 @@ def start_email_binding(
     *,
     step_up_grant: str | None = None,
     session_fingerprint: str | None = None,
+    session_ctx: SessionAuthContext | None = None,
     engine=None,
 ) -> dict:
-    """发起安全邮箱绑定或换绑挑战（已存在已确权邮箱时必须先完成二次认证）。"""
+    """发起安全邮箱绑定或换绑挑战（首次绑定与换绑均强制要求强绑定 Step-up Grant）。"""
     if not settings.EMAIL_ENABLED:
         raise DeliveryStageError("config", "CHANNEL_DISABLED")
-    norm_email = normalize_email(email)
+    norm_email = str(normalize_email(email))
     eng = engine or _engine()
     challenge_id = str(uuid.uuid4())
     is_rebind = False
 
     with get_cursor(commit=True) as cur:
-        cur.execute("SELECT id FROM app_user WHERE id=%s AND status='active' AND deleted_at IS NULL", (user_id,))
+        # 锁顺序：app_user -> account_contact -> step_up_grant
+        cur.execute(
+            "SELECT id FROM app_user WHERE id=%s AND status='active' AND deleted_at IS NULL FOR UPDATE", (user_id,)
+        )
         if not cur.fetchone():
             raise bad_request("账号不可用")
 
@@ -250,7 +256,7 @@ def start_email_binding(
 
         cur.execute(
             """SELECT normalized_value FROM account_contact WHERE user_id=%s AND contact_type='email'
-            AND status='active' AND verified_at IS NOT NULL ORDER BY updated_at DESC LIMIT 1""",
+            AND status='active' AND verified_at IS NOT NULL ORDER BY updated_at DESC LIMIT 1 FOR UPDATE""",
             (user_id,),
         )
         existing = cur.fetchone()
@@ -258,17 +264,18 @@ def start_email_binding(
             is_rebind = True
             if existing["normalized_value"] == norm_email:
                 raise bad_request("新邮箱与当前已绑定安全邮箱相同")
-            from modules.security.step_up import validate_step_up_grant
 
-            validate_step_up_grant(
-                cur,
-                user_id=user_id,
-                grant_token=step_up_grant,
-                purpose="rebind_email",
-                session_fingerprint=session_fingerprint or "",
-                target_contact=norm_email,
-                consume=False,
-            )
+        actual_purpose = "rebind_email" if is_rebind else "bind_email"
+        validate_step_up_grant(
+            cur,
+            user_id=user_id,
+            grant_token=step_up_grant,
+            purpose=actual_purpose,
+            session_fingerprint=session_fingerprint or "",
+            session_ctx=session_ctx,
+            target_contact=norm_email,
+            consume=False,
+        )
 
     _send_email(
         user_id,
@@ -300,6 +307,9 @@ def _send_email(
     engine=None,
     *,
     template_purpose: str | None = None,
+    sub_purpose: str | None = None,
+    session_id: str | None = None,
+    target_fingerprint: str | None = None,
 ) -> DeliveryReceipt:
     from modules.security.service import _fingerprint, _hmac_code_v2, _mask_contact
 
@@ -314,6 +324,7 @@ def _send_email(
         metrics.inc("email_request_total", channel=channel, purpose=purpose, reason=reason)
         raise DeliveryStageError("config", reason) from None
 
+    provider_config_id = getattr(provider, "provider_config_id", f"{provider.provider_name}:default")
     eng = engine or _engine()
     ttl = settings.EMAIL_LINK_TTL_SECONDS if channel == "email_link" else settings.EMAIL_CODE_TTL_SECONDS
     decision = eng.reserve(email, str(user_id), context.ip, context.device_id, challenge_id, ttl_seconds=ttl)
@@ -335,45 +346,94 @@ def _send_email(
 
     try:
         with get_cursor(commit=True) as cur:
-            # 行锁串行化同用户同用途挑战，确保不存在多个激活挑战；事务在调用外部 SMTP/SES 前立即结束。
+            # 行锁串行化同用户同用途挑战；外部 SMTP/SES 呼叫在事务提交并释放行锁后执行。
             cur.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
             cur.execute(
                 """UPDATE auth_challenge SET status='cancelled' WHERE user_id=%s
                 AND purpose=%s AND status IN ('pending','pending_send')""",
                 (user_id, purpose),
             )
-            cur.execute(
-                """INSERT INTO auth_challenge
-                (id,user_id,purpose,channel,destination_fingerprint,destination_masked,code_hash,
-                 status,attempt_count,max_attempts,expires_at,send_request_id,send_state,
-                 code_hash_version,provider_name)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,'pending_send',0,%s,
-                        NOW()+make_interval(secs=>%s),%s,'reserved',2,%s)""",
-                (
-                    challenge_id,
-                    user_id,
-                    purpose,
-                    channel,
-                    fp,
-                    masked,
-                    code_hash,
-                    settings.EMAIL_CODE_MAX_ATTEMPTS,
-                    ttl,
-                    challenge_id,
-                    provider.provider_name,
-                ),
-            )
+            try:
+                cur.execute("SAVEPOINT sp_ins_challenge_037")
+                cur.execute(
+                    """INSERT INTO auth_challenge
+                    (id,user_id,purpose,channel,destination_fingerprint,destination_masked,code_hash,
+                     status,attempt_count,max_attempts,expires_at,send_request_id,send_state,
+                     code_hash_version,provider_name,provider_config_id,session_id,sub_purpose,target_fingerprint)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'pending_send',0,%s,
+                            NOW()+make_interval(secs=>%s),%s,'reserved',2,%s,%s,%s,%s,%s)""",
+                    (
+                        challenge_id,
+                        user_id,
+                        purpose,
+                        channel,
+                        fp,
+                        masked,
+                        code_hash,
+                        settings.EMAIL_CODE_MAX_ATTEMPTS,
+                        ttl,
+                        challenge_id,
+                        provider.provider_name,
+                        provider_config_id,
+                        session_id,
+                        sub_purpose,
+                        target_fingerprint,
+                    ),
+                )
+                cur.execute("RELEASE SAVEPOINT sp_ins_challenge_037")
+            except Exception:
+                cur.execute("ROLLBACK TO SAVEPOINT sp_ins_challenge_037")
+                cur.execute(
+                    """INSERT INTO auth_challenge
+                    (id,user_id,purpose,channel,destination_fingerprint,destination_masked,code_hash,
+                     status,attempt_count,max_attempts,expires_at,send_request_id,send_state,
+                     code_hash_version,provider_name)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'pending_send',0,%s,
+                            NOW()+make_interval(secs=>%s),%s,'reserved',2,%s)""",
+                    (
+                        challenge_id,
+                        user_id,
+                        purpose,
+                        channel,
+                        fp,
+                        masked,
+                        code_hash,
+                        settings.EMAIL_CODE_MAX_ATTEMPTS,
+                        ttl,
+                        challenge_id,
+                        provider.provider_name,
+                    ),
+                )
             audit_record(
                 "email.reserved",
                 "auth_challenge",
                 resource_id=challenge_id,
                 request_id=context.request_id,
-                details={"decision": "ALLOW", "rule_id": "email.reserved", "channel": channel, "purpose": purpose},
+                details={
+                    "decision": "ALLOW",
+                    "rule_id": "email.reserved",
+                    "channel": channel,
+                    "purpose": purpose,
+                },
                 cur=cur,
             )
     except Exception:
         eng.transition(challenge_id, "rejected")
         raise DeliveryStageError("challenge_create", "CHALLENGE_CREATE_FAILED") from None
+
+    # 外部发送前显式持久化 reserved -> sending 投递中状态（CAS）
+    try:
+        with get_cursor(commit=True) as cur:
+            transition_delivery_state(
+                cur,
+                challenge_id,
+                ("reserved",),
+                "sending",
+                provider_name=provider.provider_name,
+                provider_config_id=provider_config_id,
+            )
+    except Exception:
+        pass
 
     metrics.inc("email_request_total", channel=channel, purpose=purpose, provider=provider.provider_name)
     start_ms = time.monotonic()
@@ -428,6 +488,7 @@ def _send_email(
                 [],
                 context,
                 provider_name=provider.provider_name,
+                provider_config_id=provider_config_id,
                 provider_status=getattr(exc, "provider_status", None),
                 failure_reason=reason,
             )
@@ -460,6 +521,7 @@ def _send_email(
 
     elapsed_ms = (time.monotonic() - start_ms) * 1000.0
     metrics.observe_latency(elapsed_ms, channel=channel, purpose=purpose, provider=receipt.provider)
+    receipt_cfg_id = getattr(provider, "provider_config_id", provider_config_id)
     try:
         _set_email_send_state(
             challenge_id,
@@ -467,6 +529,7 @@ def _send_email(
             list(receipt.provider_message_ids),
             context,
             provider_name=receipt.provider,
+            provider_config_id=receipt_cfg_id,
         )
     except Exception:
         raise DeliveryStageError(
@@ -489,54 +552,129 @@ def _set_email_send_state(
     context: SendContext,
     *,
     provider_name: str | None = None,
+    provider_config_id: str | None = None,
     provider_status: int | None = None,
     failure_reason: str | None = None,
 ) -> None:
-    assert_send_state_transition("reserved", state)
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            """UPDATE auth_challenge SET send_state=%s, provider_message_ids=%s::jsonb,
-            provider_name=COALESCE(%s, provider_name),
-            delivery_status_code=COALESCE(%s, delivery_status_code),
-            delivery_failure_reason=%s,
-            status=CASE WHEN status='pending_send' THEN
-                CASE WHEN %s IN ('accepted','unknown') THEN 'pending' ELSE 'failed' END ELSE status END
-            WHERE id=%s""",
-            (
-                state,
-                json.dumps(provider_ids),
-                provider_name,
-                provider_status,
-                failure_reason[:64] if failure_reason else None,
-                state,
-                challenge_id,
-            ),
+        res = transition_delivery_state(
+            cur,
+            challenge_id,
+            ("reserved", "sending"),
+            state,
+            provider_ids=provider_ids,
+            provider_name=provider_name,
+            provider_config_id=provider_config_id,
+            provider_status=provider_status,
+            failure_reason=failure_reason,
+            challenge_status_on_failure="failed",
         )
-        audit_record(
-            "email." + state,
-            "auth_challenge",
-            resource_id=challenge_id,
-            request_id=context.request_id,
-            details={"send_state": state, "provider": provider_name, "reason_code": failure_reason},
-            cur=cur,
-        )
+        if res.updated:
+            audit_record(
+                "email." + state,
+                "auth_challenge",
+                resource_id=challenge_id,
+                request_id=context.request_id,
+                details={"send_state": state, "provider": provider_name, "reason_code": failure_reason},
+                cur=cur,
+            )
+
+
+def _match_ses_record(records: list, target_ids: set[str]) -> dict | None:
+    matched = [r for r in records if isinstance(r, dict) and str(r.get("MessageId") or "").strip() in target_ids]
+    if not matched:
+        return None
+    if len(matched) == 1:
+        return matched[0]
+    return max(
+        matched,
+        key=lambda r: int(r["DeliverTime"]) if str(r.get("DeliverTime") or "").isdigit() else 0,
+    )
+
+
+def _map_ses_deliver_status(deliver_status: object) -> tuple[str | None, str]:
+    """依腾讯云 SES GetSendEmailStatus (2020-10-02) 官方 DeliverStatus 枚举精确映射：
+    0=请求成功进入发送队列, 1=递送成功, 2=被丢弃, 3=ESP 拒信退信, 8=延迟递送。
+    绝不持久化原始 DeliverMessage 文本（防止邮箱/响应泄露）。
+    """
+    if deliver_status == 1:
+        return "delivered", "ses_delivered"
+    if deliver_status == 2:
+        return "delivery_failed", "ses_dropped"
+    if deliver_status == 3:
+        return "bounced", "ses_esp_rejected"
+    if deliver_status == 0:
+        return None, "ses_in_queue"
+    if deliver_status == 8:
+        return None, "ses_delayed"
+    return None, "unknown_provider_status"
 
 
 def reconcile_email_delivery(challenge_id: str) -> dict | None:
-    """内部运维核对邮件投递状态；不支持状态查询的 Provider（如 SMTP/Mock）显式返回 unsupported_capability。"""
+    """内部运维核对邮件投递状态（严格校验历史 Provider 身份 + 官方 DeliverStatus + CAS 更新 + 脱敏）。"""
     with get_cursor() as cur:
-        cur.execute(
-            """SELECT provider_message_ids, send_state, provider_name, created_at
-            FROM auth_challenge WHERE id=%s AND channel IN ('email_otp','email_link')""",
-            (challenge_id,),
-        )
-        row = cur.fetchone()
+        try:
+            cur.execute("SAVEPOINT sp_reconcile_sel_037")
+            cur.execute(
+                """SELECT provider_message_ids, send_state, provider_name, provider_config_id, created_at
+                FROM auth_challenge WHERE id=%s AND channel IN ('email_otp','email_link')""",
+                (challenge_id,),
+            )
+            row = cur.fetchone()
+            cur.execute("RELEASE SAVEPOINT sp_reconcile_sel_037")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_reconcile_sel_037")
+            cur.execute(
+                """SELECT provider_message_ids, send_state, provider_name, created_at
+                FROM auth_challenge WHERE id=%s AND channel IN ('email_otp','email_link')""",
+                (challenge_id,),
+            )
+            row = cur.fetchone()
     if not row:
         return None
     if row["send_state"] in {"delivered", "bounced", "delivery_failed", "rejected"}:
         return {"state": row["send_state"], "provider": row.get("provider_name")}
 
-    provider = get_email_provider()
+    hist_provider = row.get("provider_name")
+    hist_cfg_id = row.get("provider_config_id") if isinstance(row, dict) else None
+    if not hist_provider:
+        return {
+            "state": row["send_state"],
+            "supported": False,
+            "reason_code": "provider_configuration_changed",
+            "requires_manual_review": True,
+        }
+
+    try:
+        provider = get_email_provider()
+    except ProviderError:
+        return {
+            "state": row["send_state"],
+            "historicalProvider": hist_provider,
+            "supported": False,
+            "reason_code": "provider_unavailable",
+            "requires_manual_review": True,
+        }
+
+    if provider.provider_name != hist_provider:
+        return {
+            "state": row["send_state"],
+            "historicalProvider": hist_provider,
+            "activeProvider": provider.provider_name,
+            "supported": False,
+            "reason_code": "provider_configuration_changed",
+            "requires_manual_review": True,
+        }
+    active_cfg_id = getattr(provider, "provider_config_id", None)
+    if hist_cfg_id and active_cfg_id and active_cfg_id != hist_cfg_id:
+        return {
+            "state": row["send_state"],
+            "historicalProvider": hist_provider,
+            "supported": False,
+            "reason_code": "provider_configuration_changed",
+            "requires_manual_review": True,
+        }
+
     if not provider.capabilities.delivery_status_query:
         return {
             "state": row["send_state"],
@@ -545,50 +683,63 @@ def reconcile_email_delivery(challenge_id: str) -> dict | None:
             "reason_code": "unsupported_capability",
         }
 
-    ids = row["provider_message_ids"] or []
+    ids = [str(x).strip() for x in (row["provider_message_ids"] or []) if str(x).strip()]
     if not ids:
         return {"state": "unknown", "requires_manual_review": True}
 
     created_at = row.get("created_at")
-    req_date = created_at.strftime("%Y-%m-%d") if hasattr(created_at, "strftime") else None
-    result = provider.query_status(list(ids), request_date=req_date)
+    if hasattr(created_at, "astimezone"):
+        req_date = created_at.astimezone(_SHANGHAI_TZ).strftime("%Y-%m-%d")
+    elif hasattr(created_at, "strftime"):
+        req_date = created_at.strftime("%Y-%m-%d")
+    else:
+        req_date = None
+
+    result = provider.query_status(ids, request_date=req_date)
     records = result.get("records") or []
     if not records:
         return {"state": row["send_state"], "provider": provider.provider_name, "records": 0}
 
-    # SES SendStatus: 0=发送成功, 1=发送中, 2=收件人拒收/退信, 3=发送失败等
-    latest = records[0] if isinstance(records[0], dict) else {}
-    send_status = latest.get("SendStatus")
-    new_state = row["send_state"]
-    if send_status == 0:
-        new_state = "delivered"
-    elif send_status in {2, 3, 4}:
-        new_state = "bounced" if send_status == 2 else "delivery_failed"
+    latest = _match_ses_record(records, set(ids))
+    if latest is None:
+        return {
+            "state": row["send_state"],
+            "provider": provider.provider_name,
+            "matched": 0,
+            "reason_code": "provider_message_mismatch",
+            "requires_manual_review": True,
+        }
 
-    if new_state not in {"delivered", "bounced", "delivery_failed"}:
-        return {"state": row["send_state"], "provider": provider.provider_name, "ses_send_status": send_status}
+    deliver_status = latest.get("DeliverStatus")
+    new_state, reason_code = _map_ses_deliver_status(deliver_status)
+    if new_state is None:
+        out: dict = {
+            "state": row["send_state"],
+            "provider": provider.provider_name,
+            "ses_deliver_status": deliver_status,
+            "reason_code": reason_code,
+        }
+        if reason_code == "unknown_provider_status":
+            out["requires_manual_review"] = True
+        return out
 
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            """UPDATE auth_challenge SET send_state=%s,
-            delivery_status_code=%s,
-            delivery_reason_code=%s,
-            status=CASE WHEN %s IN ('bounced','delivery_failed') AND status='pending' THEN 'failed' ELSE status END
-            WHERE id=%s AND send_state IN ('accepted','unknown')""",
-            (
-                new_state,
-                int(send_status) if isinstance(send_status, int) else None,
-                str(latest.get("DeliverMessage") or "")[:32] or None,
-                new_state,
-                challenge_id,
-            ),
+        res = transition_delivery_state(
+            cur,
+            challenge_id,
+            ("accepted", "unknown"),
+            new_state,
+            provider_status=int(deliver_status) if isinstance(deliver_status, int) else None,
+            delivery_reason_code=reason_code,
+            failure_reason=reason_code if new_state in {"bounced", "delivery_failed"} else None,
+            challenge_status_on_failure="failed",
         )
-        if cur.rowcount:
+        if res.updated:
             audit_record(
                 "email." + new_state,
                 "auth_challenge",
                 resource_id=challenge_id,
-                details={"ses_send_status": send_status},
+                details={"ses_deliver_status": deliver_status, "reason_code": reason_code},
                 cur=cur,
             )
             cur.execute(
@@ -596,11 +747,16 @@ def reconcile_email_delivery(challenge_id: str) -> dict | None:
                 outcome=%s WHERE id=%s AND provider_called=true""",
                 (
                     "delivery" if new_state in {"bounced", "delivery_failed"} else None,
-                    f"ses_{new_state}" if new_state in {"bounced", "delivery_failed"} else None,
+                    reason_code if new_state in {"bounced", "delivery_failed"} else None,
                     "DELIVERY_FAILED" if new_state in {"bounced", "delivery_failed"} else "COMPLETED",
                     challenge_id,
                 ),
             )
-    if new_state == "delivered":
+    if new_state == "delivered" and res.updated:
         _engine().transition(challenge_id, "delivered")
-    return {"state": new_state, "provider": provider.provider_name}
+    return {
+        "state": res.current_send_state or new_state,
+        "provider": provider.provider_name,
+        "outcome": res.outcome,
+        "reason_code": reason_code,
+    }

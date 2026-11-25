@@ -13,7 +13,9 @@ import {
 	revokeAllUserSessions,
 	startPasswordRecovery,
 	verifyPasswordRecovery,
-	completePasswordRecovery
+	completePasswordRecovery,
+	createSecurityIdempotencyKey,
+	shouldReuseSecurityIdempotencyKey
 } from '../subpackages/tech-transfer/api/user.js'
 
 test('changePassword validates new password length', async () => {
@@ -76,4 +78,23 @@ test('mine.vue uses email_otp recovery channel, capabilities gate, and stepUpGra
 	assert.match(source, /verifySecurityStepUp/)
 	assert.match(source, /contactStepUpGrant/)
 	assert.match(source, /stepUpMethodLabel/)
+})
+
+test('createSecurityIdempotencyKey and transient reuse helpers enforce Phase R idempotency policy', () => {
+	const k1 = createSecurityIdempotencyKey('su')
+	const k2 = createSecurityIdempotencyKey('su')
+	assert.notEqual(k1, k2)
+	assert.match(k1, /^su-[A-Za-z0-9_.:-]{12,120}$/)
+	assert.equal(shouldReuseSecurityIdempotencyKey(new Error('network timeout')), true)
+	assert.equal(shouldReuseSecurityIdempotencyKey({ code: 'TT_COMMON_50301', status: 503 }), true)
+	assert.equal(shouldReuseSecurityIdempotencyKey({ code: 'TT_COMMON_40901', status: 409 }), false)
+})
+
+test('mine.vue enforces Step-up and target email binding on initial email bind as well as rebind', () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	assert.match(source, /const needStepUp = type === 'email'/)
+	assert.match(source, /bind_email/)
+	assert.match(source, /rebind_email/)
+	assert.match(source, /targetContact:\s*targetEmail/)
+	assert.match(source, /createSecurityIdempotencyKey/)
 })

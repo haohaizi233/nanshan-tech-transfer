@@ -36,4 +36,16 @@ test('AccountSecurityView.vue provides unified security center', () => {
 	assert.match(source, /\/me\/security\/contact\/challenge/)
 	assert.match(source, /\/me\/security\/contact\/verify/)
 	assert.match(source, /\/me\/security\/revoke-sessions/)
+	assert.match(source, /bind_email/)
+	assert.match(source, /rebind_email/)
+	assert.match(source, /targetContact/)
+	assert.match(source, /Idempotency-Key/)
+	assert.doesNotMatch(source, /type === 'email'\s*&&\s*securityData\.value\?\.email\?\.verified[\s\S]{0,60}bindStage\.value = 'stepUp'/)
+})
+
+test('ForgotPasswordView.vue binds Idempotency-Key for recovery start requests', () => {
+	const source = readFileSync(new URL('../src/views/auth/ForgotPasswordView.vue', import.meta.url), 'utf8')
+	assert.match(source, /createIdempotencyKey/)
+	assert.match(source, /Idempotency-Key/)
+	assert.match(source, /shouldReuseIdempotencyKeyOnError/)
 })

@@ -39,6 +39,14 @@ from modules.identity.wechat_web import (
     wechat_web_enabled,
 )
 from modules.security.email_gateway import email_request_gate
+from modules.security.idempotency import (
+    build_idempotency_scope,
+    claim_http_idempotency,
+    compute_request_fingerprint,
+    extract_idempotency_key,
+    finalize_http_idempotency,
+    release_http_idempotency_on_pre_provider_failure,
+)
 from modules.security.rate_limiter import check_verify_challenge_rate
 from modules.security.service import (
     complete_password_recovery,
@@ -99,29 +107,94 @@ def recovery_start(
     context: SmsRequestContext = Depends(validate_sms_request),
 ):
     ctx = SendContext(context.ip, context.device_id, context.request_id)
+    acct_raw = body.account.strip()
+    acct_norm = acct_raw.lower()
+    phone: str | None = None
+    norm_email: str | None = None
+
     if body.channel == "sms":
         try:
-            phone = normalize_phone(body.account)
+            phone = normalize_phone(acct_raw)
+            acct_norm = phone
         except BizError:
             phone = None
-        request_gate(ctx, body.account.strip().lower(), phone=phone)
     else:
         if not settings.EMAIL_ENABLED:
             raise BizError("TT_COMMON_50301", "邮箱安全验证功能暂未开放", 503)
-        norm_email = None
-        if "@" in body.account:
+        if "@" in acct_raw:
             try:
-                norm_email = normalize_email(body.account)
+                norm_email = str(normalize_email(acct_raw))
+                acct_norm = norm_email
             except BizError:
                 norm_email = None
+
+    idem_key = extract_idempotency_key(request)
+    if idem_key:
+        # 幂等重放仍受请求级防洪水保护，绝不在基础安全门禁之前无条件放行
+        check_ip_rate(request, "recovery_start_http", limit=60, window_s=60)
+        req_hash = compute_request_fingerprint(
+            channel=body.channel,
+            purpose="password_recovery",
+            normalized_account=acct_norm,
+        )
+        scope = build_idempotency_scope("/auth/recovery/start", client_ip=context.ip)
+        challenge_id = str(uuid.uuid4())
+        payload = {
+            "account": acct_raw,
+            "channel": body.channel,
+            "ip": context.ip,
+            "device_id": context.device_id,
+            "request_id": context.request_id,
+        }
+        claim = claim_http_idempotency(
+            key=idem_key,
+            scope=scope,
+            request_hash=req_hash,
+            channel=body.channel,
+            purpose="password_recovery",
+            task_id=challenge_id,
+            payload=payload,
+            request_id=context.request_id,
+            initial_state="idem_pending",
+        )
+        if claim.replay:
+            if claim.state == "failed":
+                raise BizError("TT_COMMON_50301", "原请求处理失败，请更换幂等键重试", 503)
+            resp_data = claim.cached_response or recovery_response(claim.task_id or challenge_id, body.channel)
+            return success(resp_data)
+
+        try:
+            if body.channel == "sms":
+                request_gate(ctx, acct_raw.lower(), phone=phone)
+            else:
+                email_request_gate(
+                    ctx,
+                    acct_raw.lower(),
+                    email=norm_email,
+                    purpose="password_recovery",
+                )
+            resp_data = recovery_response(claim.task_id or challenge_id, body.channel)
+            finalize_http_idempotency(claim, resp_data, state="queued")
+        except Exception as exc:
+            release_http_idempotency_on_pre_provider_failure(
+                claim,
+                getattr(exc, "code", type(exc).__name__),
+            )
+            raise
+        background.add_task(run_queued_recovery_task, claim.task_id or challenge_id)
+        return success(resp_data)
+
+    if body.channel == "sms":
+        request_gate(ctx, acct_raw.lower(), phone=phone)
+    else:
         email_request_gate(
             ctx,
-            body.account.strip().lower(),
+            acct_raw.lower(),
             email=norm_email,
             purpose="password_recovery",
         )
     challenge_id = str(uuid.uuid4())
-    enqueue_recovery_task(body.account.strip(), body.channel, challenge_id, ctx)
+    enqueue_recovery_task(acct_raw, body.channel, challenge_id, ctx)
     background.add_task(run_queued_recovery_task, challenge_id)
     return success(recovery_response(challenge_id, body.channel))
 

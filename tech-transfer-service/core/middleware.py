@@ -78,6 +78,35 @@ def _user_session_version(user_id: int) -> int:
     return _query()
 
 
+def _session_is_active(user_id: int, sid: str) -> bool:
+    """Check server-side auth_session status for logical session `sid`."""
+    from db import get_cursor
+
+    try:
+        with get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    EXISTS(SELECT 1 FROM auth_session WHERE user_id = %s AND sid = %s) AS has_any,
+                    EXISTS(
+                        SELECT 1 FROM auth_session
+                        WHERE user_id = %s AND sid = %s AND status = 'active'
+                          AND (expires_at IS NULL OR expires_at > NOW())
+                    ) AS has_active
+                """,
+                (user_id, sid, user_id, sid),
+            )
+            row = cur.fetchone()
+            if not row or not isinstance(row, dict):
+                return True
+            return not (row.get("has_any") and not row.get("has_active"))
+    except Exception as exc:
+        err_name = type(exc).__name__
+        if err_name in {"UndefinedColumn", "UndefinedTable", "DataError", "InvalidTextRepresentation"}:
+            return True
+        raise BizError("TT_COMMON_50301", "认证服务暂时不可用", 503) from None
+
+
 def _is_admin_role(user_id: int) -> bool:
     """user_role 表实时 admin 判定（M8: 30s TTL 缓存，写路径主动失效）。"""
     from db import get_cursor
@@ -158,6 +187,11 @@ def identity(request: Request) -> dict:
             code, message, status = TT_COMMON_40102
             raise BizError(code, "登录已失效，请重新登录", status)
 
+    sid = payload.get("sid")
+    if isinstance(sid, str) and sid and not _session_is_active(actor["userId"], sid):
+        code, message, status = TT_COMMON_40102
+        raise BizError(code, "登录已失效，请重新登录", status)
+
     return actor
 
 
@@ -190,6 +224,10 @@ def identity_from_access_token(token: str):
     else:
         if current_ver > 1:
             return None
+
+    sid = payload.get("sid")
+    if isinstance(sid, str) and sid and not _session_is_active(actor["userId"], sid):
+        return None
 
     return actor
 

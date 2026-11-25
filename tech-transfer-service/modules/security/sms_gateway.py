@@ -22,6 +22,7 @@ from modules.security.delivery_models import DeliveryStageError, DeliveryTaskRes
 from modules.security.eligibility import SMS_ELIGIBLE_SQL as ELIGIBLE_SQL
 from modules.security.eligibility import sms_eligibility_reason as _shared_sms_eligibility_reason
 from modules.security.provider import ProviderError, get_sms_provider
+from modules.security.state_machine import transition_delivery_state
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def _engine():
 
 def _allowed(decision) -> bool:
     value = getattr(decision, "action", getattr(decision, "decision", decision))
-    return getattr(value, "value", value) == "ALLOW"
+    return str(getattr(value, "value", value)) == "ALLOW"
 
 
 def _audit(rule: str, context: SendContext, challenge_id=None, **details):
@@ -223,6 +224,11 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
         engine.transition(challenge_id, "rejected")
         raise DeliveryStageError("challenge_create", "database_write_failed") from None
     try:
+        with get_cursor(commit=True) as cur:
+            transition_delivery_state(cur, challenge_id, ("reserved",), "sending")
+    except Exception:
+        pass
+    try:
         receipt = provider.send_task(
             phone,
             code,
@@ -275,21 +281,23 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
 
 def _set_send_state(challenge_id, state, provider_ids, context):
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            """UPDATE auth_challenge SET send_state=%s, provider_message_ids=%s::jsonb,
-            status=CASE WHEN status='pending_send' THEN
-                CASE WHEN %s IN ('accepted','unknown') THEN 'pending' ELSE 'failed' END ELSE status END
-            WHERE id=%s""",
-            (state, json.dumps(provider_ids), state, challenge_id),
+        res = transition_delivery_state(
+            cur,
+            challenge_id,
+            ("reserved", "sending"),
+            state,
+            provider_ids=provider_ids,
+            challenge_status_on_failure="failed",
         )
-        audit_record(
-            "sms." + state,
-            "auth_challenge",
-            resource_id=challenge_id,
-            request_id=context.request_id,
-            details={"send_state": state},
-            cur=cur,
-        )
+        if res.updated:
+            audit_record(
+                "sms." + state,
+                "auth_challenge",
+                resource_id=challenge_id,
+                request_id=context.request_id,
+                details={"send_state": state},
+                cur=cur,
+            )
 
 
 def run_recovery_task(account, channel, challenge_id, context):
@@ -443,7 +451,7 @@ def _persist_task_result(challenge_id, result, request_id):
             """UPDATE security_delivery_request SET state=%s,outcome=%s,failure_stage=%s,failure_reason=%s,
               provider_status=%s,risk_rule_id=%s,provider_ids=%s::jsonb,outcome_unknown=%s,retryable=%s,
               elapsed_ms=%s,provider_called=%s,finished_at=NOW(),
-              payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'
+              payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
               WHERE id=%s AND state='processing'""",
             (
                 result.queue_state,
@@ -506,23 +514,61 @@ def process_pending_recovery_tasks(limit=50):
 
 
 def cleanup_delivery_tasks():
+    """清理过期队列任务、收敛 Worker 崩溃残留、在所有终止/非活跃路径清除明文 PII 并保留审计摘要。"""
     with get_cursor(commit=True) as cur:
-        cur.execute("""UPDATE security_delivery_request SET state='expired',outcome='INTERNAL_ERROR',
-            failure_stage='queue',failure_reason='queued_request_expired',finished_at=NOW()
-            WHERE state='queued' AND created_at<NOW()-INTERVAL '5 minutes'""")
-        cur.execute("""UPDATE security_delivery_request SET state='unknown',outcome='PROVIDER_UNKNOWN',
-            failure_stage='worker',failure_reason='worker_interrupted',outcome_unknown=true,
-            retryable=false,finished_at=NOW()
-            WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-INTERVAL '5 minutes'""")
+        # 1. queued 超时（未曾调用外部发送）：终止为 expired 并清除明文 PII
+        cur.execute(
+            """UPDATE security_delivery_request
+            SET state='expired', outcome='INTERNAL_ERROR',
+                failure_stage='queue', failure_reason='queued_request_expired',
+                finished_at=NOW(),
+                payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
+            WHERE state='queued' AND created_at<NOW()-INTERVAL '5 minutes'"""
+        )
+        # 2. processing 超时（Worker 崩溃，真实发送结果未知）：收敛为 unknown 且绝不重发，清除明文 PII
+        cur.execute(
+            """UPDATE security_delivery_request
+            SET state='unknown', outcome='PROVIDER_UNKNOWN',
+                failure_stage='worker', failure_reason='worker_interrupted',
+                outcome_unknown=true, retryable=false, finished_at=NOW(),
+                payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
+            WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-INTERVAL '5 minutes'"""
+        )
+        # 3. 幂等兜底清扫：所有非运行态任务若仍残留明文 PII 键，一律剥离（保留审计列与统计字段）
+        cur.execute(
+            """UPDATE security_delivery_request
+            SET payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
+            WHERE state NOT IN ('queued', 'processing')
+              AND (payload ? 'account' OR payload ? 'ip' OR payload ? 'device_id' OR payload ? 'destination')"""
+        )
+        # 4. 清除过期的请求级幂等索引键占用
+        try:
+            cur.execute("SAVEPOINT sp_cleanup_idemp_037")
+            cur.execute(
+                """UPDATE security_delivery_request
+                SET idempotency_key=NULL, idempotency_scope=NULL
+                WHERE idempotency_key IS NOT NULL
+                  AND idempotency_expires_at IS NOT NULL
+                  AND idempotency_expires_at<=NOW()"""
+            )
+            cur.execute("RELEASE SAVEPOINT sp_cleanup_idemp_037")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_cleanup_idemp_037")
         cur.execute("DELETE FROM security_delivery_request WHERE created_at<NOW()-INTERVAL '7 days'")
-        cur.execute("""UPDATE auth_challenge SET status='expired'
-            WHERE status IN ('pending_send','pending') AND expires_at<=NOW()""")
-        cur.execute("""UPDATE recovery_grant SET status='expired'
-            WHERE status='active' AND expires_at<=NOW()""")
+        cur.execute(
+            """UPDATE auth_challenge SET status='expired'
+            WHERE status IN ('pending_send','pending') AND expires_at<=NOW()"""
+        )
+        cur.execute(
+            """UPDATE recovery_grant SET status='expired'
+            WHERE status='active' AND expires_at<=NOW()"""
+        )
         try:
             cur.execute("SAVEPOINT sp_cleanup_stepup_036")
-            cur.execute("""UPDATE step_up_grant SET status='expired'
-                WHERE status='active' AND expires_at<=NOW()""")
+            cur.execute(
+                """UPDATE step_up_grant SET status='expired'
+                WHERE status='active' AND expires_at<=NOW()"""
+            )
             cur.execute("RELEASE SAVEPOINT sp_cleanup_stepup_036")
         except Exception:
             cur.execute("ROLLBACK TO SAVEPOINT sp_cleanup_stepup_036")
@@ -578,20 +624,18 @@ def reconcile_sms_delivery(challenge_id: str):
                 (codes[-1], challenge_id),
             )
         return {"state": state}
+    target_status_code = 200 if state == "delivered" else next(c for c in codes if 400 <= c < 600)
     with get_cursor(commit=True) as cur:
-        cur.execute(
-            """UPDATE auth_challenge SET send_state=%s,delivery_status_code=%s,delivery_reason_code=%s,
-            status=CASE WHEN %s='delivery_failed' AND status='pending' THEN 'failed' ELSE status END
-            WHERE id=%s AND send_state IN ('accepted','unknown')""",
-            (
-                state,
-                200 if state == "delivered" else next(c for c in codes if 400 <= c < 600),
-                reason_code,
-                state,
-                challenge_id,
-            ),
+        res = transition_delivery_state(
+            cur,
+            challenge_id,
+            ("accepted", "unknown"),
+            state,
+            provider_status=target_status_code,
+            delivery_reason_code=reason_code,
+            challenge_status_on_failure="failed",
         )
-        if cur.rowcount:
+        if res.updated:
             audit_record(
                 "sms." + state,
                 "auth_challenge",
@@ -605,11 +649,11 @@ def reconcile_sms_delivery(challenge_id: str):
                 (
                     "delivery" if state == "delivery_failed" else None,
                     "sendcloud_delivery_failed" if state == "delivery_failed" else None,
-                    200 if state == "delivered" else next(c for c in codes if 400 <= c < 600),
+                    target_status_code,
                     "DELIVERY_FAILED" if state == "delivery_failed" else "COMPLETED",
                     challenge_id,
                 ),
             )
-    if state == "delivered":
+    if state == "delivered" and res.updated:
         _engine().transition(challenge_id, "delivered")
     return {"state": state}

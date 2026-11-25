@@ -76,3 +76,25 @@ export function resolveRetryAfterSeconds(err, fallback = 0) {
   }
   return fallback
 }
+
+/**
+ * 生成随机不透明 HTTP 幂等键（绝不嵌入手机号、邮箱或用户 ID）。
+ */
+export function createIdempotencyKey(prefix = 'sec') {
+  const cleanPrefix = String(prefix || 'sec').replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 16) || 'sec'
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+    return `${cleanPrefix}-${globalThis.crypto.randomUUID()}`
+  }
+  const randA = Math.random().toString(36).slice(2, 10)
+  const randB = Math.random().toString(36).slice(2, 10)
+  return `${cleanPrefix}-${Date.now().toString(36)}-${randA}${randB}`
+}
+
+/**
+ * 判断异常是否属于网络/超时/网关未知结果，仅此时保留 Idempotency-Key 供安全重试。
+ */
+export function shouldReuseIdempotencyKeyOnError(err) {
+  const status = Number(err?.status ?? 0)
+  if (status === 0) return true
+  return status === 502 || status === 503 || status === 504
+}

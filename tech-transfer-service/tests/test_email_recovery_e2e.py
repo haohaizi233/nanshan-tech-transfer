@@ -142,6 +142,7 @@ def test_recovery_e2e_otp_and_link_complete_and_headers(_e2e_env):
     with patch("modules.security.service.get_cursor") as mock_gc:
         vcur = MagicMock()
         vcur.fetchone.side_effect = [
+            {"user_id": 301},
             {
                 "id": cid,
                 "user_id": 301,
@@ -166,8 +167,11 @@ def test_recovery_e2e_otp_and_link_complete_and_headers(_e2e_env):
     with patch("modules.security.service.get_cursor") as mock_gc:
         ccur = MagicMock()
         ccur.fetchone.side_effect = [
-            {"id": "rg-1", "user_id": 301, "status": "active", "expires_at": time.time() + 300},
-            {"user_status": "active", "cred_status": "active", "password_hash": hash_password("OldPass!9")},
+            {"user_id": 301, "challenge_id": cid},
+            {"user_status": "active"},
+            {"cred_status": "active", "password_configured": True, "password_hash": hash_password("OldPass!9")},
+            {"id": cid, "status": "verified"},
+            {"id": "rg-1", "user_id": 301, "challenge_id": cid, "status": "active", "expires_at": time.time() + 300},
         ]
         mock_gc.return_value.__enter__.return_value = ccur
         r_done = client.post(
@@ -205,6 +209,7 @@ def test_me_security_and_step_up_http_endpoints(_e2e_env):
         patch("core.middleware._user_is_active", return_value=True),
         patch("core.middleware._user_session_version", return_value=1),
         patch("modules.security.service.get_cursor") as mock_gc,
+        patch("modules.security.step_up.get_cursor") as mock_su_gc,
     ):
         cur = MagicMock()
         cur.fetchone.return_value = {"password_configured": True, "password_hash": "h", "wechat_openid": None}
@@ -220,6 +225,12 @@ def test_me_security_and_step_up_http_endpoints(_e2e_env):
             [],
         ]
         mock_gc.return_value.__enter__.return_value = cur
+
+        cur_su = MagicMock()
+        cur_su.fetchone.return_value = {"password_configured": True, "has_password": True, "privileged": False}
+        cur_su.fetchall.return_value = [{"contact_type": "email", "verification_method": "email"}]
+        mock_su_gc.return_value.__enter__.return_value = cur_su
+
         r_sec = client.get("/api/tech-transfer/v1/me/security", headers=headers)
     assert r_sec.status_code == 200
     data = r_sec.json()["data"]
