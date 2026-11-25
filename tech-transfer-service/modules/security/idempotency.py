@@ -48,7 +48,7 @@ def extract_idempotency_key(request: Request | None) -> str | None:
     raw = request.headers.get("Idempotency-Key")
     if raw is None:
         return None
-    val = raw.strip()
+    val: str = raw.strip()
     if not val:
         raise bad_request("Idempotency-Key 不能为空白字符串")
     if not _IDEMPOTENCY_KEY_RE.fullmatch(val):

@@ -34,7 +34,8 @@ def sign_access_token(
         payload["sid"] = str(sid)
     if auth_time is not None:
         payload["auth_time"] = int(auth_time)
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    token: str = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return token
 
 
 def sign_refresh_token(user_id: int, *, sid: str | None = None) -> tuple[str, str]:
@@ -55,13 +56,15 @@ def sign_refresh_token(user_id: int, *, sid: str | None = None) -> tuple[str, st
 
 
 def decode_token(token: str) -> dict[str, Any]:
-    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    claims: dict[str, Any] = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    return claims
 
 
 def decode_no_verify_exp(token: str) -> dict[str, Any]:
-    return jwt.decode(
+    claims: dict[str, Any] = jwt.decode(
         token,
         settings.JWT_SECRET,
         algorithms=[settings.JWT_ALGORITHM],
         options={"verify_exp": False},
     )
+    return claims
