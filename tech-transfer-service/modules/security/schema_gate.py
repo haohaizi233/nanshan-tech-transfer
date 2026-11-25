@@ -11,7 +11,7 @@ from typing import Any
 
 logger = logging.getLogger("nanshan.security.schema_gate")
 
-REQUIRED_SECURITY_SCHEMA_VERSION = "038"
+REQUIRED_SECURITY_SCHEMA_VERSION = "039"
 
 REQUIRED_SECURITY_COLUMNS: dict[str, tuple[str, ...]] = {
     "app_user": ("session_version",),
@@ -28,6 +28,13 @@ REQUIRED_SECURITY_COLUMNS: dict[str, tuple[str, ...]] = {
         "source_contact_fingerprint",
         "send_owner",
         "send_claimed_at",
+        "risk_sync_state",
+        "risk_sync_target",
+        "risk_sync_attempts",
+        "risk_sync_next_retry_at",
+        "risk_sync_last_error_code",
+        "risk_sync_claimed_at",
+        "risk_sync_updated_at",
     ),
     "security_delivery_request": (
         "channel",
@@ -42,6 +49,7 @@ REQUIRED_SECURITY_COLUMNS: dict[str, tuple[str, ...]] = {
         "execution_stage",
         "challenge_id",
         "idem_claimed_at",
+        "stage_provenance",
     ),
 }
 
@@ -51,8 +59,13 @@ REQUIRED_SECURITY_CONSTRAINTS: dict[str, tuple[str, ...]] = {
         "chk_auth_challenge_status",
         "chk_auth_challenge_send_state",
         "chk_auth_challenge_stepup_context",
+        "chk_auth_challenge_risk_sync_state",
+        "chk_auth_challenge_risk_sync_target",
     ),
-    "security_delivery_request": ("chk_sdr_execution_stage",),
+    "security_delivery_request": (
+        "chk_sdr_execution_stage",
+        "chk_sdr_stage_provenance",
+    ),
 }
 
 

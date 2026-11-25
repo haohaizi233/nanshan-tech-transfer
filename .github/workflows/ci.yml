@@ -91,7 +91,12 @@ jobs:
           SMS_TEST_POSTGRES_DSN: postgresql://mac:test@127.0.0.1:5432/tech_transfer_test
           SMS_TEST_REDIS_URL: redis://127.0.0.1:6379/15
         run: |
-          pytest -p no:cacheprovider tests/test_sms_gateway_postgres.py tests/test_sms_risk.py tests/test_email_gateway_postgres.py tests/test_email_risk.py tests/test_security_auth_time.py tests/test_email_first_binding.py tests/test_recovery_anti_enumeration.py tests/test_security_cross_transaction_postgres.py tests/test_security_http_idempotency.py tests/test_delivery_state_cas.py tests/test_delivery_pii_retention.py tests/test_email_provider_reconciliation.py tests/test_session_validation_fail_closed.py tests/test_security_provider_execution_right.py tests/test_security_session_transaction_postgres.py tests/test_security_credential_revocation.py tests/test_step_up_challenge_context.py tests/test_security_idempotency_crash_recovery.py tests/test_security_delivery_fault_injection.py tests/test_security_acceptance_manifest.py -q
+          pytest -p no:cacheprovider tests/test_sms_gateway_postgres.py tests/test_sms_risk.py tests/test_email_gateway_postgres.py tests/test_email_risk.py tests/test_security_auth_time.py tests/test_email_first_binding.py tests/test_recovery_anti_enumeration.py tests/test_security_cross_transaction_postgres.py tests/test_security_http_idempotency.py tests/test_delivery_state_cas.py tests/test_delivery_pii_retention.py tests/test_email_provider_reconciliation.py tests/test_session_validation_fail_closed.py tests/test_security_provider_execution_right.py tests/test_security_session_transaction_postgres.py tests/test_security_credential_revocation.py tests/test_step_up_challenge_context.py tests/test_security_idempotency_crash_recovery.py tests/test_security_delivery_fault_injection.py tests/test_security_acceptance_manifest.py --junit-xml=security-junit.xml -q
+
+      - name: Verify security integration acceptance evidence
+        working-directory: tech-transfer-service
+        run: |
+          python scripts/verify_acceptance_evidence.py --junit-xml security-junit.xml --scope pg_redis_integration
 
       - name: Run tests with coverage
         working-directory: tech-transfer-service
@@ -108,12 +113,19 @@ jobs:
           fi
           exit $EXIT_CODE
 
+      - name: Verify full backend acceptance evidence
+        working-directory: tech-transfer-service
+        run: |
+          python scripts/verify_acceptance_evidence.py --junit-xml security-junit.xml --junit-xml junit.xml
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-report
-          path: tech-transfer-service/junit.xml
+          path: |
+            tech-transfer-service/junit.xml
+            tech-transfer-service/security-junit.xml
 
       - name: Run nanshan-ai-agent tests
         working-directory: nanshan-ai-agent

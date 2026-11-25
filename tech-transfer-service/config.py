@@ -149,6 +149,12 @@ class Settings(BaseSettings):
     SECURITY_CONTACT_HMAC_SECRET: str = ""
     STEP_UP_GRANT_TTL_SECONDS: int = 300
     STEP_UP_RECENT_AUTH_SECONDS: int = 300
+    IDEMPOTENCY_REQUEST_TTL_SECONDS: int = 300
+    IDEMPOTENCY_EXECUTION_OWNERSHIP_SECONDS: int = 300
+    IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS: int = 86400
+    RISK_SYNC_MAX_ATTEMPTS: int = 5
+    RISK_SYNC_RETRY_BASE_SECONDS: int = 5
+    RISK_SYNC_RETRY_MAX_SECONDS: int = 300
 
     # ── Email Gateway 策略与多维风控 ───────────────────────────
     EMAIL_CODE_TTL_SECONDS: int = 300
@@ -413,11 +419,28 @@ class Settings(BaseSettings):
         "EMAIL_DEVICE_DISTINCT_LIMIT_10M",
         "EMAIL_GLOBAL_DAILY_BUDGET",
         "EMAIL_DOMAIN_ANOMALY_LIMIT_10M",
+        "RISK_SYNC_MAX_ATTEMPTS",
+        "RISK_SYNC_RETRY_BASE_SECONDS",
+        "RISK_SYNC_RETRY_MAX_SECONDS",
     )
     @classmethod
     def _validate_email_positive(cls, value):
         if value < 1:
             raise ValueError("Email limits and timeouts must be positive")
+        return value
+
+    @field_validator("IDEMPOTENCY_REQUEST_TTL_SECONDS", "IDEMPOTENCY_EXECUTION_OWNERSHIP_SECONDS")
+    @classmethod
+    def _validate_idempotency_ttl(cls, value: int) -> int:
+        if value < 60:
+            raise ValueError("IDEMPOTENCY TTL 必须 >= 60 秒")
+        return value
+
+    @field_validator("IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS")
+    @classmethod
+    def _validate_unknown_retention(cls, value: int) -> int:
+        if value < 300:
+            raise ValueError("IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS 必须 >= 300 秒")
         return value
 
     @field_validator("SMTP_PORT")
@@ -443,6 +466,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_pool_order(self):
+        if self.IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS < self.IDEMPOTENCY_REQUEST_TTL_SECONDS:
+            raise ValueError(
+                f"IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS({self.IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS}) "
+                f"不能小于 IDEMPOTENCY_REQUEST_TTL_SECONDS({self.IDEMPOTENCY_REQUEST_TTL_SECONDS})"
+            )
+        if self.RISK_SYNC_RETRY_MAX_SECONDS < self.RISK_SYNC_RETRY_BASE_SECONDS:
+            raise ValueError(
+                f"RISK_SYNC_RETRY_MAX_SECONDS({self.RISK_SYNC_RETRY_MAX_SECONDS}) "
+                f"不能小于 RISK_SYNC_RETRY_BASE_SECONDS({self.RISK_SYNC_RETRY_BASE_SECONDS})"
+            )
         if self.DB_POOL_MIN > self.DB_POOL_MAX:
             raise ValueError(f"DB_POOL_MIN({self.DB_POOL_MIN}) 不能大于 DB_POOL_MAX({self.DB_POOL_MAX})")
         # L8: 连接池总量约束 — DB_POOL_MAX × UVICORN_WORKERS 不应超过保守上限（100）
