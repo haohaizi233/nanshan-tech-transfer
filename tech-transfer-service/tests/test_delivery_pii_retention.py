@@ -139,6 +139,7 @@ def pg_schema():
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
                 "038_phase_r_final_security.sql",
+                "039_phase_r_hotfix.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 
@@ -165,6 +166,7 @@ def test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempoten
     id_active_queued = str(uuid.uuid4())
     id_completed_persist = str(uuid.uuid4())
     id_legacy_leftover = str(uuid.uuid4())
+    id_unknown_past_retention = str(uuid.uuid4())
 
     sample_pii = {
         "account": "secret-user@qq.com",
@@ -180,13 +182,15 @@ def test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempoten
             """
             INSERT INTO security_delivery_request (
                 id, payload, request_id, state, claimed_at, created_at,
-                idempotency_scope, idempotency_key, idempotency_expires_at
+                idempotency_scope, idempotency_key, idempotency_expires_at,
+                execution_stage, finished_at
             ) VALUES
-                (%s, %s::jsonb, 'r1', 'queued', NULL, NOW() - INTERVAL '10 minutes', NULL, NULL, NULL),
-                (%s, %s::jsonb, 'r2', 'processing', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', 's2', 'k2', NOW() - INTERVAL '1 minute'),
-                (%s, %s::jsonb, 'r3', 'queued', NULL, NOW(), NULL, NULL, NULL),
-                (%s, %s::jsonb, 'r4', 'processing', NOW(), NOW(), NULL, NULL, NULL),
-                (%s, %s::jsonb, 'r5', 'failed', NOW() - INTERVAL '2 minutes', NOW() - INTERVAL '2 minutes', NULL, NULL, NULL)
+                (%s, %s::jsonb, 'r1', 'queued', NULL, NOW() - INTERVAL '10 minutes', NULL, NULL, NULL, 'pre_provider', NULL),
+                (%s, %s::jsonb, 'r2', 'processing', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', 's2', 'k2', NOW() - INTERVAL '1 minute', 'provider_called', NULL),
+                (%s, %s::jsonb, 'r3', 'queued', NULL, NOW(), NULL, NULL, NULL, 'pre_provider', NULL),
+                (%s, %s::jsonb, 'r4', 'processing', NOW(), NOW(), NULL, NULL, NULL, 'provider_called', NULL),
+                (%s, %s::jsonb, 'r5', 'failed', NOW() - INTERVAL '2 minutes', NOW() - INTERVAL '2 minutes', NULL, NULL, NULL, 'provider_rejected', NOW() - INTERVAL '2 minutes'),
+                (%s, %s::jsonb, 'r6', 'unknown', NOW() - INTERVAL '25 hours', NOW() - INTERVAL '25 hours', 's6', 'k6-old', NOW() - INTERVAL '1 hour', 'provider_unknown', NOW() - INTERVAL '25 hours')
             """,
             (
                 id_queued_expired,
@@ -198,6 +202,8 @@ def test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempoten
                 id_completed_persist,
                 json.dumps(sample_pii),
                 id_legacy_leftover,
+                json.dumps(sample_pii),
+                id_unknown_past_retention,
                 json.dumps(sample_pii),
             ),
         )
@@ -227,6 +233,7 @@ def test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempoten
         (id_processing_crashed, "unknown"),
         (id_completed_persist, "completed"),
         (id_legacy_leftover, "failed"),
+        (id_unknown_past_retention, "unknown"),
     ):
         row = rows[clean_id]
         assert row["state"] == expected_state
@@ -234,7 +241,9 @@ def test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempoten
         assert not any(k in p for k in ("account", "ip", "device_id", "destination"))
         assert p.get("request_id") == "req-keep-audit"
 
-    assert rows[id_processing_crashed]["idempotency_key"] is None
+    # HF02: 10 分钟内崩溃进入 unknown 的任务即使原 300s 窗口已过也必须保留幂等键，超过长保留期 (24h) 才释放
+    assert rows[id_processing_crashed]["idempotency_key"] == "k2"
+    assert rows[id_unknown_past_retention]["idempotency_key"] is None
 
     # 仍在窗口内的活跃排队任务不被清理，保留完整执行载荷
     active_row = rows[id_active_queued]

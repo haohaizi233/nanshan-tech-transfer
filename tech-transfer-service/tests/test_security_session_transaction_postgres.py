@@ -298,6 +298,7 @@ def tx_env():
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
                 "038_phase_r_final_security.sql",
+                "039_phase_r_hotfix.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 

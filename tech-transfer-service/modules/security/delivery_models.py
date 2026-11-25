@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import threading
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -296,7 +298,147 @@ def task_event(
     logger.log(logging.INFO if result.outcome == "COMPLETED" else logging.WARNING, msg, extra=fields)
 
 
-def transition_risk_checked(
+def _parse_uuid_str(value: object) -> str | None:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _classify_false_transition(engine: Any, challenge_id: str) -> tuple[str, str]:
+    """当 Redis risk transition 返回 False 时，细分为 missing / conflict / retryable_failure。"""
+    try:
+        from modules.security.risk_engine import BaseRiskEngine
+    except Exception:
+        BaseRiskEngine = None  # type: ignore[assignment,misc]
+
+    if BaseRiskEngine is not None and isinstance(engine, BaseRiskEngine):
+        if engine._is_dev_bypass_allowed():
+            return "synced", "dev_bypass"
+        try:
+            raw = engine._client().get(engine._key("reservation", challenge_id))
+        except Exception as exc:
+            return "retryable_failure", f"inspect_exc_{type(exc).__name__}"[:64]
+        if raw is None:
+            return "reservation_missing", "reservation_missing"
+        raw_text = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        try:
+            parsed = json.loads(raw_text) if raw_text else {}
+        except Exception:
+            return "conflict", "invalid_reservation_payload"
+        cur_state = parsed.get("state") if isinstance(parsed, dict) else None
+        return "conflict", (f"state_conflict_{cur_state}" if cur_state else "state_conflict")[:64]
+
+    return "conflict", "transition_returned_false"
+
+
+def _persist_risk_sync_outcome(
+    challenge_id: str,
+    target_state: str,
+    *,
+    sync_state: str,
+    error_code: str | None = None,
+    cursor_factory: Any = None,
+) -> str:
+    """持久化 auth_challenge.risk_sync_* 状态并返回最终落盘的 risk_sync_state。"""
+    cid_uuid = _parse_uuid_str(challenge_id)
+    if cid_uuid is None:
+        return sync_state
+
+    from config import settings
+    from db import get_cursor
+
+    factory = cursor_factory or get_cursor
+    diag_logger = logging.getLogger("nanshan.security.risk_coordination")
+    err_val = error_code[:64] if error_code else None
+
+    try:
+        with factory(commit=True) as cur:
+            if sync_state == "synced":
+                cur.execute(
+                    """
+                    UPDATE auth_challenge
+                    SET risk_sync_state = 'synced',
+                        risk_sync_target = COALESCE(risk_sync_target, %s),
+                        risk_sync_next_retry_at = NULL,
+                        risk_sync_last_error_code = NULL,
+                        risk_sync_claimed_at = NULL,
+                        risk_sync_updated_at = NOW()
+                    WHERE id = %s
+                      AND (risk_sync_target IS NULL OR risk_sync_target = %s)
+                    RETURNING risk_sync_state
+                    """,
+                    (target_state, cid_uuid, target_state),
+                )
+                row = cur.fetchone()
+                return str(row["risk_sync_state"]) if isinstance(row, dict) and row.get("risk_sync_state") else "synced"
+
+            if sync_state in {"reservation_missing", "conflict"}:
+                cur.execute(
+                    """
+                    UPDATE auth_challenge
+                    SET risk_sync_state = %s,
+                        risk_sync_target = COALESCE(risk_sync_target, %s),
+                        risk_sync_next_retry_at = NULL,
+                        risk_sync_last_error_code = %s,
+                        risk_sync_claimed_at = NULL,
+                        risk_sync_updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING risk_sync_state
+                    """,
+                    (sync_state, target_state, err_val, cid_uuid),
+                )
+                row = cur.fetchone()
+                return (
+                    str(row["risk_sync_state"]) if isinstance(row, dict) and row.get("risk_sync_state") else sync_state
+                )
+
+            max_attempts = max(1, int(settings.RISK_SYNC_MAX_ATTEMPTS))
+            base_secs = max(1, int(settings.RISK_SYNC_RETRY_BASE_SECONDS))
+            max_secs = max(base_secs, int(settings.RISK_SYNC_RETRY_MAX_SECONDS))
+            cur.execute(
+                """
+                UPDATE auth_challenge
+                SET risk_sync_attempts = COALESCE(risk_sync_attempts, 0) + 1,
+                    risk_sync_target = COALESCE(risk_sync_target, %s),
+                    risk_sync_state = CASE
+                        WHEN COALESCE(risk_sync_attempts, 0) + 1 >= %s THEN 'manual_review_required'
+                        ELSE 'retryable_failure'
+                    END,
+                    risk_sync_next_retry_at = CASE
+                        WHEN COALESCE(risk_sync_attempts, 0) + 1 >= %s THEN NULL
+                        ELSE NOW() + make_interval(
+                            secs => LEAST(
+                                %s,
+                                %s * POWER(2, GREATEST(0, LEAST(COALESCE(risk_sync_attempts, 0), 10)))
+                            )
+                        )
+                    END,
+                    risk_sync_last_error_code = %s,
+                    risk_sync_claimed_at = NULL,
+                    risk_sync_updated_at = NOW()
+                WHERE id = %s
+                RETURNING risk_sync_state
+                """,
+                (target_state, max_attempts, max_attempts, max_secs, base_secs, err_val, cid_uuid),
+            )
+            row = cur.fetchone()
+            return (
+                str(row["risk_sync_state"])
+                if isinstance(row, dict) and row.get("risk_sync_state")
+                else "retryable_failure"
+            )
+    except Exception as db_exc:
+        diag_logger.warning(
+            "Persist risk_sync_state failed (challenge=%s target=%s err=%s)",
+            safe_id(challenge_id),
+            target_state,
+            type(db_exc).__name__,
+        )
+        return sync_state
+
+
+def _transition_risk_checked_detail(
     engine: Any,
     challenge_id: str,
     target_state: str,
@@ -304,17 +446,18 @@ def transition_risk_checked(
     channel: str,
     purpose: str,
     request_id: str | None = None,
-) -> bool:
-    """显式消费并检查 Redis 风控状态转换结果（RF9），异常或 False 均记结构化诊断，绝不触发重发。"""
+    cursor_factory: Any = None,
+) -> tuple[bool, str]:
     diag_logger = logging.getLogger("nanshan.security.risk_coordination")
     try:
         ok = bool(engine.transition(challenge_id, target_state))
     except Exception as exc:
+        err_code = f"exc_{type(exc).__name__}"[:64]
         metrics.inc(
             "risk_transition_failed_total",
             channel=channel,
             purpose=purpose,
-            reason=f"exc_{type(exc).__name__}"[:48],
+            reason=err_code[:48],
         )
         diag_logger.warning(
             "Redis risk state transition raised exception (channel=%s purpose=%s target=%s challenge=%s err=%s req=%s)",
@@ -325,21 +468,157 @@ def transition_risk_checked(
             type(exc).__name__,
             safe_id(request_id) if request_id else "-",
         )
-        return False
-
-    if not ok:
-        metrics.inc(
-            "risk_transition_failed_total",
-            channel=channel,
-            purpose=purpose,
-            reason=f"not_updated_{target_state}"[:48],
-        )
-        diag_logger.warning(
-            "Redis risk state transition returned False (channel=%s purpose=%s target=%s challenge=%s req=%s)",
-            channel,
-            purpose,
+        persisted_state = _persist_risk_sync_outcome(
+            challenge_id,
             target_state,
-            safe_id(challenge_id),
-            safe_id(request_id) if request_id else "-",
+            sync_state="retryable_failure",
+            error_code=err_code,
+            cursor_factory=cursor_factory,
         )
+        return False, persisted_state
+
+    if ok:
+        persisted_state = _persist_risk_sync_outcome(
+            challenge_id,
+            target_state,
+            sync_state="synced",
+            cursor_factory=cursor_factory,
+        )
+        return True, persisted_state
+
+    classified_state, reason_code = _classify_false_transition(engine, challenge_id)
+    metrics.inc(
+        "risk_transition_failed_total",
+        channel=channel,
+        purpose=purpose,
+        reason=f"{classified_state}_{target_state}"[:48],
+    )
+    diag_logger.warning(
+        "Redis risk state transition returned False (channel=%s purpose=%s target=%s state=%s reason=%s challenge=%s req=%s)",
+        channel,
+        purpose,
+        target_state,
+        classified_state,
+        reason_code,
+        safe_id(challenge_id),
+        safe_id(request_id) if request_id else "-",
+    )
+    persisted_state = _persist_risk_sync_outcome(
+        challenge_id,
+        target_state,
+        sync_state=classified_state,
+        error_code=reason_code,
+        cursor_factory=cursor_factory,
+    )
+    return False, persisted_state
+
+
+def transition_risk_checked(
+    engine: Any,
+    challenge_id: str,
+    target_state: str,
+    *,
+    channel: str,
+    purpose: str,
+    request_id: str | None = None,
+    cursor_factory: Any = None,
+) -> bool:
+    """显式消费并检查 Redis 风控状态转换结果并持久化协调态，绝不触发重发。"""
+    ok, _state = _transition_risk_checked_detail(
+        engine,
+        challenge_id,
+        target_state,
+        channel=channel,
+        purpose=purpose,
+        request_id=request_id,
+        cursor_factory=cursor_factory,
+    )
     return ok
+
+
+def reconcile_pending_risk_syncs(
+    limit: int = 50,
+    *,
+    email_engine: Any = None,
+    sms_engine: Any = None,
+    cursor_factory: Any = None,
+) -> dict[str, int]:
+    """扫描并补偿同步待处理的 auth_challenge Redis 风控状态（严禁在 DB 锁内执行 Redis I/O，严禁触发外部发信）。"""
+    from db import get_cursor
+
+    factory = cursor_factory or get_cursor
+    batch_limit = min(100, max(1, int(limit)))
+
+    with factory(commit=True) as cur:
+        cur.execute(
+            """
+            WITH candidate AS (
+                SELECT id
+                FROM auth_challenge
+                WHERE risk_sync_state IN ('sync_pending', 'retryable_failure')
+                  AND risk_sync_target IS NOT NULL
+                  AND (risk_sync_next_retry_at IS NULL OR risk_sync_next_retry_at <= NOW())
+                  AND (risk_sync_claimed_at IS NULL OR risk_sync_claimed_at < NOW() - INTERVAL '60 seconds')
+                ORDER BY COALESCE(risk_sync_next_retry_at, created_at) ASC, id ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT %s
+            )
+            UPDATE auth_challenge ac
+            SET risk_sync_claimed_at = NOW(),
+                risk_sync_updated_at = NOW()
+            FROM candidate c
+            WHERE ac.id = c.id
+            RETURNING ac.id, ac.channel, ac.purpose, ac.risk_sync_target
+            """,
+            (batch_limit,),
+        )
+        claimed_rows = [dict(r) for r in cur.fetchall() if isinstance(r, dict)]
+
+    summary: dict[str, int] = {
+        "claimed": len(claimed_rows),
+        "synced": 0,
+        "retryable_failure": 0,
+        "reservation_missing": 0,
+        "conflict": 0,
+        "manual_review_required": 0,
+    }
+    if not claimed_rows:
+        return summary
+
+    resolved_email_engine = email_engine
+    resolved_sms_engine = sms_engine
+
+    for row in claimed_rows:
+        cid = str(row["id"])
+        ch = str(row.get("channel") or "email_otp")
+        purp = str(row.get("purpose") or "password_recovery")
+        target = str(row.get("risk_sync_target") or "")
+        if ch == "sms":
+            if resolved_sms_engine is None:
+                from modules.security.sms_risk import get_sms_risk_engine
+
+                resolved_sms_engine = get_sms_risk_engine()
+            eng = resolved_sms_engine
+        else:
+            if resolved_email_engine is None:
+                from modules.security.email_risk import get_email_risk_engine
+
+                resolved_email_engine = get_email_risk_engine()
+            eng = resolved_email_engine
+
+        ok, final_state = _transition_risk_checked_detail(
+            eng,
+            cid,
+            target,
+            channel=ch,
+            purpose=purp,
+            cursor_factory=factory,
+        )
+        if ok:
+            summary["synced"] += 1
+        elif final_state in summary:
+            summary[final_state] += 1
+        else:
+            summary["retryable_failure"] += 1
+
+    return summary

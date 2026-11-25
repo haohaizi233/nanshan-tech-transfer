@@ -45,6 +45,7 @@ from modules.security.idempotency import (
     compute_request_fingerprint,
     extract_idempotency_key,
     finalize_http_idempotency,
+    read_http_idempotency_record,
     release_http_idempotency_on_pre_provider_failure,
     wait_for_idempotency_settlement,
 )
@@ -161,9 +162,12 @@ def recovery_start(
         if claim.replay:
             if claim.state in ("idem_pending", "idempotent_pending") and not claim.cached_response:
                 claim = wait_for_idempotency_settlement(claim, timeout_seconds=2.5)
-            if claim.state == "unknown":
+            if claim.state in ("unknown", "legacy_unknown") or claim.execution_stage in (
+                "provider_unknown",
+                "legacy_unknown",
+            ):
                 raise BizError("TT_COMMON_50301", "原请求发送结果待确认，请稍后刷新或使用新请求", 503)
-            if claim.state in ("failed", "expired", "released") and not claim.cached_response:
+            if claim.state in ("failed", "failed_internal", "expired", "released") and not claim.cached_response:
                 raise BizError("TT_COMMON_50301", "原请求处理失败，请更换幂等键重试", 503)
             if claim.state in ("idem_pending", "idempotent_pending") and not claim.cached_response:
                 raise BizError("TT_COMMON_40901", "同一请求正在处理中，请稍候", 409, details={"inFlight": True})
@@ -181,7 +185,14 @@ def recovery_start(
                     purpose="password_recovery",
                 )
             resp_data = recovery_response(claim.task_id or challenge_id, body.channel)
-            finalize_http_idempotency(claim, resp_data, state="queued", execution_stage="pre_provider")
+            finalized = finalize_http_idempotency(claim, resp_data, state="queued", execution_stage="pre_provider")
+            if not finalized:
+                rec = read_http_idempotency_record(claim.task_id or challenge_id) if claim.task_id else None
+                if rec and rec.get("state") in ("unknown", "legacy_unknown"):
+                    raise BizError("TT_COMMON_50301", "原请求发送结果待确认，请稍后刷新或使用新请求", 503)
+                if rec and isinstance(rec.get("response_payload"), dict):
+                    return success(rec["response_payload"])
+                raise BizError("TT_COMMON_50301", "请求幂等状态已失效，请更换幂等键重试", 503)
         except Exception as exc:
             release_http_idempotency_on_pre_provider_failure(
                 claim,

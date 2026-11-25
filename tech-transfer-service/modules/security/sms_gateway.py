@@ -32,7 +32,9 @@ from modules.security.eligibility import SMS_ELIGIBLE_SQL as ELIGIBLE_SQL
 from modules.security.eligibility import sms_eligibility_reason as _shared_sms_eligibility_reason
 from modules.security.idempotency import (
     ACTIVE_IDEMPOTENCY_STATES,
+    RECOVERY_REQUIRED_IDEMPOTENCY_STATES,
     TERMINAL_IDEMPOTENCY_STATES,
+    UNKNOWN_EXECUTION_STAGES,
     IdempotencyClaim,
     advance_idempotency_stage,
     mark_http_idempotency_unknown,
@@ -48,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_TASK_STATES = ACTIVE_IDEMPOTENCY_STATES
 TERMINAL_TASK_STATES = TERMINAL_IDEMPOTENCY_STATES
-RECOVERY_REQUIRED_STATES = ("unknown", "legacy_unknown")
+RECOVERY_REQUIRED_STATES = RECOVERY_REQUIRED_IDEMPOTENCY_STATES
 
 
 def eligibility_reason(account: str) -> str:
@@ -275,16 +277,9 @@ def _send(
             channel="sms",
             purpose=purpose,
             request_id=context.request_id,
+            cursor_factory=get_cursor,
         )
         raise DeliveryStageError("challenge_create", "database_write_failed") from None
-
-    if idempotency_claim is not None:
-        advance_idempotency_stage(
-            idempotency_claim,
-            ("pre_provider",),
-            "send_claimed",
-            challenge_id=challenge_id,
-        )
 
     send_owner = f"req:{context.request_id}:{uuid.uuid4().hex[:12]}"
     try:
@@ -294,10 +289,16 @@ def _send(
             expected_states=("reserved",),
             provider_name="sms",
             cursor_factory=get_cursor,
+            idempotency_claim=idempotency_claim,
         )
     except Exception:
         if idempotency_claim is not None:
-            mark_http_idempotency_unknown(idempotency_claim, "SEND_CLAIM_DB_ERROR", challenge_id=challenge_id)
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "SEND_CLAIM_DB_ERROR",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
         raise DeliveryStageError(
             "send_claim",
             "SEND_CLAIM_DATABASE_ERROR",
@@ -306,12 +307,30 @@ def _send(
         ) from None
 
     if claim_res.outcome != "transitioned":
-        ambiguous = claim_res.outcome in {"already_target", "owner_mismatch"} or claim_res.current_send_state in {
-            "sending",
-            "accepted",
-            "delivered",
-            "unknown",
-        }
+        ambiguous = (
+            claim_res.outcome
+            in {
+                "already_target",
+                "owner_mismatch",
+                "idempotency_owner_mismatch",
+                "idempotency_conflict",
+            }
+            or (
+                claim_res.outcome == "idempotency_stage_conflict"
+                and claim_res.current_send_state not in (None, "pre_provider")
+            )
+            or claim_res.current_send_state
+            in {
+                "sending",
+                "accepted",
+                "delivered",
+                "unknown",
+                "send_claimed",
+                "provider_called",
+                "provider_accepted",
+                "provider_unknown",
+            }
+        )
         if not ambiguous and claim_res.outcome in {"not_found", "expired", "conflict_or_disallowed"}:
             transition_risk_checked(
                 engine,
@@ -320,12 +339,14 @@ def _send(
                 channel="sms",
                 purpose=purpose,
                 request_id=context.request_id,
+                cursor_factory=get_cursor,
             )
         if ambiguous and idempotency_claim is not None:
             mark_http_idempotency_unknown(
                 idempotency_claim,
                 f"SEND_CLAIM_{claim_res.outcome.upper()}",
                 challenge_id=challenge_id,
+                cursor_factory=get_cursor,
             )
         raise DeliveryStageError(
             "send_claim",
@@ -334,14 +355,42 @@ def _send(
             provider_called=False,
         )
 
-    if idempotency_claim is not None:
-        advance_idempotency_stage(
-            idempotency_claim,
-            ("send_claimed", "pre_provider"),
-            "provider_called",
-            challenge_id=challenge_id,
-            provider_called=True,
-        )
+    if idempotency_claim is not None and idempotency_claim.active:
+        try:
+            stage_ok = advance_idempotency_stage(
+                idempotency_claim,
+                ("send_claimed",),
+                "provider_called",
+                challenge_id=challenge_id,
+                provider_called=True,
+                cursor_factory=get_cursor,
+            )
+        except Exception:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "IDEMPOTENCY_STAGE_DB_ERROR",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
+            raise DeliveryStageError(
+                "send_claim",
+                "IDEMPOTENCY_STAGE_DB_ERROR",
+                outcome_unknown=True,
+                provider_called=False,
+            ) from None
+        if not stage_ok:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "IDEMPOTENCY_STAGE_CONFLICT",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
+            raise DeliveryStageError(
+                "send_claim",
+                "IDEMPOTENCY_STAGE_CONFLICT",
+                outcome_unknown=True,
+                provider_called=False,
+            )
 
     try:
         receipt = provider.send_task(
@@ -357,19 +406,25 @@ def _send(
         unknown = not isinstance(exc, ProviderError) or getattr(exc, "outcome_unknown", False)
         state = "unknown" if unknown else "rejected"
         # Ambiguous delivery is not retried by creating a fresh OTP.
-        transition_risk_checked(
-            engine,
-            challenge_id,
-            state,
-            channel="sms",
-            purpose=purpose,
-            request_id=context.request_id,
-        )
         try:
             _set_send_state(challenge_id, state, [], context, expected_owner=send_owner)
         except Exception:
+            transition_risk_checked(
+                engine,
+                challenge_id,
+                state,
+                channel="sms",
+                purpose=purpose,
+                request_id=context.request_id,
+                cursor_factory=get_cursor,
+            )
             if idempotency_claim is not None:
-                mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "RECEIPT_PERSIST_FAILED",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
             raise DeliveryStageError(
                 "receipt_persist",
                 "database_write_failed",
@@ -377,16 +432,43 @@ def _send(
                 provider_called=getattr(exc, "request_attempted", True),
                 provider_status=getattr(exc, "provider_status", None),
             ) from None
-        if idempotency_claim is not None:
-            advance_idempotency_stage(
-                idempotency_claim,
-                ("provider_called", "send_claimed", "pre_provider"),
-                "provider_unknown" if unknown else "provider_rejected",
-                challenge_id=challenge_id,
-                provider_called=True,
-                failure_reason=getattr(exc, "reason_code", state),
-                outcome_unknown=unknown,
-            )
+        transition_risk_checked(
+            engine,
+            challenge_id,
+            state,
+            channel="sms",
+            purpose=purpose,
+            request_id=context.request_id,
+            cursor_factory=get_cursor,
+        )
+        if idempotency_claim is not None and idempotency_claim.active:
+            try:
+                stage_ok = advance_idempotency_stage(
+                    idempotency_claim,
+                    ("provider_called", "send_claimed"),
+                    "provider_unknown" if unknown else "provider_rejected",
+                    challenge_id=challenge_id,
+                    provider_called=True,
+                    failure_reason=getattr(exc, "reason_code", state),
+                    outcome_unknown=unknown,
+                    cursor_factory=get_cursor,
+                )
+            except Exception:
+                stage_ok = False
+            if not stage_ok:
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "IDEMPOTENCY_RECEIPT_STAGE_CONFLICT",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
+                raise DeliveryStageError(
+                    "receipt_persist",
+                    "IDEMPOTENCY_RECEIPT_STAGE_CONFLICT",
+                    outcome_unknown=True,
+                    provider_called=getattr(exc, "request_attempted", True),
+                    provider_status=getattr(exc, "provider_status", None),
+                ) from None
         if isinstance(exc, ProviderError):
             raise DeliveryStageError(
                 "provider",
@@ -418,11 +500,21 @@ def _send(
             )
     except DeliveryStageError:
         if idempotency_claim is not None:
-            mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_STATE_CONFLICT", challenge_id=challenge_id)
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "RECEIPT_STATE_CONFLICT",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
         raise
     except Exception:
         if idempotency_claim is not None:
-            mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "RECEIPT_PERSIST_FAILED",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
         raise DeliveryStageError(
             "receipt_persist",
             "database_write_failed",
@@ -431,14 +523,32 @@ def _send(
             outcome_unknown=True,
         ) from None
 
-    if idempotency_claim is not None:
-        advance_idempotency_stage(
-            idempotency_claim,
-            ("provider_called", "send_claimed", "pre_provider"),
-            "provider_accepted",
-            challenge_id=challenge_id,
-            provider_called=True,
-        )
+    if idempotency_claim is not None and idempotency_claim.active:
+        try:
+            stage_ok = advance_idempotency_stage(
+                idempotency_claim,
+                ("provider_called", "send_claimed"),
+                "provider_accepted",
+                challenge_id=challenge_id,
+                provider_called=True,
+                cursor_factory=get_cursor,
+            )
+        except Exception:
+            stage_ok = False
+        if not stage_ok:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "IDEMPOTENCY_ACCEPTED_STAGE_CONFLICT",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
+            raise DeliveryStageError(
+                "receipt_persist",
+                "IDEMPOTENCY_ACCEPTED_STAGE_CONFLICT",
+                provider_ids=receipt.provider_ids,
+                provider_called=True,
+                outcome_unknown=True,
+            )
     transition_risk_checked(
         engine,
         challenge_id,
@@ -446,6 +556,7 @@ def _send(
         channel="sms",
         purpose=purpose,
         request_id=context.request_id,
+        cursor_factory=get_cursor,
     )
     return receipt
 
@@ -650,12 +761,19 @@ def _persist_task_result(challenge_id: str, result: DeliveryTaskResult, request_
         if result.outcome == "PROVIDER_REJECTED" and result.provider_called
         else "pre_provider"
     )
+    unknown_retention = max(1, int(settings.IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS))
+    is_unknown = bool(result.outcome_unknown or result.queue_state == "unknown")
     with get_cursor(commit=True) as cur:
         cur.execute(
             """UPDATE security_delivery_request SET state=%s,outcome=%s,failure_stage=%s,failure_reason=%s,
               provider_status=%s,risk_rule_id=%s,provider_ids=%s::jsonb,outcome_unknown=%s,retryable=%s,
               elapsed_ms=%s,provider_called=%s,channel=%s,purpose=%s,provider=%s,
-              execution_stage=%s,challenge_id=COALESCE(%s::uuid, challenge_id),
+              execution_stage=%s,stage_provenance='explicit',challenge_id=COALESCE(%s::uuid, challenge_id),
+              idempotency_expires_at = CASE
+                  WHEN idempotency_key IS NOT NULL AND %s::boolean
+                      THEN GREATEST(COALESCE(idempotency_expires_at, NOW()), NOW() + make_interval(secs => %s))
+                  ELSE idempotency_expires_at
+              END,
               finished_at=NOW(),
               payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
               WHERE id=%s AND state='processing'""",
@@ -676,6 +794,8 @@ def _persist_task_result(challenge_id: str, result: DeliveryTaskResult, request_
                 result.provider,
                 exec_stage,
                 result.challenge_id,
+                is_unknown,
+                unknown_retention,
                 challenge_id,
             ),
         )
@@ -716,44 +836,129 @@ def process_pending_recovery_tasks(limit: int = 50) -> int:
 def cleanup_delivery_tasks() -> None:
     """清理过期队列任务、收敛 Worker/幂等占位崩溃残留、仅在终态/未知恢复态清除明文 PII。
 
-    绝不误伤正在合法执行中的 `idem_pending` / `queued` / `processing` 任务，
-    绝不释放仍在执行中或处于 `unknown` 状态任务的幂等键。
+    - 绝不误伤正在合法执行中的 `idem_pending` / `queued` / `processing` 任务；
+    - 仅当明确停留在 `pre_provider` + `provider_called=false` + `stage_provenance='explicit'` 且关联挑战
+      未进入 sending+ 时才允许释放超时崩溃占位键；
+    - `unknown` / `legacy_unknown` / `provider_unknown` 与 `claim_http_idempotency` 采用统一长保留期
+      `IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS`，绝不因常规 300s `idempotency_expires_at` 到期而提前释放。
     """
+    ownership_seconds = max(60, int(settings.IDEMPOTENCY_EXECUTION_OWNERSHIP_SECONDS))
+    unknown_retention = max(1, int(settings.IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS))
+    delete_retention = max(7 * 86400, unknown_retention)
     with get_cursor(commit=True) as cur:
-        # 1. 超时 idem_pending（占位超过 5 分钟）：未入发送阶段则安全过期释放；已涉外部调用则收敛为 unknown 并保留幂等键
+        # 1. 超时 idem_pending：仅明确未入外呼阶段且来源显式时安全过期释放；否则保守收敛为 unknown 并锁定键长保留期
         cur.execute(
-            """UPDATE security_delivery_request
+            """UPDATE security_delivery_request sdr
             SET idempotency_key = CASE
-                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN NULL
-                    ELSE idempotency_key
+                    WHEN sdr.execution_stage = 'pre_provider'
+                         AND sdr.provider_called = false
+                         AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM auth_challenge ac
+                             WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                               AND ac.send_state IN (
+                                   'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                               )
+                         )
+                        THEN NULL
+                    ELSE sdr.idempotency_key
                 END,
                 idempotency_scope = CASE
-                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN NULL
-                    ELSE idempotency_scope
+                    WHEN sdr.execution_stage = 'pre_provider'
+                         AND sdr.provider_called = false
+                         AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM auth_challenge ac
+                             WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                               AND ac.send_state IN (
+                                   'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                               )
+                         )
+                        THEN NULL
+                    ELSE sdr.idempotency_scope
                 END,
                 state = CASE
-                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN 'expired'
+                    WHEN sdr.execution_stage = 'pre_provider'
+                         AND sdr.provider_called = false
+                         AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM auth_challenge ac
+                             WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                               AND ac.send_state IN (
+                                   'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                               )
+                         )
+                        THEN 'expired'
                     ELSE 'unknown'
                 END,
                 outcome = CASE
-                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN COALESCE(outcome, 'INTERNAL_ERROR')
+                    WHEN sdr.execution_stage = 'pre_provider'
+                         AND sdr.provider_called = false
+                         AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM auth_challenge ac
+                             WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                               AND ac.send_state IN (
+                                   'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                               )
+                         )
+                        THEN COALESCE(sdr.outcome, 'INTERNAL_ERROR')
                     ELSE 'PROVIDER_UNKNOWN'
                 END,
-                failure_stage = COALESCE(failure_stage, 'idempotency'),
+                failure_stage = COALESCE(sdr.failure_stage, 'idempotency'),
                 failure_reason = CASE
-                    WHEN execution_stage = 'pre_provider' AND provider_called = false
-                        THEN COALESCE(failure_reason, 'idem_pending_expired')
-                    ELSE COALESCE(failure_reason, 'idem_pending_interrupted')
+                    WHEN sdr.execution_stage = 'pre_provider'
+                         AND sdr.provider_called = false
+                         AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM auth_challenge ac
+                             WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                               AND ac.send_state IN (
+                                   'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                               )
+                         )
+                        THEN COALESCE(sdr.failure_reason, 'idem_pending_expired')
+                    ELSE COALESCE(sdr.failure_reason, 'idem_pending_interrupted')
                 END,
                 outcome_unknown = CASE
-                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN outcome_unknown
+                    WHEN sdr.execution_stage = 'pre_provider'
+                         AND sdr.provider_called = false
+                         AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM auth_challenge ac
+                             WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                               AND ac.send_state IN (
+                                   'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                               )
+                         )
+                        THEN sdr.outcome_unknown
                     ELSE true
                 END,
+                idempotency_expires_at = CASE
+                    WHEN NOT (
+                        sdr.execution_stage = 'pre_provider'
+                        AND sdr.provider_called = false
+                        AND COALESCE(sdr.stage_provenance, 'explicit') = 'explicit'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM auth_challenge ac
+                            WHERE ac.id = COALESCE(sdr.challenge_id, sdr.id)
+                              AND ac.send_state IN (
+                                  'sending', 'accepted', 'delivered', 'unknown', 'bounced', 'delivery_failed'
+                              )
+                        )
+                    ) AND sdr.idempotency_key IS NOT NULL
+                        THEN GREATEST(
+                            COALESCE(sdr.idempotency_expires_at, NOW()),
+                            NOW() + make_interval(secs => %s)
+                        )
+                    ELSE sdr.idempotency_expires_at
+                END,
                 retryable = false,
-                finished_at = COALESCE(finished_at, NOW()),
-                payload = COALESCE(payload, '{}'::jsonb) - 'account' - 'ip' - 'device_id' - 'destination'
-            WHERE state IN ('idem_pending', 'idempotent_pending')
-              AND COALESCE(idem_claimed_at, created_at) < NOW() - INTERVAL '5 minutes'"""
+                finished_at = COALESCE(sdr.finished_at, NOW()),
+                payload = COALESCE(sdr.payload, '{}'::jsonb) - 'account' - 'ip' - 'device_id' - 'destination'
+            WHERE sdr.state IN ('idem_pending', 'idempotent_pending')
+              AND COALESCE(sdr.idem_claimed_at, sdr.created_at) < NOW() - make_interval(secs => %s)""",
+            (unknown_retention, ownership_seconds),
         )
         # 2. queued 超时（未曾调用外部发送）：终止为 expired 并清除明文 PII
         cur.execute(
@@ -762,16 +967,30 @@ def cleanup_delivery_tasks() -> None:
                 failure_stage='queue', failure_reason='queued_request_expired',
                 finished_at=NOW(),
                 payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
-            WHERE state='queued' AND created_at<NOW()-INTERVAL '5 minutes'"""
+            WHERE state='queued'
+              AND execution_stage='pre_provider'
+              AND provider_called=false
+              AND created_at<NOW()-make_interval(secs => %s)""",
+            (ownership_seconds,),
         )
-        # 3. processing 超时（Worker 崩溃，真实发送结果未知）：收敛为 unknown 且绝不重发，清除明文 PII
+        # 3. processing 超时（Worker 崩溃，真实发送结果未知）：收敛为 unknown、保留幂等键并清除明文 PII
         cur.execute(
             """UPDATE security_delivery_request
             SET state='unknown', outcome='PROVIDER_UNKNOWN',
                 failure_stage='worker', failure_reason='worker_interrupted',
                 outcome_unknown=true, retryable=false, finished_at=NOW(),
+                execution_stage=CASE
+                    WHEN execution_stage='pre_provider' THEN 'provider_unknown'
+                    ELSE execution_stage
+                END,
+                idempotency_expires_at=CASE
+                    WHEN idempotency_key IS NOT NULL
+                        THEN GREATEST(COALESCE(idempotency_expires_at, NOW()), NOW() + make_interval(secs => %s))
+                    ELSE idempotency_expires_at
+                END,
                 payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
-            WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-INTERVAL '5 minutes'"""
+            WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-make_interval(secs => %s)""",
+            (unknown_retention, ownership_seconds),
         )
         # 4. 仅针对显式终态与需核对未知态剥离残留明文 PII（严禁触碰活跃中的 idem_pending/queued/processing）
         cur.execute(
@@ -781,20 +1000,57 @@ def cleanup_delivery_tasks() -> None:
               AND (payload ? 'account' OR payload ? 'ip' OR payload ? 'device_id' OR payload ? 'destination')""",
             (list(TERMINAL_TASK_STATES + RECOVERY_REQUIRED_STATES),),
         )
-        # 5. 仅清除非活跃且幂等窗口已过期的旧幂等键占用（活跃执行中任务及未过期的 unknown 任务绝不释放）
+        # 5a. 清理非活跃且确定终态（未涉 unknown）且幂等窗口已过期的幂等键
         cur.execute(
             """UPDATE security_delivery_request
             SET idempotency_key=NULL, idempotency_scope=NULL
             WHERE state = ANY(%s)
+              AND outcome_unknown = false
+              AND COALESCE(execution_stage, 'pre_provider') <> ALL(%s)
+              AND COALESCE(stage_provenance, 'explicit') <> 'legacy_unknown'
               AND idempotency_key IS NOT NULL
               AND idempotency_expires_at IS NOT NULL
-              AND idempotency_expires_at<=NOW()""",
-            (list(TERMINAL_TASK_STATES + RECOVERY_REQUIRED_STATES),),
+              AND idempotency_expires_at <= NOW()""",
+            (list(TERMINAL_TASK_STATES), list(UNKNOWN_EXECUTION_STAGES)),
         )
-        # 6. 仅清理超过保留期（7 天）的非活跃任务
+        # 5b. unknown / legacy_unknown / provider_unknown：仅在同时超过长保留期 IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS 时释放
         cur.execute(
-            "DELETE FROM security_delivery_request WHERE state = ANY(%s) AND created_at<NOW()-INTERVAL '7 days'",
-            (list(TERMINAL_TASK_STATES + RECOVERY_REQUIRED_STATES),),
+            """UPDATE security_delivery_request
+            SET idempotency_key=NULL, idempotency_scope=NULL
+            WHERE state <> ALL(%s)
+              AND (
+                  state = ANY(%s)
+                  OR outcome_unknown = true
+                  OR execution_stage = ANY(%s)
+                  OR stage_provenance = 'legacy_unknown'
+              )
+              AND idempotency_key IS NOT NULL
+              AND (idempotency_expires_at IS NULL OR idempotency_expires_at <= NOW())
+              AND COALESCE(finished_at, idem_claimed_at, created_at) <= NOW() - make_interval(secs => %s)""",
+            (
+                list(ACTIVE_TASK_STATES),
+                list(RECOVERY_REQUIRED_STATES),
+                list(UNKNOWN_EXECUTION_STAGES),
+                unknown_retention,
+            ),
+        )
+        # 6. 仅清理超过保留期（>=7 天且超过 unknown 长保留期）的非活跃任务
+        cur.execute(
+            """DELETE FROM security_delivery_request
+            WHERE state <> ALL(%s)
+              AND (
+                  (state = ANY(%s) AND outcome_unknown = false AND created_at < NOW() - INTERVAL '7 days')
+                  OR (
+                      (state = ANY(%s) OR outcome_unknown = true)
+                      AND COALESCE(finished_at, idem_claimed_at, created_at) < NOW() - make_interval(secs => %s)
+                  )
+              )""",
+            (
+                list(ACTIVE_TASK_STATES),
+                list(TERMINAL_TASK_STATES),
+                list(RECOVERY_REQUIRED_STATES),
+                delete_retention,
+            ),
         )
         cur.execute(
             """UPDATE auth_challenge SET status='expired'
@@ -880,18 +1136,41 @@ def reconcile_sms_delivery(challenge_id: str) -> dict[str, Any] | None:
                 cur=cur,
             )
             cur.execute(
-                """UPDATE security_delivery_request SET failure_stage=%s,failure_reason=%s,
-                provider_status=%s,outcome=%s WHERE id=%s AND provider_called=true""",
+                """UPDATE security_delivery_request
+                SET failure_stage=%s,
+                    failure_reason=%s,
+                    provider_status=%s,
+                    outcome=%s,
+                    outcome_unknown=false,
+                    state=CASE
+                        WHEN state IN ('unknown', 'legacy_unknown') THEN %s
+                        ELSE state
+                    END,
+                    execution_stage=CASE
+                        WHEN execution_stage IN ('provider_unknown', 'provider_called', 'send_claimed')
+                            THEN 'provider_accepted'
+                        ELSE execution_stage
+                    END
+                WHERE (id=%s OR challenge_id=%s::uuid) AND provider_called=true""",
                 (
                     "delivery" if state == "delivery_failed" else None,
                     "sendcloud_delivery_failed" if state == "delivery_failed" else None,
                     target_status_code,
                     "DELIVERY_FAILED" if state == "delivery_failed" else "COMPLETED",
+                    "failed" if state == "delivery_failed" else "completed",
+                    challenge_id,
                     challenge_id,
                 ),
             )
     if state == "delivered" and res.updated:
-        transition_risk_checked(_engine(), challenge_id, "delivered", channel="sms", purpose="reconcile")
+        transition_risk_checked(
+            _engine(),
+            challenge_id,
+            "delivered",
+            channel="sms",
+            purpose="reconcile",
+            cursor_factory=get_cursor,
+        )
     return {
         "state": res.current_send_state or row["send_state"],
         "outcome": res.outcome,

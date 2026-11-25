@@ -199,6 +199,13 @@ class SpySmsProvider(SmsProvider):
             raise ProviderError("sms rejected", outcome_unknown=False, reason_code="sms_rejected")
         return self._inner.send_code(phone, code, ttl_seconds)
 
+    def send_task(self, phone: str, code: str, purpose: str, ttl_seconds: int, *, send_request_id: str | None = None):
+        with self._lock:
+            self.call_count += 1
+        if self.mode == "reject":
+            raise ProviderError("sms rejected", outcome_unknown=False, reason_code="sms_rejected")
+        return self._inner.send_task(phone, code, purpose, ttl_seconds, send_request_id=send_request_id)
+
     def query_status(self, provider_ids: list[str], days: int = 2, start: int = 0, limit: int = 50) -> dict:
         return {"accepted": True, "records": [{"smsId": provider_ids[0], "status": 200}]}
 
@@ -255,6 +262,7 @@ def pg_redis():
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
                 "038_phase_r_final_security.sql",
+                "039_phase_r_hotfix.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 
@@ -602,3 +610,305 @@ def test_s09_to_s15_late_receipts_stepup_cas_and_queue_single_send(pg_redis):
         t.join(timeout=10)
     assert sum(1 for x in res_q if x is True) == 1
     assert spy_q.call_count == 1
+
+
+def test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider(pg_redis):
+    """覆盖 H1-01–H1-08 / H1-12 / HF-A01–HF-A06 / HF-A09：单事务双重执行权、回滚一致性、阶段失败/异常 0 外呼。"""
+    from fastapi.testclient import TestClient
+
+    from app import app
+    from modules.security.idempotency import claim_http_idempotency, read_http_idempotency_record
+
+    schema, _engine = pg_redis
+    sid = _seed_user(schema, 3020, email="u3020@qq.com", phone="13800133020")
+
+    def _factory(commit: bool = False):
+        return _schema_cursor(PG_DSN, schema, commit=commit)
+
+    allow_eng = SimpleNamespace(
+        reserve=lambda *a, **k: RiskDecision(DecisionAction.ALLOW),
+        transition=lambda *a, **k: True,
+    )
+    spy_em = SpyEmailProvider()
+    spy_sms = SpySmsProvider()
+    reset_providers_for_test(email=spy_em, sms=spy_sms)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("modules.security.idempotency.get_cursor", _factory))
+        stack.enter_context(patch("modules.security.sms_gateway._engine", return_value=allow_eng))
+
+        # 1) 同事务双重执行权成功：security_delivery_request -> send_claimed 且 auth_challenge -> sending
+        c_ok = claim_http_idempotency(
+            scope="hf-s1",
+            key="hf-k-ok",
+            request_hash="hf-h-ok",
+            channel="email_otp",
+            purpose="password_recovery",
+            cursor_factory=_factory,
+        )
+        cid_ok = _insert_challenge(schema, 3020, status="pending_send", send_state="reserved")
+        r_ok = claim_send_execution_right(
+            cid_ok,
+            send_owner="hf-owner-1",
+            provider_name="mock",
+            cursor_factory=_factory,
+            idempotency_claim=c_ok,
+        )
+        assert r_ok.outcome == "transitioned"
+        rec_ok = read_http_idempotency_record(c_ok.task_id, cursor_factory=_factory)
+        assert rec_ok["execution_stage"] == "send_claimed"
+        assert str(rec_ok["challenge_id"]) == cid_ok
+
+        # 2) auth_challenge 已 cancelled -> 双重执行权事务整笔原子回滚，幂等保持 pre_provider、challenge_id 保持 NULL、0 次发信
+        c_rb = claim_http_idempotency(
+            scope="hf-s2",
+            key="hf-k-rb",
+            request_hash="hf-h-rb",
+            channel="email_otp",
+            purpose="password_recovery",
+            cursor_factory=_factory,
+        )
+        cid_cancel = _insert_challenge(schema, 3020, status="cancelled", send_state="reserved")
+        r_rb = claim_send_execution_right(
+            cid_cancel,
+            send_owner="hf-owner-2",
+            provider_name="mock",
+            cursor_factory=_factory,
+            idempotency_claim=c_rb,
+        )
+        assert r_rb.outcome == "conflict_or_disallowed"
+        rec_rb = read_http_idempotency_record(c_rb.task_id, cursor_factory=_factory)
+        assert rec_rb["execution_stage"] == "pre_provider"
+        assert rec_rb["challenge_id"] is None
+
+        # 3) 幂等记录已被篡改或丢失所有权 -> 立即阻止 claim_send_execution_right，Challenge 保持 reserved 且 0 次发信
+        c_spoof = SimpleNamespace(
+            active=True,
+            task_id=c_ok.task_id,
+            execution_owner="wrong-owner",
+            scope="hf-s1",
+            key="hf-k-ok",
+        )
+        cid_keep = _insert_challenge(schema, 3020, purpose="bind_email", status="pending_send", send_state="reserved")
+        r_spoof = claim_send_execution_right(
+            cid_keep,
+            send_owner="hf-owner-3",
+            provider_name="mock",
+            cursor_factory=_factory,
+            idempotency_claim=c_spoof,
+        )
+        assert r_spoof.outcome == "idempotency_owner_mismatch"
+        with _schema_cursor(PG_DSN, schema, commit=False) as cur:
+            cur.execute("SELECT send_state, status FROM auth_challenge WHERE id = %s", (cid_keep,))
+            row_keep = cur.fetchone()
+            assert row_keep["send_state"] == "reserved"
+            assert row_keep["status"] == "pending_send"
+
+        # 4) Email / SMS / Step-up 在 advance_idempotency_stage('provider_called') 返回 False 或抛异常时 0 次外呼
+        c_e_false = claim_http_idempotency(
+            scope="hf-e1",
+            key="hf-ke1",
+            request_hash="hfe1",
+            channel="email_otp",
+            purpose="password_recovery",
+            initial_state="idem_pending",
+            cursor_factory=_factory,
+        )
+        with patch("modules.security.email_gateway.advance_idempotency_stage", return_value=False):
+            with pytest.raises(DeliveryStageError) as exc_ef:
+                _send_email(
+                    3020,
+                    "u3020@qq.com",
+                    "password_recovery",
+                    "email_otp",
+                    str(uuid.uuid4()),
+                    SendContext("192.0.2.20", "d20", "r20"),
+                    engine=allow_eng,
+                    idempotency_claim=c_e_false,
+                )
+            assert exc_ef.value.reason_code == "IDEMPOTENCY_STAGE_CONFLICT"
+            assert exc_ef.value.request_attempted is False
+        rec_ef = read_http_idempotency_record(c_e_false.task_id, cursor_factory=_factory)
+        assert rec_ef["state"] == "unknown"
+        assert rec_ef["idempotency_key"] == "hf-ke1"
+
+        c_s_exc = claim_http_idempotency(
+            scope="hf-sms1",
+            key="hf-ksms1",
+            request_hash="hfsms1",
+            channel="sms",
+            purpose="password_recovery",
+            initial_state="idem_pending",
+            cursor_factory=_factory,
+        )
+        with patch("modules.security.sms_gateway.advance_idempotency_stage", side_effect=RuntimeError("db down")):
+            with pytest.raises(DeliveryStageError) as exc_se:
+                _send_sms(
+                    3020,
+                    "13800133020",
+                    "password_recovery",
+                    str(uuid.uuid4()),
+                    SendContext("192.0.2.21", "d21", "r21"),
+                    allow_eng,
+                    idempotency_claim=c_s_exc,
+                )
+            assert exc_se.value.reason_code == "IDEMPOTENCY_STAGE_DB_ERROR"
+            assert exc_se.value.request_attempted is False
+
+        tok = sign_access_token(3020, "U3020", ["user"], 1, sid=sid, auth_time=int(1e10))
+        sctx = session_context_from_request(SimpleNamespace(headers={"Authorization": f"Bearer {tok}"}), 3020)
+        c_su_false = claim_http_idempotency(
+            scope="hf-su1",
+            key="hf-ksu1",
+            request_hash="hfsu1",
+            channel="sms",
+            purpose="step_up_auth",
+            initial_state="idem_pending",
+            cursor_factory=_factory,
+        )
+        with patch("modules.security.step_up.advance_idempotency_stage", return_value=False):
+            with pytest.raises(DeliveryStageError) as exc_su:
+                start_step_up_challenge(
+                    3020,
+                    "rebind_email",
+                    "old_phone_otp",
+                    SendContext("192.0.2.22", "d22", "r22"),
+                    target_contact="new3020@qq.com",
+                    session_ctx=sctx,
+                    idempotency_claim=c_su_false,
+                )
+            assert exc_su.value.reason_code == "IDEMPOTENCY_STAGE_CONFLICT"
+            assert exc_su.value.request_attempted is False
+
+        assert spy_em.call_count == 0
+        assert spy_sms.call_count == 0
+
+        # 5) Provider 接受后 advance_idempotency_stage('provider_accepted') 返回 False -> 保守标 unknown，仅 1 次发信绝不重放
+        c_post_fail = claim_http_idempotency(
+            scope="hf-post",
+            key="hf-kpost",
+            request_hash="hfpost",
+            channel="email_otp",
+            purpose="password_recovery",
+            initial_state="idem_pending",
+            cursor_factory=_factory,
+        )
+        orig_adv = __import__(
+            "modules.security.idempotency", fromlist=["advance_idempotency_stage"]
+        ).advance_idempotency_stage
+
+        def _adv_fail_after_provider(claim, expected, target, **kw):
+            if target == "provider_accepted":
+                return False
+            return orig_adv(claim, expected, target, **kw)
+
+        with patch("modules.security.email_gateway.advance_idempotency_stage", side_effect=_adv_fail_after_provider):
+            with pytest.raises(DeliveryStageError) as exc_pf:
+                _send_email(
+                    3020,
+                    "u3020@qq.com",
+                    "password_recovery",
+                    "email_otp",
+                    str(uuid.uuid4()),
+                    SendContext("192.0.2.23", "d23", "r23"),
+                    engine=allow_eng,
+                    idempotency_claim=c_post_fail,
+                )
+            assert exc_pf.value.stage == "receipt_persist"
+            assert exc_pf.value.outcome_unknown is True
+            assert exc_pf.value.request_attempted is True
+        assert spy_em.call_count == 1
+        rec_pf = read_http_idempotency_record(c_post_fail.task_id, cursor_factory=_factory)
+        assert rec_pf["state"] == "unknown"
+        assert rec_pf["idempotency_key"] == "hf-kpost"
+
+    # Keep unused FastAPI import bound cleanly
+    assert app is not None and TestClient is not None
+
+
+def test_hf01_http_finalize_conflict_and_recovery_enqueue_fail_closed(pg_redis):
+    """覆盖 H1-09–H1-11 / HF-A07–HF-A08：finalize_http_idempotency 返回 False 时 Fail-Closed 503 且不调度重放。"""
+    from fastapi.testclient import TestClient
+
+    from app import app
+    from modules.security.rate_limiter import limiter
+
+    schema, _engine = pg_redis
+    sid = _seed_user(schema, 3021, email="u3021@qq.com", phone="13800133021")
+    tok = sign_access_token(3021, "U3021", ["user"], 1, sid=sid, auth_time=int(1e10))
+
+    def _factory(commit: bool = False):
+        return _schema_cursor(PG_DSN, schema, commit=commit)
+
+    allow_eng = SimpleNamespace(
+        check_request=lambda *a, **k: RiskDecision(DecisionAction.ALLOW),
+        reserve=lambda *a, **k: RiskDecision(DecisionAction.ALLOW),
+        transition=lambda *a, **k: True,
+    )
+    spy_em = SpyEmailProvider()
+    spy_sms = SpySmsProvider()
+    reset_providers_for_test(email=spy_em, sms=spy_sms)
+    limiter.reset_for_test()
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("db.init_pool"))
+        stack.enter_context(patch("db.close_pool"))
+        for target in (
+            "db.get_cursor",
+            "modules.identity.service.get_cursor",
+            "modules.security.service.get_cursor",
+            "modules.security.step_up.get_cursor",
+            "modules.security.email_gateway.get_cursor",
+            "modules.security.sms_gateway.get_cursor",
+            "modules.security.idempotency.get_cursor",
+            "modules.security.eligibility.get_cursor",
+            "modules.audit.service.get_cursor",
+        ):
+            stack.enter_context(patch(target, _factory))
+        stack.enter_context(patch("modules.security.sms_gateway._engine", return_value=allow_eng))
+        stack.enter_context(patch("modules.security.email_gateway._engine", return_value=allow_eng))
+        with TestClient(app, base_url="https://testserver", raise_server_exceptions=False) as http_client:
+            # 1) /me/security/step-up/challenge finalize 返回 False -> 503，保 key 标 unknown，同键重放 503 且仍仅 1 次发送
+            with patch("routes.me.finalize_http_idempotency", return_value=False):
+                r_su = http_client.post(
+                    "/api/tech-transfer/v1/me/security/step-up/challenge",
+                    json={"purpose": "rebind_email", "method": "old_email_otp", "targetContact": "new3021@qq.com"},
+                    headers={"Authorization": f"Bearer {tok}", "Idempotency-Key": "hf-me-finalize-false"},
+                )
+            assert r_su.status_code == 503
+            assert spy_em.call_count == 1
+            r_su_retry = http_client.post(
+                "/api/tech-transfer/v1/me/security/step-up/challenge",
+                json={"purpose": "rebind_email", "method": "old_email_otp", "targetContact": "new3021@qq.com"},
+                headers={"Authorization": f"Bearer {tok}", "Idempotency-Key": "hf-me-finalize-false"},
+            )
+            assert r_su_retry.status_code == 503
+            assert spy_em.call_count == 1
+
+            # 2) /me/security/contact/challenge (sms) finalize 返回 False -> 503，保 key 标 unknown，同键重放仍仅 1 次发送
+            with patch("routes.me.finalize_http_idempotency", return_value=False):
+                r_ct = http_client.post(
+                    "/api/tech-transfer/v1/me/security/contact/challenge",
+                    json={"contactType": "phone", "contactValue": "13900139021"},
+                    headers={"Authorization": f"Bearer {tok}", "Idempotency-Key": "hf-ct-finalize-false"},
+                )
+            assert r_ct.status_code == 503
+            assert spy_sms.call_count == 1
+            r_ct_retry = http_client.post(
+                "/api/tech-transfer/v1/me/security/contact/challenge",
+                json={"contactType": "phone", "contactValue": "13900139021"},
+                headers={"Authorization": f"Bearer {tok}", "Idempotency-Key": "hf-ct-finalize-false"},
+            )
+            assert r_ct_retry.status_code == 503
+            assert spy_sms.call_count == 1
+
+            # 3) /auth/recovery/start finalize 返回 False -> 503 且禁止调度后台投递任务
+            em_before = spy_em.call_count
+            with patch("routes.auth.finalize_http_idempotency", return_value=False):
+                r_rec = http_client.post(
+                    "/api/tech-transfer/v1/auth/recovery/start",
+                    json={"account": "u3021@qq.com", "channel": "email_otp"},
+                    headers={"Idempotency-Key": "hf-rec-finalize-false"},
+                )
+            assert r_rec.status_code == 503
+            assert spy_em.call_count == em_before

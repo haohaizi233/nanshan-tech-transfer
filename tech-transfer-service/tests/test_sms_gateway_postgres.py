@@ -78,6 +78,7 @@ def pg(monkeypatch, request):
             "036_email_security_gateway.sql",
             "037_phase_r_security_hardening.sql",
             "038_phase_r_final_security.sql",
+            "039_phase_r_hotfix.sql",
         ]:
             migration = (Path(__file__).parents[1] / "migrations" / "pg" / name).read_text(encoding="utf-8")
             c.execute(migration.replace("public.", schema + "."))

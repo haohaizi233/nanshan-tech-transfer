@@ -1,5 +1,7 @@
 # Phase R 安全边界收敛与生产可靠性加固验收报告 (14-phase-r-acceptance)
 
+> **[HISTORICAL SNAPSHOT / 历史快照说明]** 本文档为 Phase R 阶段的历史验收快照，已被 [17-phase-r-hotfix-acceptance.md](./17-phase-r-hotfix-acceptance.md) 与动态证据清单 [acceptance-manifest.yaml](./acceptance-manifest.yaml) 取代；最新实时核验结果以 CI 执行与证据门禁输出为准。
+
 ## 1. 基线与提交信息
 
 - **上轮验收基准 SHA**：`f4af46f39e1a73b904939d98989d61ed88c0d0ba`

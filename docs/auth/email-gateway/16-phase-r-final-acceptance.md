@@ -1,5 +1,7 @@
 # 南山科转通 Phase R-Final 最终上线验收报告
 
+> **[HISTORICAL SNAPSHOT / 历史快照说明]** 本文档为 Phase R-Final 阶段的历史验收快照（仅反映基线提交时点结论），已被 [17-phase-r-hotfix-acceptance.md](./17-phase-r-hotfix-acceptance.md) 与动态证据清单 [acceptance-manifest.yaml](./acceptance-manifest.yaml) 取代；最新上线门禁与实测证据以 `17-phase-r-hotfix-acceptance.md` 及 `scripts/verify_acceptance_evidence.py` 为准。
+
 > 仓库：`haohaizi233/nanshan-tech-transfer`  
 > 分支：`feat/phase-r-final-security`（基线提交 `5f0d00aee3a3a869f52b790a72e74bf26908672c`）  
 > 数据库增量：`migrations/pg/038_phase_r_final_security.sql`（历史 `033`–`037` 未变更）  
