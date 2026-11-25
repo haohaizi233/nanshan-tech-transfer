@@ -418,18 +418,11 @@ def _send_email(
             channel=channel,
             purpose=purpose,
             request_id=context.request_id,
+            cursor_factory=get_cursor,
         )
         raise DeliveryStageError("challenge_create", "CHALLENGE_CREATE_FAILED") from None
 
-    if idempotency_claim is not None:
-        advance_idempotency_stage(
-            idempotency_claim,
-            ("pre_provider",),
-            "send_claimed",
-            challenge_id=challenge_id,
-        )
-
-    # 外部发送执行权门禁：必须在独立事务成功提交后方允许调用外部 Provider
+    # 双重执行权门禁：必须在单事务提交中同时 CAS 推进幂等阶段与 Challenge 发送权，方允许调用外部 Provider
     send_owner = f"req:{context.request_id}:{uuid.uuid4().hex[:12]}"
     try:
         claim_res = claim_send_execution_right(
@@ -439,10 +432,16 @@ def _send_email(
             provider_name=provider.provider_name,
             provider_config_id=provider_config_id,
             cursor_factory=get_cursor,
+            idempotency_claim=idempotency_claim,
         )
     except Exception:
         if idempotency_claim is not None:
-            mark_http_idempotency_unknown(idempotency_claim, "SEND_CLAIM_DB_ERROR", challenge_id=challenge_id)
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "SEND_CLAIM_DB_ERROR",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
         raise DeliveryStageError(
             "send_claim",
             "SEND_CLAIM_DATABASE_ERROR",
@@ -452,12 +451,30 @@ def _send_email(
         ) from None
 
     if claim_res.outcome != "transitioned":
-        ambiguous = claim_res.outcome in {"already_target", "owner_mismatch"} or claim_res.current_send_state in {
-            "sending",
-            "accepted",
-            "delivered",
-            "unknown",
-        }
+        ambiguous = (
+            claim_res.outcome
+            in {
+                "already_target",
+                "owner_mismatch",
+                "idempotency_owner_mismatch",
+                "idempotency_conflict",
+            }
+            or (
+                claim_res.outcome == "idempotency_stage_conflict"
+                and claim_res.current_send_state not in (None, "pre_provider")
+            )
+            or claim_res.current_send_state
+            in {
+                "sending",
+                "accepted",
+                "delivered",
+                "unknown",
+                "send_claimed",
+                "provider_called",
+                "provider_accepted",
+                "provider_unknown",
+            }
+        )
         if not ambiguous and claim_res.outcome in {"not_found", "expired", "conflict_or_disallowed"}:
             transition_risk_checked(
                 eng,
@@ -466,12 +483,14 @@ def _send_email(
                 channel=channel,
                 purpose=purpose,
                 request_id=context.request_id,
+                cursor_factory=get_cursor,
             )
         if ambiguous and idempotency_claim is not None:
             mark_http_idempotency_unknown(
                 idempotency_claim,
                 f"SEND_CLAIM_{claim_res.outcome.upper()}",
                 challenge_id=challenge_id,
+                cursor_factory=get_cursor,
             )
         raise DeliveryStageError(
             "send_claim",
@@ -481,14 +500,44 @@ def _send_email(
             provider_name=provider.provider_name,
         )
 
-    if idempotency_claim is not None:
-        advance_idempotency_stage(
-            idempotency_claim,
-            ("send_claimed", "pre_provider"),
-            "provider_called",
-            challenge_id=challenge_id,
-            provider_called=True,
-        )
+    if idempotency_claim is not None and idempotency_claim.active:
+        try:
+            stage_ok = advance_idempotency_stage(
+                idempotency_claim,
+                ("send_claimed",),
+                "provider_called",
+                challenge_id=challenge_id,
+                provider_called=True,
+                cursor_factory=get_cursor,
+            )
+        except Exception:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "IDEMPOTENCY_STAGE_DB_ERROR",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
+            raise DeliveryStageError(
+                "send_claim",
+                "IDEMPOTENCY_STAGE_DB_ERROR",
+                outcome_unknown=True,
+                provider_called=False,
+                provider_name=provider.provider_name,
+            ) from None
+        if not stage_ok:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "IDEMPOTENCY_STAGE_CONFLICT",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
+            raise DeliveryStageError(
+                "send_claim",
+                "IDEMPOTENCY_STAGE_CONFLICT",
+                outcome_unknown=True,
+                provider_called=False,
+                provider_name=provider.provider_name,
+            )
 
     metrics.inc("email_request_total", channel=channel, purpose=purpose, provider=provider.provider_name)
     start_ms = time.monotonic()
@@ -535,14 +584,6 @@ def _send_email(
                 provider=provider.provider_name,
                 reason=reason,
             )
-        transition_risk_checked(
-            eng,
-            challenge_id,
-            state,
-            channel=channel,
-            purpose=purpose,
-            request_id=context.request_id,
-        )
         try:
             _set_email_send_state(
                 challenge_id,
@@ -556,8 +597,22 @@ def _send_email(
                 expected_owner=send_owner,
             )
         except Exception:
+            transition_risk_checked(
+                eng,
+                challenge_id,
+                state,
+                channel=channel,
+                purpose=purpose,
+                request_id=context.request_id,
+                cursor_factory=get_cursor,
+            )
             if idempotency_claim is not None:
-                mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "RECEIPT_PERSIST_FAILED",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
             raise DeliveryStageError(
                 "receipt_persist",
                 "RECEIPT_PERSIST_FAILED",
@@ -567,16 +622,45 @@ def _send_email(
                 provider_name=provider.provider_name,
             ) from None
 
-        if idempotency_claim is not None:
-            advance_idempotency_stage(
-                idempotency_claim,
-                ("provider_called", "send_claimed", "pre_provider"),
-                "provider_unknown" if unknown else "provider_rejected",
-                challenge_id=challenge_id,
-                provider_called=True,
-                failure_reason=reason,
-                outcome_unknown=unknown,
-            )
+        transition_risk_checked(
+            eng,
+            challenge_id,
+            state,
+            channel=channel,
+            purpose=purpose,
+            request_id=context.request_id,
+            cursor_factory=get_cursor,
+        )
+
+        if idempotency_claim is not None and idempotency_claim.active:
+            try:
+                stage_ok = advance_idempotency_stage(
+                    idempotency_claim,
+                    ("provider_called", "send_claimed"),
+                    "provider_unknown" if unknown else "provider_rejected",
+                    challenge_id=challenge_id,
+                    provider_called=True,
+                    failure_reason=reason,
+                    outcome_unknown=unknown,
+                    cursor_factory=get_cursor,
+                )
+            except Exception:
+                stage_ok = False
+            if not stage_ok:
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "IDEMPOTENCY_RECEIPT_STAGE_CONFLICT",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
+                raise DeliveryStageError(
+                    "receipt_persist",
+                    "IDEMPOTENCY_RECEIPT_STAGE_CONFLICT",
+                    outcome_unknown=True,
+                    provider_called=getattr(exc, "request_attempted", True),
+                    provider_status=getattr(exc, "provider_status", None),
+                    provider_name=provider.provider_name,
+                ) from None
 
         if isinstance(exc, ProviderError):
             raise DeliveryStageError(
@@ -620,11 +704,21 @@ def _send_email(
             )
     except DeliveryStageError:
         if idempotency_claim is not None:
-            mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_STATE_CONFLICT", challenge_id=challenge_id)
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "RECEIPT_STATE_CONFLICT",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
         raise
     except Exception:
         if idempotency_claim is not None:
-            mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "RECEIPT_PERSIST_FAILED",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
         raise DeliveryStageError(
             "receipt_persist",
             "RECEIPT_PERSIST_FAILED",
@@ -634,14 +728,33 @@ def _send_email(
             provider_name=receipt.provider,
         ) from None
 
-    if idempotency_claim is not None:
-        advance_idempotency_stage(
-            idempotency_claim,
-            ("provider_called", "send_claimed", "pre_provider"),
-            "provider_accepted",
-            challenge_id=challenge_id,
-            provider_called=True,
-        )
+    if idempotency_claim is not None and idempotency_claim.active:
+        try:
+            stage_ok = advance_idempotency_stage(
+                idempotency_claim,
+                ("provider_called", "send_claimed"),
+                "provider_accepted",
+                challenge_id=challenge_id,
+                provider_called=True,
+                cursor_factory=get_cursor,
+            )
+        except Exception:
+            stage_ok = False
+        if not stage_ok:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                "IDEMPOTENCY_ACCEPTED_STAGE_CONFLICT",
+                challenge_id=challenge_id,
+                cursor_factory=get_cursor,
+            )
+            raise DeliveryStageError(
+                "receipt_persist",
+                "IDEMPOTENCY_ACCEPTED_STAGE_CONFLICT",
+                provider_ids=receipt.provider_message_ids,
+                provider_called=True,
+                outcome_unknown=True,
+                provider_name=receipt.provider,
+            )
     transition_risk_checked(
         eng,
         challenge_id,
@@ -649,6 +762,7 @@ def _send_email(
         channel=channel,
         purpose=purpose,
         request_id=context.request_id,
+        cursor_factory=get_cursor,
     )
     metrics.inc("email_provider_accepted_total", channel=channel, purpose=purpose, provider=receipt.provider)
     return receipt
@@ -858,17 +972,39 @@ def reconcile_email_delivery(challenge_id: str) -> dict[str, Any] | None:
                 cur=cur,
             )
             cur.execute(
-                """UPDATE security_delivery_request SET failure_stage=%s, failure_reason=%s,
-                outcome=%s WHERE id=%s AND provider_called=true""",
+                """UPDATE security_delivery_request
+                SET failure_stage=%s,
+                    failure_reason=%s,
+                    outcome=%s,
+                    outcome_unknown=false,
+                    state=CASE
+                        WHEN state IN ('unknown', 'legacy_unknown') THEN %s
+                        ELSE state
+                    END,
+                    execution_stage=CASE
+                        WHEN execution_stage IN ('provider_unknown', 'provider_called', 'send_claimed')
+                            THEN 'provider_accepted'
+                        ELSE execution_stage
+                    END
+                WHERE (id=%s OR challenge_id=%s::uuid) AND provider_called=true""",
                 (
                     "delivery" if new_state in {"bounced", "delivery_failed"} else None,
                     reason_code if new_state in {"bounced", "delivery_failed"} else None,
                     "DELIVERY_FAILED" if new_state in {"bounced", "delivery_failed"} else "COMPLETED",
+                    "failed" if new_state in {"bounced", "delivery_failed"} else "completed",
+                    challenge_id,
                     challenge_id,
                 ),
             )
     if new_state == "delivered" and res.updated:
-        transition_risk_checked(_engine(), challenge_id, "delivered", channel="email", purpose="reconcile")
+        transition_risk_checked(
+            _engine(),
+            challenge_id,
+            "delivered",
+            channel="email",
+            purpose="reconcile",
+            cursor_factory=get_cursor,
+        )
     out_res: dict[str, Any] = {
         "state": res.current_send_state or row["send_state"],
         "provider": provider.provider_name,

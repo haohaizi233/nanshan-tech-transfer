@@ -94,6 +94,17 @@ def can_verify_challenge(status: str, send_state: str | None = None) -> bool:
     return send_state in {"accepted", "delivered", "unknown"}
 
 
+_RISK_SYNC_STATES = frozenset({"accepted", "rejected", "unknown", "delivered"})
+
+
+class _AtomicClaimRollback(Exception):
+    """用于双重执行权联合事务内部原子回滚的受控信号异常。"""
+
+    def __init__(self, result: DeliveryTransitionResult) -> None:
+        super().__init__(result.outcome)
+        self.result = result
+
+
 def _is_expired(value: Any) -> bool:
     if value is None:
         return False
@@ -118,6 +129,7 @@ def transition_delivery_state(
     expected_owner: str | None = None,
     require_pending_send: bool | None = None,
     require_not_expired: bool | None = None,
+    record_risk_sync: bool = True,
 ) -> DeliveryTransitionResult:
     """基于数据库真实当前状态的联合 CAS 原子投递状态转换。
 
@@ -125,6 +137,7 @@ def transition_delivery_state(
     - 校验所有 `expected_states -> target_state` 均满足 `ALLOWED_SEND_STATE_TRANSITIONS`；
     - 当 `target_state == 'sending'` 时强制联合检查 `status = 'pending_send' AND expires_at > NOW()`；
     - 当提供 `expected_owner` 时严格校对 `send_owner`，防止迟到或无执行权 Worker 篡改状态；
+    - 当 `target_state` 对应 Redis 风控协调态时，在同事务持久化 `risk_sync_state = 'sync_pending'`；
     - 绝不将 `consumed` / `expired` / `locked` / `failed` / `cancelled` 等终态恢复为 `pending`；
     - 精准区分 `not_found`、`expired`、`owner_mismatch`、`already_target` 与 `conflict_or_disallowed`。
     """
@@ -142,6 +155,7 @@ def transition_delivery_state(
     reason_val = failure_reason[:64] if failure_reason else None
     deliv_code = delivery_reason_code[:32] if delivery_reason_code else None
     is_claim_sending = target_state == "sending"
+    should_record_risk = bool(record_risk_sync and target_state in _RISK_SYNC_STATES)
 
     where_clauses = ["id = %s", "send_state = ANY(%s)"]
     params: list[Any] = [
@@ -161,6 +175,14 @@ def transition_delivery_state(
         reason_val,
         send_owner,
         is_claim_sending,
+        should_record_risk,
+        should_record_risk,
+        target_state,
+        should_record_risk,
+        should_record_risk,
+        should_record_risk,
+        should_record_risk,
+        should_record_risk,
         challenge_id,
         list(expected_states),
     ]
@@ -169,7 +191,7 @@ def transition_delivery_state(
     if must_not_expired:
         where_clauses.append("expires_at > NOW()")
     if expected_owner is not None:
-        where_clauses.append("(send_owner IS NULL OR send_owner = %s)")
+        where_clauses.append("(send_owner = %s OR (send_state = 'reserved' AND send_owner IS NULL))")
         params.append(expected_owner)
 
     cur.execute(
@@ -189,7 +211,14 @@ def transition_delivery_state(
             provider_config_id = COALESCE(%s, provider_config_id),
             delivery_failure_reason = COALESCE(%s, delivery_failure_reason),
             send_owner = COALESCE(%s, send_owner),
-            send_claimed_at = CASE WHEN %s::boolean THEN COALESCE(send_claimed_at, NOW()) ELSE send_claimed_at END
+            send_claimed_at = CASE WHEN %s::boolean THEN COALESCE(send_claimed_at, NOW()) ELSE send_claimed_at END,
+            risk_sync_state = CASE WHEN %s::boolean THEN 'sync_pending' ELSE risk_sync_state END,
+            risk_sync_target = CASE WHEN %s::boolean THEN %s ELSE risk_sync_target END,
+            risk_sync_attempts = CASE WHEN %s::boolean THEN 0 ELSE risk_sync_attempts END,
+            risk_sync_next_retry_at = CASE WHEN %s::boolean THEN NULL ELSE risk_sync_next_retry_at END,
+            risk_sync_last_error_code = CASE WHEN %s::boolean THEN NULL ELSE risk_sync_last_error_code END,
+            risk_sync_claimed_at = CASE WHEN %s::boolean THEN NULL ELSE risk_sync_claimed_at END,
+            risk_sync_updated_at = CASE WHEN %s::boolean THEN NOW() ELSE risk_sync_updated_at END
         WHERE {" AND ".join(where_clauses)}
         RETURNING status, send_state, send_owner
         """,
@@ -269,25 +298,104 @@ def claim_send_execution_right(
     provider_name: str | None = None,
     provider_config_id: str | None = None,
     cursor_factory: Any = None,
+    idempotency_claim: Any | None = None,
+    idempotency_expected_stages: tuple[str, ...] = ("pre_provider",),
 ) -> DeliveryTransitionResult:
-    """在独立事务提交中原子取得外部发送执行权（reserved -> sending）。
+    """在单事务提交中原子取得双重发送执行权（幂等 send_claimed + auth_challenge sending）。
 
-    仅当联合 CAS 更新成功且数据库事务**实际提交**完成后才返回 outcome='transitioned'。
-    任何状态冲突、过期、取消、不存在、或数据库/提交异常均视为未取得发送执行权。
+    全局锁顺序：security_delivery_request -> auth_challenge。
+    当存在 active `idempotency_claim` 时：
+    - 先严格校验 execution_owner / idempotency_scope / idempotency_key / 活跃态 / execution_stage，
+      并将幂等记录推进至 `send_claimed` 且绑定 `challenge_id`；
+    - 随后在同事务内联合 CAS 将 `auth_challenge` 从 `reserved -> sending`；
+    - 任一前置条件或 CAS 失败均整笔事务原子回滚，绝不遗留半成功状态，也绝不进入外部 Provider。
     """
+    from config import settings
     from db import get_cursor
+    from modules.security.idempotency import ACTIVE_IDEMPOTENCY_STATES
 
+    if not send_owner or not str(send_owner).strip():
+        return DeliveryTransitionResult(outcome="owner_mismatch", updated=False)
+
+    has_idem = bool(idempotency_claim is not None and getattr(idempotency_claim, "active", False))
     factory = cursor_factory or get_cursor
-    with factory(commit=True) as cur:
-        res = transition_delivery_state(
-            cur,
-            challenge_id,
-            expected_states,
-            "sending",
-            provider_name=provider_name,
-            provider_config_id=provider_config_id,
-            send_owner=send_owner,
-            require_pending_send=True,
-            require_not_expired=True,
-        )
-    return res
+    ownership_seconds = max(60, int(settings.IDEMPOTENCY_EXECUTION_OWNERSHIP_SECONDS))
+
+    try:
+        with factory(commit=True) as cur:
+            if has_idem:
+                task_id = getattr(idempotency_claim, "task_id", None)
+                exec_owner = getattr(idempotency_claim, "execution_owner", None)
+                idem_scope = getattr(idempotency_claim, "scope", None)
+                idem_key = getattr(idempotency_claim, "key", None)
+                if not task_id or not exec_owner or not idem_scope or not idem_key:
+                    return DeliveryTransitionResult(outcome="idempotency_conflict", updated=False)
+
+                cur.execute(
+                    """
+                    UPDATE security_delivery_request
+                    SET execution_stage = 'send_claimed',
+                        challenge_id = COALESCE(%s::uuid, challenge_id)
+                    WHERE id = %s
+                      AND execution_owner = %s
+                      AND idempotency_scope = %s
+                      AND idempotency_key = %s
+                      AND state = ANY(%s)
+                      AND execution_stage = ANY(%s)
+                      AND provider_called = false
+                      AND (idem_claimed_at IS NULL OR idem_claimed_at > NOW() - make_interval(secs => %s))
+                    RETURNING id
+                    """,
+                    (
+                        challenge_id,
+                        task_id,
+                        exec_owner,
+                        idem_scope,
+                        idem_key,
+                        list(ACTIVE_IDEMPOTENCY_STATES),
+                        list(idempotency_expected_stages),
+                        ownership_seconds,
+                    ),
+                )
+                if cur.rowcount <= 0:
+                    cur.execute(
+                        """
+                        SELECT state, execution_stage, execution_owner, idempotency_scope, idempotency_key
+                        FROM security_delivery_request
+                        WHERE id = %s
+                        """,
+                        (task_id,),
+                    )
+                    idem_row = cur.fetchone()
+                    if not idem_row:
+                        return DeliveryTransitionResult(outcome="idempotency_not_found", updated=False)
+                    if idem_row.get("execution_owner") != exec_owner:
+                        return DeliveryTransitionResult(
+                            outcome="idempotency_owner_mismatch",
+                            current_send_state=idem_row.get("execution_stage"),
+                            updated=False,
+                        )
+                    return DeliveryTransitionResult(
+                        outcome="idempotency_stage_conflict",
+                        current_send_state=idem_row.get("execution_stage"),
+                        updated=False,
+                    )
+
+            res = transition_delivery_state(
+                cur,
+                challenge_id,
+                expected_states,
+                "sending",
+                provider_name=provider_name,
+                provider_config_id=provider_config_id,
+                send_owner=send_owner,
+                require_pending_send=True,
+                require_not_expired=True,
+                record_risk_sync=False,
+            )
+            if has_idem and res.outcome != "transitioned":
+                # 回滚本事务内对 security_delivery_request 的 send_claimed 更新
+                raise _AtomicClaimRollback(res)
+            return res
+    except _AtomicClaimRollback as rollback_sig:
+        return rollback_sig.result

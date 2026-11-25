@@ -484,16 +484,9 @@ def start_step_up_challenge(
                 channel="sms",
                 purpose="step_up_auth",
                 request_id=context.request_id,
+                cursor_factory=get_cursor,
             )
             raise DeliveryStageError("challenge_create", "CHALLENGE_CREATE_FAILED") from None
-
-        if idempotency_claim is not None:
-            advance_idempotency_stage(
-                idempotency_claim,
-                ("pre_provider",),
-                "send_claimed",
-                challenge_id=challenge_id,
-            )
 
         send_owner = f"req:{context.request_id}:{uuid.uuid4().hex[:12]}"
         try:
@@ -503,10 +496,16 @@ def start_step_up_challenge(
                 expected_states=("reserved",),
                 provider_name="sms",
                 cursor_factory=get_cursor,
+                idempotency_claim=idempotency_claim,
             )
         except Exception:
             if idempotency_claim is not None:
-                mark_http_idempotency_unknown(idempotency_claim, "SEND_CLAIM_DB_ERROR", challenge_id=challenge_id)
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "SEND_CLAIM_DB_ERROR",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
             raise DeliveryStageError(
                 "send_claim",
                 "SEND_CLAIM_DATABASE_ERROR",
@@ -515,12 +514,30 @@ def start_step_up_challenge(
             ) from None
 
         if claim_res.outcome != "transitioned":
-            ambiguous = claim_res.outcome in {"already_target", "owner_mismatch"} or claim_res.current_send_state in {
-                "sending",
-                "accepted",
-                "delivered",
-                "unknown",
-            }
+            ambiguous = (
+                claim_res.outcome
+                in {
+                    "already_target",
+                    "owner_mismatch",
+                    "idempotency_owner_mismatch",
+                    "idempotency_conflict",
+                }
+                or (
+                    claim_res.outcome == "idempotency_stage_conflict"
+                    and claim_res.current_send_state not in (None, "pre_provider")
+                )
+                or claim_res.current_send_state
+                in {
+                    "sending",
+                    "accepted",
+                    "delivered",
+                    "unknown",
+                    "send_claimed",
+                    "provider_called",
+                    "provider_accepted",
+                    "provider_unknown",
+                }
+            )
             if not ambiguous and claim_res.outcome in {"not_found", "expired", "conflict_or_disallowed"}:
                 transition_risk_checked(
                     engine,
@@ -529,12 +546,14 @@ def start_step_up_challenge(
                     channel="sms",
                     purpose="step_up_auth",
                     request_id=context.request_id,
+                    cursor_factory=get_cursor,
                 )
             if ambiguous and idempotency_claim is not None:
                 mark_http_idempotency_unknown(
                     idempotency_claim,
                     f"SEND_CLAIM_{claim_res.outcome.upper()}",
                     challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
                 )
             raise DeliveryStageError(
                 "send_claim",
@@ -543,14 +562,42 @@ def start_step_up_challenge(
                 provider_called=False,
             )
 
-        if idempotency_claim is not None:
-            advance_idempotency_stage(
-                idempotency_claim,
-                ("send_claimed", "pre_provider"),
-                "provider_called",
-                challenge_id=challenge_id,
-                provider_called=True,
-            )
+        if idempotency_claim is not None and idempotency_claim.active:
+            try:
+                stage_ok = advance_idempotency_stage(
+                    idempotency_claim,
+                    ("send_claimed",),
+                    "provider_called",
+                    challenge_id=challenge_id,
+                    provider_called=True,
+                    cursor_factory=get_cursor,
+                )
+            except Exception:
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "IDEMPOTENCY_STAGE_DB_ERROR",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
+                raise DeliveryStageError(
+                    "send_claim",
+                    "IDEMPOTENCY_STAGE_DB_ERROR",
+                    outcome_unknown=True,
+                    provider_called=False,
+                ) from None
+            if not stage_ok:
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "IDEMPOTENCY_STAGE_CONFLICT",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
+                raise DeliveryStageError(
+                    "send_claim",
+                    "IDEMPOTENCY_STAGE_CONFLICT",
+                    outcome_unknown=True,
+                    provider_called=False,
+                )
 
         try:
             receipt = provider.send_task(dest, code, "bind_phone", ttl, send_request_id=challenge_id)
@@ -559,14 +606,6 @@ def start_step_up_challenge(
         except Exception as exc:
             unknown = not isinstance(exc, ProviderError) or getattr(exc, "outcome_unknown", False)
             state = "unknown" if unknown else "rejected"
-            transition_risk_checked(
-                engine,
-                challenge_id,
-                state,
-                channel="sms",
-                purpose="step_up_auth",
-                request_id=context.request_id,
-            )
             try:
                 with get_cursor(commit=True) as cur:
                     res = transition_delivery_state(
@@ -580,9 +619,21 @@ def start_step_up_challenge(
                     if not res.updated and res.outcome != "already_target":
                         metrics.inc("delivery_cas_conflict_total", channel="sms", purpose="step_up_auth", reason=state)
             except Exception:
+                transition_risk_checked(
+                    engine,
+                    challenge_id,
+                    state,
+                    channel="sms",
+                    purpose="step_up_auth",
+                    request_id=context.request_id,
+                    cursor_factory=get_cursor,
+                )
                 if idempotency_claim is not None:
                     mark_http_idempotency_unknown(
-                        idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id
+                        idempotency_claim,
+                        "RECEIPT_PERSIST_FAILED",
+                        challenge_id=challenge_id,
+                        cursor_factory=get_cursor,
                     )
                 raise DeliveryStageError(
                     "receipt_persist",
@@ -591,16 +642,43 @@ def start_step_up_challenge(
                     provider_called=getattr(exc, "request_attempted", True),
                 ) from None
 
-            if idempotency_claim is not None:
-                advance_idempotency_stage(
-                    idempotency_claim,
-                    ("provider_called", "send_claimed", "pre_provider"),
-                    "provider_unknown" if unknown else "provider_rejected",
-                    challenge_id=challenge_id,
-                    provider_called=True,
-                    failure_reason=getattr(exc, "reason_code", state),
-                    outcome_unknown=unknown,
-                )
+            transition_risk_checked(
+                engine,
+                challenge_id,
+                state,
+                channel="sms",
+                purpose="step_up_auth",
+                request_id=context.request_id,
+                cursor_factory=get_cursor,
+            )
+
+            if idempotency_claim is not None and idempotency_claim.active:
+                try:
+                    stage_ok = advance_idempotency_stage(
+                        idempotency_claim,
+                        ("provider_called", "send_claimed"),
+                        "provider_unknown" if unknown else "provider_rejected",
+                        challenge_id=challenge_id,
+                        provider_called=True,
+                        failure_reason=getattr(exc, "reason_code", state),
+                        outcome_unknown=unknown,
+                        cursor_factory=get_cursor,
+                    )
+                except Exception:
+                    stage_ok = False
+                if not stage_ok:
+                    mark_http_idempotency_unknown(
+                        idempotency_claim,
+                        "IDEMPOTENCY_RECEIPT_STAGE_CONFLICT",
+                        challenge_id=challenge_id,
+                        cursor_factory=get_cursor,
+                    )
+                    raise DeliveryStageError(
+                        "receipt_persist",
+                        "IDEMPOTENCY_RECEIPT_STAGE_CONFLICT",
+                        outcome_unknown=True,
+                        provider_called=getattr(exc, "request_attempted", True),
+                    ) from None
             if isinstance(exc, ProviderError):
                 raise DeliveryStageError(
                     "provider",
@@ -634,11 +712,21 @@ def start_step_up_challenge(
                     )
         except DeliveryStageError:
             if idempotency_claim is not None:
-                mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_STATE_CONFLICT", challenge_id=challenge_id)
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "RECEIPT_STATE_CONFLICT",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
             raise
         except Exception:
             if idempotency_claim is not None:
-                mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "RECEIPT_PERSIST_FAILED",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
             raise DeliveryStageError(
                 "receipt_persist",
                 "RECEIPT_PERSIST_FAILED",
@@ -647,14 +735,32 @@ def start_step_up_challenge(
                 outcome_unknown=True,
             ) from None
 
-        if idempotency_claim is not None:
-            advance_idempotency_stage(
-                idempotency_claim,
-                ("provider_called", "send_claimed", "pre_provider"),
-                "provider_accepted",
-                challenge_id=challenge_id,
-                provider_called=True,
-            )
+        if idempotency_claim is not None and idempotency_claim.active:
+            try:
+                stage_ok = advance_idempotency_stage(
+                    idempotency_claim,
+                    ("provider_called", "send_claimed"),
+                    "provider_accepted",
+                    challenge_id=challenge_id,
+                    provider_called=True,
+                    cursor_factory=get_cursor,
+                )
+            except Exception:
+                stage_ok = False
+            if not stage_ok:
+                mark_http_idempotency_unknown(
+                    idempotency_claim,
+                    "IDEMPOTENCY_ACCEPTED_STAGE_CONFLICT",
+                    challenge_id=challenge_id,
+                    cursor_factory=get_cursor,
+                )
+                raise DeliveryStageError(
+                    "receipt_persist",
+                    "IDEMPOTENCY_ACCEPTED_STAGE_CONFLICT",
+                    provider_ids=receipt.provider_ids,
+                    provider_called=True,
+                    outcome_unknown=True,
+                )
         transition_risk_checked(
             engine,
             challenge_id,
@@ -662,6 +768,7 @@ def start_step_up_challenge(
             channel="sms",
             purpose="step_up_auth",
             request_id=context.request_id,
+            cursor_factory=get_cursor,
         )
 
     return {
