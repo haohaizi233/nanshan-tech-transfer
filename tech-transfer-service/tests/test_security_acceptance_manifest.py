@@ -106,3 +106,20 @@ def test_match_junit_statuses_supports_class_scoped_test_methods():
         "test_refresh_happy_path",
     )
     assert statuses == ["passed"]
+
+
+def test_match_junit_statuses_treats_any_real_pass_as_evidence_over_skip():
+    """同一节点在集成报告 passed、全量报告 skipped 时，证据成立；失败仍必须阻塞。"""
+    junit_by_fn = {
+        "test_hf03_migration_039": [
+            ("tests.test_security_delivery_fault_injection", ["passed"]),
+            ("tests.test_security_delivery_fault_injection", ["skipped"]),
+        ],
+        "test_failed_node": [
+            ("tests.test_security_delivery_fault_injection", ["passed"]),
+            ("tests.test_security_delivery_fault_injection", ["failed"]),
+        ],
+    }
+    rel_file = "tech-transfer-service/tests/test_security_delivery_fault_injection.py"
+    assert _match_junit_statuses(junit_by_fn, rel_file, "test_hf03_migration_039") == ["passed"]
+    assert _match_junit_statuses(junit_by_fn, rel_file, "test_failed_node") == ["failed"]

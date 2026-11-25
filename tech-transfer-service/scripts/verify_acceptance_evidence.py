@@ -166,6 +166,15 @@ def _match_junit_statuses(
     for j_cls, j_statuses in junit_by_fn.get(test_name, ()):
         if any(j_cls == cls or j_cls.startswith(f"{cls}.") for cls in cls_candidates):
             matched.extend(j_statuses)
+    if not matched:
+        return matched
+    # 同一测试节点可能同时出现在多份 JUnit 报告中（如集成报告 passed、
+    # 全量报告 skipped）。有一次真实 pass 即视为证据成立；失败/错误仍必须阻塞。
+    unique = set(matched)
+    if unique & {"failed", "error"}:
+        return ["failed"]
+    if "passed" in unique:
+        return ["passed"]
     return matched
 
 
