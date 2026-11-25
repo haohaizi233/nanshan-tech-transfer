@@ -104,10 +104,17 @@ def test_hmac_v2_v1_key_rotation_and_leading_zero_preservation():
 
 def test_email_binding_provider_failure_closes_challenge_without_dangling_pending():
     from config import settings as _settings
+    from core.jwt_utils import sign_access_token
+    from modules.security.step_up import _target_fingerprint, session_fingerprint_from_request
 
     em = MockEmailProvider()
     em.should_fail = True
     reset_providers_for_test(email=em)
+
+    req = MagicMock()
+    req.headers = {"Authorization": f"Bearer {sign_access_token(42, 'U042', ['user'], 1)}"}
+    sess_fp = session_fingerprint_from_request(req, 42)
+    target_fp = _target_fingerprint("newuser@example.com", purpose="bind_email")
 
     eng = MagicMock()
     eng.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
@@ -116,7 +123,20 @@ def test_email_binding_provider_failure_closes_challenge_without_dangling_pendin
         {"id": 42},  # active user check
         None,  # duplicate verified email check
         None,  # existing verified email check (first bind)
+        {
+            "id": "sg-bind-42",
+            "user_id": 42,
+            "purpose": "bind_email",
+            "method": "password",
+            "session_fingerprint": sess_fp,
+            "session_id": None,
+            "target_fingerprint": target_fp,
+            "status": "active",
+            "expires_at": time.time() + 180,
+        },  # bind_email step_up_grant validation
         {"id": 42},  # FOR UPDATE app_user in _send_email
+        {"status": "pending_send", "send_state": "sending"},  # RETURNING in reserved->sending CAS
+        {"status": "failed", "send_state": "rejected"},  # RETURNING in sending->rejected CAS
     ]
 
     with (
@@ -130,17 +150,22 @@ def test_email_binding_provider_failure_closes_challenge_without_dangling_pendin
                 42,
                 "newuser@example.com",
                 SendContext("10.0.0.1", "dev-1", "req-bind-fail"),
+                step_up_grant="su-bind-42",
+                session_fingerprint=sess_fp,
                 engine=eng,
             )
         assert exc_info.value.stage == "provider"
         assert exc_info.value.reason_code == "provider_rejected"
 
-    # 验证最终 UPDATE 将 pending_send 转为 failed / rejected（绝不残留 pending）
+    # 验证最终 CAS UPDATE 将 sending 转为 rejected / failed（绝不残留 pending）
     update_calls = [
-        c.args for c in cur.execute.call_args_list if "UPDATE auth_challenge SET send_state" in str(c.args[0])
+        c.args
+        for c in cur.execute.call_args_list
+        if "UPDATE auth_challenge" in str(c.args[0]) and "SET send_state" in str(c.args[0])
     ]
-    assert len(update_calls) == 1
-    sql_params = update_calls[0][1]
+    assert len(update_calls) == 2
+    assert update_calls[0][1][0] == "sending"
+    sql_params = update_calls[-1][1]
     assert sql_params[0] == "rejected"
     assert sql_params[5] == "rejected"
     eng.transition.assert_called_once()
@@ -163,7 +188,7 @@ def test_email_unknown_outcome_keeps_single_otp_verifiable_and_avoids_resend():
     eng = MagicMock()
     eng.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
     cur = MagicMock()
-    cur.fetchone.return_value = {"id": 88}
+    cur.fetchone.return_value = {"id": 88, "status": "pending", "send_state": "unknown"}
 
     with (
         patch.object(_settings, "EMAIL_ENABLED", True),
@@ -186,12 +211,15 @@ def test_email_unknown_outcome_keeps_single_otp_verifiable_and_avoids_resend():
         assert exc_info.value.reason_code == "PROVIDER_OUTCOME_UNKNOWN"
 
     update_calls = [
-        c.args for c in cur.execute.call_args_list if "UPDATE auth_challenge SET send_state" in str(c.args[0])
+        c.args
+        for c in cur.execute.call_args_list
+        if "UPDATE auth_challenge" in str(c.args[0]) and "SET send_state" in str(c.args[0])
     ]
-    assert len(update_calls) == 1
-    assert update_calls[0][1][0] == "unknown"
+    assert len(update_calls) == 2
+    assert update_calls[0][1][0] == "sending"
+    assert update_calls[-1][1][0] == "unknown"
     assert (
-        update_calls[0][1][5] == "unknown"
+        update_calls[-1][1][5] == "unknown"
     )  # CASE turns pending_send -> pending when send_state in (accepted, unknown)
     eng.transition.assert_called_once_with("ch-unk-88", "unknown")
 
@@ -200,6 +228,7 @@ def test_email_unknown_outcome_keeps_single_otp_verifiable_and_avoids_resend():
     with patch("modules.security.service.get_cursor") as mock_gc:
         v_cur = MagicMock()
         v_cur.fetchone.side_effect = [
+            {"user_id": 88},
             {
                 "id": "ch-unk-88",
                 "user_id": 88,

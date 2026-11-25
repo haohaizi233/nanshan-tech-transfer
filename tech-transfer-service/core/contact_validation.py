@@ -60,7 +60,7 @@ def normalize_email(value, *, field_name: str = "邮箱") -> str:
 
 def email_domain(normalized_email: str) -> str:
     """提取已规范化邮箱的小写 ASCII 域名。"""
-    text = normalize_contact(normalized_email)
+    text = str(normalize_contact(normalized_email))
     if "@" not in text:
         return ""
     return text.rsplit("@", 1)[-1].lower()

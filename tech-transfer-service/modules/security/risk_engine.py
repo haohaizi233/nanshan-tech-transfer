@@ -201,7 +201,7 @@ class BaseRiskEngine:
         return hmac.new(self.secret, (kind + ":" + str(value)).encode("utf-8"), hashlib.sha256).hexdigest()
 
     def _key(self, kind: str, value: object) -> str:
-        return self.prefix + kind + ":" + self._digest(kind, value)
+        return f"{self.prefix}{kind}:{self._digest(kind, value)}"
 
     def _client(self):
         if self.redis is None:

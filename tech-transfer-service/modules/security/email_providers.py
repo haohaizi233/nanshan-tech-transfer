@@ -30,6 +30,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, make_msgid, parseaddr
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from core.contact_validation import email_domain, normalize_email
 from core.errors import BizError
@@ -97,9 +98,16 @@ def _validate_send_inputs(
         raise ProviderError("收件人邮箱格式不正确", reason_code="invalid_parameters") from None
 
 
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+
+
 class EmailProvider(abc.ABC):
     provider_name: str = "base"
     capabilities: ProviderCapabilities = ProviderCapabilities()
+
+    @property
+    def provider_config_id(self) -> str:
+        return f"{self.provider_name}:default"
 
     @abc.abstractmethod
     def send_code(
@@ -196,10 +204,15 @@ class MockEmailProvider(EmailProvider):
         delivery_webhook=False,
     )
 
-    def __init__(self):
+    def __init__(self, *, config_id: str = "default"):
         self.sent_emails: list[dict[str, Any]] = []
         self.should_fail: bool = False
         self.failure_error: ProviderError | None = None
+        self._config_id = str(config_id or "default")
+
+    @property
+    def provider_config_id(self) -> str:
+        return f"{self.provider_name}:{self._config_id}"
 
     def clear(self):
         self.sent_emails.clear()
@@ -210,14 +223,14 @@ class MockEmailProvider(EmailProvider):
         target = (email or "").strip().lower()
         for item in reversed(self.sent_emails):
             if item["email"] == target and "code" in item:
-                return item["code"]
+                return str(item["code"])
         return None
 
     def get_last_link(self, email: str) -> str | None:
         target = (email or "").strip().lower()
         for item in reversed(self.sent_emails):
             if item["email"] == target and "reset_url" in item:
-                return item["reset_url"]
+                return str(item["reset_url"])
         return None
 
     def send_code(
@@ -444,6 +457,11 @@ class SmtpEmailProvider(EmailProvider):
             raise ProviderError("SMTP 发件人邮箱配置无效", reason_code="CONFIG_ERROR") from None
         _assert_no_header_injection(self.from_email, "from_email")
 
+    @property
+    def provider_config_id(self) -> str:
+        raw = f"smtp:{self.host}:{self.port}:{int(self.use_ssl)}:{self.from_email}:{self.user[:6]}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
     def _build_mime(
         self,
         to_email: str,
@@ -485,6 +503,7 @@ class SmtpEmailProvider(EmailProvider):
         send_request_id: str,
     ) -> DeliveryReceipt:
         phase = "connect"
+        server: smtplib.SMTP
         try:
             if self.use_ssl:
                 server = smtplib.SMTP_SSL(
@@ -760,6 +779,14 @@ class TencentSesProvider(EmailProvider):
             normalize_email(parsed_addr or self.from_email, field_name="发信地址")
         except BizError:
             raise ProviderError("腾讯云 SES 发信邮箱格式无效", reason_code="CONFIG_ERROR") from None
+
+    @property
+    def provider_config_id(self) -> str:
+        raw = (
+            f"tencent_ses:{self.endpoint}:{self.region}:{self.from_email}:"
+            f"{self.secret_id[:6]}:{self.otp_template_id}:{self.reset_template_id}"
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
     def _tc3_request(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         service = "ses"
@@ -1067,14 +1094,20 @@ class TencentSesProvider(EmailProvider):
             rendered=rendered,
         )
 
-    def query_status(self, provider_ids: list[str], *, request_date: str | None = None) -> dict[str, Any]:
+    def query_status(
+        self,
+        provider_ids: list[str],
+        *,
+        request_date: str | None = None,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         """查询腾讯云 SES 发送状态（GetSendEmailStatus 2020-10-02）。"""
         if not provider_ids or any(not str(item).strip() for item in provider_ids):
             raise ProviderError("缺少服务商邮件 MessageId", reason_code="invalid_parameters")
-        query_date = request_date or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+        query_date = request_date or datetime.datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
         payload = {
             "RequestDate": query_date,
-            "Offset": 0,
+            "Offset": max(0, int(offset)),
             "Limit": 100,
             "MessageId": str(provider_ids[0]).strip(),
         }

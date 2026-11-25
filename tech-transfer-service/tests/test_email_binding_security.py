@@ -48,10 +48,10 @@ def test_available_step_up_methods_by_account_type():
         cur.fetchone.return_value = {"password_configured": True, "has_password": True, "privileged": False}
         cur.fetchall.return_value = [{"contact_type": "email", "verification_method": "email"}]
         mock_gc.return_value.__enter__.return_value = cur
-        methods = get_available_step_up_methods(10, token_iat=int(time.time()))
+        methods = get_available_step_up_methods(10, auth_time=int(time.time()), has_sid=True)
     assert methods == ["password", "old_email_otp"]
 
-    # 无密码（仅微信）账号近期登录可使用 recent_auth
+    # 无密码（仅微信）账号近期可信登录（含 auth_time + sid）可使用 recent_auth
     with (
         patch.object(_settings, "EMAIL_ENABLED", True),
         patch.object(_settings, "SMS_ENABLED", False),
@@ -61,7 +61,7 @@ def test_available_step_up_methods_by_account_type():
         cur2.fetchone.return_value = {"password_configured": False, "has_password": False, "privileged": False}
         cur2.fetchall.return_value = []
         mock_gc.return_value.__enter__.return_value = cur2
-        methods_wc = get_available_step_up_methods(11, token_iat=int(time.time()) - 10)
+        methods_wc = get_available_step_up_methods(11, auth_time=int(time.time()) - 10, has_sid=True)
     assert "recent_auth" in methods_wc
 
 
@@ -134,6 +134,7 @@ def test_step_up_grant_issuance_and_validation_guards():
 
 def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notifies():
     from config import settings as _settings
+    from modules.security.step_up import _target_fingerprint
 
     _, sess_fp = _make_request_with_jwt(77)
     cid = "ch-rebind-77"
@@ -159,6 +160,7 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
             "expires_at": time.time() + 300,
         },
         {"id": 10, "normalized_value": "old77@example.com"},
+        None,  # conflict query
     ]
     with patch("modules.security.service.get_cursor") as mock_gc:
         mock_gc.return_value.__enter__.return_value = cur_no_grant
@@ -176,7 +178,8 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
         "purpose": "rebind_email",
         "method": "password",
         "session_fingerprint": sess_fp,
-        "target_fingerprint": None,
+        "session_id": None,
+        "target_fingerprint": _target_fingerprint(new_email, purpose="rebind_email"),
         "status": "active",
         "expires_at": time.time() + 180,
     }
@@ -197,8 +200,8 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
             "expires_at": time.time() + 300,
         },
         {"id": 10, "normalized_value": "old77@example.com"},
-        grant_row,
         None,  # conflict query -> no other account
+        grant_row,
     ]
     with (
         patch.object(_settings, "EMAIL_ENABLED", True),
@@ -236,6 +239,17 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
         },
         None,  # first-time bind
         None,  # FOR UPDATE didn't see uncommitted row
+        {
+            "id": "sg-bind-dup",
+            "user_id": 77,
+            "purpose": "bind_email",
+            "method": "password",
+            "session_fingerprint": sess_fp,
+            "session_id": None,
+            "target_fingerprint": _target_fingerprint(new_email, purpose="bind_email"),
+            "status": "active",
+            "expires_at": time.time() + 180,
+        },
     ]
 
     def _side_effect(sql, params=None):
@@ -246,5 +260,12 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
     with patch("modules.security.service.get_cursor") as mock_gc:
         mock_gc.return_value.__enter__.return_value = cur_dup
         with pytest.raises(BizError) as dup_exc:
-            verify_and_bind_contact(77, cid, code, new_email, session_fingerprint=sess_fp)
+            verify_and_bind_contact(
+                77,
+                cid,
+                code,
+                new_email,
+                step_up_grant="step-up-bind-dup-77",
+                session_fingerprint=sess_fp,
+            )
         assert dup_exc.value.http_status == 409
