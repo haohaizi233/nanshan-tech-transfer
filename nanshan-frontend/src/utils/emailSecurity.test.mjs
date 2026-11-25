@@ -3,10 +3,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   STEP_UP_METHOD_LABELS,
+  createIdempotencyKey,
   sanitizeOtpCode,
   parseResetCredentialsFromLocation,
   normalizeRecoveryCapabilities,
   resolveRetryAfterSeconds,
+  shouldReuseIdempotencyKeyOnError,
 } from './emailSecurity.js'
 
 test('sanitizeOtpCode preserves leading zeros and strips non-digits', () => {
@@ -63,4 +65,21 @@ test('ResetPasswordView does not verify link in onMounted and strips URL state',
   assert.doesNotMatch(vueSrc, /onMounted[\s\S]*verifyPasswordRecovery/)
   assert.match(vueSrc, /replaceState/)
   assert.match(vueSrc, /parseResetCredentialsFromLocation/)
+})
+
+test('createIdempotencyKey generates opaque ASCII keys without PII', () => {
+  const k1 = createIdempotencyKey('rec')
+  const k2 = createIdempotencyKey('rec')
+  assert.notEqual(k1, k2)
+  assert.match(k1, /^rec-[A-Za-z0-9_.:-]{12,120}$/)
+  assert.doesNotMatch(k1, /@/)
+})
+
+test('shouldReuseIdempotencyKeyOnError reuses key only for transient network or gateway errors', () => {
+  assert.equal(shouldReuseIdempotencyKeyOnError({ status: 0 }), true)
+  assert.equal(shouldReuseIdempotencyKeyOnError({ status: 503 }), true)
+  assert.equal(shouldReuseIdempotencyKeyOnError({ status: 504 }), true)
+  assert.equal(shouldReuseIdempotencyKeyOnError({ status: 400 }), false)
+  assert.equal(shouldReuseIdempotencyKeyOnError({ status: 409 }), false)
+  assert.equal(shouldReuseIdempotencyKeyOnError({ status: 429 }), false)
 })

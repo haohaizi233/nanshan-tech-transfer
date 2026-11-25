@@ -120,6 +120,7 @@ export async function api(path, {
   method = 'GET',
   body,
   params,
+  headers: extraHeaders,
   skipAuthRefresh,
   signal,
   guestOn401 = false,
@@ -138,7 +139,7 @@ export async function api(path, {
     if (existing) {
       return existing
     }
-    const promise = doRequest(url, { method, body, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet })
+    const promise = doRequest(url, { method, body, extraHeaders, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet })
       .finally(() => {
         inflightGets.delete(cacheKey)
       })
@@ -146,13 +147,20 @@ export async function api(path, {
     return promise
   }
 
-  return doRequest(url, { method, body, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet })
+  return doRequest(url, { method, body, extraHeaders, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet })
 }
 
-async function doRequest(url, { method, body, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet }) {
+async function doRequest(url, { method, body, extraHeaders, skipAuthRefresh, signal, guestOn401, skipErrorToast, isGet }) {
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
   const buildHeaders = () => {
     const headers = {}
+    if (extraHeaders && typeof extraHeaders === 'object') {
+      for (const [k, v] of Object.entries(extraHeaders)) {
+        if (v !== undefined && v !== null && v !== '') {
+          headers[k] = String(v)
+        }
+      }
+    }
     if (/\/auth\/recovery\/start$|\/me\/security\/contact\/challenge$|\/me\/security\/step-up\/challenge$/.test(url.pathname)) {
       headers['X-Client-Source'] = 'h5'
       const deviceId = getDeviceInstanceId()

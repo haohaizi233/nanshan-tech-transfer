@@ -288,9 +288,37 @@ export async function getRecoveryCapabilities() {
 	return publicRequest('GET', '/auth/recovery/capabilities')
 }
 
+/** 生成随机不透明 HTTP 幂等键（不含联系方式或用户敏感信息） */
+export function createSecurityIdempotencyKey(prefix = 'sec') {
+	const clean = String(prefix || 'sec').replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 16) || 'sec'
+	if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+		return `${clean}-${globalThis.crypto.randomUUID()}`
+	}
+	const r1 = Math.random().toString(36).slice(2, 10)
+	const r2 = Math.random().toString(36).slice(2, 10)
+	return `${clean}-${Date.now().toString(36)}-${r1}${r2}`
+}
+
+/** 判定仅网络/超时/网关未知异常时复用当前幂等键，确定性失败或成功后均轮转 */
+export function shouldReuseSecurityIdempotencyKey(err) {
+	if (!err) return false
+	const status = Number(err.status || 0)
+	if (status === 502 || status === 503 || status === 504) return true
+	if (!err.code) return true
+	return /^(NETWORK|TIMEOUT)/i.test(String(err.code)) || err.code === 'TT_COMMON_50301'
+}
+
 /** 发起敏感操作二次认证验证码挑战 */
-export async function startSecurityStepUpChallenge(purpose = 'rebind_email', method = 'old_email_otp') {
-	return apiRequest('POST', '/me/security/step-up/challenge', null, { purpose, method })
+export async function startSecurityStepUpChallenge(
+	purpose = 'rebind_email',
+	method = 'old_email_otp',
+	targetContact = null,
+	idempotencyKey = null
+) {
+	const body = { purpose, method }
+	if (targetContact) body.targetContact = String(targetContact).trim()
+	const options = idempotencyKey ? { headers: { 'Idempotency-Key': String(idempotencyKey).trim() } } : {}
+	return apiRequest('POST', '/me/security/step-up/challenge', null, body, options)
 }
 
 /** 核验敏感操作二次认证凭据并获取短期 Step-up Grant */
@@ -313,13 +341,19 @@ export async function verifySecurityStepUp({
 }
 
 /** 发起安全联系方式绑定/换绑挑战（发送验证码） */
-export async function sendSecurityContactChallenge(contactType, contactValue, stepUpGrant = null) {
+export async function sendSecurityContactChallenge(
+	contactType,
+	contactValue,
+	stepUpGrant = null,
+	idempotencyKey = null
+) {
 	const body = {
 		contactType,
 		contactValue: String(contactValue || '').trim()
 	}
 	if (stepUpGrant) body.stepUpGrant = stepUpGrant
-	return apiRequest('POST', '/me/security/contact/challenge', null, body)
+	const options = idempotencyKey ? { headers: { 'Idempotency-Key': String(idempotencyKey).trim() } } : {}
+	return apiRequest('POST', '/me/security/contact/challenge', null, body, options)
 }
 
 /** 提交验证码确认绑定/换绑安全联系方式 */
@@ -339,11 +373,12 @@ export async function revokeAllUserSessions() {
 }
 
 /** 发起找回密码挑战（防枚举返回） */
-export async function startPasswordRecovery(account, channel = 'sms') {
+export async function startPasswordRecovery(account, channel = 'sms', idempotencyKey = null) {
+	const options = idempotencyKey ? { headers: { 'Idempotency-Key': String(idempotencyKey).trim() } } : {}
 	return apiRequest('POST', '/auth/recovery/start', null, {
 		account: String(account || '').trim(),
 		channel
-	})
+	}, options)
 }
 
 /** 验证找回密码挑战验证码，换取单次 recoveryGrant */
