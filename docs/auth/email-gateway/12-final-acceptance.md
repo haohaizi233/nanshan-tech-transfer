@@ -1,5 +1,7 @@
 # Email Security Gateway 最终验收标准逐项核验矩阵 (12-final-acceptance)
 
+> **[HISTORICAL SNAPSHOT / 历史快照说明]** 本文档为 Phase Final 阶段的历史验收快照，已被 [17-phase-r-hotfix-acceptance.md](./17-phase-r-hotfix-acceptance.md) 与动态证据清单 [acceptance-manifest.yaml](./acceptance-manifest.yaml) 取代；最新实时核验结果以 CI 执行与证据门禁输出为准。
+
 > **基线说明**：本文档记录第一轮上线的 **A01–A30** 原始验收矩阵。第二轮 **Phase R 安全边界收敛与生产可靠性加固 (R01–R11 / R-A01–R-A32)** 详见 [13-phase-r-hardening.md](13-phase-r-hardening.md) 与 [14-phase-r-acceptance.md](14-phase-r-acceptance.md)（其中在 Phase R 中进一步将首次绑定安全邮箱收敛为强制会话授权并绑定目标邮箱）。
 >
 > **外部实发声明**：凡涉及真实公网外部 SMTP/SES 服务器通信及真实用户收件箱送达确认的外部实盘验收项（包括 **`EXT-EMAIL-01`**、**`EXT-EMAIL-02`** 与下表 **`A30`**），因未收到外部实发测试账号与收件箱明确授权，均严格标记为 **`NOT RUN`**；所有代码门禁、Mock/Socket/Protocol 合约测试及本地真实 PostgreSQL/Redis 并发集成验证均已执行并通过。

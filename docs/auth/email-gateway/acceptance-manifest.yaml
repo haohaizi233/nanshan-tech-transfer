@@ -1,6 +1,6 @@
-version: "phase-r-final"
-baseline_sha: "5f0d00aee3a3a869f52b790a72e74bf26908672c"
-schema_version: "038"
+version: "phase-r-hotfix"
+baseline_sha: "a68d5a367ee8007f33b1e227b83683860a068597"
+schema_version: "039"
 
 requirements:
   # ── 原始 A01–A30（严格保持不可变编号与原始语义） ────────────────────────
@@ -8,39 +8,50 @@ requirements:
     group: A
     description: 生产环境无法使用 Mock Email
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/config.py
       - tech-transfer-service/modules/security/provider.py
     tests:
       - tech-transfer-service/tests/test_email_provider.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider.py::test_email_provider_registry_strict_check_order
+    expected_outcome: PASS
 
   - id: A02
     group: A
     description: EMAIL_ENABLED=false 时无法真实发信
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/provider.py
       - tech-transfer-service/modules/security/email_gateway.py
     tests:
       - tech-transfer-service/tests/test_email_provider.py
       - tech-transfer-service/tests/test_email_recovery_e2e.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider.py::test_email_provider_cache_invalidation_and_toggle
+      - tech-transfer-service/tests/test_email_recovery_e2e.py::test_recovery_capabilities_and_disabled_email_gate
+    expected_outcome: PASS
 
   - id: A03
     group: A
     description: 未知 Provider 不会静默回退
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/provider.py
     tests:
       - tech-transfer-service/tests/test_email_provider.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider.py::test_email_provider_registry_strict_check_order
+    expected_outcome: PASS
 
   - id: A04
     group: A
     description: OTP、Token、Grant 不进入日志
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_providers.py
       - tech-transfer-service/core/exception_handlers.py
@@ -48,36 +59,47 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_email_provider.py
       - tech-transfer-service/tests/test_email_recovery_e2e.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider.py::test_mock_email_provider_never_logs_plaintext_secrets
+      - tech-transfer-service/tests/test_email_recovery_e2e.py::test_recovery_e2e_otp_and_link_complete_and_headers
+    expected_outcome: PASS
 
   - id: A05
     group: A
     description: Redis 异常时生产发送 Fail-Closed
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/risk_engine.py
       - tech-transfer-service/modules/security/rate_limiter.py
       - tech-transfer-service/modules/security/email_risk.py
     tests:
       - tech-transfer-service/tests/test_email_risk.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_risk.py::test_email_risk_and_rate_limiter_fail_closed_on_redis_failure
+    expected_outcome: PASS
 
   - id: A06
     group: A
     description: 未确权邮箱无法用于账号恢复
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/eligibility.py
       - tech-transfer-service/modules/security/email_gateway.py
     tests:
       - tech-transfer-service/tests/test_email_recovery_e2e.py
       - tech-transfer-service/tests/test_email_gateway_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_recovery_e2e.py::test_recovery_start_anti_enumeration_and_retry_after_header
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_redis_recovery_and_16_thread_parallel_verify_race
+    expected_outcome: PASS
 
   - id: A07
     group: A
     description: 安全邮箱换绑具备二次认证
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/modules/security/service.py
@@ -85,59 +107,76 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_email_binding_security.py
       - tech-transfer-service/tests/test_email_gateway_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_binding_security.py::test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notifies
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery
+    expected_outcome: PASS
 
   - id: A08
     group: A
     description: Challenge 与 Grant 不可重复消费
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_email_challenge.py
       - tech-transfer-service/tests/test_email_gateway_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_challenge.py::test_challenge_state_machine_and_unknown_verification_policy
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_redis_recovery_and_16_thread_parallel_verify_race
+    expected_outcome: PASS
 
   - id: A09
     group: A
     description: 邮件发送失败不会残留错误有效挑战
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_gateway.py
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_email_challenge.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_challenge.py::test_email_binding_provider_failure_closes_challenge_without_dangling_pending
+    expected_outcome: PASS
 
   - id: A10
     group: A
     description: 真实数据库并发核验通过
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/modules/security/email_gateway.py
     tests:
       - tech-transfer-service/tests/test_email_gateway_postgres.py
       - tech-transfer-service/tests/test_security_cross_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_redis_recovery_and_16_thread_parallel_verify_race
+      - tech-transfer-service/tests/test_security_cross_transaction_postgres.py::test_c01_to_c09_cross_transaction_pg_concurrency_matrix
+    expected_outcome: PASS
 
   - id: A11
     group: A
     description: 邮件链接 GET 无不可逆副作用
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/app.py
       - nanshan-frontend/src/views/auth/ResetPasswordView.vue
     tests:
       - tech-transfer-service/tests/test_email_recovery_e2e.py
-      - nanshan-frontend/src/utils/emailSecurity.test.mjs
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_recovery_e2e.py::test_recovery_e2e_otp_and_link_complete_and_headers
+    expected_outcome: PASS
 
   - id: A12
     group: A
     description: 密码重置后旧会话失效
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/core/middleware.py
@@ -145,32 +184,43 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_unified_auth_recovery.py
       - tech-transfer-service/tests/test_security_credential_revocation.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_unified_auth_recovery.py::test_session_version_rejection_after_invalidation
+      - tech-transfer-service/tests/test_security_credential_revocation.py::test_change_password_and_recovery_complete_revoke_all_credentials_and_invalidate_post_commit
+    expected_outcome: PASS
 
   - id: A13
     group: A
     description: SMTP 错误分类完整
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_providers.py
     tests:
       - tech-transfer-service/tests/test_email_smtp.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_smtp.py::test_smtp_error_classifications_and_data_phase_unknown_no_retry
+    expected_outcome: PASS
 
   - id: A14
     group: A
     description: SES 请求与响应契约测试通过
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_providers.py
     tests:
       - tech-transfer-service/tests/test_email_ses.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_ses.py::test_tencent_ses_send_email_simple_and_template_contracts
+      - tech-transfer-service/tests/test_email_ses.py::test_tencent_ses_http_malformed_and_query_status
+    expected_outcome: PASS
 
   - id: A15
     group: A
     description: 多维原子风控完整
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/risk_engine.py
       - tech-transfer-service/modules/security/email_risk.py
@@ -178,24 +228,32 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_email_risk.py
       - tech-transfer-service/tests/test_sms_risk.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_risk.py::test_email_risk_cooldown_windows_distinct_and_public_domain_allowlist
+      - tech-transfer-service/tests/test_sms_risk.py::test_concurrent_phone_only_one_send
+    expected_outcome: PASS
 
   - id: A16
     group: A
     description: 投递任务具备应用内部幂等性
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_delivery_state_cas.py
       - tech-transfer-service/tests/test_security_http_idempotency.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_state_cas.py::test_two_worker_concurrent_claim_only_executes_once
+      - tech-transfer-service/tests/test_security_http_idempotency.py::test_32_thread_idempotency_replay_conflict_scope_release_expiry_and_legacy_client
+    expected_outcome: PASS
 
   - id: A17
     group: A
     description: 供应商结果未知时不会盲目重发
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/state_machine.py
       - tech-transfer-service/modules/security/email_gateway.py
@@ -203,44 +261,57 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_email_challenge.py
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_challenge.py::test_email_unknown_outcome_keeps_single_otp_verifiable_and_avoids_resend
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id01_to_id08_lifecycle_finalize_failure_unknown_and_active_ttl_protection
+    expected_outcome: PASS
 
   - id: A18
     group: A
     description: 邮件结构化投递 Receipt
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/delivery_models.py
       - tech-transfer-service/modules/security/email_providers.py
     tests:
       - tech-transfer-service/tests/test_email_delivery_results.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_delivery_results.py::test_delivery_receipt_and_capabilities_contract
+    expected_outcome: PASS
 
   - id: A19
     group: A
     description: 邮件故障诊断工具可用
     priority: P1
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_diagnostics.py
       - tech-transfer-service/tools/email_gateway_ops.py
     tests:
       - tech-transfer-service/tests/test_email_diagnostics.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_diagnostics.py::test_email_gateway_ops_cli_subcommands_and_live_test_gate
+    expected_outcome: PASS
 
   - id: A20
     group: A
     description: 邮件模板工程化
     priority: P1
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_templates.py
     tests:
       - tech-transfer-service/tests/test_email_provider.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider.py::test_normalize_email_and_templates_security
+    expected_outcome: PASS
 
   - id: A21
     group: A
     description: H5 邮箱流程正常
     priority: P1
+    evidence_type: frontend_node_test
     sources:
       - nanshan-frontend/src/views/auth/ForgotPasswordView.vue
       - nanshan-frontend/src/views/auth/ResetPasswordView.vue
@@ -248,36 +319,51 @@ requirements:
     tests:
       - nanshan-frontend/src/utils/emailSecurity.test.mjs
       - nanshan-frontend/tests/unified-auth-views.test.mjs
-    status: PASS
+    test_nodes:
+      - nanshan-frontend/src/utils/emailSecurity.test.mjs::ResetPasswordView does not verify link in onMounted and strips URL state
+      - nanshan-frontend/tests/unified-auth-views.test.mjs::ForgotPasswordView.vue implements 4-step wizard
+      - nanshan-frontend/tests/unified-auth-views.test.mjs::AccountSecurityView.vue provides unified security center
+    expected_outcome: PASS
 
   - id: A22
     group: A
     description: 微信小程序邮箱流程正常
     priority: P1
+    evidence_type: miniprogram_node_test
     sources:
       - 南山小程序/南山/subpackages/tech-transfer/pages/mine/mine.vue
       - 南山小程序/南山/subpackages/tech-transfer/api/user.js
     tests:
       - 南山小程序/南山/tests/unified-auth-security.test.mjs
-    status: PASS
+    test_nodes:
+      - 南山小程序/南山/tests/unified-auth-security.test.mjs::mine.vue contains forgot password entry and unified account security settings
+      - 南山小程序/南山/tests/unified-auth-security.test.mjs::mine.vue uses email_otp recovery channel, capabilities gate, and stepUpGrant rebinding
+    expected_outcome: PASS
 
   - id: A23
     group: A
     description: 数据库增量迁移兼容
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/migrations/pg/036_email_security_gateway.sql
       - tech-transfer-service/migrations/pg/037_phase_r_security_hardening.sql
       - tech-transfer-service/migrations/pg/038_phase_r_final_security.sql
+      - tech-transfer-service/migrations/pg/039_phase_r_hotfix.sql
     tests:
       - tech-transfer-service/tests/test_email_gateway_postgres.py
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_migration_036_upgrade_converges_historical_dirty_rows
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_gate
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
 
   - id: A24
     group: A
     description: 原有 SMS Gateway 全量回归
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/sms_risk.py
@@ -285,162 +371,215 @@ requirements:
       - tech-transfer-service/tests/test_sms_gateway.py
       - tech-transfer-service/tests/test_sms_gateway_postgres.py
       - tech-transfer-service/tests/test_sms_risk.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_sms_gateway.py::test_unknown_account_never_calls_provider_or_reserves_send_quota
+      - tech-transfer-service/tests/test_sms_gateway_postgres.py::test_real_recovery_and_old_session_version
+      - tech-transfer-service/tests/test_sms_risk.py::test_redis_failure_denies
+    expected_outcome: PASS
 
   - id: A25
     group: A
     description: 微信登录及注册流程无回归
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/identity/wechat.py
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_wechat_login.py
       - tech-transfer-service/tests/test_cov_ach_identity.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_wechat_login.py::test_linked_wechat_login_reuses_account_without_phone_authorization
+      - tech-transfer-service/tests/test_cov_ach_identity.py::test_refresh_happy_path
+    expected_outcome: PASS
 
   - id: A26
     group: A
     description: 邮箱专项测试进入 CI
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - .github/workflows/ci.yml
     tests:
       - tech-transfer-service/tests/test_email_gateway_postgres.py
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_redis_recovery_and_16_thread_parallel_verify_race
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: A27
     group: A
     description: 部署及送达验收文档完整
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/10-deployment-runbook.md
       - docs/auth/email-gateway/15-phase-r-final-hardening.md
       - docs/auth/email-gateway/16-phase-r-final-acceptance.md
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: A28
     group: A
     description: 密码找回接口防账号枚举
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/modules/security/email_gateway.py
       - tech-transfer-service/modules/security/sms_gateway.py
     tests:
       - tech-transfer-service/tests/test_recovery_anti_enumeration.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_recovery_anti_enumeration.py::test_all_anonymous_recovery_verify_failures_return_identical_public_response
+    expected_outcome: PASS
 
   - id: A29
     group: A
     description: 风控及投递日志完成脱敏
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/delivery_models.py
       - tech-transfer-service/modules/security/email_diagnostics.py
     tests:
       - tech-transfer-service/tests/test_email_diagnostics.py
       - tech-transfer-service/tests/test_email_provider_reconciliation.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_diagnostics.py::test_email_config_redis_queue_and_inspection_redact_secrets
+      - tech-transfer-service/tests/test_email_provider_reconciliation.py::test_ses_official_deliver_status_mapping_message_id_matching_and_no_raw_deliver_message
+    expected_outcome: PASS
 
   - id: A30
     group: A
     description: 代码及文档实际行为一致
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
+      - docs/auth/email-gateway/15-phase-r-final-hardening.md
       - docs/auth/email-gateway/16-phase-r-final-acceptance.md
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_rejects_static_pass_and_verifies_ast_and_docs
+    expected_outcome: PASS
 
   # ── 原始 R-A01–R-A32（严格保持不可变编号与原始语义） ──────────────────────
   - id: R-A01
     group: R-A
     description: 首次绑定安全邮箱必须满足敏感操作授权策略
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/modules/security/email_gateway.py
     tests:
       - tech-transfer-service/tests/test_email_first_binding.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_first_binding.py::test_password_and_admin_first_email_bind_require_strong_step_up_and_block_recent_auth
+    expected_outcome: PASS
 
   - id: R-A02
     group: R-A
     description: 已绑定邮箱换绑必须通过 Step-up
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/modules/security/service.py
     tests:
       - tech-transfer-service/tests/test_email_binding_security.py
       - tech-transfer-service/tests/test_email_first_binding.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_binding_security.py::test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notifies
+      - tech-transfer-service/tests/test_email_first_binding.py::test_wechat_non_password_first_email_bind_allows_recent_auth_in_window_and_blocks_escalation
+    expected_outcome: PASS
 
   - id: R-A03
     group: R-A
     description: JWT 刷新不会推进真实 auth_time
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_security_auth_time.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_auth_time.py::test_refresh_preserves_sid_and_never_advances_auth_time
+    expected_outcome: PASS
 
   - id: R-A04
     group: R-A
     description: 旧 Token 不会自动获得近期认证资格
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/modules/security/session_guard.py
     tests:
       - tech-transfer-service/tests/test_security_auth_time.py
       - tech-transfer-service/tests/test_session_validation_fail_closed.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_auth_time.py::test_legacy_null_auth_time_not_fabricated_and_forged_future_time_rejected
+      - tech-transfer-service/tests/test_session_validation_fail_closed.py::test_f01_to_f07_f12_to_f16_session_validation_fail_closed
+    expected_outcome: PASS
 
   - id: R-A05
     group: R-A
     description: Step-up Grant 强制绑定用途及目标
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_email_first_binding.py
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_first_binding.py::test_mandatory_target_binding_and_step_up_challenge_guards
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su01_to_su12_step_up_challenge_full_context_binding_and_rejects
+    expected_outcome: PASS
 
   - id: R-A06
     group: R-A
     description: Grant 不可跨账号、跨会话消费
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_security_auth_time.py
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_auth_time.py::test_step_up_grant_survives_refresh_same_session_and_invalidates_on_logout_cross_device_or_disable
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su13_to_su18_incomplete_legacy_challenge_and_grant_consumption_guards
+    expected_outcome: PASS
 
   - id: R-A07
     group: R-A
     description: 密码重置、邮箱绑定锁顺序统一
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_security_cross_transaction_postgres.py
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_cross_transaction_postgres.py::test_c01_to_c09_cross_transaction_pg_concurrency_matrix
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx08_to_tx14_login_bind_storm_and_lock_order_governance
+    expected_outcome: PASS
 
   - id: R-A08
     group: R-A
     description: 真实交叉事务并发测试无未处理死锁
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/db.py
       - tech-transfer-service/modules/security/service.py
@@ -448,88 +587,116 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_security_cross_transaction_postgres.py
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_cross_transaction_postgres.py::test_deadlock_retry_helper_handles_40p01_and_40001
+      - tech-transfer-service/tests/test_security_cross_transaction_postgres.py::test_c01_to_c09_cross_transaction_pg_concurrency_matrix
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx08_to_tx14_login_bind_storm_and_lock_order_governance
+    expected_outcome: PASS
 
   - id: R-A09
     group: R-A
     description: 同一 Challenge 并发核验仅成功一次
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
     tests:
       - tech-transfer-service/tests/test_email_gateway_postgres.py
       - tech-transfer-service/tests/test_sms_gateway_postgres.py
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_redis_recovery_and_16_thread_parallel_verify_race
+      - tech-transfer-service/tests/test_sms_gateway_postgres.py::test_parallel_challenge_consumption_only_one_grant
+    expected_outcome: PASS
 
   - id: R-A10
     group: R-A
     description: 同一 Grant 并发消费仅成功一次
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_security_cross_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_cross_transaction_postgres.py::test_c01_to_c09_cross_transaction_pg_concurrency_matrix
+    expected_outcome: PASS
 
   - id: R-A11
     group: R-A
     description: 匿名恢复核验失败公开语义一致
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/core/errors.py
     tests:
       - tech-transfer-service/tests/test_recovery_anti_enumeration.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_recovery_anti_enumeration.py::test_all_anonymous_recovery_verify_failures_return_identical_public_response
+    expected_outcome: PASS
 
   - id: R-A12
     group: R-A
     description: 防枚举改造不影响真实失败次数累加
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
     tests:
       - tech-transfer-service/tests/test_recovery_anti_enumeration.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_recovery_anti_enumeration.py::test_all_anonymous_recovery_verify_failures_return_identical_public_response
+    expected_outcome: PASS
 
   - id: R-A13
     group: R-A
     description: 高权限账号不会通过弱认证建立恢复渠道
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/modules/security/eligibility.py
     tests:
       - tech-transfer-service/tests/test_email_first_binding.py
       - tech-transfer-service/tests/test_sms_gateway_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_first_binding.py::test_password_and_admin_first_email_bind_require_strong_step_up_and_block_recent_auth
+      - tech-transfer-service/tests/test_sms_gateway_postgres.py::test_ineligible_business_account_never_calls_provider
+    expected_outcome: PASS
 
   - id: R-A14
     group: R-A
     description: 已关闭认证状态不可被投递回执重新激活
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_delivery_state_cas.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_state_cas.py::test_cas_transitions_duplicate_receipt_and_late_receipt_never_revive_terminal_status
+    expected_outcome: PASS
 
   - id: R-A15
     group: R-A
     description: 同一 HTTP 幂等请求不会重复创建任务
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_security_http_idempotency.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_http_idempotency.py::test_32_thread_idempotency_replay_conflict_scope_release_expiry_and_legacy_client
+    expected_outcome: PASS
 
   - id: R-A16
     group: R-A
     description: 同一幂等请求不会重复消耗真实发送额度
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
       - tech-transfer-service/routes/auth.py
@@ -537,23 +704,31 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_security_http_idempotency.py
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_http_idempotency.py::test_32_thread_idempotency_replay_conflict_scope_release_expiry_and_legacy_client
+      - tech-transfer-service/tests/test_security_http_idempotency.py::test_authenticated_idempotency_pre_provider_release_scope_isolation_and_unknown_outcome
+    expected_outcome: PASS
 
   - id: R-A17
     group: R-A
     description: 幂等冲突能够正确识别
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_security_http_idempotency.py
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_http_idempotency.py::test_32_thread_idempotency_replay_conflict_scope_release_expiry_and_legacy_client
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id01_to_id08_lifecycle_finalize_failure_unknown_and_active_ttl_protection
+    expected_outcome: PASS
 
   - id: R-A18
     group: R-A
     description: Provider unknown 不会盲目重发
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
       - tech-transfer-service/modules/security/email_gateway.py
@@ -561,104 +736,139 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_security_http_idempotency.py
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_http_idempotency.py::test_authenticated_idempotency_pre_provider_release_scope_isolation_and_unknown_outcome
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id01_to_id08_lifecycle_finalize_failure_unknown_and_active_ttl_protection
+    expected_outcome: PASS
 
   - id: R-A19
     group: R-A
     description: 投递状态转换采用真实状态 CAS
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_delivery_state_cas.py
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_state_cas.py::test_cas_transitions_duplicate_receipt_and_late_receipt_never_revive_terminal_status
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s01_to_s08_execution_right_cas_and_zero_provider_calls
+    expected_outcome: PASS
 
   - id: R-A20
     group: R-A
     description: Worker 崩溃恢复具备明确安全边界
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_delivery_state_cas.py
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_state_cas.py::test_two_worker_concurrent_claim_only_executes_once
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+    expected_outcome: PASS
 
   - id: R-A21
     group: R-A
     description: 所有异常终止路径执行必要 PII 清理
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_delivery_pii_retention.py
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_pii_retention.py::test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempotently
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+    expected_outcome: PASS
 
   - id: R-A22
     group: R-A
     description: Provider 切换后历史回执不会错误查询
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/email_gateway.py
     tests:
       - tech-transfer-service/tests/test_email_provider_reconciliation.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider_reconciliation.py::test_reconcile_rejects_provider_switch_config_change_and_unavailable
+    expected_outcome: PASS
 
   - id: R-A23
     group: R-A
     description: 供应商日志与诊断数据完成脱敏
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/security/email_gateway.py
       - tech-transfer-service/modules/security/email_diagnostics.py
     tests:
       - tech-transfer-service/tests/test_email_provider_reconciliation.py
       - tech-transfer-service/tests/test_email_diagnostics.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_provider_reconciliation.py::test_ses_official_deliver_status_mapping_message_id_matching_and_no_raw_deliver_message
+      - tech-transfer-service/tests/test_email_diagnostics.py::test_email_config_redis_queue_and_inspection_redact_secrets
+    expected_outcome: PASS
 
   - id: R-A24
     group: R-A
     description: H5 首次绑定和换绑正常
     priority: P1
+    evidence_type: frontend_node_test
     sources:
       - nanshan-frontend/src/views/admin/AccountSecurityView.vue
       - nanshan-frontend/src/utils/emailSecurity.js
     tests:
       - nanshan-frontend/tests/unified-auth-views.test.mjs
       - nanshan-frontend/src/utils/emailSecurity.test.mjs
-    status: PASS
+    test_nodes:
+      - nanshan-frontend/tests/unified-auth-views.test.mjs::AccountSecurityView.vue provides unified security center
+      - nanshan-frontend/src/utils/emailSecurity.test.mjs::shouldReuseIdempotencyKeyOnError reuses key only for transient network or gateway errors
+    expected_outcome: PASS
 
   - id: R-A25
     group: R-A
     description: 微信小程序首次绑定和换绑正常
     priority: P1
+    evidence_type: miniprogram_node_test
     sources:
       - 南山小程序/南山/subpackages/tech-transfer/pages/mine/mine.vue
       - 南山小程序/南山/subpackages/tech-transfer/api/user.js
     tests:
       - 南山小程序/南山/tests/unified-auth-security.test.mjs
-    status: PASS
+    test_nodes:
+      - 南山小程序/南山/tests/unified-auth-security.test.mjs::mine.vue enforces Step-up and target email binding on initial email bind as well as rebind
+      - 南山小程序/南山/tests/unified-auth-security.test.mjs::createSecurityIdempotencyKey and transient reuse helpers enforce Phase R idempotency policy
+    expected_outcome: PASS
 
   - id: R-A26
     group: R-A
     description: 原 SMS Gateway 不发生安全回归
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/sms_risk.py
     tests:
       - tech-transfer-service/tests/test_sms_gateway_postgres.py
       - tech-transfer-service/tests/test_sms_risk.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_sms_gateway_postgres.py::test_real_redis_postgres_concurrent_requests_send_once
+      - tech-transfer-service/tests/test_sms_risk.py::test_known_reject_releases_daily_budget_once
+    expected_outcome: PASS
 
   - id: R-A27
     group: R-A
     description: 微信登录、刷新、注销无回归
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/identity/wechat.py
       - tech-transfer-service/modules/identity/service.py
@@ -666,286 +876,373 @@ requirements:
       - tech-transfer-service/tests/test_wechat_login.py
       - tech-transfer-service/tests/test_cov_ach_identity.py
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_wechat_login.py::test_session_response_excludes_wechat_identifiers_and_is_a_regular_session
+      - tech-transfer-service/tests/test_cov_ach_identity.py::test_logout_revokes_active_session
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx01_to_tx07_session_rotation_revocation_and_recovery_concurrency
+    expected_outcome: PASS
 
   - id: R-A28
     group: R-A
     description: 数据库迁移支持历史数据升级
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/migrations/pg/036_email_security_gateway.sql
       - tech-transfer-service/migrations/pg/037_phase_r_security_hardening.sql
       - tech-transfer-service/migrations/pg/038_phase_r_final_security.sql
+      - tech-transfer-service/migrations/pg/039_phase_r_hotfix.sql
     tests:
       - tech-transfer-service/tests/test_email_first_binding.py
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_first_binding.py::test_migration_037_revokes_untargeted_active_grants_and_enforces_check
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_gate
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
 
   - id: R-A29
     group: R-A
     description: 新增安全测试实际进入 CI
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - .github/workflows/ci.yml
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: R-A30
     group: R-A
     description: 原始 A01–A30 验收编号完整恢复
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
       - docs/auth/email-gateway/16-phase-r-final-acceptance.md
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: R-A31
     group: R-A
     description: 本轮新增安全模块无未解释类型问题
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - .github/workflows/ci.yml
       - tech-transfer-service/modules/security/session_guard.py
       - tech-transfer-service/modules/security/schema_gate.py
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: R-A32
     group: R-A
     description: 真实外部投递验收未执行时明确 NOT RUN
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
       - docs/auth/email-gateway/16-phase-r-final-acceptance.md
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   # ── Phase R-Final 强制验收矩阵 RF-A01–RF-A42 ───────────────────────────
   - id: RF-A01
     group: RF-A
     description: 不存在的新版 SID 必须拒绝
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/session_guard.py
       - tech-transfer-service/core/middleware.py
     tests:
       - tech-transfer-service/tests/test_session_validation_fail_closed.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_session_validation_fail_closed.py::test_f01_to_f07_f12_to_f16_session_validation_fail_closed
+    expected_outcome: PASS
 
   - id: RF-A02
     group: RF-A
     description: 会话查询异常必须 Fail-Closed
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/session_guard.py
       - tech-transfer-service/core/middleware.py
     tests:
       - tech-transfer-service/tests/test_session_validation_fail_closed.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_session_validation_fail_closed.py::test_f08_to_f11_db_failures_and_missing_schema_fail_closed_503
+    expected_outcome: PASS
 
   - id: RF-A03
     group: RF-A
     description: 已注销会话无法签发或消费 Step-up Grant
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/modules/security/session_guard.py
     tests:
       - tech-transfer-service/tests/test_session_validation_fail_closed.py
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_session_validation_fail_closed.py::test_f01_to_f07_f12_to_f16_session_validation_fail_closed
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su01_to_su12_step_up_challenge_full_context_binding_and_rejects
+    expected_outcome: PASS
 
   - id: RF-A04
     group: RF-A
     description: 旧 Token 不得获得现代近期认证资格
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_session_validation_fail_closed.py
       - tech-transfer-service/tests/test_security_auth_time.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_session_validation_fail_closed.py::test_f01_to_f07_f12_to_f16_session_validation_fail_closed
+      - tech-transfer-service/tests/test_security_auth_time.py::test_legacy_null_auth_time_not_fabricated_and_forged_future_time_rejected
+    expected_outcome: PASS
 
   - id: RF-A05
     group: RF-A
     description: CAS 失败时 Provider 调用次数为零
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
       - tech-transfer-service/modules/security/email_gateway.py
       - tech-transfer-service/modules/security/sms_gateway.py
     tests:
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s01_to_s08_execution_right_cas_and_zero_provider_calls
+    expected_outcome: PASS
 
   - id: RF-A06
     group: RF-A
     description: CAS 未提交时 Provider 调用次数为零
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
       - tech-transfer-service/modules/security/email_gateway.py
     tests:
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s01_to_s08_execution_right_cas_and_zero_provider_calls
+    expected_outcome: PASS
 
   - id: RF-A07
     group: RF-A
     description: 多执行者竞争发送权仅一方获得
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s01_to_s08_execution_right_cas_and_zero_provider_calls
+    expected_outcome: PASS
 
   - id: RF-A08
     group: RF-A
     description: Challenge 已取消或过期时不能获得新发送权
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s01_to_s08_execution_right_cas_and_zero_provider_calls
+    expected_outcome: PASS
 
   - id: RF-A09
     group: RF-A
     description: 迟到回执不能激活已关闭 Challenge
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_delivery_state_cas.py
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_state_cas.py::test_cas_transitions_duplicate_receipt_and_late_receipt_never_revive_terminal_status
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s09_to_s15_late_receipts_stepup_cas_and_queue_single_send
+    expected_outcome: PASS
 
   - id: RF-A10
     group: RF-A
     description: Refresh 与密码重置并发不能恢复旧会话
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/identity/service.py
       - tech-transfer-service/modules/security/service.py
     tests:
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx01_to_tx07_session_rotation_revocation_and_recovery_concurrency
+    expected_outcome: PASS
 
   - id: RF-A11
     group: RF-A
     description: Refresh 与 Logout 并发具备一致结果
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx01_to_tx07_session_rotation_revocation_and_recovery_concurrency
+    expected_outcome: PASS
 
   - id: RF-A12
     group: RF-A
     description: 普通密码修改后旧恢复 Grant 失效
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_security_credential_revocation.py
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_credential_revocation.py::test_change_password_and_recovery_complete_revoke_all_credentials_and_invalidate_post_commit
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx01_to_tx07_session_rotation_revocation_and_recovery_concurrency
+    expected_outcome: PASS
 
   - id: RF-A13
     group: RF-A
     description: 密码重置后历史恢复 Challenge 按策略撤销
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_security_credential_revocation.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_credential_revocation.py::test_rebind_contact_and_user_disable_revoke_old_credentials
+    expected_outcome: PASS
 
   - id: RF-A14
     group: RF-A
     description: 登录与凭证修改并发不会签发错误有效会话
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/identity/service.py
     tests:
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx08_to_tx14_login_bind_storm_and_lock_order_governance
+    expected_outcome: PASS
 
   - id: RF-A15
     group: RF-A
     description: 全局安全事务锁顺序得到真实测试验证
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/identity/service.py
       - tech-transfer-service/modules/security/service.py
       - tech-transfer-service/db.py
     tests:
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx08_to_tx14_login_bind_storm_and_lock_order_governance
+    expected_outcome: PASS
 
   - id: RF-A16
     group: RF-A
     description: 新版 Step-up Challenge 强制绑定完整上下文
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/migrations/pg/038_phase_r_final_security.sql
     tests:
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su01_to_su12_step_up_challenge_full_context_binding_and_rejects
+    expected_outcome: PASS
 
   - id: RF-A17
     group: RF-A
     description: Step-up Challenge 不可跨会话核验
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su01_to_su12_step_up_challenge_full_context_binding_and_rejects
+    expected_outcome: PASS
 
   - id: RF-A18
     group: RF-A
     description: Step-up Challenge 不可跨用途核验
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su01_to_su12_step_up_challenge_full_context_binding_and_rejects
+    expected_outcome: PASS
 
   - id: RF-A19
     group: RF-A
     description: Step-up Challenge 不可跨目标核验
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
     tests:
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su01_to_su12_step_up_challenge_full_context_binding_and_rejects
+    expected_outcome: PASS
 
   - id: RF-A20
     group: RF-A
     description: 不完整历史 Challenge 不会获得新版 Grant
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/step_up.py
       - tech-transfer-service/migrations/pg/038_phase_r_final_security.sql
     tests:
       - tech-transfer-service/tests/test_step_up_challenge_context.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_step_up_challenge_context.py::test_su13_to_su18_incomplete_legacy_challenge_and_grant_consumption_guards
+    expected_outcome: PASS
 
   - id: RF-A21
     group: RF-A
     description: 安全关键异常不再触发弱化回退
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/session_guard.py
       - tech-transfer-service/modules/security/step_up.py
@@ -955,101 +1252,133 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
       - tech-transfer-service/tests/test_session_validation_fail_closed.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_delivery_fault_injection_and_redis_coordination
+      - tech-transfer-service/tests/test_session_validation_fail_closed.py::test_f08_to_f11_db_failures_and_missing_schema_fail_closed_503
+    expected_outcome: PASS
 
   - id: RF-A22
     group: RF-A
     description: 生产安全 Schema 版本具备明确门禁
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/schema_gate.py
       - tech-transfer-service/app.py
     tests:
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_gate
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
 
   - id: RF-A23
     group: RF-A
     description: Provider 成功后持久化失败不会错误释放幂等键
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
       - tech-transfer-service/routes/me.py
     tests:
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id01_to_id08_lifecycle_finalize_failure_unknown_and_active_ttl_protection
+    expected_outcome: PASS
 
   - id: RF-A24
     group: RF-A
     description: unknown 状态不会盲目重新发送
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
       - tech-transfer-service/modules/security/state_machine.py
     tests:
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+    expected_outcome: PASS
 
   - id: RF-A25
     group: RF-A
     description: idem_pending 中间状态具备明确生命周期
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
       - tech-transfer-service/modules/security/sms_gateway.py
     tests:
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+    expected_outcome: PASS
 
   - id: RF-A26
     group: RF-A
     description: 活跃任务不会因幂等 TTL 到期而错误重放
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id01_to_id08_lifecycle_finalize_failure_unknown_and_active_ttl_protection
+    expected_outcome: PASS
 
   - id: RF-A27
     group: RF-A
     description: 清理程序不会破坏合法执行中的任务
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
     tests:
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
       - tech-transfer-service/tests/test_delivery_pii_retention.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+      - tech-transfer-service/tests/test_delivery_pii_retention.py::test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempotently
+    expected_outcome: PASS
 
   - id: RF-A28
     group: RF-A
     description: 所有必要终止路径执行 PII 清理
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/idempotency.py
     tests:
       - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
       - tech-transfer-service/tests/test_delivery_pii_retention.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_delivery_pii_retention.py::test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempotently
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+    expected_outcome: PASS
 
   - id: RF-A29
     group: RF-A
     description: Redis 状态转换失败具备诊断及协调策略
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/delivery_models.py
       - tech-transfer-service/modules/security/email_gateway.py
       - tech-transfer-service/modules/security/sms_gateway.py
     tests:
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_delivery_fault_injection_and_redis_coordination
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf04_persistent_redis_risk_reconciliation_and_concurrency
+    expected_outcome: PASS
 
   - id: RF-A30
     group: RF-A
     description: PostgreSQL 与 Provider 结果不一致时安全收敛
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/email_gateway.py
       - tech-transfer-service/modules/security/sms_gateway.py
@@ -1057,66 +1386,88 @@ requirements:
     tests:
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
       - tech-transfer-service/tests/test_security_provider_execution_right.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_delivery_fault_injection_and_redis_coordination
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_s09_to_s15_late_receipts_stepup_cas_and_queue_single_send
+    expected_outcome: PASS
 
   - id: RF-A31
     group: RF-A
     description: 原始 A01–A30 编号恢复
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: RF-A32
     group: RF-A
     description: 原始 R-A01–R-A32 编号恢复
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: RF-A33
     group: RF-A
     description: 验收清单具备自动化完整性检查
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
+      - tech-transfer-service/scripts/verify_acceptance_evidence.py
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_rejects_static_pass_and_verifies_ast_and_docs
+    expected_outcome: PASS
 
   - id: RF-A34
     group: RF-A
     description: 原 SMS Gateway 不发生安全回归
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/modules/security/sms_gateway.py
       - tech-transfer-service/modules/security/sms_risk.py
     tests:
       - tech-transfer-service/tests/test_sms_gateway_postgres.py
       - tech-transfer-service/tests/test_sms_risk.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_sms_gateway_postgres.py::test_real_recovery_and_old_session_version
+      - tech-transfer-service/tests/test_sms_risk.py::test_quota_release_idempotent_and_unknown_retained
+    expected_outcome: PASS
 
   - id: RF-A35
     group: RF-A
     description: 微信登录、密码登录、刷新及注销无回归
     priority: P0
+    evidence_type: backend_pytest
     sources:
       - tech-transfer-service/modules/identity/service.py
       - tech-transfer-service/modules/identity/wechat.py
     tests:
       - tech-transfer-service/tests/test_wechat_login.py
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_wechat_login.py::test_new_verified_phone_creates_one_regular_user_not_a_mock_identity
+      - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx01_to_tx07_session_rotation_revocation_and_recovery_concurrency
+    expected_outcome: PASS
 
   - id: RF-A36
     group: RF-A
     description: H5 邮箱绑定及密码恢复流程无回归
     priority: P1
+    evidence_type: frontend_node_test
     sources:
       - nanshan-frontend/src/utils/emailSecurity.js
       - nanshan-frontend/src/views/admin/AccountSecurityView.vue
@@ -1124,94 +1475,475 @@ requirements:
     tests:
       - nanshan-frontend/src/utils/emailSecurity.test.mjs
       - nanshan-frontend/tests/unified-auth-views.test.mjs
-    status: PASS
+    test_nodes:
+      - nanshan-frontend/src/utils/emailSecurity.test.mjs::createIdempotencyKey generates opaque ASCII keys without PII
+      - nanshan-frontend/tests/unified-auth-views.test.mjs::ForgotPasswordView.vue binds Idempotency-Key for recovery start requests
+    expected_outcome: PASS
 
   - id: RF-A37
     group: RF-A
     description: 微信小程序账号安全流程无回归
     priority: P1
+    evidence_type: miniprogram_node_test
     sources:
       - 南山小程序/南山/subpackages/tech-transfer/api/user.js
       - 南山小程序/南山/subpackages/tech-transfer/pages/mine/mine.vue
     tests:
       - 南山小程序/南山/tests/unified-auth-security.test.mjs
-    status: PASS
+    test_nodes:
+      - 南山小程序/南山/tests/unified-auth-security.test.mjs::user.js exports all required security APIs
+    expected_outcome: PASS
 
   - id: RF-A38
     group: RF-A
     description: 最新数据库迁移兼容历史版本
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - tech-transfer-service/migrations/pg/038_phase_r_final_security.sql
+      - tech-transfer-service/migrations/pg/039_phase_r_hotfix.sql
     tests:
       - tech-transfer-service/tests/test_security_delivery_fault_injection.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_gate
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
 
   - id: RF-A39
     group: RF-A
     description: 安全核心阻断式 mypy 通过
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - .github/workflows/ci.yml
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: RF-A40
     group: RF-A
     description: 新增真实并发与故障注入测试进入 CI
     priority: P1
+    evidence_type: pg_redis_integration
     sources:
       - .github/workflows/ci.yml
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
 
   - id: RF-A41
     group: RF-A
     description: 性能数据具有实际测试证据
     priority: P2
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/16-phase-r-final-acceptance.md
     tests:
       - tech-transfer-service/tests/test_email_gateway_postgres.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_email_gateway_postgres.py::test_real_pg_redis_recovery_and_16_thread_parallel_verify_race
+    expected_outcome: PASS
 
   - id: RF-A42
     group: RF-A
     description: 未授权真实邮件测试未被执行且如实标记
     priority: P0
+    evidence_type: pg_redis_integration
     sources:
       - docs/auth/email-gateway/acceptance-manifest.yaml
       - docs/auth/email-gateway/16-phase-r-final-acceptance.md
     tests:
       - tech-transfer-service/tests/test_security_acceptance_manifest.py
-    status: PASS
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_integrity_immutable_ids_and_evidence_paths
+    expected_outcome: PASS
+
+  # ── Phase R-Hotfix 新增验收矩阵 HF-A01–HF-A25 ─────────────────────────────
+  - id: HF-A01
+    group: HF
+    description: advance_idempotency_stage 返回 False 时 Mail/SMS/Step-up 严禁调用外部 Provider（0 次外呼）
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/modules/security/email_gateway.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+      - tech-transfer-service/modules/security/step_up.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider
+    expected_outcome: PASS
+
+  - id: HF-A02
+    group: HF
+    description: advance_idempotency_stage 数据库异常时 Fail-Closed 且不触发外部 Provider（0 次外呼）
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/modules/security/email_gateway.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+      - tech-transfer-service/modules/security/step_up.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider
+    expected_outcome: PASS
+
+  - id: HF-A03
+    group: HF
+    description: advance_idempotency_stage 强制绑定 execution_owner、scope、key 与活跃态，禁止 NULL owner 越权绕过
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+    tests:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_hf02_unknown_retention_consistency_owner_strictness_and_reconciliation
+    expected_outcome: PASS
+
+  - id: HF-A04
+    group: HF
+    description: 双重执行权（security_delivery_request -> auth_challenge）在同一提交事务内联合 CAS 获取
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/state_machine.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider
+    expected_outcome: PASS
+
+  - id: HF-A05
+    group: HF
+    description: auth_challenge CAS 失败或过期时整笔联合事务原子回滚，幂等保持 pre_provider 且 0 次发信
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/state_machine.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider
+    expected_outcome: PASS
+
+  - id: HF-A06
+    group: HF
+    description: 幂等所有权或阶段冲突时立即拒绝发送权获取，Challenge 保持 reserved 且 0 次发信
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/state_machine.py
+      - tech-transfer-service/modules/security/email_gateway.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+      - tech-transfer-service/modules/security/step_up.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider
+    expected_outcome: PASS
+
+  - id: HF-A07
+    group: HF
+    description: finalize_http_idempotency 返回 False 或冲突时 Fail-Closed (503)，不返回伪成功响应、不重发、不释放幂等键
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/routes/me.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_http_finalize_conflict_and_recovery_enqueue_fail_closed
+    expected_outcome: PASS
+
+  - id: HF-A08
+    group: HF
+    description: /auth/recovery/start 在 finalize_http_idempotency 返回 False 时禁止调度后台投递任务
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/routes/auth.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_http_finalize_conflict_and_recovery_enqueue_fail_closed
+    expected_outcome: PASS
+
+  - id: HF-A09
+    group: HF
+    description: 无 Idempotency-Key 的历史兼容请求仍严格执行单次提交 Challenge 发送权 CAS
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/state_machine.py
+      - tech-transfer-service/modules/security/email_gateway.py
+    tests:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_provider_execution_right.py::test_hf01_dual_execution_right_atomic_cas_and_stage_gate_blocks_provider
+    expected_outcome: PASS
+
+  - id: HF-A10
+    group: HF
+    description: unknown / legacy_unknown 幂等键绝不因常规 300s idempotency_expires_at 到期而提前释放
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+      - tech-transfer-service/config.py
+    tests:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
+      - tech-transfer-service/tests/test_delivery_pii_retention.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503
+      - tech-transfer-service/tests/test_delivery_pii_retention.py::test_pii_stripped_across_expired_crashed_completed_and_legacy_rows_idempotently
+    expected_outcome: PASS
+
+  - id: HF-A11
+    group: HF
+    description: claim_http_idempotency 与 cleanup_delivery_tasks 统一遵守 IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS 长保留期并在期满后一致释放
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+    tests:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_hf02_unknown_retention_consistency_owner_strictness_and_reconciliation
+    expected_outcome: PASS
+
+  - id: HF-A12
+    group: HF
+    description: 确定终态（completed/failed/expired 非 unknown）按常规 IDEMPOTENCY_REQUEST_TTL_SECONDS 安全轮转
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+    tests:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_hf02_unknown_retention_consistency_owner_strictness_and_reconciliation
+    expected_outcome: PASS
+
+  - id: HF-A13
+    group: HF
+    description: pre_provider 释放与 PII 清理严格校验显式阶段、provenance 与关联 Challenge 未进入外呼态
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/idempotency.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+    tests:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_hf02_unknown_retention_consistency_owner_strictness_and_reconciliation
+    expected_outcome: PASS
+
+  - id: HF-A14
+    group: HF
+    description: reconcile_email_delivery / reconcile_sms_delivery 按 challenge_id 联动收敛未知幂等任务状态
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/email_gateway.py
+      - tech-transfer-service/modules/security/sms_gateway.py
+    tests:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_idempotency_crash_recovery.py::test_hf02_unknown_retention_consistency_owner_strictness_and_reconciliation
+    expected_outcome: PASS
+
+  - id: HF-A15
+    group: HF
+    description: 039_phase_r_hotfix.sql 严格增量幂等且完整支持 033-037->038->039、038->039 与全量新建（零改动 033-038）
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/migrations/pg/039_phase_r_hotfix.sql
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
+
+  - id: HF-A16
+    group: HF
+    description: 039 仅在具备明确证明时回填 legacy_proven_sent 与 legacy_proven_not_sent
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/migrations/pg/039_phase_r_hotfix.sql
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
+
+  - id: HF-A17
+    group: HF
+    description: 039 将 038 默认 pre_provider 模糊行与 038 退化过期行保守降级为 legacy_unknown，不伪造清理键且不补发
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/migrations/pg/039_phase_r_hotfix.sql
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_gate
+    expected_outcome: PASS
+
+  - id: HF-A18
+    group: HF
+    description: schema_gate.py 升级至 039 并强制阻断缺少 stage_provenance 或 risk_sync 列的数据库启动
+    priority: P0
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/schema_gate.py
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf03_migration_039_conservative_provenance_and_schema_gate
+    expected_outcome: PASS
+
+  - id: HF-A19
+    group: HF
+    description: transition_delivery_state 在同事务原子写入 risk_sync_state='sync_pending' 与目标态
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/state_machine.py
+      - tech-transfer-service/modules/security/delivery_models.py
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf04_persistent_redis_risk_reconciliation_and_concurrency
+    expected_outcome: PASS
+
+  - id: HF-A20
+    group: HF
+    description: Redis 异常时 transition_risk_checked 落盘 retryable_failure 及有界指数退避时间窗口
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/delivery_models.py
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf04_persistent_redis_risk_reconciliation_and_concurrency
+    expected_outcome: PASS
+
+  - id: HF-A21
+    group: HF
+    description: Redis 恢复后 reconcile_pending_risk_syncs 锁外补偿至 synced，0 次外呼且不篡改认证状态
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/delivery_models.py
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf04_persistent_redis_risk_reconciliation_and_concurrency
+    expected_outcome: PASS
+
+  - id: HF-A22
+    group: HF
+    description: Redis 键缺失、状态冲突与超限失败精确收敛为 reservation_missing / conflict / manual_review_required
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/delivery_models.py
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf04_persistent_redis_risk_reconciliation_and_concurrency
+    expected_outcome: PASS
+
+  - id: HF-A23
+    group: HF
+    description: 多 Worker 并发执行 reconcile_pending_risk_syncs 基于 SKIP LOCKED 短租约无冲突无死锁
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/modules/security/delivery_models.py
+    tests:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_delivery_fault_injection.py::test_hf04_persistent_redis_risk_reconciliation_and_concurrency
+    expected_outcome: PASS
+
+  - id: HF-A24
+    group: HF
+    description: 清单取消静态 status PASS、历史报告标注 Historical Snapshot 且 15 文档修正为与真实 Schema 一致
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - docs/auth/email-gateway/acceptance-manifest.yaml
+      - docs/auth/email-gateway/12-final-acceptance.md
+      - docs/auth/email-gateway/14-phase-r-acceptance.md
+      - docs/auth/email-gateway/15-phase-r-final-hardening.md
+      - docs/auth/email-gateway/16-phase-r-final-acceptance.md
+    tests:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_rejects_static_pass_and_verifies_ast_and_docs
+    expected_outcome: PASS
+
+  - id: HF-A25
+    group: HF
+    description: verify_acceptance_evidence.py 与 CI 按 AST 及 JUnit XML 执行证据阻断校验通过
+    priority: P1
+    evidence_type: pg_redis_integration
+    sources:
+      - tech-transfer-service/scripts/verify_acceptance_evidence.py
+      - .github/workflows/ci.yml
+    tests:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py
+    test_nodes:
+      - tech-transfer-service/tests/test_security_acceptance_manifest.py::test_acceptance_manifest_rejects_static_pass_and_verifies_ast_and_docs
+    expected_outcome: PASS
 
   # ── 真实外部投递独立验收（未获外部凭证与明确授权，严格保持 NOT RUN） ───
   - id: EXT-EMAIL-01
     group: EXT-EMAIL
     description: 真实 SMTP 投递及受控收件箱确认
     priority: EXTERNAL
+    evidence_type: external_live_smoke
     sources:
       - tech-transfer-service/modules/security/email_providers.py
     tests: []
+    test_nodes: []
     status: NOT RUN
 
   - id: EXT-EMAIL-02
     group: EXT-EMAIL
     description: 真实腾讯云 SES 投递及受控收件箱确认
     priority: EXTERNAL
+    evidence_type: external_live_smoke
     sources:
       - tech-transfer-service/modules/security/email_providers.py
     tests: []
+    test_nodes: []
     status: NOT RUN
 
   - id: EXT-EMAIL-03
     group: EXT-EMAIL
     description: SPF / DKIM / DMARC 与发信域名配置检查
     priority: EXTERNAL
+    evidence_type: external_live_smoke
     sources:
       - docs/auth/email-gateway/10-deployment-runbook.md
     tests: []
+    test_nodes: []
     status: NOT RUN

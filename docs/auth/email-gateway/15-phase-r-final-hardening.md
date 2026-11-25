@@ -104,15 +104,15 @@ Phase R-Final 不新建外围业务体系，专注确保既有认证与投递安
 ### 6.1 `038_phase_r_final_security.sql` 变更内容
 
 1. **`auth_challenge`**：
-   - 新增列：`session_version INT`、`source_contact_fingerprint VARCHAR(128)`、`send_owner VARCHAR(64)`、`send_claimed_at TIMESTAMPTZ`。
+   - 新增列：`session_version INT`、`source_contact_fingerprint VARCHAR(64)`、`send_owner VARCHAR(64)`、`send_claimed_at TIMESTAMPTZ`。
    - 历史脏数据收敛：将缺失 `session_id` / `sub_purpose` /（对邮箱绑定/换绑缺失 `target_fingerprint`）的未终结 `step_up_auth` 记录收敛为 `status = 'cancelled'`。
    - 新增检查约束：`chk_auth_challenge_stepup_context` 与部分索引 `idx_auth_challenge_sending_claimed`。
 2. **`security_delivery_request`**：
-   - 新增列：`execution_owner VARCHAR(64)`、`execution_stage VARCHAR(32) NOT NULL DEFAULT 'pre_provider'`、`challenge_id UUID`、`idem_claimed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`。
-   - 历史脏数据收敛：回填历史已完成/失败/未知记录的 `execution_stage`；收敛超过 5 分钟未结算的 `idem_pending` 占位记录并剥离遗留明文 PII 字段。
-   - 新增检查约束：`chk_sdr_execution_stage`（限定 `pre_provider` / `send_claimed` / `provider_called` / `response_persisted` / `provider_unknown` / `provider_rejected`）与索引 `idx_sdr_state_created`。
+   - 新增列：`execution_owner VARCHAR(64)`、`execution_stage VARCHAR(32) NOT NULL DEFAULT 'pre_provider'`、`challenge_id UUID`、`idem_claimed_at TIMESTAMPTZ DEFAULT NULL`。
+   - 历史脏数据收敛：历史行未在 `038` 中回填 `execution_stage`（历史阶段 provenance 分类与 `legacy_unknown` 保守降级由 `039_phase_r_hotfix.sql` 补全）；`038` 收敛了超过 5 分钟未结算的 `idem_pending` 占位记录并剥离遗留明文 PII 字段。
+   - 新增检查约束：`chk_sdr_execution_stage`（限定 `pre_provider` / `send_claimed` / `provider_called` / `provider_accepted` / `provider_rejected` / `provider_unknown` / `response_persisted`，`039` 扩展 `legacy_unknown`）与索引 `idx_sdr_state_created`。
 3. **`step_up_grant`**：吊销历史缺少 `session_id` 的活跃 `bind_email` / `rebind_email` Grant（保留 `session_id` 可空以兼容历史过期审计记录）。
-4. **`auth_session`**：新增复合部分索引 `idx_auth_session_user_sid_status (user_id, sid, status, expires_at) WHERE sid IS NOT NULL`。
+4. **`auth_session`**：新增复合部分索引 `idx_auth_session_user_sid_status (user_id, sid, status) WHERE sid IS NOT NULL`。
 
 ### 6.2 升级与回滚指引
 

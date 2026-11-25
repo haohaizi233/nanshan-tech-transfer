@@ -16,16 +16,26 @@ from psycopg2.extras import RealDictCursor
 
 from config import settings
 from core.password import hash_password
-from modules.security.delivery_models import DeliveryStageError, ProviderError, metrics, transition_risk_checked
+from modules.security.delivery_models import (
+    DeliveryStageError,
+    ProviderError,
+    metrics,
+    reconcile_pending_risk_syncs,
+    transition_risk_checked,
+)
 from modules.security.email_gateway import _send_email
-from modules.security.provider import MockEmailProvider, reset_providers_for_test
+from modules.security.email_risk import EmailRiskEngine
+from modules.security.provider import MockEmailProvider, MockSmsProvider, reset_providers_for_test
 from modules.security.risk_engine import DecisionAction, RiskDecision
 from modules.security.schema_gate import assert_required_security_schema, check_required_security_schema
 from modules.security.sms_gateway import SendContext
+from modules.security.sms_risk import SmsRiskEngine
+from modules.security.state_machine import transition_delivery_state
 
 PG_DSN = os.getenv("SMS_TEST_POSTGRES_DSN") or (
     "postgresql://postgres:postgres123@127.0.0.1:5432/postgres" if os.getenv("SMS_TEST_POSTGRES") == "1" else None
 )
+REDIS_URL = os.getenv("SMS_TEST_REDIS_URL")
 MIGRATION_DIR = Path(__file__).resolve().parents[1] / "migrations" / "pg"
 
 _BASE_TABLES_SQL = """
@@ -207,17 +217,17 @@ def test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_ga
                 (dirty_idem_pre,),
             )
 
-            # 执行 038 增量迁移（并故意重复执行第二次验证幂等性）
+            # 执行 038 增量迁移（并故意重复执行第二次验证幂等性），此时 039 未运行前 Schema Gate 应仍阻断
             sql_038 = (MIGRATION_DIR / "038_phase_r_final_security.sql").read_text(encoding="utf-8")
             _apply_sql(cur, schema, sql_038)
             _apply_sql(cur, schema, sql_038)
 
-            gate_post = check_required_security_schema(cur)
-            assert gate_post["ok"] is True, gate_post
-            with patch.object(settings, "APP_ENV", "production"):
-                assert assert_required_security_schema(cur)["ok"] is True
+            gate_038 = check_required_security_schema(cur)
+            assert gate_038["ok"] is False
+            assert "auth_challenge.risk_sync_state" in gate_038["missing_columns"]
+            assert "security_delivery_request.stage_provenance" in gate_038["missing_columns"]
 
-            # 验证脏数据收敛效果
+            # 验证 038 脏数据收敛效果
             cur.execute("SELECT status FROM auth_challenge WHERE id=%s", (dirty_su_cid,))
             assert cur.fetchone()[0] == "cancelled"
             cur.execute("SELECT status FROM step_up_grant WHERE id=%s", (dirty_grant_id,))
@@ -228,11 +238,37 @@ def test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_ga
             sdr = cur.fetchone()
             assert sdr[0] == "expired" and sdr[2] is None and "account" not in sdr[1]
 
-            # 验证 038 新增约束生效
+            # 继续执行 039 增量迁移（并重复执行两次验证幂等性与历史阶段来源保守判定）
+            sql_039 = (MIGRATION_DIR / "039_phase_r_hotfix.sql").read_text(encoding="utf-8")
+            _apply_sql(cur, schema, sql_039)
+            _apply_sql(cur, schema, sql_039)
+
+            gate_post = check_required_security_schema(cur)
+            assert gate_post["ok"] is True, gate_post
+            with patch.object(settings, "APP_ENV", "production"):
+                assert assert_required_security_schema(cur)["ok"] is True
+
+            # 038 退化的历史过期行在 039 中应保守标为 legacy_unknown（不伪造已清理键，也不推断为显式未发送）
+            cur.execute(
+                "SELECT execution_stage, stage_provenance, idempotency_key FROM security_delivery_request WHERE id=%s",
+                (dirty_idem_pre,),
+            )
+            sdr_039 = cur.fetchone()
+            assert sdr_039[0] == "legacy_unknown"
+            assert sdr_039[1] == "legacy_unknown"
+            assert sdr_039[2] is None
+
+            # 验证 039 约束生效（非法阶段/非法来源/非法风控协调状态均拒绝）
             with pytest.raises(psycopg2.errors.CheckViolation):
                 cur.execute(
                     "INSERT INTO security_delivery_request(id, payload, state, request_id, execution_stage) "
                     "VALUES (%s, '{}'::jsonb, 'queued', 'r-bad', 'invalid_stage')",
+                    (str(uuid.uuid4()),),
+                )
+            with pytest.raises(psycopg2.errors.CheckViolation):
+                cur.execute(
+                    "INSERT INTO security_delivery_request(id, payload, state, request_id, stage_provenance) "
+                    "VALUES (%s, '{}'::jsonb, 'queued', 'r-bad-prov', 'invalid_prov')",
                     (str(uuid.uuid4()),),
                 )
     finally:
@@ -278,6 +314,7 @@ def test_delivery_fault_injection_and_redis_coordination():
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
                 "038_phase_r_final_security.sql",
+                "039_phase_r_hotfix.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
             cur.execute(
@@ -404,6 +441,385 @@ def test_delivery_fault_injection_and_redis_coordination():
             assert row_r["status"] == "failed"
     finally:
         reset_providers_for_test(None, None)
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+        conn.close()
+
+
+def test_hf03_migration_039_conservative_provenance_and_schema_gate():
+    """覆盖 HF03 / HF-A15–HF-A18：039 历史阶段 provenance 保守分类、不伪造已清理键、重复执行幂等与 Schema 门禁。"""
+    if not PG_DSN:
+        pytest.skip("SMS_TEST_POSTGRES / SMS_TEST_POSTGRES_DSN not configured")
+    schema = f"mig039_{uuid.uuid4().hex[:10]}"
+    conn = psycopg2.connect(PG_DSN)
+    conn.autocommit = True
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            cur.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+            _apply_sql(cur, schema, _BASE_TABLES_SQL)
+            for mig in (
+                "033_unified_account_security.sql",
+                "034_sms_security_gateway.sql",
+                "035_sms_delivery_diagnostics.sql",
+                "036_email_security_gateway.sql",
+                "037_phase_r_security_hardening.sql",
+            ):
+                _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
+
+            # 在 037 阶段写入模拟历史存量数据
+            r_sent_resp = str(uuid.uuid4())
+            r_sent_ids = str(uuid.uuid4())
+            r_rejected = str(uuid.uuid4())
+            r_blocked = str(uuid.uuid4())
+            r_ambig_completed = str(uuid.uuid4())
+            r_ambig_unknown = str(uuid.uuid4())
+            r_037_stale_idem = str(uuid.uuid4())
+            cur.execute(
+                """
+                INSERT INTO security_delivery_request (
+                    id, payload, state, request_id, outcome, failure_stage,
+                    provider_ids, outcome_unknown, provider_called, response_payload,
+                    idempotency_scope, idempotency_key, created_at
+                ) VALUES
+                    (%s, '{}'::jsonb, 'completed', 'h1', 'COMPLETED', NULL, '[]'::jsonb, false, true, '{"sent":true}'::jsonb, NULL, NULL, NOW() - INTERVAL '1 hour'),
+                    (%s, '{}'::jsonb, 'completed', 'h2', 'COMPLETED', NULL, '["m-1"]'::jsonb, false, false, NULL, NULL, NULL, NOW() - INTERVAL '1 hour'),
+                    (%s, '{}'::jsonb, 'failed', 'h3', 'PROVIDER_REJECTED', 'provider', '[]'::jsonb, false, true, NULL, NULL, NULL, NOW() - INTERVAL '1 hour'),
+                    (%s, '{}'::jsonb, 'blocked', 'h4', 'RISK_BLOCKED', 'risk', '[]'::jsonb, false, false, NULL, NULL, NULL, NOW() - INTERVAL '1 hour'),
+                    (%s, '{}'::jsonb, 'completed', 'h5', NULL, NULL, '[]'::jsonb, false, false, NULL, NULL, NULL, NOW() - INTERVAL '1 hour'),
+                    (%s, '{}'::jsonb, 'unknown', 'h6', 'PROVIDER_UNKNOWN', NULL, '[]'::jsonb, true, false, NULL, 'sc-h6', 'key-h6-keep', NOW() - INTERVAL '1 hour'),
+                    (%s, '{}'::jsonb, 'idem_pending', 'h7', NULL, NULL, '[]'::jsonb, false, false, NULL, 'sc-h7', 'key-h7-lost-in-038', NOW() - INTERVAL '10 minutes')
+                """,
+                (r_sent_resp, r_sent_ids, r_rejected, r_blocked, r_ambig_completed, r_ambig_unknown, r_037_stale_idem),
+            )
+
+            # 升级 038（历史非 idem_pending 行全部继承 default 'pre_provider'，h7 被 038 退化为 expired 并丢弃 key）
+            _apply_sql(cur, schema, (MIGRATION_DIR / "038_phase_r_final_security.sql").read_text(encoding="utf-8"))
+            # 然后连续两次幂等执行 039
+            sql_039 = (MIGRATION_DIR / "039_phase_r_hotfix.sql").read_text(encoding="utf-8")
+            _apply_sql(cur, schema, sql_039)
+            _apply_sql(cur, schema, sql_039)
+
+            cur.execute(
+                "SELECT id, state, execution_stage, stage_provenance, provider_called, idempotency_key "
+                "FROM security_delivery_request"
+            )
+            rows = {str(r["id"]): r for r in cur.fetchall()}
+
+            assert rows[r_sent_resp]["execution_stage"] == "response_persisted"
+            assert rows[r_sent_resp]["stage_provenance"] == "legacy_proven_sent"
+            assert rows[r_sent_ids]["execution_stage"] == "provider_accepted"
+            assert rows[r_sent_ids]["stage_provenance"] == "legacy_proven_sent"
+            assert rows[r_sent_ids]["provider_called"] is True
+            assert rows[r_rejected]["execution_stage"] == "provider_rejected"
+            assert rows[r_rejected]["stage_provenance"] == "legacy_proven_sent"
+
+            assert rows[r_blocked]["execution_stage"] == "pre_provider"
+            assert rows[r_blocked]["stage_provenance"] == "legacy_proven_not_sent"
+
+            # 无明确证据的历史完成/未知/038过期行：一律保守降级 legacy_unknown，不伪造已清理的 key
+            assert rows[r_ambig_completed]["execution_stage"] == "legacy_unknown"
+            assert rows[r_ambig_completed]["stage_provenance"] == "legacy_unknown"
+            assert rows[r_ambig_unknown]["execution_stage"] == "legacy_unknown"
+            assert rows[r_ambig_unknown]["stage_provenance"] == "legacy_unknown"
+            assert rows[r_ambig_unknown]["idempotency_key"] == "key-h6-keep"
+            assert rows[r_037_stale_idem]["execution_stage"] == "legacy_unknown"
+            assert rows[r_037_stale_idem]["stage_provenance"] == "legacy_unknown"
+            assert rows[r_037_stale_idem]["idempotency_key"] is None
+
+            # 新建 runtime 行（带 explicit）在重跑 039 时保持 explicit 不被误改
+            r_fresh = str(uuid.uuid4())
+            cur.execute(
+                "INSERT INTO security_delivery_request (id, payload, state, request_id, outcome, failure_stage, execution_stage, stage_provenance) "
+                "VALUES (%s, '{}'::jsonb, 'completed', 'h-fresh', 'COMPLETED', NULL, 'response_persisted', 'explicit')",
+                (r_fresh,),
+            )
+            _apply_sql(cur, schema, sql_039)
+            cur.execute(
+                "SELECT execution_stage, stage_provenance FROM security_delivery_request WHERE id=%s", (r_fresh,)
+            )
+            r_f = cur.fetchone()
+            assert r_f["execution_stage"] == "response_persisted"
+            assert r_f["stage_provenance"] == "explicit"
+
+            # 039 Schema 门禁在 production 下通过；若人为移除 stage_provenance 或 risk_sync_state 约束则阻断
+            with patch.object(settings, "APP_ENV", "production"):
+                assert assert_required_security_schema(cur)["ok"] is True
+            cur.execute(
+                "ALTER TABLE public.auth_challenge DROP CONSTRAINT chk_auth_challenge_risk_sync_state".replace(
+                    "public.", ""
+                )
+            )
+            gate_missing = check_required_security_schema(cur)
+            assert gate_missing["ok"] is False
+            assert "auth_challenge.chk_auth_challenge_risk_sync_state" in gate_missing["missing_constraints"]
+            with patch.object(settings, "APP_ENV", "production"):
+                with pytest.raises(RuntimeError):
+                    assert_required_security_schema(cur)
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+        conn.close()
+
+
+def test_hf04_persistent_redis_risk_reconciliation_and_concurrency():
+    """覆盖 HF04 / HF-A19–HF-A23：sync_pending 持久化、Redis 断连退避重放、键缺失/冲突/人工介入及并发 SKIP LOCKED。"""
+    if not PG_DSN:
+        pytest.skip("SMS_TEST_POSTGRES / SMS_TEST_POSTGRES_DSN not configured")
+    if not REDIS_URL:
+        pytest.skip("SMS_TEST_REDIS_URL not configured")
+    import json
+    import threading
+
+    import redis
+
+    schema = f"rs_{uuid.uuid4().hex[:10]}"
+    conn = psycopg2.connect(PG_DSN)
+    conn.autocommit = True
+    rclient = redis.Redis.from_url(REDIS_URL, decode_responses=True, protocol=2)
+    prefix_em = f"email:{{gateway}}:hf04:{uuid.uuid4().hex[:8]}:"
+    prefix_sms = f"sms:{{gateway}}:hf04:{uuid.uuid4().hex[:8]}:"
+    cfg = SimpleNamespace(
+        APP_ENV="local",
+        is_production_like=False,
+        REDIS_ENABLED=True,
+        REDIS_URL=REDIS_URL,
+        JWT_SECRET="ci-test-secret-key-for-github-actions-32chars!",
+        EMAIL_RISK_HMAC_SECRET="hf04-em-secret-32bytes!",
+        SMS_RISK_HMAC_SECRET="hf04-sms-secret-32bytes!",
+        SMS_BUSINESS_TIMEZONE="Asia/Shanghai",
+        EMAIL_RISK_ENGINE_ENABLED=True,
+        EMAIL_REQUIRE_VERIFIED_CONTACT=True,
+        EMAIL_CODE_TTL_SECONDS=300,
+        EMAIL_COOLDOWN_SECONDS=1,
+        EMAIL_LIMIT_10M=200,
+        EMAIL_LIMIT_1H=500,
+        EMAIL_LIMIT_DAY=1000,
+        EMAIL_IP_LIMIT_1M=200,
+        EMAIL_IP_LIMIT_1H=500,
+        EMAIL_IP_LIMIT_DAY=1000,
+        EMAIL_ACCOUNT_LIMIT_1H=200,
+        EMAIL_ACCOUNT_LIMIT_DAY=500,
+        EMAIL_DEVICE_LIMIT_1H=200,
+        EMAIL_DEVICE_LIMIT_DAY=500,
+        EMAIL_IP_DISTINCT_LIMIT_1H=200,
+        EMAIL_DEVICE_DISTINCT_LIMIT_10M=200,
+        EMAIL_GLOBAL_DAILY_BUDGET=2000,
+        EMAIL_DOMAIN_ANOMALY_LIMIT_10M=200,
+        SMS_RISK_ENGINE_ENABLED=True,
+        SMS_REQUIRE_VERIFIED_CONTACT=True,
+        SMS_CODE_TTL_SECONDS=300,
+        SMS_PHONE_COOLDOWN_SECONDS=1,
+        SMS_PHONE_LIMIT_10M=200,
+        SMS_PHONE_LIMIT_1H=500,
+        SMS_PHONE_LIMIT_DAY=1000,
+        SMS_IP_LIMIT_1M=200,
+        SMS_IP_LIMIT_1H=500,
+        SMS_IP_LIMIT_DAY=1000,
+        SMS_ACCOUNT_LIMIT_1H=200,
+        SMS_ACCOUNT_LIMIT_DAY=500,
+        SMS_DEVICE_LIMIT_1H=200,
+        SMS_DEVICE_LIMIT_DAY=500,
+        SMS_IP_DISTINCT_PHONE_LIMIT_1H=200,
+        SMS_DEVICE_DISTINCT_PHONE_LIMIT_10M=200,
+    )
+    em_eng = EmailRiskEngine(redis_client=rclient, config=cfg, prefix=prefix_em)
+    sms_eng = SmsRiskEngine(redis_client=rclient, config=cfg, prefix=prefix_sms)
+    spy_prov = MockEmailProvider()
+    spy_sms_prov = MockSmsProvider()
+    reset_providers_for_test(email=spy_prov, sms=spy_sms_prov)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            cur.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+            _apply_sql(cur, schema, _BASE_TABLES_SQL)
+            for mig in (
+                "033_unified_account_security.sql",
+                "034_sms_security_gateway.sql",
+                "035_sms_delivery_diagnostics.sql",
+                "036_email_security_gateway.sql",
+                "037_phase_r_security_hardening.sql",
+                "038_phase_r_final_security.sql",
+                "039_phase_r_hotfix.sql",
+            ):
+                _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
+            cur.execute("INSERT INTO app_user(id, user_no, status) VALUES (9101, 'U9101', 'active')")
+
+        def _factory(commit: bool = False):
+            return _schema_cursor(PG_DSN, schema, commit=commit)
+
+        def _seed_ch(cid: str, channel: str = "email_otp", uid: int = 9101) -> None:
+            with _factory(commit=True) as cur:
+                cur.execute(
+                    "INSERT INTO app_user(id, user_no, status) VALUES (%s, %s, 'active') ON CONFLICT DO NOTHING",
+                    (uid, f"U{uid}"),
+                )
+                cur.execute(
+                    "INSERT INTO auth_challenge(id, user_id, purpose, channel, destination_fingerprint, destination_masked, "
+                    "code_hash, status, send_state, expires_at, code_hash_version) "
+                    "VALUES (%s, %s, 'password_recovery', %s, %s, 'm', 'h', 'pending_send', 'sending', NOW() + INTERVAL '5 minutes', 2)",
+                    (cid, uid, channel, uuid.uuid4().hex),
+                )
+
+        # 1) transition_delivery_state 同事务记录 sync_pending；Redis 故障 -> retryable_failure + 退避；Redis 恢复 -> 补偿至 synced
+        cid_recover = str(uuid.uuid4())
+        dec1 = em_eng.reserve("hf04rec@qq.com", "9101", "198.51.100.41", "d1", cid_recover, ttl_seconds=300)
+        assert dec1.action == DecisionAction.ALLOW
+        _seed_ch(cid_recover, "email_otp", uid=9101)
+        with _factory(commit=True) as cur:
+            t_res = transition_delivery_state(cur, cid_recover, ("sending",), "accepted", provider_ids=["m-rec"])
+            assert t_res.updated is True
+        with _factory(commit=False) as cur:
+            cur.execute("SELECT risk_sync_state, risk_sync_target FROM auth_challenge WHERE id=%s", (cid_recover,))
+            pending_row = cur.fetchone()
+            assert pending_row["risk_sync_state"] == "sync_pending"
+            assert pending_row["risk_sync_target"] == "accepted"
+
+        broken_eng = SimpleNamespace(transition=lambda *_a, **_k: (_ for _ in ()).throw(ConnectionError("redis down")))
+        assert (
+            transition_risk_checked(
+                broken_eng,
+                cid_recover,
+                "accepted",
+                channel="email_otp",
+                purpose="password_recovery",
+                cursor_factory=_factory,
+            )
+            is False
+        )
+        with _factory(commit=False) as cur:
+            cur.execute(
+                "SELECT risk_sync_state, risk_sync_attempts, risk_sync_next_retry_at, status, send_state "
+                "FROM auth_challenge WHERE id=%s",
+                (cid_recover,),
+            )
+            rf_row = cur.fetchone()
+            assert rf_row["risk_sync_state"] == "retryable_failure"
+            assert rf_row["risk_sync_attempts"] == 1
+            assert rf_row["risk_sync_next_retry_at"] is not None
+            assert rf_row["status"] == "pending"
+            assert rf_row["send_state"] == "accepted"
+
+        # 退避时间未到，worker 不会盲目重跑；退避期过后立刻由真实 Redis 补偿成功至 synced
+        sum_early = reconcile_pending_risk_syncs(email_engine=em_eng, sms_engine=sms_eng, cursor_factory=_factory)
+        assert sum_early["claimed"] == 0
+        with _factory(commit=True) as cur:
+            cur.execute(
+                "UPDATE auth_challenge SET risk_sync_next_retry_at = NOW() - INTERVAL '1 second' WHERE id=%s",
+                (cid_recover,),
+            )
+        sum_ok = reconcile_pending_risk_syncs(email_engine=em_eng, sms_engine=sms_eng, cursor_factory=_factory)
+        assert sum_ok["synced"] == 1
+        with _factory(commit=False) as cur:
+            cur.execute("SELECT risk_sync_state, status, send_state FROM auth_challenge WHERE id=%s", (cid_recover,))
+            synced_row = cur.fetchone()
+            assert synced_row["risk_sync_state"] == "synced"
+            assert synced_row["status"] == "pending"
+            assert synced_row["send_state"] == "accepted"
+        res_blob = json.loads(rclient.get(em_eng._key("reservation", cid_recover)))
+        assert res_blob["state"] == "accepted"
+
+        # 2) Redis key 缺失 -> reservation_missing；状态冲突 -> conflict；超限 -> manual_review_required
+        cid_missing = str(uuid.uuid4())
+        _seed_ch(cid_missing, "email_otp", uid=9102)
+        with _factory(commit=True) as cur:
+            transition_delivery_state(cur, cid_missing, ("sending",), "rejected")
+
+        cid_conflict = str(uuid.uuid4())
+        em_eng.reserve("hf04conf@qq.com", "9103", "198.51.100.42", "d2", cid_conflict, ttl_seconds=300)
+        assert em_eng.transition(cid_conflict, "accepted") is True
+        assert em_eng.transition(cid_conflict, "delivered") is True  # Redis 已是终态 delivered
+        _seed_ch(cid_conflict, "email_otp", uid=9103)
+        with _factory(commit=True) as cur:
+            transition_delivery_state(cur, cid_conflict, ("sending",), "rejected")
+
+        sum_cls = reconcile_pending_risk_syncs(email_engine=em_eng, sms_engine=sms_eng, cursor_factory=_factory)
+        assert sum_cls["reservation_missing"] == 1
+        assert sum_cls["conflict"] == 1
+        with _factory(commit=False) as cur:
+            cur.execute(
+                "SELECT id, risk_sync_state FROM auth_challenge WHERE id IN (%s, %s)", (cid_missing, cid_conflict)
+            )
+            cls_map = {str(r["id"]): r["risk_sync_state"] for r in cur.fetchall()}
+            assert cls_map[cid_missing] == "reservation_missing"
+            assert cls_map[cid_conflict] == "conflict"
+
+        cid_max = str(uuid.uuid4())
+        _seed_ch(cid_max, "sms", uid=9104)
+        with _factory(commit=True) as cur:
+            transition_delivery_state(cur, cid_max, ("sending",), "unknown")
+        with patch.object(settings, "RISK_SYNC_MAX_ATTEMPTS", 2):
+            transition_risk_checked(
+                broken_eng, cid_max, "unknown", channel="sms", purpose="password_recovery", cursor_factory=_factory
+            )
+            with _factory(commit=True) as cur:
+                cur.execute(
+                    "UPDATE auth_challenge SET risk_sync_next_retry_at = NOW() - INTERVAL '1 second' WHERE id=%s",
+                    (cid_max,),
+                )
+            sum_max = reconcile_pending_risk_syncs(
+                email_engine=broken_eng, sms_engine=broken_eng, cursor_factory=_factory
+            )
+            assert sum_max["manual_review_required"] == 1
+        with _factory(commit=False) as cur:
+            cur.execute("SELECT risk_sync_state, risk_sync_attempts FROM auth_challenge WHERE id=%s", (cid_max,))
+            max_row = cur.fetchone()
+            assert max_row["risk_sync_state"] == "manual_review_required"
+            assert max_row["risk_sync_attempts"] == 2
+
+        # 3) 8 并发 Worker SKIP LOCKED 抢占补偿（涵盖 Email 与 SMS）-> 总成功 10 条无冲突无死锁，且 0 次外部发信
+        concurrent_cids: list[str] = []
+        for idx in range(10):
+            cid_i = str(uuid.uuid4())
+            concurrent_cids.append(cid_i)
+            if idx % 2 == 0:
+                assert (
+                    em_eng.reserve(
+                        f"c{idx}@qq.com", str(9200 + idx), f"198.51.100.{50 + idx}", f"dc{idx}", cid_i, ttl_seconds=300
+                    ).action
+                    == DecisionAction.ALLOW
+                )
+                _seed_ch(cid_i, "email_otp", uid=9200 + idx)
+            else:
+                assert (
+                    sms_eng.reserve(
+                        f"13800138{idx:03d}", str(9200 + idx), f"198.51.100.{50 + idx}", f"dc{idx}", cid_i
+                    ).action
+                    == DecisionAction.ALLOW
+                )
+                _seed_ch(cid_i, "sms", uid=9200 + idx)
+            with _factory(commit=True) as cur:
+                transition_delivery_state(cur, cid_i, ("sending",), "accepted", provider_ids=[f"p-{idx}"])
+
+        worker_totals: list[dict[str, int]] = []
+        w_lock = threading.Lock()
+        w_bar = threading.Barrier(8)
+
+        def _reconcile_worker():
+            w_bar.wait(timeout=10)
+            res_w = reconcile_pending_risk_syncs(
+                limit=5, email_engine=em_eng, sms_engine=sms_eng, cursor_factory=_factory
+            )
+            with w_lock:
+                worker_totals.append(res_w)
+
+        threads = [threading.Thread(target=_reconcile_worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+
+        assert sum(w["claimed"] for w in worker_totals) == 10
+        assert sum(w["synced"] for w in worker_totals) == 10
+        assert len(spy_prov.sent_emails) == 0
+        assert len(spy_sms_prov.sent_messages) == 0
+    finally:
+        reset_providers_for_test(None, None)
+        for p in (prefix_em, prefix_sms):
+            for k in rclient.scan_iter(match=p + "*"):
+                rclient.delete(k)
+        rclient.close()
         with conn.cursor() as cur:
             cur.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
         conn.close()

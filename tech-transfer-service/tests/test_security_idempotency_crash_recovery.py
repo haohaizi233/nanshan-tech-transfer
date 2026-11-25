@@ -214,6 +214,7 @@ def idem_env():
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
                 "038_phase_r_final_security.sql",
+                "039_phase_r_hotfix.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 
@@ -380,18 +381,22 @@ def test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503(idem_env
         # 2) 崩溃超时 pre_provider idem_pending (>5m) -> 收敛为 expired 并安全释放键
         # 3) 崩溃超时 post-provider idem_pending (>5m, execution_stage='provider_called') -> 收敛为 unknown 且保留幂等键
         # 4) unknown 仍在 TTL 内 -> 保留幂等键
-        # 5) unknown 已过 TTL -> 清理幂等键
+        # 5) unknown 仅常规 300s TTL 已过但未满 24h 长保留期 -> 仍必须保留幂等键
+        # 6) unknown 超过 IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS (24h) 且已过 TTL -> 与 claim 一致释放
+        id_unk_past_retention = str(uuid.uuid4())
         cur.execute(
             """
             INSERT INTO security_delivery_request (
-                id, payload, state, request_id, idempotency_scope, idempotency_key,
-                idempotency_expires_at, execution_stage, execution_owner, provider_called, idem_claimed_at, created_at
+                id, payload, state, request_id, idempotency_scope, idempotency_key, request_hash,
+                idempotency_expires_at, execution_stage, execution_owner, provider_called, idem_claimed_at,
+                finished_at, created_at
             ) VALUES
-                (%s, %s::jsonb, 'idem_pending', 'r1', 'sc1', 'key-active-idem', NOW() - INTERVAL '1 second', 'pre_provider', 'own-1', false, NOW(), NOW()),
-                (%s, %s::jsonb, 'idem_pending', 'r2', 'sc2', 'key-stuck-pre', NOW() + INTERVAL '5 minutes', 'pre_provider', 'own-2', false, NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes'),
-                (%s, %s::jsonb, 'idem_pending', 'r3', 'sc3', 'key-stuck-post', NOW() + INTERVAL '5 minutes', 'provider_called', 'own-3', true, NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes'),
-                (%s, %s::jsonb, 'unknown', 'r4', 'sc4', 'key-unk-live', NOW() + INTERVAL '5 minutes', 'provider_unknown', 'own-4', true, NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes'),
-                (%s, %s::jsonb, 'unknown', 'r5', 'sc5', 'key-unk-exp', NOW() - INTERVAL '1 minute', 'provider_unknown', 'own-5', true, NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes')
+                (%s, %s::jsonb, 'idem_pending', 'r1', 'sc1', 'key-active-idem', 'h1', NOW() - INTERVAL '1 second', 'pre_provider', 'own-1', false, NOW(), NULL, NOW()),
+                (%s, %s::jsonb, 'idem_pending', 'r2', 'sc2', 'key-stuck-pre', 'h2', NOW() + INTERVAL '5 minutes', 'pre_provider', 'own-2', false, NOW() - INTERVAL '6 minutes', NULL, NOW() - INTERVAL '6 minutes'),
+                (%s, %s::jsonb, 'idem_pending', 'r3', 'sc3', 'key-stuck-post', 'h3', NOW() + INTERVAL '5 minutes', 'provider_called', 'own-3', true, NOW() - INTERVAL '6 minutes', NULL, NOW() - INTERVAL '6 minutes'),
+                (%s, %s::jsonb, 'unknown', 'r4', 'sc4', 'key-unk-live', 'h4', NOW() + INTERVAL '5 minutes', 'provider_unknown', 'own-4', true, NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes'),
+                (%s, %s::jsonb, 'unknown', 'r5', 'sc5', 'key-unk-300s-exp', 'h5', NOW() - INTERVAL '1 minute', 'provider_unknown', 'own-5', true, NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes', NOW() - INTERVAL '6 minutes'),
+                (%s, %s::jsonb, 'unknown', 'r6', 'sc6', 'key-unk-25h-exp', 'h6', NOW() - INTERVAL '1 minute', 'provider_unknown', 'own-6', true, NOW() - INTERVAL '25 hours', NOW() - INTERVAL '25 hours', NOW() - INTERVAL '25 hours')
             """,
             (
                 id_active_idem,
@@ -403,6 +408,8 @@ def test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503(idem_env
                 id_unk_in_ttl,
                 pii_json,
                 id_unk_past_ttl,
+                pii_json,
+                id_unk_past_retention,
                 pii_json,
             ),
         )
@@ -427,9 +434,14 @@ def test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503(idem_env
     assert rows[id_stuck_post]["idempotency_key"] == "key-stuck-post"
     assert "account" not in rows[id_stuck_post]["payload"]
 
-    # ID11: unknown 锁仅在 TTL 过期后清理
+    # ID11 (HF02): unknown 绝不因 300s TTL 到期而误放行，仅超过 IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS (24h) 后一致释放
     assert rows[id_unk_in_ttl]["idempotency_key"] == "key-unk-live"
-    assert rows[id_unk_past_ttl]["idempotency_key"] is None
+    assert rows[id_unk_past_ttl]["idempotency_key"] == "key-unk-300s-exp"
+    assert rows[id_unk_past_retention]["idempotency_key"] is None
+    still_locked = claim_http_idempotency(
+        scope="sc5", key="key-unk-300s-exp", request_hash="h5", channel="email_otp", purpose="bind_email"
+    )
+    assert still_locked.replay is True and still_locked.state == "unknown"
 
     # ID12 & ID13: 非持有者 execution_owner 无权推进阶段或回写 finalize
     wrong_claim = claim_http_idempotency(
@@ -505,3 +517,167 @@ def test_id09_to_id15_cleanup_protection_owner_cas_and_http_unknown_503(idem_env
     )
     assert r_409.status_code == 409
     assert r_409.json()["details"]["inFlight"] is True
+
+
+def test_hf02_unknown_retention_consistency_owner_strictness_and_reconciliation(idem_env):
+    """覆盖 H2-01–H2-12 / HF-A03 / HF-A10–HF-A14：unknown 统一保留策略、禁止 NULL owner 越权与对账联动。"""
+    from modules.security.email_gateway import reconcile_email_delivery
+    from modules.security.email_providers import TencentSesProvider
+    from modules.security.idempotency import read_http_idempotency_record
+    from modules.security.provider import MockSmsProvider
+    from modules.security.sms_gateway import reconcile_sms_delivery
+
+    schema, _em, _client, _eng = idem_env
+    _seed(schema, 8010, email="u8010@qq.com")
+
+    def _factory(commit: bool = False):
+        return _schema_cursor(PG_DSN, schema, commit=commit)
+
+    # 1) NULL owner 越权拦截（HF01/HF-A03）+ state='completed'/'unknown' 不可被伪造覆盖
+    null_owner_id = str(uuid.uuid4())
+    with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+        cur.execute(
+            "INSERT INTO security_delivery_request (id, payload, state, request_id, idempotency_scope, idempotency_key, request_hash, execution_owner, execution_stage) "
+            "VALUES (%s, '{}'::jsonb, 'idem_pending', 'r-null', 'sc-null', 'k-null', 'h-null', NULL, 'pre_provider')",
+            (null_owner_id,),
+        )
+    hijack_claim = SimpleNamespace(
+        active=True,
+        task_id=null_owner_id,
+        execution_owner=None,
+        scope="sc-null",
+        key="k-null",
+    )
+    assert advance_idempotency_stage(hijack_claim, ("pre_provider",), "send_claimed") is False
+    assert finalize_http_idempotency(hijack_claim, {"ok": True}, state="completed") is False
+    assert release_http_idempotency_on_pre_provider_failure(hijack_claim, "spoof") is False
+
+    # 2) pre_provider 记录关联的 auth_challenge 若已进入 sending 态 -> 严禁释放键；cleanup 收敛为 unknown
+    linked_cid = str(uuid.uuid4())
+    c_linked = claim_http_idempotency(
+        scope="sc-link",
+        key="k-link-sending",
+        request_hash="h-link",
+        channel="email_otp",
+        purpose="bind_email",
+        initial_state="idem_pending",
+    )
+    with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+        cur.execute(
+            "INSERT INTO auth_challenge (id, user_id, purpose, channel, destination_fingerprint, destination_masked, code_hash, status, send_state, expires_at, code_hash_version) "
+            "VALUES (%s, 8010, 'bind_email', 'email_otp', 'fp8', 'u***', 'ch8', 'pending_send', 'sending', NOW() + INTERVAL '5 minutes', 2)",
+            (linked_cid,),
+        )
+        cur.execute(
+            "UPDATE security_delivery_request SET challenge_id = %s, idem_claimed_at = NOW() - INTERVAL '10 minutes' WHERE id = %s",
+            (linked_cid, c_linked.task_id),
+        )
+    assert release_http_idempotency_on_pre_provider_failure(c_linked, "late_pre_release") is False
+    cleanup_delivery_tasks()
+    rec_linked = read_http_idempotency_record(c_linked.task_id, cursor_factory=_factory)
+    assert rec_linked["state"] == "unknown"
+    assert rec_linked["idempotency_key"] == "k-link-sending"
+
+    # 3) HF02 统一长保留期对比验证：completed(explicit) 300s 可轮转；completed(legacy_unknown) 与 unknown(300s已过/<24h) 均保留；超 24h 后双方一致清理
+    id_explicit_done = str(uuid.uuid4())
+    id_legacy_ambig = str(uuid.uuid4())
+    id_unk_recent = str(uuid.uuid4())
+    id_unk_expired_long = str(uuid.uuid4())
+    with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO security_delivery_request (
+                id, payload, state, request_id, idempotency_scope, idempotency_key, request_hash,
+                idempotency_expires_at, execution_stage, stage_provenance, outcome_unknown,
+                idem_claimed_at, finished_at, created_at
+            ) VALUES
+                (%s, '{}'::jsonb, 'completed', 'rx1', 'sc-x', 'k-exp-done', 'hx1', NOW() - INTERVAL '1 minute', 'response_persisted', 'explicit', false, NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '9 minutes', NOW() - INTERVAL '10 minutes'),
+                (%s, '{}'::jsonb, 'completed', 'rx2', 'sc-x', 'k-leg-ambig', 'hx2', NOW() - INTERVAL '1 minute', 'legacy_unknown', 'legacy_unknown', false, NULL, NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes'),
+                (%s, '{}'::jsonb, 'unknown', 'rx3', 'sc-x', 'k-unk-short', 'hx3', NOW() - INTERVAL '1 minute', 'provider_unknown', 'explicit', true, NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes'),
+                (%s, '{}'::jsonb, 'unknown', 'rx4', 'sc-x', 'k-unk-long', 'hx4', NOW() - INTERVAL '1 minute', 'provider_unknown', 'explicit', true, NOW() - INTERVAL '25 hours', NOW() - INTERVAL '25 hours', NOW() - INTERVAL '25 hours')
+            """,
+            (id_explicit_done, id_legacy_ambig, id_unk_recent, id_unk_expired_long),
+        )
+
+    cleanup_delivery_tasks()
+    with _schema_cursor(PG_DSN, schema, commit=False) as cur:
+        cur.execute(
+            "SELECT id, idempotency_key FROM security_delivery_request WHERE id = ANY(%s::uuid[])",
+            ([id_explicit_done, id_legacy_ambig, id_unk_recent, id_unk_expired_long],),
+        )
+        kmap = {str(r["id"]): r["idempotency_key"] for r in cur.fetchall()}
+    assert kmap[id_explicit_done] is None
+    assert kmap[id_legacy_ambig] == "k-leg-ambig"
+    assert kmap[id_unk_recent] == "k-unk-short"
+    assert kmap[id_unk_expired_long] is None
+
+    # claim_http_idempotency 同样锁定 k-leg-ambig 与 k-unk-short，仅对 k-unk-long (超长保留期) 与 k-exp-done 允许轮转
+    replay_leg = claim_http_idempotency(
+        scope="sc-x", key="k-leg-ambig", request_hash="hx2", channel="email_otp", purpose="bind_email"
+    )
+    assert replay_leg.replay is True and replay_leg.key == "k-leg-ambig"
+    replay_short_unk = claim_http_idempotency(
+        scope="sc-x", key="k-unk-short", request_hash="hx3", channel="email_otp", purpose="bind_email"
+    )
+    assert replay_short_unk.replay is True and replay_short_unk.state == "unknown"
+
+    with patch.object(settings, "IDEMPOTENCY_UNKNOWN_RETENTION_SECONDS", 300):
+        # 当长保留期配为 300s 且 10 分钟已过时，claim_http_idempotency 立即一致释放并创建新占位于同键
+        rotated_after_cfg = claim_http_idempotency(
+            scope="sc-x", key="k-unk-short", request_hash="hx3-new", channel="email_otp", purpose="bind_email"
+        )
+        assert rotated_after_cfg.replay is False
+
+    # 4) reconcile_email_delivery & reconcile_sms_delivery 按 challenge_id 联动收敛未知幂等记录
+    _seed(schema, 8011, email="u8011@qq.com")
+    ses_prov = TencentSesProvider("AKIDHF02TEST", "sec", "noreply@example.com")
+    ses_prov.query_status = lambda mids, **_k: {
+        "accepted": True,
+        "records": [{"MessageId": mids[0], "DeliverStatus": 1, "DeliverTime": 1700000000}],
+    }
+    sms_prov = MockSmsProvider()
+    sms_prov.query_status = lambda mids: {"records": [{"smsId": mids[0], "statusCode": 410, "sendLog": "BOUNCE"}]}
+
+    cid_em_rec = str(uuid.uuid4())
+    cid_sms_rec = str(uuid.uuid4())
+    c_http_em = claim_http_idempotency(
+        scope="sc-rec",
+        key="k-rec-em",
+        request_hash="hre",
+        channel="email_otp",
+        purpose="bind_email",
+        initial_state="idem_pending",
+    )
+    c_http_sms = claim_http_idempotency(
+        scope="sc-rec",
+        key="k-rec-sms",
+        request_hash="hrs",
+        channel="sms",
+        purpose="bind_phone",
+        initial_state="idem_pending",
+    )
+    with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+        cur.execute(
+            "INSERT INTO auth_challenge (id, user_id, purpose, channel, destination_fingerprint, destination_masked, code_hash, status, send_state, provider_name, provider_config_id, provider_message_ids, expires_at, code_hash_version) "
+            "VALUES (%s, 8011, 'bind_email', 'email_otp', 'fpe', 'u***', 'che', 'pending', 'unknown', 'tencent', %s, '[\"ses-mid-1\"]'::jsonb, NOW() + INTERVAL '5 minutes', 2),"
+            "       (%s, 8011, 'bind_phone', 'sms', 'fps', '138****8010', 'chs', 'pending', 'unknown', 'sms', NULL, '[\"sms-mid-1\"]'::jsonb, NOW() + INTERVAL '5 minutes', 2)",
+            (cid_em_rec, ses_prov.provider_config_id, cid_sms_rec),
+        )
+        cur.execute(
+            "UPDATE security_delivery_request SET state='unknown', execution_stage='provider_unknown', provider_called=true, outcome_unknown=true, challenge_id=%s WHERE id=%s",
+            (cid_em_rec, c_http_em.task_id),
+        )
+        cur.execute(
+            "UPDATE security_delivery_request SET state='unknown', execution_stage='provider_unknown', provider_called=true, outcome_unknown=true, challenge_id=%s WHERE id=%s",
+            (cid_sms_rec, c_http_sms.task_id),
+        )
+
+    reset_providers_for_test(email=ses_prov, sms=sms_prov)
+    res_em = reconcile_email_delivery(cid_em_rec)
+    res_sms = reconcile_sms_delivery(cid_sms_rec)
+    assert res_em["state"] == "delivered"
+    assert res_sms["state"] == "delivery_failed"
+    rec_em_done = read_http_idempotency_record(c_http_em.task_id, cursor_factory=_factory)
+    rec_sms_fail = read_http_idempotency_record(c_http_sms.task_id, cursor_factory=_factory)
+    assert rec_em_done["state"] == "completed" and rec_em_done["outcome_unknown"] is False
+    assert rec_sms_fail["state"] == "failed" and rec_sms_fail["outcome_unknown"] is False
