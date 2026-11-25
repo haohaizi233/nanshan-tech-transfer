@@ -137,7 +137,25 @@ def _schema_cursor(dsn: str, schema: str, commit: bool = False):
 def _sess_ctx(uid: int):
     from fastapi import Request
 
-    tok = sign_access_token(uid, f"U{uid}", ["user"], 1, sid=str(uuid.uuid4()), auth_time=9_999_999_999)
+    from modules.security.step_up import get_cursor
+
+    sid: str | None = None
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "SELECT sid FROM auth_session WHERE user_id = %s AND status = 'active' AND sid IS NOT NULL ORDER BY id LIMIT 1",
+            (uid,),
+        )
+        row = cur.fetchone()
+        if row and row.get("sid"):
+            sid = str(row["sid"])
+        else:
+            sid = str(uuid.uuid4())
+            cur.execute(
+                "INSERT INTO auth_session (user_id, refresh_jti, status, sid, auth_time) "
+                "VALUES (%s, %s, 'active', %s, NOW())",
+                (uid, uuid.uuid4().hex, sid),
+            )
+    tok = sign_access_token(uid, f"U{uid}", ["user"], 1, sid=sid, auth_time=9_999_999_999)
     req = Request({"type": "http", "headers": [(b"authorization", f"Bearer {tok}".encode("latin-1"))]})
     return session_context_from_request(req, uid)
 
@@ -226,6 +244,7 @@ def pg_redis():
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
+                "038_phase_r_final_security.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 

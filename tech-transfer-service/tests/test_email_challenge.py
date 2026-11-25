@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import time
+import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -105,15 +106,19 @@ def test_hmac_v2_v1_key_rotation_and_leading_zero_preservation():
 def test_email_binding_provider_failure_closes_challenge_without_dangling_pending():
     from config import settings as _settings
     from core.jwt_utils import sign_access_token
-    from modules.security.step_up import _target_fingerprint, session_fingerprint_from_request
+    from modules.security.step_up import _target_fingerprint, session_context_from_request
 
     em = MockEmailProvider()
     em.should_fail = True
     reset_providers_for_test(email=em)
 
+    sid_42 = str(uuid.uuid4())
     req = MagicMock()
-    req.headers = {"Authorization": f"Bearer {sign_access_token(42, 'U042', ['user'], 1)}"}
-    sess_fp = session_fingerprint_from_request(req, 42)
+    req.headers = {
+        "Authorization": f"Bearer {sign_access_token(42, 'U042', ['user'], 1, sid=sid_42, auth_time=int(time.time()))}"
+    }
+    sctx = session_context_from_request(req, 42)
+    sess_fp = sctx.fingerprint_for_purpose("bind_email")
     target_fp = _target_fingerprint("newuser@example.com", purpose="bind_email")
 
     eng = MagicMock()
@@ -129,11 +134,19 @@ def test_email_binding_provider_failure_closes_challenge_without_dangling_pendin
             "purpose": "bind_email",
             "method": "password",
             "session_fingerprint": sess_fp,
-            "session_id": None,
+            "session_id": sid_42,
             "target_fingerprint": target_fp,
             "status": "active",
             "expires_at": time.time() + 180,
         },  # bind_email step_up_grant validation
+        {
+            "user_status": "active",
+            "deleted_at": None,
+            "session_version": 1,
+            "has_any": True,
+            "has_active": True,
+            "has_expired": False,
+        },  # session_guard active session check
         {"id": 42},  # FOR UPDATE app_user in _send_email
         {"status": "pending_send", "send_state": "sending"},  # RETURNING in reserved->sending CAS
         {"status": "failed", "send_state": "rejected"},  # RETURNING in sending->rejected CAS
@@ -152,6 +165,7 @@ def test_email_binding_provider_failure_closes_challenge_without_dangling_pendin
                 SendContext("10.0.0.1", "dev-1", "req-bind-fail"),
                 step_up_grant="su-bind-42",
                 session_fingerprint=sess_fp,
+                session_ctx=sctx,
                 engine=eng,
             )
         assert exc_info.value.stage == "provider"
