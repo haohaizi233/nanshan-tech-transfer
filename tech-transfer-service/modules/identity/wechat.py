@@ -185,6 +185,7 @@ def wechat_login_session(login_code: str, phone_code: str | None = None, *, bind
                         (user_id, phone),
                     )
                 audit_record("user.bind_wechat", "app_user", resource_id=user_id, actor_user_id=user_id, cur=cursor)
+            cursor.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
             result = _issue_session(cursor, user_id, _get_roles(cursor, user_id))
             result["user"] = build_user_response(cursor, user_id)
             result["isNewUser"] = is_new

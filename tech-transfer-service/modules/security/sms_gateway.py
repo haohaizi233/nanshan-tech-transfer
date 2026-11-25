@@ -1,7 +1,8 @@
 """SMS orchestration over existing Auth tables; no parallel OTP system.
 
-No public status endpoint. Redis is required for all real send paths. A send
-reservation is retained on ambiguous outcomes; no new OTP is generated on retry.
+No public status endpoint. Redis is required for all real send paths.
+Send ownership requires a committed CAS transition (`reserved -> sending`) before calling
+the external provider. Ambiguous outcomes are retained safely without regenerating OTPs.
 """
 
 from __future__ import annotations
@@ -13,18 +14,41 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, replace
+from typing import Any
 
 from config import settings
 from core.errors import BizError, bad_request
 from db import get_cursor
 from modules.audit.service import record as audit_record
-from modules.security.delivery_models import DeliveryStageError, DeliveryTaskResult, risk_reason, task_event
+from modules.security.delivery_models import (
+    DeliveryStageError,
+    DeliveryTaskResult,
+    metrics,
+    risk_reason,
+    task_event,
+    transition_risk_checked,
+)
 from modules.security.eligibility import SMS_ELIGIBLE_SQL as ELIGIBLE_SQL
 from modules.security.eligibility import sms_eligibility_reason as _shared_sms_eligibility_reason
+from modules.security.idempotency import (
+    ACTIVE_IDEMPOTENCY_STATES,
+    TERMINAL_IDEMPOTENCY_STATES,
+    IdempotencyClaim,
+    advance_idempotency_stage,
+    mark_http_idempotency_unknown,
+)
 from modules.security.provider import ProviderError, get_sms_provider
-from modules.security.state_machine import transition_delivery_state
+from modules.security.state_machine import (
+    DeliveryTransitionResult,
+    claim_send_execution_right,
+    transition_delivery_state,
+)
 
 logger = logging.getLogger(__name__)
+
+ACTIVE_TASK_STATES = ACTIVE_IDEMPOTENCY_STATES
+TERMINAL_TASK_STATES = TERMINAL_IDEMPOTENCY_STATES
+RECOVERY_REQUIRED_STATES = ("unknown", "legacy_unknown")
 
 
 def eligibility_reason(account: str) -> str:
@@ -47,7 +71,7 @@ def normalize_phone(value: str) -> str:
     return value
 
 
-def recovery_response(challenge_id: str, channel: str) -> dict:
+def recovery_response(challenge_id: str, channel: str) -> dict[str, Any]:
     return {
         "challengeId": challenge_id,
         "channel": channel,
@@ -63,12 +87,12 @@ def _engine():
     return get_sms_risk_engine()
 
 
-def _allowed(decision) -> bool:
+def _allowed(decision: Any) -> bool:
     value = getattr(decision, "action", getattr(decision, "decision", decision))
     return str(getattr(value, "value", value)) == "ALLOW"
 
 
-def _audit(rule: str, context: SendContext, challenge_id=None, **details):
+def _audit(rule: str, context: SendContext, challenge_id: str | None = None, **details: Any) -> None:
     from modules.security.service import _fingerprint
 
     audit_record(
@@ -80,7 +104,7 @@ def _audit(rule: str, context: SendContext, challenge_id=None, **details):
     )
 
 
-def request_gate(context: SendContext, account: str, phone=None, purpose="reset_password"):
+def request_gate(context: SendContext, account: str, phone: str | None = None, purpose: str = "reset_password") -> None:
     decision = _engine().check_request(context.ip, account, context.device_id, phone=phone, purpose=purpose)
     _audit(
         getattr(decision, "rule_id", "request"),
@@ -96,7 +120,14 @@ def request_gate(context: SendContext, account: str, phone=None, purpose="reset_
         raise BizError("TT_COMMON_42901", "操作过于频繁或需要额外安全验证，请稍后重试", 429)
 
 
-def start_sms_recovery(account: str, challenge_id: str, context: SendContext, engine=None, *, return_result=False):
+def start_sms_recovery(
+    account: str,
+    challenge_id: str,
+    context: SendContext,
+    engine: Any = None,
+    *,
+    return_result: bool = False,
+) -> Any:
     engine = engine or _engine()
     account = account.strip()
     if account.startswith("+86") or re.fullmatch(r"[0-9 -]+", account):
@@ -146,7 +177,14 @@ def start_sms_recovery(account: str, challenge_id: str, context: SendContext, en
     return recovery_response(challenge_id, "sms")
 
 
-def start_sms_binding(user_id: int, phone: str, context: SendContext, engine=None):
+def start_sms_binding(
+    user_id: int,
+    phone: str,
+    context: SendContext,
+    engine: Any = None,
+    *,
+    idempotency_claim: IdempotencyClaim | None = None,
+) -> dict[str, Any]:
     phone = normalize_phone(phone)
     engine = engine or _engine()
     challenge_id = str(uuid.uuid4())
@@ -161,7 +199,7 @@ def start_sms_binding(user_id: int, phone: str, context: SendContext, engine=Non
         )
         if cur.fetchone():
             raise bad_request("无法绑定此联系方式")
-    _send(user_id, phone, "bind_phone", challenge_id, context, engine)
+    _send(user_id, phone, "bind_phone", challenge_id, context, engine, idempotency_claim=idempotency_claim)
     return {
         "challengeId": challenge_id,
         "maskedDestination": phone[:3] + "****" + phone[-4:],
@@ -169,7 +207,16 @@ def start_sms_binding(user_id: int, phone: str, context: SendContext, engine=Non
     }
 
 
-def _send(user_id, phone, purpose, challenge_id, context, engine):
+def _send(
+    user_id: int,
+    phone: str,
+    purpose: str,
+    challenge_id: str,
+    context: SendContext,
+    engine: Any,
+    *,
+    idempotency_claim: IdempotencyClaim | None = None,
+) -> Any:
     from modules.security.service import _fingerprint, _hmac_code
 
     if not settings.SMS_ENABLED:
@@ -197,9 +244,9 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
             cur.execute(
                 """INSERT INTO auth_challenge
                 (id,user_id,purpose,channel,destination_fingerprint,destination_masked,code_hash,
-                 status,attempt_count,max_attempts,expires_at,send_request_id,send_state)
+                 status,attempt_count,max_attempts,expires_at,send_request_id,send_state,provider_name)
                 VALUES (%s,%s,%s,'sms',%s,%s,%s,'pending_send',0,%s,
-                        NOW()+make_interval(secs=>%s),%s,'reserved')""",
+                        NOW()+make_interval(secs=>%s),%s,'reserved','sms')""",
                 (
                     challenge_id,
                     user_id,
@@ -221,13 +268,81 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
                 cur=cur,
             )
     except Exception:
-        engine.transition(challenge_id, "rejected")
+        transition_risk_checked(
+            engine,
+            challenge_id,
+            "rejected",
+            channel="sms",
+            purpose=purpose,
+            request_id=context.request_id,
+        )
         raise DeliveryStageError("challenge_create", "database_write_failed") from None
+
+    if idempotency_claim is not None:
+        advance_idempotency_stage(
+            idempotency_claim,
+            ("pre_provider",),
+            "send_claimed",
+            challenge_id=challenge_id,
+        )
+
+    send_owner = f"req:{context.request_id}:{uuid.uuid4().hex[:12]}"
     try:
-        with get_cursor(commit=True) as cur:
-            transition_delivery_state(cur, challenge_id, ("reserved",), "sending")
+        claim_res = claim_send_execution_right(
+            challenge_id,
+            send_owner=send_owner,
+            expected_states=("reserved",),
+            provider_name="sms",
+            cursor_factory=get_cursor,
+        )
     except Exception:
-        pass
+        if idempotency_claim is not None:
+            mark_http_idempotency_unknown(idempotency_claim, "SEND_CLAIM_DB_ERROR", challenge_id=challenge_id)
+        raise DeliveryStageError(
+            "send_claim",
+            "SEND_CLAIM_DATABASE_ERROR",
+            outcome_unknown=True,
+            provider_called=False,
+        ) from None
+
+    if claim_res.outcome != "transitioned":
+        ambiguous = claim_res.outcome in {"already_target", "owner_mismatch"} or claim_res.current_send_state in {
+            "sending",
+            "accepted",
+            "delivered",
+            "unknown",
+        }
+        if not ambiguous and claim_res.outcome in {"not_found", "expired", "conflict_or_disallowed"}:
+            transition_risk_checked(
+                engine,
+                challenge_id,
+                "rejected",
+                channel="sms",
+                purpose=purpose,
+                request_id=context.request_id,
+            )
+        if ambiguous and idempotency_claim is not None:
+            mark_http_idempotency_unknown(
+                idempotency_claim,
+                f"SEND_CLAIM_{claim_res.outcome.upper()}",
+                challenge_id=challenge_id,
+            )
+        raise DeliveryStageError(
+            "send_claim",
+            f"SEND_CLAIM_{claim_res.outcome.upper()}",
+            outcome_unknown=ambiguous,
+            provider_called=False,
+        )
+
+    if idempotency_claim is not None:
+        advance_idempotency_stage(
+            idempotency_claim,
+            ("send_claimed", "pre_provider"),
+            "provider_called",
+            challenge_id=challenge_id,
+            provider_called=True,
+        )
+
     try:
         receipt = provider.send_task(
             phone,
@@ -237,22 +352,41 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
             send_request_id=challenge_id,
         )
         if not receipt.accepted:
-            raise ProviderError("短信服务未接受请求")
+            raise ProviderError("短信服务未接受请求", request_attempted=True)
     except Exception as exc:
         unknown = not isinstance(exc, ProviderError) or getattr(exc, "outcome_unknown", False)
         state = "unknown" if unknown else "rejected"
         # Ambiguous delivery is not retried by creating a fresh OTP.
-        engine.transition(challenge_id, state)
+        transition_risk_checked(
+            engine,
+            challenge_id,
+            state,
+            channel="sms",
+            purpose=purpose,
+            request_id=context.request_id,
+        )
         try:
-            _set_send_state(challenge_id, state, [], context)
+            _set_send_state(challenge_id, state, [], context, expected_owner=send_owner)
         except Exception:
+            if idempotency_claim is not None:
+                mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
             raise DeliveryStageError(
                 "receipt_persist",
                 "database_write_failed",
-                outcome_unknown=unknown,
-                provider_called=getattr(exc, "request_attempted", unknown),
+                outcome_unknown=True,
+                provider_called=getattr(exc, "request_attempted", True),
                 provider_status=getattr(exc, "provider_status", None),
             ) from None
+        if idempotency_claim is not None:
+            advance_idempotency_stage(
+                idempotency_claim,
+                ("provider_called", "send_claimed", "pre_provider"),
+                "provider_unknown" if unknown else "provider_rejected",
+                challenge_id=challenge_id,
+                provider_called=True,
+                failure_reason=getattr(exc, "reason_code", state),
+                outcome_unknown=unknown,
+            )
         if isinstance(exc, ProviderError):
             raise DeliveryStageError(
                 "provider",
@@ -265,9 +399,30 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
         raise DeliveryStageError(
             "provider", "unexpected_provider_error", outcome_unknown=True, provider_called=True
         ) from None
+
     try:
-        _set_send_state(challenge_id, "accepted", list(receipt.provider_ids), context)
+        res = _set_send_state(
+            challenge_id,
+            "accepted",
+            list(receipt.provider_ids),
+            context,
+            expected_owner=send_owner,
+        )
+        if not res.updated and res.outcome != "already_target":
+            raise DeliveryStageError(
+                "receipt_persist",
+                "RECEIPT_STATE_CONFLICT",
+                provider_ids=receipt.provider_ids,
+                provider_called=True,
+                outcome_unknown=True,
+            )
+    except DeliveryStageError:
+        if idempotency_claim is not None:
+            mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_STATE_CONFLICT", challenge_id=challenge_id)
+        raise
     except Exception:
+        if idempotency_claim is not None:
+            mark_http_idempotency_unknown(idempotency_claim, "RECEIPT_PERSIST_FAILED", challenge_id=challenge_id)
         raise DeliveryStageError(
             "receipt_persist",
             "database_write_failed",
@@ -275,11 +430,34 @@ def _send(user_id, phone, purpose, challenge_id, context, engine):
             provider_called=True,
             outcome_unknown=True,
         ) from None
-    engine.transition(challenge_id, "accepted")
+
+    if idempotency_claim is not None:
+        advance_idempotency_stage(
+            idempotency_claim,
+            ("provider_called", "send_claimed", "pre_provider"),
+            "provider_accepted",
+            challenge_id=challenge_id,
+            provider_called=True,
+        )
+    transition_risk_checked(
+        engine,
+        challenge_id,
+        "accepted",
+        channel="sms",
+        purpose=purpose,
+        request_id=context.request_id,
+    )
     return receipt
 
 
-def _set_send_state(challenge_id, state, provider_ids, context):
+def _set_send_state(
+    challenge_id: str,
+    state: str,
+    provider_ids: list[str],
+    context: SendContext,
+    *,
+    expected_owner: str | None = None,
+) -> DeliveryTransitionResult:
     with get_cursor(commit=True) as cur:
         res = transition_delivery_state(
             cur,
@@ -288,6 +466,7 @@ def _set_send_state(challenge_id, state, provider_ids, context):
             state,
             provider_ids=provider_ids,
             challenge_status_on_failure="failed",
+            expected_owner=expected_owner,
         )
         if res.updated:
             audit_record(
@@ -298,9 +477,24 @@ def _set_send_state(challenge_id, state, provider_ids, context):
                 details={"send_state": state},
                 cur=cur,
             )
+        elif res.outcome != "already_target":
+            metrics.inc(
+                "delivery_cas_conflict_total",
+                channel="sms",
+                purpose=state,
+                reason=res.outcome,
+            )
+            logger.warning(
+                "SMS delivery state CAS conflict (challenge=%s target=%s outcome=%s current=%s)",
+                challenge_id,
+                state,
+                res.outcome,
+                res.current_send_state,
+            )
+    return res
 
 
-def run_recovery_task(account, channel, challenge_id, context):
+def run_recovery_task(account: str, channel: str, challenge_id: str, context: SendContext) -> DeliveryTaskResult:
     """Run after uniform HTTP response. Never expose business/provider outcome."""
     start = time.monotonic()
     exception_type = None
@@ -334,7 +528,7 @@ def run_recovery_task(account, channel, challenge_id, context):
             else "CONFIG_ERROR"
             if stage == "config"
             else "INTERNAL_ERROR"
-            if stage in {"eligibility", "challenge_create", "receipt_persist"}
+            if stage in {"eligibility", "challenge_create", "receipt_persist", "send_claim"}
             else "PROVIDER_UNKNOWN"
             if unknown
             else "PROVIDER_REJECTED"
@@ -370,7 +564,7 @@ def run_recovery_task(account, channel, challenge_id, context):
     return result
 
 
-def enqueue_recovery_task(account, channel, challenge_id, context):
+def enqueue_recovery_task(account: str, channel: str, challenge_id: str, context: SendContext) -> None:
     """Same insert for real/unknown accounts, before any eligibility lookup."""
     payload = {
         "account": account,
@@ -382,8 +576,9 @@ def enqueue_recovery_task(account, channel, challenge_id, context):
     try:
         with get_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO security_delivery_request(id,payload,request_id) VALUES(%s,%s::jsonb,%s)",
-                (challenge_id, json.dumps(payload), context.request_id),
+                "INSERT INTO security_delivery_request(id,payload,request_id,channel,purpose,execution_stage) "
+                "VALUES(%s,%s::jsonb,%s,%s,'password_recovery','pre_provider')",
+                (challenge_id, json.dumps(payload), context.request_id, channel[:16]),
             )
     except Exception as exc:
         task_event(
@@ -396,7 +591,7 @@ def enqueue_recovery_task(account, channel, challenge_id, context):
         raise BizError("TT_COMMON_50301", "验证服务暂时不可用，请稍后重试", 503) from None
 
 
-def run_queued_recovery_task(challenge_id):
+def run_queued_recovery_task(challenge_id: str) -> bool:
     try:
         with get_cursor(commit=True) as cur:
             cur.execute(
@@ -445,12 +640,23 @@ def run_queued_recovery_task(challenge_id):
         return False
 
 
-def _persist_task_result(challenge_id, result, request_id):
+def _persist_task_result(challenge_id: str, result: DeliveryTaskResult, request_id: str | None) -> bool:
+    exec_stage = (
+        "provider_unknown"
+        if result.outcome_unknown or result.outcome == "PROVIDER_UNKNOWN"
+        else "provider_accepted"
+        if result.outcome == "COMPLETED" and result.provider_called
+        else "provider_rejected"
+        if result.outcome == "PROVIDER_REJECTED" and result.provider_called
+        else "pre_provider"
+    )
     with get_cursor(commit=True) as cur:
         cur.execute(
             """UPDATE security_delivery_request SET state=%s,outcome=%s,failure_stage=%s,failure_reason=%s,
               provider_status=%s,risk_rule_id=%s,provider_ids=%s::jsonb,outcome_unknown=%s,retryable=%s,
-              elapsed_ms=%s,provider_called=%s,finished_at=NOW(),
+              elapsed_ms=%s,provider_called=%s,channel=%s,purpose=%s,provider=%s,
+              execution_stage=%s,challenge_id=COALESCE(%s::uuid, challenge_id),
+              finished_at=NOW(),
               payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
               WHERE id=%s AND state='processing'""",
             (
@@ -465,20 +671,14 @@ def _persist_task_result(challenge_id, result, request_id):
                 result.retryable,
                 result.elapsed_ms,
                 result.provider_called,
+                result.channel,
+                result.purpose,
+                result.provider,
+                exec_stage,
+                result.challenge_id,
                 challenge_id,
             ),
         )
-        # 兼容仅运行到 035 的测试 schema：存在 036 列时再补充写入 channel / purpose / provider
-        try:
-            cur.execute("SAVEPOINT sp_delivery_036")
-            cur.execute(
-                """UPDATE security_delivery_request SET channel=%s, purpose=%s, provider=%s
-                WHERE id=%s""",
-                (result.channel, result.purpose, result.provider, challenge_id),
-            )
-            cur.execute("RELEASE SAVEPOINT sp_delivery_036")
-        except Exception:
-            cur.execute("ROLLBACK TO SAVEPOINT sp_delivery_036")
         audit_record(
             "sms.task_result" if result.channel == "sms" else "email.task_result",
             "security_delivery_request",
@@ -502,7 +702,7 @@ def _persist_task_result(challenge_id, result, request_id):
     return True
 
 
-def process_pending_recovery_tasks(limit=50):
+def process_pending_recovery_tasks(limit: int = 50) -> int:
     """Worker hook. Safe for multiple workers; each claim is an atomic CAS."""
     with get_cursor() as cur:
         cur.execute(
@@ -510,13 +710,52 @@ def process_pending_recovery_tasks(limit=50):
             (max(1, min(100, int(limit))),),
         )
         ids = [str(row["id"]) for row in cur.fetchall()]
-    return sum(run_queued_recovery_task(cid) for cid in ids)
+    return sum(1 for cid in ids if run_queued_recovery_task(cid))
 
 
-def cleanup_delivery_tasks():
-    """清理过期队列任务、收敛 Worker 崩溃残留、在所有终止/非活跃路径清除明文 PII 并保留审计摘要。"""
+def cleanup_delivery_tasks() -> None:
+    """清理过期队列任务、收敛 Worker/幂等占位崩溃残留、仅在终态/未知恢复态清除明文 PII。
+
+    绝不误伤正在合法执行中的 `idem_pending` / `queued` / `processing` 任务，
+    绝不释放仍在执行中或处于 `unknown` 状态任务的幂等键。
+    """
     with get_cursor(commit=True) as cur:
-        # 1. queued 超时（未曾调用外部发送）：终止为 expired 并清除明文 PII
+        # 1. 超时 idem_pending（占位超过 5 分钟）：未入发送阶段则安全过期释放；已涉外部调用则收敛为 unknown 并保留幂等键
+        cur.execute(
+            """UPDATE security_delivery_request
+            SET idempotency_key = CASE
+                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN NULL
+                    ELSE idempotency_key
+                END,
+                idempotency_scope = CASE
+                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN NULL
+                    ELSE idempotency_scope
+                END,
+                state = CASE
+                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN 'expired'
+                    ELSE 'unknown'
+                END,
+                outcome = CASE
+                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN COALESCE(outcome, 'INTERNAL_ERROR')
+                    ELSE 'PROVIDER_UNKNOWN'
+                END,
+                failure_stage = COALESCE(failure_stage, 'idempotency'),
+                failure_reason = CASE
+                    WHEN execution_stage = 'pre_provider' AND provider_called = false
+                        THEN COALESCE(failure_reason, 'idem_pending_expired')
+                    ELSE COALESCE(failure_reason, 'idem_pending_interrupted')
+                END,
+                outcome_unknown = CASE
+                    WHEN execution_stage = 'pre_provider' AND provider_called = false THEN outcome_unknown
+                    ELSE true
+                END,
+                retryable = false,
+                finished_at = COALESCE(finished_at, NOW()),
+                payload = COALESCE(payload, '{}'::jsonb) - 'account' - 'ip' - 'device_id' - 'destination'
+            WHERE state IN ('idem_pending', 'idempotent_pending')
+              AND COALESCE(idem_claimed_at, created_at) < NOW() - INTERVAL '5 minutes'"""
+        )
+        # 2. queued 超时（未曾调用外部发送）：终止为 expired 并清除明文 PII
         cur.execute(
             """UPDATE security_delivery_request
             SET state='expired', outcome='INTERNAL_ERROR',
@@ -525,7 +764,7 @@ def cleanup_delivery_tasks():
                 payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
             WHERE state='queued' AND created_at<NOW()-INTERVAL '5 minutes'"""
         )
-        # 2. processing 超时（Worker 崩溃，真实发送结果未知）：收敛为 unknown 且绝不重发，清除明文 PII
+        # 3. processing 超时（Worker 崩溃，真实发送结果未知）：收敛为 unknown 且绝不重发，清除明文 PII
         cur.execute(
             """UPDATE security_delivery_request
             SET state='unknown', outcome='PROVIDER_UNKNOWN',
@@ -534,27 +773,29 @@ def cleanup_delivery_tasks():
                 payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
             WHERE state='processing' AND COALESCE(claimed_at,created_at)<NOW()-INTERVAL '5 minutes'"""
         )
-        # 3. 幂等兜底清扫：所有非运行态任务若仍残留明文 PII 键，一律剥离（保留审计列与统计字段）
+        # 4. 仅针对显式终态与需核对未知态剥离残留明文 PII（严禁触碰活跃中的 idem_pending/queued/processing）
         cur.execute(
             """UPDATE security_delivery_request
             SET payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
-            WHERE state NOT IN ('queued', 'processing')
-              AND (payload ? 'account' OR payload ? 'ip' OR payload ? 'device_id' OR payload ? 'destination')"""
+            WHERE state = ANY(%s)
+              AND (payload ? 'account' OR payload ? 'ip' OR payload ? 'device_id' OR payload ? 'destination')""",
+            (list(TERMINAL_TASK_STATES + RECOVERY_REQUIRED_STATES),),
         )
-        # 4. 清除过期的请求级幂等索引键占用
-        try:
-            cur.execute("SAVEPOINT sp_cleanup_idemp_037")
-            cur.execute(
-                """UPDATE security_delivery_request
-                SET idempotency_key=NULL, idempotency_scope=NULL
-                WHERE idempotency_key IS NOT NULL
-                  AND idempotency_expires_at IS NOT NULL
-                  AND idempotency_expires_at<=NOW()"""
-            )
-            cur.execute("RELEASE SAVEPOINT sp_cleanup_idemp_037")
-        except Exception:
-            cur.execute("ROLLBACK TO SAVEPOINT sp_cleanup_idemp_037")
-        cur.execute("DELETE FROM security_delivery_request WHERE created_at<NOW()-INTERVAL '7 days'")
+        # 5. 仅清除非活跃且幂等窗口已过期的旧幂等键占用（活跃执行中任务及未过期的 unknown 任务绝不释放）
+        cur.execute(
+            """UPDATE security_delivery_request
+            SET idempotency_key=NULL, idempotency_scope=NULL
+            WHERE state = ANY(%s)
+              AND idempotency_key IS NOT NULL
+              AND idempotency_expires_at IS NOT NULL
+              AND idempotency_expires_at<=NOW()""",
+            (list(TERMINAL_TASK_STATES + RECOVERY_REQUIRED_STATES),),
+        )
+        # 6. 仅清理超过保留期（7 天）的非活跃任务
+        cur.execute(
+            "DELETE FROM security_delivery_request WHERE state = ANY(%s) AND created_at<NOW()-INTERVAL '7 days'",
+            (list(TERMINAL_TASK_STATES + RECOVERY_REQUIRED_STATES),),
+        )
         cur.execute(
             """UPDATE auth_challenge SET status='expired'
             WHERE status IN ('pending_send','pending') AND expires_at<=NOW()"""
@@ -563,18 +804,13 @@ def cleanup_delivery_tasks():
             """UPDATE recovery_grant SET status='expired'
             WHERE status='active' AND expires_at<=NOW()"""
         )
-        try:
-            cur.execute("SAVEPOINT sp_cleanup_stepup_036")
-            cur.execute(
-                """UPDATE step_up_grant SET status='expired'
-                WHERE status='active' AND expires_at<=NOW()"""
-            )
-            cur.execute("RELEASE SAVEPOINT sp_cleanup_stepup_036")
-        except Exception:
-            cur.execute("ROLLBACK TO SAVEPOINT sp_cleanup_stepup_036")
+        cur.execute(
+            """UPDATE step_up_grant SET status='expired'
+            WHERE status='active' AND expires_at<=NOW()"""
+        )
 
 
-def reconcile_sms_delivery(challenge_id: str):
+def reconcile_sms_delivery(challenge_id: str) -> dict[str, Any] | None:
     """Internal scheduled/operations hook; no public account-status oracle.
 
     Acceptance consumes a send allowance even if final delivery fails. SendCloud
@@ -655,5 +891,9 @@ def reconcile_sms_delivery(challenge_id: str):
                 ),
             )
     if state == "delivered" and res.updated:
-        _engine().transition(challenge_id, "delivered")
-    return {"state": state}
+        transition_risk_checked(_engine(), challenge_id, "delivered", channel="sms", purpose="reconcile")
+    return {
+        "state": res.current_send_state or row["send_state"],
+        "outcome": res.outcome,
+        "updated": res.updated,
+    }

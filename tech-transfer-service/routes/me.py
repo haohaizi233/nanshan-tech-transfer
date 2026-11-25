@@ -19,6 +19,7 @@ from modules.demand.service import list_my_demands
 from modules.favorite.service import list_my_favorites
 from modules.identity.service import change_password
 from modules.profile.service import get_my_profile, update_my_profile
+from modules.security.delivery_models import DeliveryStageError
 from modules.security.email_gateway import email_request_gate
 from modules.security.idempotency import (
     build_idempotency_scope,
@@ -26,6 +27,7 @@ from modules.security.idempotency import (
     compute_request_fingerprint,
     extract_idempotency_key,
     finalize_http_idempotency,
+    mark_http_idempotency_unknown,
     release_http_idempotency_on_pre_provider_failure,
 )
 from modules.security.rate_limiter import check_verify_challenge_rate, limiter
@@ -128,9 +130,11 @@ def post_step_up_challenge(
         if claim.replay:
             if claim.state == "unknown":
                 raise BizError("TT_COMMON_50301", "原验证码发送结果待确认，请稍后刷新或使用新请求", 503)
+            if claim.state == "failed":
+                raise BizError("TT_COMMON_50301", "原请求处理失败，请更换幂等键重试", 503)
             if claim.cached_response:
                 return success(claim.cached_response)
-            raise BizError("TT_COMMON_40901", "同一请求正在处理中，请稍候", 409)
+            raise BizError("TT_COMMON_40901", "同一请求正在处理中，请稍候", 409, details={"inFlight": True})
         try:
             if body.method == "old_email_otp":
                 email_request_gate(ctx, str(user["userId"]), purpose="step_up_auth")
@@ -143,19 +147,35 @@ def post_step_up_challenge(
                 ctx,
                 target_contact=body.targetContact,
                 session_ctx=sess_ctx,
+                idempotency_claim=claim,
             )
-            finalize_http_idempotency(claim, res, state="completed")
-            return success(res)
         except Exception as exc:
             if getattr(exc, "outcome_unknown", False):
-                finalize_http_idempotency(
-                    claim,
-                    {"pendingOutcome": True, "reasonCode": getattr(exc, "reason_code", "PROVIDER_OUTCOME_UNKNOWN")},
-                    state="unknown",
-                )
+                mark_http_idempotency_unknown(claim, getattr(exc, "reason_code", "PROVIDER_OUTCOME_UNKNOWN"))
+            elif getattr(exc, "request_attempted", False):
+                try:
+                    finalize_http_idempotency(
+                        claim,
+                        {"rejected": True, "reasonCode": getattr(exc, "reason_code", "PROVIDER_REJECTED")},
+                        state="failed",
+                        execution_stage="provider_rejected",
+                    )
+                except Exception:
+                    mark_http_idempotency_unknown(claim, "PROVIDER_REJECTED_PERSIST_FAILED")
             else:
                 release_http_idempotency_on_pre_provider_failure(claim, getattr(exc, "reason_code", type(exc).__name__))
             raise
+        try:
+            finalize_http_idempotency(claim, res, state="completed", execution_stage="response_persisted")
+        except Exception:
+            mark_http_idempotency_unknown(claim, "IDEMPOTENCY_FINALIZE_FAILED", challenge_id=res.get("challengeId"))
+            raise DeliveryStageError(
+                "idempotency_persist",
+                "IDEMPOTENCY_FINALIZE_FAILED",
+                outcome_unknown=True,
+                provider_called=True,
+            ) from None
+        return success(res)
 
     if body.method == "old_email_otp":
         email_request_gate(ctx, str(user["userId"]), purpose="step_up_auth")
@@ -245,9 +265,11 @@ def post_contact_challenge(
         if claim.replay:
             if claim.state == "unknown":
                 raise BizError("TT_COMMON_50301", "原验证码发送结果待确认，请勿重复发送", 503)
+            if claim.state == "failed":
+                raise BizError("TT_COMMON_50301", "原请求处理失败，请更换幂等键重试", 503)
             if claim.cached_response:
                 return success(claim.cached_response)
-            raise BizError("TT_COMMON_40901", "同一请求正在处理中，请稍候", 409)
+            raise BizError("TT_COMMON_40901", "同一请求正在处理中，请稍候", 409, details={"inFlight": True})
         try:
             if body.contactType == "phone":
                 request_gate(ctx, str(user["userId"]), phone=norm_dest, purpose="bind_phone")
@@ -261,19 +283,35 @@ def post_contact_challenge(
                 step_up_grant=body.stepUpGrant,
                 session_fingerprint=sess_fp,
                 session_ctx=sess_ctx,
+                idempotency_claim=claim,
             )
-            finalize_http_idempotency(claim, res, state="completed")
-            return success(res)
         except Exception as exc:
             if getattr(exc, "outcome_unknown", False):
-                finalize_http_idempotency(
-                    claim,
-                    {"pendingOutcome": True, "reasonCode": getattr(exc, "reason_code", "PROVIDER_OUTCOME_UNKNOWN")},
-                    state="unknown",
-                )
+                mark_http_idempotency_unknown(claim, getattr(exc, "reason_code", "PROVIDER_OUTCOME_UNKNOWN"))
+            elif getattr(exc, "request_attempted", False):
+                try:
+                    finalize_http_idempotency(
+                        claim,
+                        {"rejected": True, "reasonCode": getattr(exc, "reason_code", "PROVIDER_REJECTED")},
+                        state="failed",
+                        execution_stage="provider_rejected",
+                    )
+                except Exception:
+                    mark_http_idempotency_unknown(claim, "PROVIDER_REJECTED_PERSIST_FAILED")
             else:
                 release_http_idempotency_on_pre_provider_failure(claim, getattr(exc, "reason_code", type(exc).__name__))
             raise
+        try:
+            finalize_http_idempotency(claim, res, state="completed", execution_stage="response_persisted")
+        except Exception:
+            mark_http_idempotency_unknown(claim, "IDEMPOTENCY_FINALIZE_FAILED", challenge_id=res.get("challengeId"))
+            raise DeliveryStageError(
+                "idempotency_persist",
+                "IDEMPOTENCY_FINALIZE_FAILED",
+                outcome_unknown=True,
+                provider_called=True,
+            ) from None
+        return success(res)
 
     if body.contactType == "phone":
         request_gate(ctx, str(user["userId"]), phone=norm_dest, purpose="bind_phone")

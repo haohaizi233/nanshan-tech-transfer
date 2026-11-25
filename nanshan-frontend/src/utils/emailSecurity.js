@@ -96,5 +96,6 @@ export function createIdempotencyKey(prefix = 'sec') {
 export function shouldReuseIdempotencyKeyOnError(err) {
   const status = Number(err?.status ?? 0)
   if (status === 0) return true
+  if (status === 409 && err?.details?.inFlight === true) return true
   return status === 502 || status === 503 || status === 504
 }

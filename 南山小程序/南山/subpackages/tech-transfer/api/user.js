@@ -304,6 +304,7 @@ export function shouldReuseSecurityIdempotencyKey(err) {
 	if (!err) return false
 	const status = Number(err.status || 0)
 	if (status === 502 || status === 503 || status === 504) return true
+	if (status === 409 && err.details && err.details.inFlight === true) return true
 	if (!err.code) return true
 	return /^(NETWORK|TIMEOUT)/i.test(String(err.code)) || err.code === 'TT_COMMON_50301'
 }
