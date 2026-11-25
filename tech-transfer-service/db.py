@@ -25,9 +25,11 @@
 - TIMESTAMPTZ 读取为带时区 datetime（会话时区 Asia/Shanghai）
 """
 
+import contextvars
 import logging
 import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager, suppress
 
 import psycopg2
@@ -252,3 +254,54 @@ def transaction():
             with suppress(Exception):
                 conn.rollback()
             raise
+
+
+_concurrency_observer: contextvars.ContextVar[Callable[[str, BaseException], None] | None] = contextvars.ContextVar(
+    "_concurrency_observer", default=None
+)
+
+
+def set_concurrency_retry_observer(observer: Callable[[str, BaseException], None] | None) -> contextvars.Token:
+    """Register a per-context observer notified on real 40P01/40001 concurrency errors before retry."""
+    return _concurrency_observer.set(observer)
+
+
+def reset_concurrency_retry_observer(token: contextvars.Token) -> None:
+    _concurrency_observer.reset(token)
+
+
+def is_retryable_db_concurrency_error(exc: BaseException) -> str | None:
+    """Return 'deadlock' (40P01) or 'serialization' (40001) if retryable, else None."""
+    pgcode = getattr(exc, "pgcode", None)
+    if pgcode == "40P01":
+        return "deadlock"
+    if pgcode == "40001":
+        return "serialization"
+    err_mod = getattr(psycopg2, "errors", None)
+    if err_mod is not None:
+        dl = getattr(err_mod, "DeadlockDetected", None)
+        if dl is not None and isinstance(exc, dl):
+            return "deadlock"
+        sf = getattr(err_mod, "SerializationFailure", None)
+        if sf is not None and isinstance(exc, sf):
+            return "serialization"
+    return None
+
+
+def run_with_deadlock_retry[T](fn: Callable[[], T], *, max_attempts: int = 3) -> T:
+    """对纯数据库安全事务在发生 40P01/40001 时执行有界重试，并如实通知并发观测器。"""
+    attempts = max(1, int(max_attempts))
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except psycopg2.Error as exc:
+            kind = is_retryable_db_concurrency_error(exc)
+            if kind is not None:
+                obs = _concurrency_observer.get()
+                if obs is not None:
+                    with suppress(Exception):
+                        obs(kind, exc)
+            if kind is None or attempt + 1 >= attempts:
+                raise
+            time.sleep(0.01 * (attempt + 1))
+    raise RuntimeError("unreachable")

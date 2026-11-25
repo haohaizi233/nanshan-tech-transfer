@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import time
+import uuid
 from unittest.mock import MagicMock, patch
 
 import psycopg2
@@ -15,8 +15,10 @@ from core.password import hash_password
 from modules.security.provider import MockEmailProvider, reset_providers_for_test
 from modules.security.service import _fingerprint, _hmac_code_v2, verify_and_bind_contact
 from modules.security.step_up import (
+    _target_fingerprint,
     get_available_step_up_methods,
     issue_step_up_grant,
+    session_context_from_request,
     session_fingerprint_from_request,
     validate_step_up_grant,
 )
@@ -29,8 +31,9 @@ def _reset():
     reset_providers_for_test(None, None)
 
 
-def _make_request_with_jwt(user_id: int):
-    token = sign_access_token(user_id, "U001", ["user"], 1)
+def _make_request_with_jwt(user_id: int, *, sid: str | None = None, version: int = 1):
+    sid_val = sid or str(uuid.uuid4())
+    token = sign_access_token(user_id, "U001", ["user"], version, sid=sid_val, auth_time=int(time.time()))
     req = MagicMock()
     req.headers = {"Authorization": f"Bearer {token}"}
     return req, session_fingerprint_from_request(req, user_id)
@@ -66,22 +69,35 @@ def test_available_step_up_methods_by_account_type():
 
 
 def test_step_up_grant_issuance_and_validation_guards():
-    _req1, sess1 = _make_request_with_jwt(50)
-    req2 = MagicMock()
-    req2.headers = {"Authorization": f"Bearer {sign_access_token(50, 'U001', ['user'], 2)}"}
-    sess2 = session_fingerprint_from_request(req2, 50)
+    sid1 = str(uuid.uuid4())
+    sid2 = str(uuid.uuid4())
+    req1, sess1 = _make_request_with_jwt(50, sid=sid1, version=1)
+    req2, sess2 = _make_request_with_jwt(50, sid=sid2, version=2)
+    sctx1 = session_context_from_request(req1, 50)
+    sctx2 = session_context_from_request(req2, 50)
     assert sess1 != sess2
     pwd_hash = hash_password("CurrentStrongPass!9")
 
     cur = MagicMock()
-    cur.fetchone.return_value = {
-        "user_status": "active",
-        "deleted_at": None,
-        "cred_status": "active",
-        "password_configured": True,
-        "password_hash": pwd_hash,
-        "privileged": False,
-    }
+    cur.fetchone.side_effect = [
+        {
+            "user_status": "active",
+            "deleted_at": None,
+            "session_version": 1,
+            "cred_status": "active",
+            "password_configured": True,
+            "password_hash": pwd_hash,
+            "privileged": False,
+        },
+        {
+            "user_status": "active",
+            "deleted_at": None,
+            "session_version": 1,
+            "has_any": True,
+            "has_active": True,
+            "has_expired": False,
+        },
+    ]
     with (
         patch("modules.security.service.get_cursor") as mock_gc,
         patch("modules.security.step_up.audit_record"),
@@ -92,6 +108,7 @@ def test_step_up_grant_issuance_and_validation_guards():
             purpose="rebind_email",
             method="password",
             session_fingerprint=sess1,
+            session_ctx=sctx1,
             current_password="CurrentStrongPass!9",
             target_contact="new@example.com",
         )
@@ -104,39 +121,74 @@ def test_step_up_grant_issuance_and_validation_guards():
         "purpose": "rebind_email",
         "method": "password",
         "session_fingerprint": sess1,
-        "target_fingerprint": hashlib.sha256(b"placeholder").hexdigest(),
+        "session_id": sid1,
+        "target_fingerprint": _target_fingerprint("new@example.com", purpose="rebind_email"),
         "status": "active",
         "expires_at": time.time() + 180,
     }
     # Wrong session rejected
     vcur = MagicMock()
-    vcur.fetchone.return_value = {**valid_row, "target_fingerprint": None}
+    vcur.fetchone.return_value = valid_row
     with pytest.raises(BizError) as exc_sess:
-        validate_step_up_grant(vcur, user_id=50, grant_token=token, purpose="rebind_email", session_fingerprint=sess2)
+        validate_step_up_grant(
+            vcur,
+            user_id=50,
+            grant_token=token,
+            purpose="rebind_email",
+            session_fingerprint=sess2,
+            session_ctx=sctx2,
+            target_contact="new@example.com",
+        )
     assert exc_sess.value.http_status == 403
 
     # Wrong user rejected
-    vcur.fetchone.return_value = {**valid_row, "user_id": 999, "target_fingerprint": None}
+    vcur.fetchone.return_value = {**valid_row, "user_id": 999}
     with pytest.raises(BizError) as exc_user:
-        validate_step_up_grant(vcur, user_id=50, grant_token=token, purpose="rebind_email", session_fingerprint=sess1)
+        validate_step_up_grant(
+            vcur,
+            user_id=50,
+            grant_token=token,
+            purpose="rebind_email",
+            session_fingerprint=sess1,
+            session_ctx=sctx1,
+            target_contact="new@example.com",
+        )
     assert exc_user.value.http_status == 403
 
     # Consumed replay rejected
-    vcur.fetchone.return_value = {**valid_row, "status": "consumed", "target_fingerprint": None}
+    vcur.fetchone.return_value = {**valid_row, "status": "consumed"}
     with pytest.raises(BizError):
-        validate_step_up_grant(vcur, user_id=50, grant_token=token, purpose="rebind_email", session_fingerprint=sess1)
+        validate_step_up_grant(
+            vcur,
+            user_id=50,
+            grant_token=token,
+            purpose="rebind_email",
+            session_fingerprint=sess1,
+            session_ctx=sctx1,
+            target_contact="new@example.com",
+        )
 
     # Expired grant rejected and marked expired
-    vcur.fetchone.return_value = {**valid_row, "expires_at": time.time() - 5, "target_fingerprint": None}
+    vcur.fetchone.return_value = {**valid_row, "expires_at": time.time() - 5}
     with pytest.raises(BizError):
-        validate_step_up_grant(vcur, user_id=50, grant_token=token, purpose="rebind_email", session_fingerprint=sess1)
+        validate_step_up_grant(
+            vcur,
+            user_id=50,
+            grant_token=token,
+            purpose="rebind_email",
+            session_fingerprint=sess1,
+            session_ctx=sctx1,
+            target_contact="new@example.com",
+        )
 
 
 def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notifies():
     from config import settings as _settings
     from modules.security.step_up import _target_fingerprint
 
-    _, sess_fp = _make_request_with_jwt(77)
+    sid77 = str(uuid.uuid4())
+    req77, sess_fp = _make_request_with_jwt(77, sid=sid77, version=1)
+    sctx77 = session_context_from_request(req77, 77)
     cid = "ch-rebind-77"
     code = "005599"
     new_email = "new77@example.com"
@@ -177,8 +229,8 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
         "user_id": 77,
         "purpose": "rebind_email",
         "method": "password",
-        "session_fingerprint": sess_fp,
-        "session_id": None,
+        "session_fingerprint": sctx77.fingerprint_for_purpose("rebind_email"),
+        "session_id": sid77,
         "target_fingerprint": _target_fingerprint(new_email, purpose="rebind_email"),
         "status": "active",
         "expires_at": time.time() + 180,
@@ -202,6 +254,14 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
         {"id": 10, "normalized_value": "old77@example.com"},
         None,  # conflict query -> no other account
         grant_row,
+        {
+            "user_status": "active",
+            "deleted_at": None,
+            "session_version": 1,
+            "has_any": True,
+            "has_active": True,
+            "has_expired": False,
+        },
     ]
     with (
         patch.object(_settings, "EMAIL_ENABLED", True),
@@ -210,7 +270,15 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
         patch("modules.security.service.audit_record"),
     ):
         mock_gc.return_value.__enter__.return_value = cur_ok
-        res = verify_and_bind_contact(77, cid, code, new_email, step_up_grant=grant_token, session_fingerprint=sess_fp)
+        res = verify_and_bind_contact(
+            77,
+            cid,
+            code,
+            new_email,
+            step_up_grant=grant_token,
+            session_fingerprint=sess_fp,
+            session_ctx=sctx77,
+        )
     assert res["ok"] is True
     sqls = [str(c.args[0]) for c in cur_ok.execute.call_args_list]
     assert any("UPDATE step_up_grant SET status='consumed'" in s for s in sqls)
@@ -244,11 +312,19 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
             "user_id": 77,
             "purpose": "bind_email",
             "method": "password",
-            "session_fingerprint": sess_fp,
-            "session_id": None,
+            "session_fingerprint": sctx77.fingerprint_for_purpose("bind_email"),
+            "session_id": sid77,
             "target_fingerprint": _target_fingerprint(new_email, purpose="bind_email"),
             "status": "active",
             "expires_at": time.time() + 180,
+        },
+        {
+            "user_status": "active",
+            "deleted_at": None,
+            "session_version": 1,
+            "has_any": True,
+            "has_active": True,
+            "has_expired": False,
         },
     ]
 
@@ -267,5 +343,6 @@ def test_rebind_email_requires_step_up_revokes_grants_handles_conflict_and_notif
                 new_email,
                 step_up_grant="step-up-bind-dup-77",
                 session_fingerprint=sess_fp,
+                session_ctx=sctx77,
             )
         assert dup_exc.value.http_status == 409

@@ -46,6 +46,7 @@ from modules.security.idempotency import (
     extract_idempotency_key,
     finalize_http_idempotency,
     release_http_idempotency_on_pre_provider_failure,
+    wait_for_idempotency_settlement,
 )
 from modules.security.rate_limiter import check_verify_challenge_rate
 from modules.security.service import (
@@ -158,8 +159,14 @@ def recovery_start(
             initial_state="idem_pending",
         )
         if claim.replay:
-            if claim.state == "failed":
+            if claim.state in ("idem_pending", "idempotent_pending") and not claim.cached_response:
+                claim = wait_for_idempotency_settlement(claim, timeout_seconds=2.5)
+            if claim.state == "unknown":
+                raise BizError("TT_COMMON_50301", "原请求发送结果待确认，请稍后刷新或使用新请求", 503)
+            if claim.state in ("failed", "expired", "released") and not claim.cached_response:
                 raise BizError("TT_COMMON_50301", "原请求处理失败，请更换幂等键重试", 503)
+            if claim.state in ("idem_pending", "idempotent_pending") and not claim.cached_response:
+                raise BizError("TT_COMMON_40901", "同一请求正在处理中，请稍候", 409, details={"inFlight": True})
             resp_data = claim.cached_response or recovery_response(claim.task_id or challenge_id, body.channel)
             return success(resp_data)
 
@@ -174,7 +181,7 @@ def recovery_start(
                     purpose="password_recovery",
                 )
             resp_data = recovery_response(claim.task_id or challenge_id, body.channel)
-            finalize_http_idempotency(claim, resp_data, state="queued")
+            finalize_http_idempotency(claim, resp_data, state="queued", execution_stage="pre_provider")
         except Exception as exc:
             release_http_idempotency_on_pre_provider_failure(
                 claim,

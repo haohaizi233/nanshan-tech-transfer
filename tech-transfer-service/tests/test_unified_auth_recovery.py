@@ -476,11 +476,11 @@ def test_api_recovery_flow_e2e():
     # 3. complete
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
+        cur.fetchall.return_value = [{"id": challenge_id, "status": "verified"}]
         cur.fetchone.side_effect = [
             {"user_id": 200, "challenge_id": challenge_id},
             {"user_status": "active"},
             {"cred_status": "active", "password_configured": True, "password_hash": "dummy"},
-            {"id": challenge_id, "status": "verified"},
             {
                 "id": "grant-1",
                 "user_id": 200,

@@ -1,13 +1,15 @@
+import hmac
 import json
 import time
 import uuid
 
 from config import settings
+from core import auth_cache
 from core.contact_validation import is_valid_phone, validate_email, validate_phone
 from core.errors import TT_COMMON_40903, BizError, bad_request
 from core.jwt_utils import sign_access_token, sign_refresh_token
 from core.password import hash_password, verify_password
-from db import get_cursor
+from db import get_cursor, run_with_deadlock_retry
 from modules.audit.service import record as audit_record
 from modules.identity.context import IdentityContext
 from modules.identity.provider import ExternalIdentity
@@ -208,38 +210,33 @@ def _ts_to_epoch(value) -> int | None:
 
 
 def _insert_auth_session(cur, user_id: int, refresh_jti: str, sid: str | None, auth_time: int | None) -> None:
-    try:
-        cur.execute("SAVEPOINT sp_auth_sess_insert_037")
-        cur.execute(
-            """
-            INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at, sid, auth_time)
-            VALUES (
-                %s, %s, 'active', NOW(), NOW() + make_interval(days => %s), %s,
-                CASE WHEN %s IS NOT NULL THEN to_timestamp(%s) ELSE NULL END
-            )
-            """,
-            (user_id, refresh_jti, settings.REFRESH_TOKEN_EXPIRES_DAYS, sid, auth_time, auth_time),
+    cur.execute(
+        """
+        INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at, sid, auth_time)
+        VALUES (
+            %s, %s, 'active', NOW(), NOW() + make_interval(days => %s), %s,
+            CASE WHEN %s IS NOT NULL THEN to_timestamp(%s) ELSE NULL END
         )
-        cur.execute("RELEASE SAVEPOINT sp_auth_sess_insert_037")
-    except Exception:
-        cur.execute("ROLLBACK TO SAVEPOINT sp_auth_sess_insert_037")
-        cur.execute(
-            """
-            INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at)
-            VALUES (%s, %s, 'active', NOW(), NOW() + make_interval(days => %s))
-            """,
-            (user_id, refresh_jti, settings.REFRESH_TOKEN_EXPIRES_DAYS),
-        )
+        """,
+        (user_id, refresh_jti, settings.REFRESH_TOKEN_EXPIRES_DAYS, sid, auth_time, auth_time),
+    )
 
 
 def bootstrap_session(ext: ExternalIdentity) -> dict:
+    from core.errors import TT_AUTH_40106
+
     identity, is_new = find_or_create_user(ext)
 
     with get_cursor(commit=True) as cur:
-        cur.execute("SELECT user_no, session_version FROM app_user WHERE id=%s", (identity.userId,))
+        cur.execute(
+            "SELECT user_no, status, deleted_at, session_version FROM app_user WHERE id=%s FOR UPDATE",
+            (identity.userId,),
+        )
         row = cur.fetchone()
-        user_no = (row and row.get("user_no")) or ""
-        session_version = int((row and row.get("session_version")) or 1)
+        if not row or row.get("deleted_at") is not None or row.get("status", "active") != "active":
+            raise BizError(*TT_AUTH_40106)
+        user_no = row.get("user_no") or ""
+        session_version = int(row.get("session_version") or 1)
         sid = str(uuid.uuid4())
         auth_time = int(time.time())
 
@@ -267,7 +264,7 @@ def bootstrap_session(ext: ExternalIdentity) -> dict:
 
 def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
     """签发 access/refresh token 并落 auth_session，返回响应 dict（无 user 字段）。"""
-    cur.execute("SELECT user_no, status, session_version FROM app_user WHERE id=%s", (user_id,))
+    cur.execute("SELECT user_no, status, session_version FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
     row = cur.fetchone()
     user_no = (row and row.get("user_no")) or ""
     session_version = int((row and row.get("session_version")) or 1)
@@ -370,11 +367,11 @@ _LOGIN_CRED_SQL = """
 """
 
 
-def _verify_login_and_issue(cur, cred: dict | None, password: str) -> dict:
-    """密码校验 + 账号状态检查 + 签发会话（username/phone 两种登录共用）。
+def _verify_login_and_issue(cred: dict | None, password: str) -> dict:
+    """密码校验（锁外）+ 锁内凭证/状态二次核验 + 签发会话。
 
-    用户不存在 / 密码错误返回同一文案（防账号枚举）；
-    账号禁用（credential 或 app_user 任一 disabled）返回独立错误码。
+    防止在慢密码哈希校验窗口内发生并发改密/重置后仍以旧密码签发新版有效会话；
+    用户不存在 / 密码错误返回同一文案（防账号枚举）。
     """
     from core.errors import TT_AUTH_40105, TT_AUTH_40106
 
@@ -390,12 +387,40 @@ def _verify_login_and_issue(cur, cred: dict | None, password: str) -> dict:
         code, message, status = TT_AUTH_40106
         raise BizError(code, message, status)
 
-    user_id = cred["user_id"]
-    roles = _get_roles(cur, user_id)
-    result = _issue_session(cur, user_id, roles)
-    result["user"] = build_user_response(cur, user_id)
-    result["isNewUser"] = False
-    return result
+    user_id = int(cred["user_id"])
+    expected_hash = str(cred["password_hash"])
+
+    def _attempt() -> dict:
+        with get_cursor(commit=True) as cur:
+            # 全局规范锁顺序：app_user -> user_credential -> ... -> auth_session
+            cur.execute(
+                "SELECT id, status, deleted_at FROM app_user WHERE id=%s FOR UPDATE",
+                (user_id,),
+            )
+            au = cur.fetchone()
+            if not au or au.get("deleted_at") is not None or au.get("status") != "active":
+                raise BizError(*TT_AUTH_40106)
+
+            cur.execute(
+                "SELECT password_hash, password_configured, status FROM user_credential WHERE user_id=%s FOR UPDATE",
+                (user_id,),
+            )
+            fresh_cred = cur.fetchone()
+            if not fresh_cred or fresh_cred.get("status") != "active":
+                raise BizError(*TT_AUTH_40106)
+            if not fresh_cred.get("password_configured", True) or not hmac.compare_digest(
+                str(fresh_cred.get("password_hash") or ""),
+                expected_hash,
+            ):
+                raise BizError(*TT_AUTH_40105)
+
+            roles = _get_roles(cur, user_id)
+            result = _issue_session(cur, user_id, roles)
+            result["user"] = build_user_response(cur, user_id)
+            result["isNewUser"] = False
+            return result
+
+    return run_with_deadlock_retry(_attempt)
 
 
 def password_login_session(username: str, password: str) -> dict:
@@ -405,10 +430,10 @@ def password_login_session(username: str, password: str) -> dict:
     if not username or not password:
         raise BizError(*TT_AUTH_40105)
 
-    with get_cursor(commit=True) as cur:
+    with get_cursor() as cur:
         cur.execute(_LOGIN_CRED_SQL.format(where="uc.username = %s"), (username,))
         cred = cur.fetchone()
-        return _verify_login_and_issue(cur, cred, password)
+    return _verify_login_and_issue(cred, password)
 
 
 def login_phone_session(phone: str, password: str) -> dict:
@@ -422,7 +447,7 @@ def login_phone_session(phone: str, password: str) -> dict:
     if not phone or not password:
         raise BizError(*TT_AUTH_40105)
 
-    with get_cursor(commit=True) as cur:
+    with get_cursor() as cur:
         cur.execute(_LOGIN_CRED_SQL.format(where="uc.phone = %s"), (phone,))
         cred = cur.fetchone()
         if cred is None:
@@ -431,7 +456,7 @@ def login_phone_session(phone: str, password: str) -> dict:
                 (phone,),
             )
             cred = cur.fetchone()
-        return _verify_login_and_issue(cur, cred, password)
+    return _verify_login_and_issue(cred, password)
 
 
 def create_password_account(
@@ -527,127 +552,116 @@ def register_password_user(body: dict, request_id: str | None = None) -> dict:
 def refresh_session(refresh_token: str) -> dict:
     import jwt as _jwt
 
+    from core.errors import TT_AUTH_40106, TT_COMMON_40102
     from core.jwt_utils import decode_no_verify_exp
 
     try:
         payload = decode_no_verify_exp(refresh_token)
     except _jwt.InvalidTokenError:
-        from core.errors import TT_COMMON_40102, BizError
-
-        code, message, status = TT_COMMON_40102
-        raise BizError(code, message, status)
+        raise BizError(*TT_COMMON_40102) from None
 
     if payload.get("type") != "refresh":
-        from core.errors import TT_COMMON_40102, BizError
-
-        code, message, status = TT_COMMON_40102
-        raise BizError(code, message, status)
+        raise BizError(*TT_COMMON_40102)
 
     jti = payload.get("jti")
-    user_id = int(payload["sub"])
+    if not jti:
+        raise BizError(*TT_COMMON_40102)
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise BizError(*TT_COMMON_40102) from None
 
-    with get_cursor(commit=True) as cur:
-        # 原子消费 refresh 令牌并保留原逻辑会话 sid 与真实初次认证时间戳 auth_time；
-        # 绝不在刷新时推进 auth_time，历史缺失字段也不伪造为当前时间。
-        consumed_row = None
-        try:
-            cur.execute("SAVEPOINT sp_refresh_037")
+    def _attempt() -> tuple[dict | None, bool]:
+        with get_cursor() as read_cur:
+            read_cur.execute(
+                "SELECT user_id, sid, status FROM auth_session WHERE refresh_jti=%s",
+                (jti,),
+            )
+            sess_row = read_cur.fetchone()
+        if not sess_row or int(sess_row.get("user_id") or 0) != user_id:
+            raise BizError(*TT_COMMON_40102)
+
+        with get_cursor(commit=True) as cur:
+            # 全局规范锁顺序：app_user -> user_credential -> ... -> step_up_grant -> auth_session
+            cur.execute(
+                """
+                SELECT au.user_no, au.status AS user_status, au.deleted_at, au.session_version
+                FROM app_user au
+                WHERE au.id = %s
+                FOR UPDATE OF au
+                """,
+                (user_id,),
+            )
+            au_row = cur.fetchone()
+            cur.execute(
+                "SELECT status AS cred_status FROM user_credential WHERE user_id = %s FOR UPDATE",
+                (user_id,),
+            )
+            cred_row = cur.fetchone()
+            cred_status = cred_row.get("cred_status") if isinstance(cred_row, dict) else None
+            if (
+                not au_row
+                or au_row.get("deleted_at") is not None
+                or au_row.get("user_status") != "active"
+                or (cred_status is not None and cred_status != "active")
+            ):
+                cur.execute(
+                    "UPDATE step_up_grant SET status='revoked' WHERE user_id=%s AND status='active'",
+                    (user_id,),
+                )
+                cur.execute(
+                    "UPDATE auth_session SET status='revoked', revoked_at=NOW() WHERE user_id=%s AND status='active'",
+                    (user_id,),
+                )
+                return None, True
+
             cur.execute(
                 """
                 UPDATE auth_session
                 SET status='consumed', consumed_at=NOW()
-                WHERE refresh_jti=%s AND status='active'
+                WHERE refresh_jti=%s AND user_id=%s AND status='active'
                   AND (expires_at IS NULL OR expires_at >= NOW())
                 RETURNING sid, auth_time
                 """,
-                (jti,),
+                (jti, user_id),
             )
             if cur.rowcount == 0:
-                cur.execute("RELEASE SAVEPOINT sp_refresh_037")
-                from core.errors import TT_COMMON_40102, BizError
-
-                code, message, status = TT_COMMON_40102
-                raise BizError(code, message, status)
+                raise BizError(*TT_COMMON_40102)
             consumed_row = cur.fetchone()
-            cur.execute("RELEASE SAVEPOINT sp_refresh_037")
-        except BizError:
-            raise
-        except Exception:
-            cur.execute("ROLLBACK TO SAVEPOINT sp_refresh_037")
-            cur.execute(
-                """
-                UPDATE auth_session
-                SET status='consumed', consumed_at=NOW()
-                WHERE refresh_jti=%s AND status='active'
-                  AND (expires_at IS NULL OR expires_at >= NOW())
-                """,
-                (jti,),
+
+            raw_sid = consumed_row.get("sid") if isinstance(consumed_row, dict) else None
+            sid = str(raw_sid) if raw_sid else None
+            auth_time = _ts_to_epoch(consumed_row.get("auth_time")) if isinstance(consumed_row, dict) else None
+
+            user_no = au_row["user_no"] or ""
+            session_version = int(au_row.get("session_version") or 1)
+
+            roles = _get_roles(cur, user_id)
+            access_token = sign_access_token(
+                user_id,
+                user_no,
+                roles,
+                session_version=session_version,
+                sid=sid,
+                auth_time=auth_time,
             )
-            if cur.rowcount == 0:
-                from core.errors import TT_COMMON_40102, BizError
+            new_refresh_token, new_jti = sign_refresh_token(user_id, sid=sid)
+            _insert_auth_session(cur, user_id, new_jti, sid, auth_time)
+            user = build_user_response(cur, user_id)
+            return {
+                "accessToken": access_token,
+                "refreshToken": new_refresh_token,
+                "expiresIn": settings.ACCESS_TOKEN_EXPIRES,
+                "user": user,
+                "isNewUser": False,
+            }, False
 
-                code, message, status = TT_COMMON_40102
-                raise BizError(code, message, status)
-
-        raw_sid = consumed_row.get("sid") if isinstance(consumed_row, dict) else None
-        sid = str(raw_sid) if raw_sid else None
-        auth_time = _ts_to_epoch(consumed_row.get("auth_time")) if isinstance(consumed_row, dict) else None
-
-        cur.execute(
-            """
-            SELECT au.user_no, au.status AS user_status, au.session_version, uc.status AS cred_status
-            FROM app_user au
-            LEFT JOIN user_credential uc ON uc.user_id = au.id
-            WHERE au.id = %s AND au.deleted_at IS NULL
-            """,
-            (user_id,),
-        )
-        row = cur.fetchone()
-        if (
-            not row
-            or row["user_status"] != "active"
-            or (row["cred_status"] is not None and row["cred_status"] != "active")
-        ):
-            cur.execute(
-                "UPDATE auth_session SET status='revoked', revoked_at=NOW() WHERE user_id=%s AND status='active'",
-                (user_id,),
-            )
-            try:
-                cur.execute("SAVEPOINT sp_refresh_disable_grant")
-                cur.execute(
-                    "UPDATE step_up_grant SET status='revoked' WHERE user_id=%s AND status='active'", (user_id,)
-                )
-                cur.execute("RELEASE SAVEPOINT sp_refresh_disable_grant")
-            except Exception:
-                cur.execute("ROLLBACK TO SAVEPOINT sp_refresh_disable_grant")
-            from core.errors import TT_AUTH_40106, BizError
-
-            code, message, status = TT_AUTH_40106
-            raise BizError(code, message, status)
-        user_no = row["user_no"] or ""
-        session_version = int(row.get("session_version") or 1)
-
-        roles = _get_roles(cur, user_id)
-        access_token = sign_access_token(
-            user_id,
-            user_no,
-            roles,
-            session_version=session_version,
-            sid=sid,
-            auth_time=auth_time,
-        )
-        new_refresh_token, new_jti = sign_refresh_token(user_id, sid=sid)
-        _insert_auth_session(cur, user_id, new_jti, sid, auth_time)
-
-        user = build_user_response(cur, user_id)
-
-    return {
-        "accessToken": access_token,
-        "refreshToken": new_refresh_token,
-        "expiresIn": settings.ACCESS_TOKEN_EXPIRES,
-        "user": user,
-        "isNewUser": False,
-    }
+    result, disabled_revoked = run_with_deadlock_retry(_attempt)
+    if disabled_revoked:
+        auth_cache.invalidate_user(user_id)
+        raise BizError(*TT_AUTH_40106)
+    assert result is not None
+    return result
 
 
 def logout_session(refresh_token: str) -> dict:
@@ -655,54 +669,61 @@ def logout_session(refresh_token: str) -> dict:
 
     from core.jwt_utils import decode_no_verify_exp
 
-    revoked = False
     try:
         payload = decode_no_verify_exp(refresh_token)
-        jti = payload.get("jti")
-        if jti:
-            with get_cursor(commit=True) as cur:
-                revoked_row = None
-                try:
-                    cur.execute("SAVEPOINT sp_logout_037")
-                    cur.execute(
-                        "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
-                        "WHERE refresh_jti=%s AND status='active' RETURNING user_id, sid",
-                        (jti,),
-                    )
-                    revoked = cur.rowcount > 0
-                    if revoked:
-                        revoked_row = cur.fetchone()
-                    cur.execute("RELEASE SAVEPOINT sp_logout_037")
-                except Exception:
-                    cur.execute("ROLLBACK TO SAVEPOINT sp_logout_037")
-                    cur.execute(
-                        "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
-                        "WHERE refresh_jti=%s AND status='active'",
-                        (jti,),
-                    )
-                    revoked = cur.rowcount > 0
-                if revoked and isinstance(revoked_row, dict) and revoked_row.get("sid"):
-                    sid = str(revoked_row["sid"])
-                    uid = revoked_row.get("user_id")
-                    if uid is not None:
-                        try:
-                            cur.execute("SAVEPOINT sp_logout_chain_037")
-                            cur.execute(
-                                "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
-                                "WHERE user_id=%s AND sid=%s AND status='active'",
-                                (uid, sid),
-                            )
-                            cur.execute(
-                                "UPDATE step_up_grant SET status='revoked' "
-                                "WHERE user_id=%s AND session_id=%s AND status='active'",
-                                (uid, sid),
-                            )
-                            cur.execute("RELEASE SAVEPOINT sp_logout_chain_037")
-                        except Exception:
-                            cur.execute("ROLLBACK TO SAVEPOINT sp_logout_chain_037")
     except _jwt.InvalidTokenError:
-        pass
+        return {"revoked": False}
 
+    if payload.get("type") not in (None, "refresh"):
+        return {"revoked": False}
+
+    jti = payload.get("jti")
+    if not jti:
+        return {"revoked": False}
+
+    def _attempt() -> tuple[bool, int | None]:
+        with get_cursor() as read_cur:
+            read_cur.execute(
+                "SELECT user_id, sid, status FROM auth_session WHERE refresh_jti=%s",
+                (jti,),
+            )
+            sess_row = read_cur.fetchone()
+
+        raw_uid = (sess_row.get("user_id") if isinstance(sess_row, dict) else None) or payload.get("sub")
+        uid: int | None = int(raw_uid) if raw_uid is not None else None
+        raw_sid = (sess_row.get("sid") if isinstance(sess_row, dict) else None) or payload.get("sid")
+        sid: str | None = str(raw_sid) if raw_sid else None
+        if sess_row is None and uid is None:
+            return False, None
+
+        revoked_local = False
+        with get_cursor(commit=True) as cur:
+            # 全局规范锁顺序：app_user -> ... -> step_up_grant -> auth_session
+            if uid is not None:
+                cur.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (uid,))
+            if sid and uid is not None:
+                cur.execute(
+                    "UPDATE step_up_grant SET status='revoked' WHERE user_id=%s AND session_id=%s AND status='active'",
+                    (uid, sid),
+                )
+                cur.execute(
+                    "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
+                    "WHERE user_id=%s AND sid=%s AND status='active'",
+                    (uid, sid),
+                )
+                revoked_local = cur.rowcount > 0
+            else:
+                cur.execute(
+                    "UPDATE auth_session SET status='revoked', revoked_at=NOW() "
+                    "WHERE refresh_jti=%s AND status='active'",
+                    (jti,),
+                )
+                revoked_local = cur.rowcount > 0
+        return revoked_local, uid
+
+    revoked, uid = run_with_deadlock_retry(_attempt)
+    if revoked and uid is not None:
+        auth_cache.invalidate_user(uid)
     return {"revoked": revoked}
 
 
@@ -715,59 +736,85 @@ def change_password(user_id: int, current_password: str, new_password: str) -> d
     if current_password == new_password:
         raise bad_request("新密码不能与当前密码相同")
 
-    with get_cursor(commit=True) as cur:
-        # 全局统一锁顺序：app_user -> user_credential -> recovery_grant -> step_up_grant -> auth_session
+    with get_cursor() as cur:
         cur.execute(
-            "SELECT id, status, deleted_at FROM app_user WHERE id=%s FOR UPDATE",
+            "SELECT password_hash, password_configured, status FROM user_credential WHERE user_id=%s",
             (user_id,),
         )
-        user_row = cur.fetchone()
-        if not user_row or user_row.get("deleted_at") is not None or user_row.get("status", "active") != "active":
-            raise bad_request("当前账号不可修改密码")
-        cur.execute(
-            "SELECT password_hash, password_configured, status FROM user_credential WHERE user_id=%s FOR UPDATE",
-            (user_id,),
-        )
-        cred = cur.fetchone()
-        if not cred:
-            raise bad_request("当前账号不支持密码登录")
-        if cred.get("status", "active") != "active":
-            raise bad_request("当前账号不可修改密码")
-        if cred.get("password_configured", True) and not current_password:
-            raise bad_request("请填写当前密码")
-        if cred.get("password_configured", True) and not verify_password(current_password, cred["password_hash"]):
-            raise bad_request("当前密码不正确")
-        cur.execute(
-            "UPDATE user_credential SET password_hash=%s, password_configured=true WHERE user_id=%s",
-            (hash_password(new_password), user_id),
-        )
-        # 递增 session_version 使旧 Access Token 即刻失效
-        cur.execute(
-            "UPDATE app_user SET session_version = session_version + 1 WHERE id = %s",
-            (user_id,),
-        )
-        # 吊销活跃 Step-up Grant 与活跃 refresh token
-        try:
-            cur.execute("SAVEPOINT sp_chg_pwd_stepup")
+        pre_cred = cur.fetchone()
+    if not pre_cred:
+        raise bad_request("当前账号不支持密码登录")
+    if pre_cred.get("status", "active") != "active":
+        raise bad_request("当前账号不可修改密码")
+    if pre_cred.get("password_configured", True) and not current_password:
+        raise bad_request("请填写当前密码")
+    if pre_cred.get("password_configured", True) and not verify_password(current_password, pre_cred["password_hash"]):
+        raise bad_request("当前密码不正确")
+
+    new_hash = hash_password(new_password)
+
+    def _attempt() -> None:
+        with get_cursor(commit=True) as cur:
+            # 全局统一锁顺序：app_user -> user_credential -> auth_challenge -> recovery_grant -> step_up_grant -> auth_session
+            cur.execute(
+                "SELECT id, status, deleted_at FROM app_user WHERE id=%s FOR UPDATE",
+                (user_id,),
+            )
+            user_row = cur.fetchone()
+            if not user_row or user_row.get("deleted_at") is not None or user_row.get("status", "active") != "active":
+                raise bad_request("当前账号不可修改密码")
+            cur.execute(
+                "SELECT password_hash, password_configured, status FROM user_credential WHERE user_id=%s FOR UPDATE",
+                (user_id,),
+            )
+            cred = cur.fetchone()
+            if not cred:
+                raise bad_request("当前账号不支持密码登录")
+            if cred.get("status", "active") != "active":
+                raise bad_request("当前账号不可修改密码")
+            if cred.get("password_configured", True) and not current_password:
+                raise bad_request("请填写当前密码")
+            if cred.get("password_configured", True) and not verify_password(current_password, cred["password_hash"]):
+                raise bad_request("当前密码不正确")
+
+            cur.execute(
+                "UPDATE user_credential SET password_hash=%s, password_configured=true WHERE user_id=%s",
+                (new_hash, user_id),
+            )
+            cur.execute(
+                """
+                UPDATE auth_challenge
+                SET status='cancelled'
+                WHERE user_id=%s
+                  AND purpose IN ('password_recovery', 'step_up_auth')
+                  AND status IN ('pending_send', 'pending', 'verified')
+                """,
+                (user_id,),
+            )
+            cur.execute(
+                "UPDATE recovery_grant SET status='revoked' WHERE user_id=%s AND status='active'",
+                (user_id,),
+            )
             cur.execute(
                 "UPDATE step_up_grant SET status='revoked' WHERE user_id=%s AND status='active'",
                 (user_id,),
             )
-            cur.execute("RELEASE SAVEPOINT sp_chg_pwd_stepup")
-        except Exception:
-            cur.execute("ROLLBACK TO SAVEPOINT sp_chg_pwd_stepup")
-        cur.execute(
-            "UPDATE auth_session SET status='revoked', revoked_at=NOW() WHERE user_id=%s AND status='active'",
-            (user_id,),
-        )
-        from core import auth_cache
+            cur.execute(
+                "UPDATE auth_session SET status='revoked', revoked_at=NOW() WHERE user_id=%s AND status='active'",
+                (user_id,),
+            )
+            cur.execute(
+                "UPDATE app_user SET session_version = session_version + 1 WHERE id = %s",
+                (user_id,),
+            )
+            audit_record(
+                "user.change_password",
+                "user_credential",
+                resource_id=user_id,
+                actor_user_id=user_id,
+                cur=cur,
+            )
 
-        auth_cache.invalidate_user(user_id)
-        audit_record(
-            "user.change_password",
-            "user_credential",
-            resource_id=user_id,
-            actor_user_id=user_id,
-            cur=cur,
-        )
+    run_with_deadlock_retry(_attempt)
+    auth_cache.invalidate_user(user_id)
     return {"ok": True}

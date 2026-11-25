@@ -91,7 +91,7 @@ jobs:
           SMS_TEST_POSTGRES_DSN: postgresql://mac:test@127.0.0.1:5432/tech_transfer_test
           SMS_TEST_REDIS_URL: redis://127.0.0.1:6379/15
         run: |
-          pytest -p no:cacheprovider tests/test_sms_gateway_postgres.py tests/test_sms_risk.py tests/test_email_gateway_postgres.py tests/test_email_risk.py tests/test_security_auth_time.py tests/test_email_first_binding.py tests/test_recovery_anti_enumeration.py tests/test_security_cross_transaction_postgres.py tests/test_security_http_idempotency.py tests/test_delivery_state_cas.py tests/test_delivery_pii_retention.py tests/test_email_provider_reconciliation.py -q
+          pytest -p no:cacheprovider tests/test_sms_gateway_postgres.py tests/test_sms_risk.py tests/test_email_gateway_postgres.py tests/test_email_risk.py tests/test_security_auth_time.py tests/test_email_first_binding.py tests/test_recovery_anti_enumeration.py tests/test_security_cross_transaction_postgres.py tests/test_security_http_idempotency.py tests/test_delivery_state_cas.py tests/test_delivery_pii_retention.py tests/test_email_provider_reconciliation.py tests/test_session_validation_fail_closed.py tests/test_security_provider_execution_right.py tests/test_security_session_transaction_postgres.py tests/test_security_credential_revocation.py tests/test_step_up_challenge_context.py tests/test_security_idempotency_crash_recovery.py tests/test_security_delivery_fault_injection.py tests/test_security_acceptance_manifest.py -q
 
       - name: Run tests with coverage
         working-directory: tech-transfer-service
@@ -161,7 +161,7 @@ jobs:
       - name: Run mypy (security & auth core blocking gate)
         working-directory: tech-transfer-service
         run: |
-          mypy modules/security core/jwt_utils.py --ignore-missing-imports --no-strict-optional --show-error-codes
+          mypy modules/security core/jwt_utils.py core/middleware.py --ignore-missing-imports --no-strict-optional --show-error-codes
 
       - name: Run mypy (full repo type checking)
         working-directory: tech-transfer-service

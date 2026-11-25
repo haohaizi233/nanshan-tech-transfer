@@ -75,6 +75,9 @@ def pg(monkeypatch, request):
             "033_unified_account_security.sql",
             "034_sms_security_gateway.sql",
             "035_sms_delivery_diagnostics.sql",
+            "036_email_security_gateway.sql",
+            "037_phase_r_security_hardening.sql",
+            "038_phase_r_final_security.sql",
         ]:
             migration = (Path(__file__).parents[1] / "migrations" / "pg" / name).read_text(encoding="utf-8")
             c.execute(migration.replace("public.", schema + "."))
@@ -85,7 +88,7 @@ def pg(monkeypatch, request):
         c.execute(
             "INSERT INTO account_contact(user_id,contact_type,normalized_value,verified_at,verification_method) VALUES(1,'phone','13800138000',NOW(),'sms')"
         )
-        c.execute("INSERT INTO auth_session VALUES(1,'active',NULL)")
+        c.execute("INSERT INTO auth_session(user_id,status,revoked_at) VALUES(1,'active',NULL)")
 
     @contextmanager
     def cursor(commit=False):

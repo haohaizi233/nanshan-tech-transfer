@@ -12,6 +12,7 @@ import re
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any
 
 from core.errors import BizError
 
@@ -293,3 +294,52 @@ def task_event(
     }
     msg = "SMS delivery task event" if result.channel == "sms" else "security.delivery.result"
     logger.log(logging.INFO if result.outcome == "COMPLETED" else logging.WARNING, msg, extra=fields)
+
+
+def transition_risk_checked(
+    engine: Any,
+    challenge_id: str,
+    target_state: str,
+    *,
+    channel: str,
+    purpose: str,
+    request_id: str | None = None,
+) -> bool:
+    """显式消费并检查 Redis 风控状态转换结果（RF9），异常或 False 均记结构化诊断，绝不触发重发。"""
+    diag_logger = logging.getLogger("nanshan.security.risk_coordination")
+    try:
+        ok = bool(engine.transition(challenge_id, target_state))
+    except Exception as exc:
+        metrics.inc(
+            "risk_transition_failed_total",
+            channel=channel,
+            purpose=purpose,
+            reason=f"exc_{type(exc).__name__}"[:48],
+        )
+        diag_logger.warning(
+            "Redis risk state transition raised exception (channel=%s purpose=%s target=%s challenge=%s err=%s req=%s)",
+            channel,
+            purpose,
+            target_state,
+            safe_id(challenge_id),
+            type(exc).__name__,
+            safe_id(request_id) if request_id else "-",
+        )
+        return False
+
+    if not ok:
+        metrics.inc(
+            "risk_transition_failed_total",
+            channel=channel,
+            purpose=purpose,
+            reason=f"not_updated_{target_state}"[:48],
+        )
+        diag_logger.warning(
+            "Redis risk state transition returned False (channel=%s purpose=%s target=%s challenge=%s req=%s)",
+            channel,
+            purpose,
+            target_state,
+            safe_id(challenge_id),
+            safe_id(request_id) if request_id else "-",
+        )
+    return ok

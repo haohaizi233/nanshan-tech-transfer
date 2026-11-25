@@ -43,6 +43,7 @@ def client():
         patch("db.close_pool"),
         patch("db.get_cursor") as mock_gc,
         patch("db.get_conn") as mock_gconn,
+        patch("core.middleware._user_session_version", return_value=1),
     ):
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None

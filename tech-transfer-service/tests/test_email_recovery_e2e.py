@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
@@ -166,11 +167,11 @@ def test_recovery_e2e_otp_and_link_complete_and_headers(_e2e_env):
 
     with patch("modules.security.service.get_cursor") as mock_gc:
         ccur = MagicMock()
+        ccur.fetchall.return_value = [{"id": cid, "status": "verified"}]
         ccur.fetchone.side_effect = [
             {"user_id": 301, "challenge_id": cid},
             {"user_status": "active"},
             {"cred_status": "active", "password_configured": True, "password_hash": hash_password("OldPass!9")},
-            {"id": cid, "status": "verified"},
             {"id": "rg-1", "user_id": 301, "challenge_id": cid, "status": "active", "expires_at": time.time() + 300},
         ]
         mock_gc.return_value.__enter__.return_value = ccur
@@ -202,12 +203,14 @@ def test_recovery_e2e_otp_and_link_complete_and_headers(_e2e_env):
 
 
 def test_me_security_and_step_up_http_endpoints(_e2e_env):
-    token = sign_access_token(405, "U0405", ["user"], 1)
+    sid_405 = str(uuid.uuid4())
+    token = sign_access_token(405, "U0405", ["user"], 1, sid=sid_405, auth_time=int(time.time()))
     headers = {"Authorization": f"Bearer {token}"}
 
     with (
         patch("core.middleware._user_is_active", return_value=True),
         patch("core.middleware._user_session_version", return_value=1),
+        patch("core.middleware._session_is_active", return_value=True),
         patch("modules.security.service.get_cursor") as mock_gc,
         patch("modules.security.step_up.get_cursor") as mock_su_gc,
     ):
@@ -242,18 +245,30 @@ def test_me_security_and_step_up_http_endpoints(_e2e_env):
     with (
         patch("core.middleware._user_is_active", return_value=True),
         patch("core.middleware._user_session_version", return_value=1),
+        patch("core.middleware._session_is_active", return_value=True),
         patch("modules.security.service.get_cursor") as mock_gc,
         patch("modules.security.step_up.audit_record"),
     ):
         cur2 = MagicMock()
-        cur2.fetchone.return_value = {
-            "user_status": "active",
-            "deleted_at": None,
-            "cred_status": "active",
-            "password_configured": True,
-            "password_hash": pwd_hash,
-            "privileged": False,
-        }
+        cur2.fetchone.side_effect = [
+            {
+                "user_status": "active",
+                "deleted_at": None,
+                "session_version": 1,
+                "cred_status": "active",
+                "password_configured": True,
+                "password_hash": pwd_hash,
+                "privileged": False,
+            },
+            {
+                "user_status": "active",
+                "deleted_at": None,
+                "session_version": 1,
+                "has_any": True,
+                "has_active": True,
+                "has_expired": False,
+            },
+        ]
         mock_gc.return_value.__enter__.return_value = cur2
         r_su = client.post(
             "/api/tech-transfer/v1/me/security/step-up/verify",

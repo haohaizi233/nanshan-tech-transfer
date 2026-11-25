@@ -34,7 +34,7 @@ from core.errors import (
     bad_request,
 )
 from core.password import hash_password
-from db import get_cursor
+from db import get_cursor, is_retryable_db_concurrency_error, run_with_deadlock_retry
 from modules.audit.service import record as audit_record
 from modules.security.delivery_models import metrics
 from modules.security.provider import get_email_provider
@@ -53,29 +53,12 @@ def _expired(value: Any) -> bool:
 
 
 def _is_retryable_db_concurrency_error(exc: BaseException) -> bool:
-    pgcode = getattr(exc, "pgcode", None)
-    if pgcode in {"40P01", "40001"}:
-        return True
-    err_mod = getattr(psycopg2, "errors", None)
-    if err_mod is not None:
-        for name in ("DeadlockDetected", "SerializationFailure"):
-            cls = getattr(err_mod, name, None)
-            if cls is not None and isinstance(exc, cls):
-                return True
-    return False
+    return is_retryable_db_concurrency_error(exc) is not None
 
 
 def _run_with_deadlock_retry(fn, *, max_attempts: int = 3):
     """对纯数据库安全事务在发生 40P01/40001 并发冲突时执行有界重试（事务已完整回滚）。"""
-    attempts = max(1, int(max_attempts))
-    for attempt in range(attempts):
-        try:
-            return fn()
-        except psycopg2.Error as exc:
-            if not _is_retryable_db_concurrency_error(exc) or attempt + 1 >= attempts:
-                raise
-            time.sleep(0.01 * (attempt + 1))
-    return None
+    return run_with_deadlock_retry(fn, max_attempts=max_attempts)
 
 
 @contextmanager
@@ -473,13 +456,17 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict[str,
             if not cred_row or cred_row["cred_status"] != "active":
                 raise BizError(*TT_AUTH_40106)
 
-            # 3. 锁定关联 auth_challenge
-            if challenge_id:
-                cur.execute(
-                    "SELECT id, status FROM auth_challenge WHERE id = %s AND user_id = %s FOR UPDATE",
-                    (challenge_id, user_id),
-                )
-                cur.fetchone()
+            # 3. 锁定并收敛用户未终结恢复/二次验证挑战（按全局锁顺序）
+            cur.execute(
+                """
+                SELECT id, status FROM auth_challenge
+                WHERE user_id = %s
+                  AND (id = %s OR (purpose IN ('password_recovery', 'step_up_auth') AND status IN ('pending_send', 'pending', 'verified')))
+                FOR UPDATE
+                """,
+                (user_id, challenge_id),
+            )
+            cur.fetchall()
 
             # 4. 锁后重新验证 recovery_grant（防 TOCTOU 与并发重放）
             cur.execute(
@@ -499,7 +486,7 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict[str,
             ):
                 raise bad_request("重置授权凭证无效或已被使用")
 
-            # 5. 更新密码哈希并消费 Grant 与关联 Challenge
+            # 5. 更新密码哈希并消费 Grant 与关联 Challenge，同时撤销历史恢复凭证
             cur.execute(
                 """
                 UPDATE user_credential
@@ -508,10 +495,33 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict[str,
                 """,
                 (precomputed_hash, user_id),
             )
-            if grant.get("challenge_id"):
+            matched_cid = grant.get("challenge_id")
+            if matched_cid:
                 cur.execute(
                     "UPDATE auth_challenge SET status = 'consumed', consumed_at = NOW() WHERE id = %s",
-                    (grant["challenge_id"],),
+                    (matched_cid,),
+                )
+                cur.execute(
+                    """
+                    UPDATE auth_challenge
+                    SET status = 'cancelled'
+                    WHERE user_id = %s
+                      AND id <> %s
+                      AND purpose IN ('password_recovery', 'step_up_auth')
+                      AND status IN ('pending_send', 'pending', 'verified')
+                    """,
+                    (user_id, matched_cid),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE auth_challenge
+                    SET status = 'cancelled'
+                    WHERE user_id = %s
+                      AND purpose IN ('password_recovery', 'step_up_auth')
+                      AND status IN ('pending_send', 'pending', 'verified')
+                    """,
+                    (user_id,),
                 )
             cur.execute(
                 """
@@ -521,17 +531,20 @@ def complete_password_recovery(grant_token: str, new_password: str) -> dict[str,
                 """,
                 (grant["id"],),
             )
+            cur.execute(
+                """
+                UPDATE recovery_grant
+                SET status = 'revoked'
+                WHERE user_id = %s AND id <> %s AND status = 'active'
+                """,
+                (user_id, grant["id"]),
+            )
 
             # 6. 吊销活跃 Step-up Grant 与活跃会话，并递增 session_version
-            try:
-                cur.execute("SAVEPOINT sp_revoke_stepup_on_reset")
-                cur.execute(
-                    "UPDATE step_up_grant SET status = 'revoked' WHERE user_id = %s AND status = 'active'",
-                    (user_id,),
-                )
-                cur.execute("RELEASE SAVEPOINT sp_revoke_stepup_on_reset")
-            except Exception:
-                cur.execute("ROLLBACK TO SAVEPOINT sp_revoke_stepup_on_reset")
+            cur.execute(
+                "UPDATE step_up_grant SET status = 'revoked' WHERE user_id = %s AND status = 'active'",
+                (user_id,),
+            )
 
             cur.execute(
                 """
@@ -681,6 +694,7 @@ def start_contact_binding_challenge(
     step_up_grant: str | None = None,
     session_fingerprint: str | None = None,
     session_ctx: SessionAuthContext | None = None,
+    idempotency_claim=None,
 ) -> dict[str, Any]:
     """发起安全手机号/邮箱绑定挑战（委托给 sms_gateway / email_gateway，消除孤儿 pending 挑战）。"""
     ct = contact_type.lower().strip()
@@ -693,7 +707,7 @@ def start_contact_binding_challenge(
     if ct == "phone":
         from modules.security.sms_gateway import start_sms_binding
 
-        return dict(start_sms_binding(user_id, contact_value, ctx))
+        return dict(start_sms_binding(user_id, contact_value, ctx, idempotency_claim=idempotency_claim))
 
     from modules.security.email_gateway import start_email_binding
 
@@ -705,6 +719,7 @@ def start_contact_binding_challenge(
             step_up_grant=step_up_grant,
             session_fingerprint=session_fingerprint,
             session_ctx=session_ctx,
+            idempotency_claim=idempotency_claim,
         )
     )
 
@@ -790,8 +805,17 @@ def verify_and_bind_contact(
                       AND status IN ('pending_send', 'pending', 'verified')""",
                     (user_id,),
                 )
+            else:
+                cur.execute(
+                    """UPDATE auth_challenge SET status = 'cancelled'
+                    WHERE user_id = %s AND purpose = 'password_recovery'
+                      AND channel = 'sms'
+                      AND status IN ('pending_send', 'pending', 'verified')""",
+                    (user_id,),
+                )
 
             existing_email = None
+            existing_phone = None
             if contact_type == "email":
                 cur.execute(
                     """
@@ -808,6 +832,19 @@ def verify_and_bind_contact(
                     old_email_to_notify = existing_email["normalized_value"]
                     if old_email_to_notify == normalized_val:
                         raise bad_request("新邮箱与当前已绑定安全邮箱相同")
+            else:
+                cur.execute(
+                    """
+                    SELECT id, normalized_value FROM account_contact
+                    WHERE user_id = %s AND contact_type = 'phone' AND status = 'active'
+                      AND verified_at IS NOT NULL
+                    FOR UPDATE
+                    """,
+                    (user_id,),
+                )
+                existing_phone = cur.fetchone()
+                if existing_phone:
+                    is_rebind = True
 
             # 检查唯一性冲突（防并发抢绑同一联系方式）
             cur.execute(
@@ -843,6 +880,15 @@ def verify_and_bind_contact(
                     session_ctx=session_ctx,
                     target_contact=normalized_val,
                     consume=True,
+                )
+            elif is_rebind:
+                cur.execute(
+                    """
+                    UPDATE recovery_grant SET status = 'revoked'
+                    WHERE user_id = %s AND status = 'active'
+                      AND challenge_id IN (SELECT id FROM auth_challenge WHERE user_id = %s AND channel = 'sms')
+                    """,
+                    (user_id, user_id),
                 )
 
             cur.execute(
@@ -905,21 +951,16 @@ def revoke_all_user_sessions(user_id: int) -> dict[str, Any]:
         with get_cursor(commit=True) as cur:
             cur.execute("SELECT id FROM app_user WHERE id = %s FOR UPDATE", (user_id,))
             cur.execute("UPDATE app_user SET session_version = session_version + 1 WHERE id = %s", (user_id,))
-            try:
-                cur.execute("SAVEPOINT sp_revoke_stepup_all")
-                cur.execute(
-                    "UPDATE step_up_grant SET status = 'revoked' WHERE user_id = %s AND status = 'active'",
-                    (user_id,),
-                )
-                cur.execute("RELEASE SAVEPOINT sp_revoke_stepup_all")
-            except Exception:
-                cur.execute("ROLLBACK TO SAVEPOINT sp_revoke_stepup_all")
+            cur.execute(
+                "UPDATE step_up_grant SET status = 'revoked' WHERE user_id = %s AND status = 'active'",
+                (user_id,),
+            )
             cur.execute(
                 "UPDATE auth_session SET status = 'revoked', revoked_at = NOW() WHERE user_id = %s AND status = 'active'",
                 (user_id,),
             )
-            auth_cache.invalidate_user(user_id)
             audit_record("user.revoke_all_sessions", "app_user", resource_id=user_id, actor_user_id=user_id, cur=cur)
 
     _run_with_deadlock_retry(_attempt)
+    auth_cache.invalidate_user(user_id)
     return {"ok": True, "message": "已成功强制登出全部会话，请重新登录"}

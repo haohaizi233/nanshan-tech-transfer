@@ -241,6 +241,7 @@ def pg_redis_env():
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
+                "038_phase_r_final_security.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 
@@ -417,15 +418,21 @@ def test_wechat_non_password_first_email_bind_allows_recent_auth_in_window_and_b
     assert swap_exc.value.http_status == 403
 
     # 无密码用户 auth_time 超过窗口后 recent_auth 被拒绝
+    sid_202 = str(uuid.uuid4())
     with _schema_cursor(PG_DSN, schema, commit=True) as cur:
         cur.execute("INSERT INTO app_user (id, user_no, status) VALUES (202, 'U202', 'active')")
         cur.execute(
             "INSERT INTO user_credential (user_id, username, password_hash, password_configured, status) "
             "VALUES (202, 'wx202', '', false, 'active')"
         )
+        cur.execute(
+            "INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at, sid, auth_time) "
+            "VALUES (202, %s, 'active', NOW() - INTERVAL '400 seconds', NOW() + INTERVAL '7 days', %s, NOW() - INTERVAL '400 seconds')",
+            (uuid.uuid4().hex, sid_202),
+        )
     from core.jwt_utils import sign_access_token
 
-    expired_tok = sign_access_token(202, "U202", ["user"], 1, sid=str(uuid.uuid4()), auth_time=int(time.time()) - 400)
+    expired_tok = sign_access_token(202, "U202", ["user"], 1, sid=sid_202, auth_time=int(time.time()) - 400)
     expired_ctx = session_context_from_request(_fake_req(expired_tok), 202)
     with pytest.raises(BizError, match="超过近期安全窗口"):
         issue_step_up_grant(

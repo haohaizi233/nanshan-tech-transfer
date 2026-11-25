@@ -36,7 +36,10 @@ from modules.security.sms_gateway import (
     enqueue_recovery_task,
     run_queued_recovery_task,
 )
-from modules.security.step_up import issue_step_up_grant, session_fingerprint_from_request
+from modules.security.step_up import (
+    issue_step_up_grant,
+    session_context_from_request,
+)
 
 PG_DSN = os.getenv("SMS_TEST_POSTGRES_DSN") or (
     "postgresql://postgres:postgres123@127.0.0.1:5432/postgres" if os.getenv("SMS_TEST_POSTGRES") == "1" else None
@@ -183,6 +186,7 @@ def pg_schema():
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
+                "038_phase_r_final_security.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
             # 幂等重跑 036 与 037 验证无报错
@@ -359,8 +363,24 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
         def __init__(self, tok: str):
             self.headers = {"Authorization": f"Bearer {tok}"}
 
-    sess21 = session_fingerprint_from_request(_Req(sign_access_token(21, "U0021", ["user"], 1)), 21)
-    sess22 = session_fingerprint_from_request(_Req(sign_access_token(22, "U0022", ["user"], 1)), 22)
+    sid21 = str(uuid.uuid4())
+    sid22 = str(uuid.uuid4())
+    with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+        cur.execute(
+            "INSERT INTO auth_session (user_id, refresh_jti, status, sid, auth_time) "
+            "VALUES (21, %s, 'active', %s, NOW()), (22, %s, 'active', %s, NOW())",
+            (uuid.uuid4().hex, sid21, uuid.uuid4().hex, sid22),
+        )
+
+    now_epoch = int(time.time())
+    ctx21 = session_context_from_request(
+        _Req(sign_access_token(21, "U0021", ["user"], 1, sid=sid21, auth_time=now_epoch)), 21
+    )
+    ctx22 = session_context_from_request(
+        _Req(sign_access_token(22, "U0022", ["user"], 1, sid=sid22, auth_time=now_epoch)), 22
+    )
+    sess21 = ctx21.fingerprint_for_purpose("rebind_email")
+    sess22 = ctx22.fingerprint_for_purpose("bind_email")
 
     with (
         patch.object(_settings, "EMAIL_ENABLED", True),
@@ -371,6 +391,7 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
             purpose="rebind_email",
             method="password",
             session_fingerprint=sess21,
+            session_ctx=ctx21,
             current_password="InitPass!123",
             target_contact="shared-target@qq.com",
         )["stepUpGrant"]
@@ -380,6 +401,7 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
             purpose="bind_email",
             method="password",
             session_fingerprint=sess22,
+            session_ctx=ctx22,
             current_password="InitPass!123",
             target_contact="shared-target@qq.com",
         )["stepUpGrant"]
@@ -390,6 +412,7 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
             SendContext("192.0.2.21", "d21", str(uuid.uuid4())),
             step_up_grant=grant21,
             session_fingerprint=sess21,
+            session_ctx=ctx21,
             engine=engine,
         )
         # 清理邮箱冷却键以便在同一真实环境中模拟第二个独立用户抢先验证并绑定同一邮箱
@@ -401,6 +424,7 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
             SendContext("192.0.2.22", "d22", str(uuid.uuid4())),
             step_up_grant=grant22,
             session_fingerprint=sess22,
+            session_ctx=ctx22,
             engine=engine,
         )
         codes = [m["code"] for m in em.sent_emails if m.get("email") == "shared-target@qq.com"]
@@ -411,11 +435,17 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
         lock = threading.Lock()
         barrier = threading.Barrier(2)
 
-        def _bind_worker(uid, cid, code, grant, sess):
+        def _bind_worker(uid, cid, code, grant, sess, sctx):
             barrier.wait(timeout=5)
             try:
                 verify_and_bind_contact(
-                    uid, cid, code, "shared-target@qq.com", step_up_grant=grant, session_fingerprint=sess
+                    uid,
+                    cid,
+                    code,
+                    "shared-target@qq.com",
+                    step_up_grant=grant,
+                    session_fingerprint=sess,
+                    session_ctx=sctx,
                 )
                 with lock:
                     ok_users.append(uid)
@@ -423,8 +453,8 @@ def test_real_pg_parallel_rebind_conflict_step_up_and_worker_crash_recovery(pg_s
                 with lock:
                     conflict_codes.append(exc.http_status)
 
-        t1 = threading.Thread(target=_bind_worker, args=(21, r21["challengeId"], code21, grant21, sess21))
-        t2 = threading.Thread(target=_bind_worker, args=(22, r22["challengeId"], code22, grant22, sess22))
+        t1 = threading.Thread(target=_bind_worker, args=(21, r21["challengeId"], code21, grant21, sess21, ctx21))
+        t2 = threading.Thread(target=_bind_worker, args=(22, r22["challengeId"], code22, grant22, sess22, ctx22))
         t1.start()
         t2.start()
         t1.join(timeout=10)
@@ -504,6 +534,7 @@ def run_pg_redis_benchmark(iterations: int = 30) -> dict[str, object]:
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
+                "038_phase_r_final_security.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 

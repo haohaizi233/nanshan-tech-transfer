@@ -59,8 +59,26 @@ _docs_enabled = settings.is_local
 # ── DB 连接池生命周期（T007）────────────────────────────────
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # 启动即建池（DB 不可用时降级为空池懒填充，不阻塞服务）
+    # 启动即建池（DB 不可用时降级为空池懒填充，不阻塞本地测试启动）
     init_pool()
+    if settings.is_production_like:
+        from modules.security.schema_gate import assert_required_security_schema
+
+        assert_required_security_schema()
+    else:
+        try:
+            from modules.security.schema_gate import check_required_security_schema
+
+            gate = check_required_security_schema()
+            if not gate["ok"]:
+                logging.getLogger("nanshan.security.schema_gate").warning(
+                    "本地环境安全 Schema 尚未升级到 %s: missing_columns=%s missing_constraints=%s",
+                    gate["required_version"],
+                    gate["missing_columns"],
+                    gate["missing_constraints"],
+                )
+        except Exception:
+            pass
     yield
     close_pool()
 
@@ -95,7 +113,14 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_origin_regex=settings.cors_origin_regex,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-Id", "X-Idempotency-Key", "Prefer"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Request-Id",
+        "X-Idempotency-Key",
+        "Idempotency-Key",
+        "Prefer",
+    ],
     expose_headers=["X-Request-Id", "X-Upstream-Layer", "X-Upstream-Status", "X-Upstream-Reason"],
 )
 

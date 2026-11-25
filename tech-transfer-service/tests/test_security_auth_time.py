@@ -198,6 +198,7 @@ def pg_schema():
                 "035_sms_delivery_diagnostics.sql",
                 "036_email_security_gateway.sql",
                 "037_phase_r_security_hardening.sql",
+                "038_phase_r_final_security.sql",
             ):
                 _apply_sql(cur, schema, (MIGRATION_DIR / mig).read_text(encoding="utf-8"))
 
@@ -315,8 +316,15 @@ def test_legacy_null_auth_time_not_fabricated_and_forged_future_time_rejected(pg
     assert "recent_auth" not in get_available_step_up_methods(501, auth_time=future_epoch, has_sid=True)
     assert "recent_auth" not in get_available_step_up_methods(501, auth_time=int(time.time()), has_sid=False)
 
-    # token 仅含 iat 而无 auth_time 时同样禁止 recent_auth
-    tok_no_auth_time = sign_access_token(501, "U501", ["user"], 1, sid=str(uuid.uuid4()), auth_time=None)
+    # token 仅含 iat 而无 auth_time 时同样禁止 recent_auth（构造数据库中存在但无 auth_time 的现代会话）
+    sid_no_auth_time = str(uuid.uuid4())
+    with _schema_cursor(PG_DSN, pg_schema, commit=True) as cur:
+        cur.execute(
+            "INSERT INTO auth_session (user_id, refresh_jti, status, issued_at, expires_at, sid, auth_time) "
+            "VALUES (501, %s, 'active', NOW(), NOW() + INTERVAL '7 days', %s, NULL)",
+            (uuid.uuid4().hex, sid_no_auth_time),
+        )
+    tok_no_auth_time = sign_access_token(501, "U501", ["user"], 1, sid=sid_no_auth_time, auth_time=None)
     ctx_no_auth = session_context_from_request(_fake_request(tok_no_auth_time), 501)
     assert ctx_no_auth is not None and ctx_no_auth.auth_time is None
     with pytest.raises(BizError, match="近期安全窗口"):
