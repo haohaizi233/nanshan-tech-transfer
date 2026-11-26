@@ -517,8 +517,8 @@
 					</view>
 				</view>
 				<view v-else-if="recoveryStep === 2" class="dialog-body">
-					<text v-if="recoveryOwner" class="dialog-desc">验证请求已受理，请查收{{ recoveryChannel === 'sms' ? '短信' : '邮箱' }}{{ recoveryContacts[recoveryChannel] ? '（' + recoveryContacts[recoveryChannel] + '）' : '' }}。若未收到，可重试或更换验证方式。</text>
-					<text v-else class="dialog-desc">验证请求已受理。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
+				<text v-if="recoveryOwner" class="dialog-desc">验证请求已提交，请查收{{ recoveryChannel === 'sms' ? '短信' : '邮箱' }}{{ recoveryContacts[recoveryChannel] ? '（' + recoveryContacts[recoveryChannel] + '）' : '' }}。若未收到，可重试或更换验证方式。</text>
+				<text v-else class="dialog-desc">验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
 					<view class="form-item">
 						<text class="label">6位数字验证码</text>
 						<input class="input" type="text" inputmode="numeric" maxlength="6" :value="recoveryCode" @input="onRecoveryCodeInput" placeholder="请输入6位验证码" />
