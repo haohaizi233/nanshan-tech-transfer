@@ -1,9 +1,54 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import vm from 'node:vm'
 
 import { extractResponseErrorMessage } from '../subpackages/tech-transfer/api/client.js'
-import { registerAccount } from '../subpackages/tech-transfer/api/user.js'
+import { getRecoveryCapabilities, registerAccount, startRegistrationChallenge } from '../subpackages/tech-transfer/api/user.js'
+import HostBridge from '../host/host-bridge.js'
+
+test('registration sends the phone to the public SMS challenge endpoint', async context => {
+  const challenge = { challengeId: 'registration-test', cooldownSeconds: 60 }
+  context.mock.method(HostBridge, 'request', async ({ method, path, body }) => {
+    assert.equal(method, 'POST')
+    assert.equal(path, '/auth/register/challenge')
+    assert.deepEqual(body, { phone: '13800138000' })
+    return { code: 0, data: challenge }
+  })
+  assert.deepEqual(await startRegistrationChallenge('13800138000'), challenge)
+})
+
+test('password recovery loads capabilities through the public endpoint', async context => {
+  const capabilities = { sms: true }
+  context.mock.method(HostBridge, 'request', async ({ method, path }) => {
+    assert.equal(method, 'GET')
+    assert.equal(path, '/auth/recovery/capabilities')
+    return { code: 0, data: capabilities }
+  })
+  assert.deepEqual(await getRecoveryCapabilities(), capabilities)
+})
+
+test('password and WeChat authentication cannot submit while the other is in flight', async () => {
+  const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+  const wechat = source.slice(source.indexOf('async onWechatLogin('), source.indexOf('onWechatPhone(event)'))
+  const password = source.slice(source.indexOf('async onAuthSubmit('), source.indexOf('fillForm(profile) {', source.indexOf('async onAuthSubmit(')))
+  const loginWithWechat = test.mock.fn(async () => ({ ok: false }))
+  const loginAccount = test.mock.fn(async () => ({ ok: false }))
+  const methods = vm.runInNewContext(`({${wechat}${password}})`, {
+    isLoggedIn: () => false,
+    loginWithWechat,
+    loginAccount,
+    uni: { showToast() {}, showLoading() {}, hideLoading() {} },
+  })
+  const state = {
+    authBusy: true, wechatBusy: false, registrationSending: false, authMode: 'login',
+    authForm: { phone: '13800138000', password: 'password' },
+  }
+  await methods.onWechatLogin.call(state)
+  await methods.onAuthSubmit.call({ ...state, authBusy: false, wechatBusy: true })
+  assert.equal(loginWithWechat.mock.callCount(), 0)
+  assert.equal(loginAccount.mock.callCount(), 0)
+})
 
 test('extractResponseErrorMessage extracts details string over generic message', () => {
   const res = {

@@ -7,9 +7,9 @@
 				<text class="login-desc">使用手机号注册登录，账号数据云端同步，小程序与 H5 通用</text>
 				<!-- #ifdef MP-WEIXIN -->
 				<view v-if="wechatLoginEnabled" class="wechat-login">
-					<button v-if="!wechatPhoneRequired" class="wechat-btn" :disabled="wechatBusy" @click="onWechatLogin">微信快捷登录</button>
+					<button v-if="!wechatPhoneRequired" class="wechat-btn" :disabled="wechatBusy || authBusy" @click="onWechatLogin">微信快捷登录</button>
 					<WechatPrivacyGate v-else-if="privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
-					<button v-else class="wechat-btn" open-type="getPhoneNumber" :disabled="wechatBusy" @getphonenumber="onWechatPhone">授权手机号并登录</button>
+					<button v-else class="wechat-btn" open-type="getPhoneNumber" :disabled="wechatBusy || authBusy" @getphonenumber="onWechatPhone">授权手机号并登录</button>
 					<text class="login-desc">新用户请用短信验证码注册，登录后可绑定微信</text>
 				</view>
 				<!-- #endif -->
@@ -51,7 +51,7 @@
 					<text class="password-hint">验证通过后，此号码将设为安全手机号。</text>
 					<text v-if="registrationError" class="password-error" role="alert">{{ registrationError }}</text>
 				</view>
-				<button class="login-btn" type="primary" :disabled="authBusy || registrationSending" @click="onAuthSubmit">
+				<button class="login-btn" type="primary" :disabled="authBusy || wechatBusy || registrationSending" @click="onAuthSubmit">
 					{{ authMode === 'register' ? '注册并继续' : '登录' }}
 				</button>
 				<view class="auth-helper-row">
@@ -771,7 +771,7 @@
 				}
 			},
 			async onWechatLogin(phoneCode) {
-				if (this.wechatBusy) return
+				if (this.wechatBusy || this.authBusy) return
 				this.wechatBusy = true
 				const bind = isLoggedIn()
 				try {
@@ -1631,7 +1631,7 @@
 				uni.showToast({ title: '已填入手机号，请输入密码', icon: 'none' })
 			},
 			async onAuthSubmit() {
-			if (this.authBusy || this.registrationSending) return
+			if (this.authBusy || this.wechatBusy || this.registrationSending) return
 			const phone = (this.authForm.phone || '').trim()
 			const password = (this.authForm.password || '').trim()
 			if (!phone) {
