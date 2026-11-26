@@ -73,8 +73,8 @@ const sendRegistrationCode = async () => {
     return
   }
 
-  clearChallenge(state)
-  const requestSeq = state.requestSeq
+  if (state.phone !== phoneCheck.value) clearChallenge(state)
+  const requestSeq = ++state.requestSeq
   state.phone = phoneCheck.value
   state.sending = true
   try {
@@ -86,6 +86,7 @@ const sendRegistrationCode = async () => {
     if (state.requestSeq !== requestSeq) return
     if (!result?.challengeId) throw new Error('验证码请求未建立，请稍后重试。')
     state.challengeId = result.challengeId
+    state.code = ''
     startCountdown(state, result.cooldownSeconds)
   } catch (error) {
     if (state.requestSeq !== requestSeq) return
@@ -188,6 +189,7 @@ const submitInstitutionRegistration = async () => {
 }
 
 const submit = async () => {
+  if (submitting.value || activeRegistration().state.sending) return
   errorMessage.value = ''
   successMessage.value = ''
   submitting.value = true
@@ -279,7 +281,7 @@ const submit = async () => {
 
         <p v-if="errorMessage" class="message error" role="alert">{{ errorMessage }}</p>
         <p v-if="successMessage" class="message success">{{ successMessage }}</p>
-        <footer class="actions"><button type="button" class="secondary" @click="router.push('/login')">返回登录</button><button type="submit" class="primary" :disabled="submitting || Boolean(successMessage)">{{ submitting ? '提交中…' : mode === 'user' ? '完成注册' : '提交注册申请' }}</button></footer>
+        <footer class="actions"><button type="button" class="secondary" @click="router.push('/login')">返回登录</button><button type="submit" class="primary" :disabled="submitting || verification[mode].sending || Boolean(successMessage)">{{ submitting ? '提交中…' : mode === 'user' ? '完成注册' : '提交注册申请' }}</button></footer>
       </form>
     </section>
   </main>
