@@ -2712,7 +2712,7 @@
 		gap: 18rpx;
 		width: 100%;
 		box-sizing: border-box;
-		margin: 0 0 18rpx;
+		margin: 24rpx 0 0;
 		padding: 16rpx 24rpx;
 		border: 1rpx solid #e2e8f1;
 		border-radius: 18rpx;
