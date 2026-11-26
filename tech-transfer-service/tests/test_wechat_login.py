@@ -123,15 +123,14 @@ def test_disabled_or_unlinked_wechat_identity_cannot_login(runtime):
     issue.assert_not_called()
 
 
-def test_new_verified_phone_creates_one_regular_user_not_a_mock_identity(runtime):
-    wechat, cursor, _phone, _issue = runtime
+def test_new_wechat_phone_requires_sms_registration_before_linking(runtime):
+    wechat, cursor, _phone, issue = runtime
     cursor.fetchone.side_effect = [None, None]
-    with patch.object(wechat, "create_password_account", return_value=(9, "U9")) as create:
-        result = wechat.wechat_login_session("login-code", "phone-code")
-    assert result["isNewUser"] is True
-    assert create.call_args.kwargs["phone"] == "13900000000"
-    assert len(create.call_args.args[2]) >= 32
-    assert any("password_configured=false" in call.args[0] for call in cursor.execute.call_args_list)
+    with pytest.raises(BizError) as error:
+        wechat.wechat_login_session("login-code", "phone-code")
+    assert error.value.code == "TT_AUTH_40904"
+    issue.assert_not_called()
+    assert not any("INSERT INTO" in call.args[0] for call in cursor.execute.call_args_list)
 
 
 def test_wechat_disabled_fails_closed_without_network(runtime):

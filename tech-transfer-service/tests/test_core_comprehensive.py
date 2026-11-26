@@ -741,14 +741,26 @@ class TestRequestSchemas:
     def test_register_request(self):
         from core.request_schemas import RegisterRequest
 
-        body = RegisterRequest(username="newuser", password="pass123")
+        body = RegisterRequest(
+            username="newuser",
+            phone="13800138000",
+            password="pass123",
+            challengeId="12345678-1234-1234-1234-123456789abc",
+            code="001234",
+        )
         d = body.as_dict()
         assert d["username"] == "newuser"
 
     def test_register_request_phone(self):
         from core.request_schemas import RegisterRequest
 
-        body = RegisterRequest(phone="13800138000", password="pass", displayName="Test")
+        body = RegisterRequest(
+            phone="13800138000",
+            password="pass",
+            displayName="Test",
+            challengeId="12345678-1234-1234-1234-123456789abc",
+            code="001234",
+        )
         d = body.as_dict()
         assert d["phone"] == "13800138000"
         assert d["displayName"] == "Test"
@@ -808,6 +820,8 @@ class TestRequestSchemas:
         from core.request_schemas import InstitutionRegistrationRequest
 
         body = InstitutionRegistrationRequest(
+            challengeId="12345678-1234-1234-1234-123456789abc",
+            code="001234",
             kind="enterprise",
             name="Test Corp",
             contactName="Zhang",

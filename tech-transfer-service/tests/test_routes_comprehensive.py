@@ -113,19 +113,45 @@ class TestAuthRoutes:
         resp = client.post("/api/tech-transfer/v1/auth/login", json={"username": "admin"})
         assert resp.status_code == 401
 
+    @patch("routes.auth.verified_registration")
     @patch("routes.auth.register_password_user")
-    @patch("core.rate_limit.check_register_rate")
-    def test_register_username(self, mock_rate, mock_register, client):
+    @patch("routes.auth.check_register_rate")
+    def test_register_username(self, mock_rate, mock_register, mock_verify, client):
         mock_register.return_value = {"userId": 1}
-        resp = client.post("/api/tech-transfer/v1/auth/register", json={"username": "newuser", "password": "pass123"})
+        mock_verify.return_value.__enter__.return_value.phone = "13800138000"
+        challenge_id = "12345678-1234-1234-1234-123456789abc"
+        resp = client.post(
+            "/api/tech-transfer/v1/auth/register",
+            json={
+                "username": "newuser",
+                "phone": "13800138000",
+                "password": "pass123",
+                "challengeId": challenge_id,
+                "code": "001234",
+            },
+        )
         assert resp.status_code == 200
+        mock_verify.assert_called_once_with("13800138000", challenge_id, "001234")
+
+    @patch("routes.auth.verified_registration")
+    @patch("routes.auth.register_user")
+    @patch("routes.auth.check_register_rate")
+    def test_register_phone(self, mock_rate, mock_register, mock_verify, client):
+        mock_register.return_value = {"accessToken": "tok"}
+        mock_verify.return_value.__enter__.return_value.phone = "13800138000"
+        challenge_id = "12345678-1234-1234-1234-123456789abc"
+        resp = client.post(
+            "/api/tech-transfer/v1/auth/register",
+            json={"phone": "13800138000", "password": "pass123", "challengeId": challenge_id, "code": "001234"},
+        )
+        assert resp.status_code == 200
+        mock_verify.assert_called_once_with("13800138000", challenge_id, "001234")
 
     @patch("routes.auth.register_user")
-    @patch("core.rate_limit.check_register_rate")
-    def test_register_phone(self, mock_rate, mock_register, client):
-        mock_register.return_value = {"accessToken": "tok"}
+    def test_register_phone_without_verification_is_rejected(self, mock_register, client):
         resp = client.post("/api/tech-transfer/v1/auth/register", json={"phone": "13800138000", "password": "pass123"})
-        assert resp.status_code == 200
+        assert resp.status_code == 422
+        mock_register.assert_not_called()
 
     @patch("routes.auth.refresh_session")
     @patch("core.rate_limit.check_ip_rate")

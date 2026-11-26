@@ -391,13 +391,18 @@ class TestFileRoutes:
 
 
 class TestInstitutionRegistrationRoutes:
-    @patch("core.rate_limit.check_register_rate")
+    @patch("routes.institution_registration.verified_registration")
+    @patch("routes.institution_registration.check_register_rate")
     @patch("routes.institution_registration.create_institution_registration")
-    def test_submit_registration(self, mock_create, mock_rate, client):
+    def test_submit_registration(self, mock_create, mock_rate, mock_verify, client):
         mock_create.return_value = {"applicationId": 1, "status": "pending", "version": 1, "username": "testuser"}
+        mock_verify.return_value.__enter__.return_value.phone = "13800138000"
+        challenge_id = "12345678-1234-1234-1234-123456789abc"
         resp = client.post(
             "/api/tech-transfer/v1/institution-registrations",
             json={
+                "challengeId": challenge_id,
+                "code": "001234",
                 "kind": "enterprise",
                 "name": "Test Corp",
                 "contactName": "张三",
@@ -407,3 +412,4 @@ class TestInstitutionRegistrationRoutes:
             },
         )
         assert resp.status_code == 201
+        mock_verify.assert_called_once_with("13800138000", challenge_id, "001234")
