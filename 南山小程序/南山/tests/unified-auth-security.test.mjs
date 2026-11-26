@@ -96,8 +96,38 @@ test('mine.vue enforces Step-up and target email binding on initial email bind a
 	assert.match(source, /const needStepUp = type === 'email'/)
 	assert.match(source, /bind_email/)
 	assert.match(source, /rebind_email/)
-	assert.match(source, /targetContact:\s*targetEmail/)
+	assert.match(source, /targetContact/)
 	assert.match(source, /createSecurityIdempotencyKey/)
+})
+
+test('mine.vue enforces Step-up for rebind_phone and guards H5 modal inputs against password autofill', () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	assert.match(source, /rebind_phone/)
+	assert.match(source, /更换安全手机 · 二次认证/)
+	assert.match(source, /更换安全手机/)
+	assert.match(source, /new-password/)
+	assert.match(source, /readOnly = true/)
+
+	const start = source.indexOf('openContactModal(type')
+	const end = source.indexOf('onTargetEmailInput(e)', start)
+	const { openContactModal } = vm.runInNewContext(`({${source.slice(start, end)}})`)
+
+	const unboundState = {
+		smsFeatureEnabled: true,
+		securityInfo: { phone: null, stepUpMethods: ['password'] },
+	}
+	openContactModal.call(unboundState, 'phone')
+	assert.equal(unboundState.contactModalStep, 'bind')
+
+	const boundState = {
+		smsFeatureEnabled: true,
+		securityInfo: { phone: { value: '166****8913', verified: true }, stepUpMethods: ['password', 'old_phone_otp'] },
+	}
+	openContactModal.call(boundState, 'phone')
+	assert.equal(boundState.contactModalStep, 'stepUp')
+	assert.equal(boundState.contactModalType, 'phone')
+	assert.equal(boundState.contactModalValue, '')
+	assert.equal(boundState.contactStepUpMethod, 'password')
 })
 
 test('profile email shortcut prefills the existing verification dialog without saving the form', () => {

@@ -379,22 +379,46 @@
 		<view v-if="showContactModal" class="dialog-mask" @click="closeContactModal">
 			<view class="dialog-panel" @click.stop>
 				<view class="dialog-header">
-					<text class="dialog-title">
-						{{
-							contactModalStep === 'stepUp'
-								? (isRebindEmail ? '更换安全邮箱 · 二次认证' : '绑定安全邮箱 · 身份授权')
-								: (contactModalType === 'phone' ? '绑定安全手机' : (isRebindEmail ? '更换安全邮箱' : '绑定安全邮箱'))
-						}}
-					</text>
+					<text class="dialog-title">{{ contactModalTitle }}</text>
 					<text class="dialog-close" @click="closeContactModal">×</text>
 				</view>
 				<view v-if="contactModalStep === 'stepUp'" class="dialog-body">
 					<text class="dialog-desc">
-						{{ isRebindEmail ? '更换已确权安全邮箱前，须先填写目标新邮箱并完成二次身份认证。' : '首次绑定安全邮箱须先确认目标邮箱并完成本次会话身份授权。' }}
+						{{
+							isRebindPhone
+								? '更换已确权安全手机前，须先填写目标新手机号并完成二次身份认证。'
+								: (isRebindEmail
+									? '更换已确权安全邮箱前，须先填写目标新邮箱并完成二次身份认证。'
+									: '首次绑定安全邮箱须先确认目标邮箱并完成本次会话身份授权。')
+						}}
 					</text>
 					<view class="form-item">
-						<text class="label">{{ isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址' }}</text>
-						<input class="input" type="text" inputmode="email" :disabled="contactModalBusy" :value="contactModalValue" @input="onTargetEmailInput" placeholder="例如 name@example.com" />
+						<text class="label">{{ isRebindPhone ? '目标新手机号' : (isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址') }}</text>
+						<input
+							v-if="contactModalType === 'phone'"
+							key="stepup-target-phone"
+							v-no-autofill:stepup_phone="'off'"
+							class="input"
+							type="number"
+							inputmode="numeric"
+							maxlength="11"
+							:disabled="contactModalBusy || contactStepUpCountdown > 0"
+							:value="contactModalValue"
+							@input="onTargetEmailInput"
+							placeholder="请输入11位新手机号"
+						/>
+						<input
+							v-else
+							key="stepup-target-email"
+							v-no-autofill:stepup_email="'off'"
+							class="input"
+							type="text"
+							inputmode="email"
+							:disabled="contactModalBusy || contactStepUpCountdown > 0"
+							:value="contactModalValue"
+							@input="onTargetEmailInput"
+							placeholder="例如 name@example.com"
+						/>
 						<text v-if="contactTargetEmailError" class="contact-form-error" role="alert">{{ contactTargetEmailError }}</text>
 					</view>
 					<view v-if="securityInfo && (securityInfo.stepUpMethods || []).length > 1" class="form-item">
@@ -412,12 +436,30 @@
 					</view>
 					<view v-if="contactStepUpMethod === 'password'" class="form-item">
 						<text class="label">当前密码</text>
-						<input class="input" password maxlength="128" v-model="contactStepUpPassword" placeholder="请输入当前登录密码" />
+						<input
+							key="stepup-password"
+							v-no-autofill:stepup_pwd="'password'"
+							class="input"
+							password
+							maxlength="128"
+							v-model="contactStepUpPassword"
+							placeholder="请输入当前登录密码"
+						/>
 					</view>
 					<view v-else-if="contactStepUpMethod === 'old_email_otp' || contactStepUpMethod === 'old_phone_otp'" class="form-item">
 						<text class="label">原安全{{ contactStepUpMethod === 'old_email_otp' ? '邮箱' : '手机' }}验证码</text>
 						<view class="code-input-row">
-							<input class="input code-input" type="text" maxlength="6" :value="contactStepUpCode" @input="onContactStepUpCodeInput" placeholder="6位数字验证码" />
+							<input
+								key="stepup-otp"
+								v-no-autofill:stepup_otp="'off'"
+								class="input code-input"
+								type="text"
+								inputmode="numeric"
+								maxlength="6"
+								:value="contactStepUpCode"
+								@input="onContactStepUpCodeInput"
+								placeholder="6位数字验证码"
+							/>
 							<button class="send-code-btn" size="mini" :disabled="contactStepUpCountdown > 0 || contactModalBusy" @click="sendStepUpChallenge">
 								{{ contactStepUpCountdown > 0 ? contactStepUpCountdown + 's' : '获取验证码' }}
 							</button>
@@ -427,10 +469,22 @@
 					<button class="primary-action-btn" :disabled="contactModalBusy" @click="submitStepUpVerify">验证并继续</button>
 				</view>
 				<view v-else class="dialog-body">
-					<text class="dialog-desc">绑定并通过验证后，该联系方式可用于找回密码与安全通知</text>
+					<text class="dialog-desc">
+						{{ (isRebindPhone || isRebindEmail) ? '完成新联系方式验证后将立即替换原安全联系方式，用于找回密码与安全通知' : '绑定并通过验证后，该联系方式可用于找回密码与安全通知' }}
+					</text>
 					<view class="form-item">
-						<text class="label">{{ contactModalType === 'phone' ? '手机号' : '已授权目标邮箱' }}</text>
-						<input v-if="contactModalType === 'phone'" class="input" type="number" v-model="contactModalValue" placeholder="请输入11位手机号" />
+						<text class="label">{{ contactRequiresStepUp ? (contactModalType === 'phone' ? '已授权目标手机号' : '已授权目标邮箱') : '手机号' }}</text>
+						<input
+							v-if="!contactRequiresStepUp"
+							key="bind-phone-input"
+							v-no-autofill:bind_phone="'off'"
+							class="input"
+							type="number"
+							inputmode="numeric"
+							maxlength="11"
+							v-model="contactModalValue"
+							placeholder="请输入11位手机号"
+						/>
 						<view v-else class="code-input-row">
 							<input class="input code-input" type="text" :value="contactModalValue" disabled />
 							<button class="send-code-btn" size="mini" :disabled="contactModalBusy" @click="resetEmailStepUpTarget">更换目标</button>
@@ -439,13 +493,23 @@
 					<view class="form-item">
 						<text class="label">验证码</text>
 						<view class="code-input-row">
-							<input class="input code-input" type="text" maxlength="6" :value="contactModalCode" @input="onContactCodeInput" placeholder="6位数字验证码" />
+							<input
+								key="bind-otp-input"
+								v-no-autofill:bind_otp="'off'"
+								class="input code-input"
+								type="text"
+								inputmode="numeric"
+								maxlength="6"
+								:value="contactModalCode"
+								@input="onContactCodeInput"
+								placeholder="6位数字验证码"
+							/>
 							<button class="send-code-btn" size="mini" :disabled="contactModalCountdown > 0 || contactModalBusy" @click="sendContactChallenge">
 								{{ contactModalCountdown > 0 ? contactModalCountdown + 's' : '获取验证码' }}
 							</button>
 						</view>
 					</view>
-					<button class="primary-action-btn" :disabled="contactModalBusy" @click="submitContactVerify">确认绑定</button>
+					<button class="primary-action-btn" :disabled="contactModalBusy" @click="submitContactVerify">{{ (isRebindPhone || isRebindEmail) ? '确认更换' : '确认绑定' }}</button>
 				</view>
 			</view>
 		</view>
@@ -463,15 +527,15 @@
 							<text class="label">当前密码</text>
 							<button class="security-btn profile-field-action" size="mini" :disabled="passwordBusy" @click="openPasswordRecovery">忘记当前密码</button>
 						</view>
-						<input class="input" password maxlength="128" v-model="pwdModalCurrent" placeholder="请输入当前密码" />
+						<input v-no-autofill:pwd_current="'password'" class="input" password maxlength="128" v-model="pwdModalCurrent" placeholder="请输入当前密码" />
 					</view>
 					<view class="form-item">
 						<text class="label">新密码</text>
-						<input class="input" password maxlength="128" v-model="pwdModalNew" placeholder="设置8—128位新密码" />
+						<input v-no-autofill:pwd_new="'password'" class="input" password maxlength="128" v-model="pwdModalNew" placeholder="设置8—128位新密码" />
 					</view>
 					<view class="form-item">
 						<text class="label">确认新密码</text>
-						<input class="input" password maxlength="128" v-model="pwdModalConfirm" placeholder="请再次输入新密码" />
+						<input v-no-autofill:pwd_confirm="'password'" class="input" password maxlength="128" v-model="pwdModalConfirm" placeholder="请再次输入新密码" />
 					</view>
 					<text v-if="passwordError" class="password-feedback-error" role="alert">{{ passwordError }}</text>
 					<button class="primary-action-btn" :loading="passwordBusy" :disabled="passwordBusy" @click="submitChangePassword">{{ passwordBusy ? '正在保存，请稍候…' : (isSettingInitial ? '确认设置密码' : '确认修改密码') }}</button>
@@ -538,11 +602,11 @@
 					<text class="dialog-desc">身份验证通过，请设置新密码</text>
 					<view class="form-item">
 						<text class="label">新密码</text>
-						<input class="input" password maxlength="128" v-model="recoveryNewPassword" @input="recoveryError = ''" placeholder="设置8—128位新密码" />
+						<input v-no-autofill:rec_pwd="'password'" class="input" password maxlength="128" v-model="recoveryNewPassword" @input="recoveryError = ''" placeholder="设置8—128位新密码" />
 					</view>
 					<view class="form-item">
 						<text class="label">确认新密码</text>
-						<input class="input" password maxlength="128" v-model="recoveryConfirmPassword" @input="recoveryError = ''" placeholder="请再次输入新密码" />
+						<input v-no-autofill:rec_confirm="'password'" class="input" password maxlength="128" v-model="recoveryConfirmPassword" @input="recoveryError = ''" placeholder="请再次输入新密码" />
 					</view>
 					<text v-if="recoveryError" class="password-feedback-error" role="alert">{{ recoveryError }}</text>
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="submitRecoveryNewPassword">完成并使用新密码登录</button>
@@ -610,10 +674,56 @@
 	import { refreshNotificationBadge, subscribeNotificationBadge } from '../../../../utils/notification-poller.js'
 	import { createPageStateMixin, getPageStateScope } from '../../api/page-state-cache.mjs'
 
+	const noAutofillDirective = {
+		/* #ifdef H5 */
+		mounted(el, binding) {
+			const input = el && typeof el.querySelector === 'function' ? el.querySelector('input') : null
+			if (!input) return
+			const mode = binding && binding.value === 'password' ? 'new-password' : 'off'
+			const fieldName = 'ns_sec_' + ((binding && binding.arg) || 'field')
+			input.setAttribute('autocomplete', mode)
+			input.setAttribute('name', fieldName)
+			if (!input.disabled && input.dataset.nsAutofillUnlocked !== '1') {
+				input.readOnly = true
+				const unlock = () => {
+					input.readOnly = false
+					input.dataset.nsAutofillUnlocked = '1'
+				}
+				const events = ['pointerdown', 'touchstart', 'focus', 'keydown']
+				events.forEach((evt) => input.addEventListener(evt, unlock, { once: true }))
+				input._nsAutofillCleanup = () => {
+					events.forEach((evt) => input.removeEventListener(evt, unlock))
+				}
+			}
+		},
+		updated(el, binding) {
+			const input = el && typeof el.querySelector === 'function' ? el.querySelector('input') : null
+			if (!input) return
+			const mode = binding && binding.value === 'password' ? 'new-password' : 'off'
+			const fieldName = 'ns_sec_' + ((binding && binding.arg) || 'field')
+			input.setAttribute('autocomplete', mode)
+			input.setAttribute('name', fieldName)
+			if (!input.disabled && input.dataset.nsAutofillUnlocked !== '1') {
+				input.readOnly = true
+			}
+		},
+		unmounted(el) {
+			const input = el && typeof el.querySelector === 'function' ? el.querySelector('input') : null
+			if (input && typeof input._nsAutofillCleanup === 'function') {
+				input._nsAutofillCleanup()
+				delete input._nsAutofillCleanup
+			}
+		},
+		/* #endif */
+	}
+
 	export default {
 		components: {
 			AppTabbar,
 			WechatPrivacyGate,
+		},
+		directives: {
+			noAutofill: noAutofillDirective,
 		},
 		mixins: [createPageStateMixin({
 			route: 'pages/mine/mine',
@@ -777,11 +887,36 @@
 			displayCompany() {
 				return this.certifiedOrgName || (this.profile && this.profile.company) || ''
 			},
+			hasVerifiedSecurityPhone() {
+				return Boolean(this.securityInfo && this.securityInfo.phone && this.securityInfo.phone.verified)
+			},
 			hasVerifiedSecurityEmail() {
 				return Boolean(this.securityInfo && this.securityInfo.email && this.securityInfo.email.verified)
 			},
+			isRebindPhone() {
+				return this.contactModalType === 'phone' && this.hasVerifiedSecurityPhone
+			},
 			isRebindEmail() {
 				return this.contactModalType === 'email' && this.hasVerifiedSecurityEmail
+			},
+			contactRequiresStepUp() {
+				return this.contactModalType === 'email' || this.isRebindPhone
+			},
+			contactStepUpPurpose() {
+				if (this.contactModalType === 'phone') {
+					return this.hasVerifiedSecurityPhone ? 'rebind_phone' : 'bind_phone'
+				}
+				return this.hasVerifiedSecurityEmail ? 'rebind_email' : 'bind_email'
+			},
+			contactModalTitle() {
+				if (this.contactModalStep === 'stepUp') {
+					if (this.isRebindPhone) return '更换安全手机 · 二次认证'
+					return this.isRebindEmail ? '更换安全邮箱 · 二次认证' : '绑定安全邮箱 · 身份授权'
+				}
+				if (this.contactModalType === 'phone') {
+					return this.isRebindPhone ? '更换安全手机' : '绑定安全手机'
+				}
+				return this.isRebindEmail ? '更换安全邮箱' : '绑定安全邮箱'
 			},
 			emailFeatureEnabled() {
 				if (!this.securityInfo || !this.securityInfo.capabilities) return true
@@ -961,7 +1096,8 @@
 					clearInterval(this.contactStepUpTimer)
 					this.contactStepUpTimer = null
 				}
-				const needStepUp = type === 'email'
+				const hasVerifiedPhone = Boolean(this.securityInfo && this.securityInfo.phone && this.securityInfo.phone.verified)
+				const needStepUp = type === 'email' || (type === 'phone' && hasVerifiedPhone)
 				if (needStepUp) {
 					const methods = (this.securityInfo && Array.isArray(this.securityInfo.stepUpMethods) && this.securityInfo.stepUpMethods.length > 0)
 						? this.securityInfo.stepUpMethods
@@ -978,7 +1114,11 @@
 			onTargetEmailInput(e) {
 				this.contactTargetEmailError = ''
 				this.contactStepUpError = ''
-				this.contactModalValue = String((e && e.detail && e.detail.value) || '')
+				let val = String((e && e.detail && e.detail.value) || '')
+				if (this.contactModalType === 'phone') {
+					val = val.replace(/\D/g, '').slice(0, 11)
+				}
+				this.contactModalValue = val
 				this.contactStepUpChallengeId = null
 				this.contactStepUpCode = ''
 				this.contactStepUpGrant = null
@@ -1024,26 +1164,34 @@
 					this.contactStepUpTimer = null
 				}
 			},
-			getValidatedStepUpEmail() {
+			getValidatedStepUpTarget() {
 				this.contactStepUpError = ''
+				if (this.contactModalType === 'phone') {
+					const result = validatePhone(this.contactModalValue, { required: true, label: '目标新手机号' })
+					const validMobile = result.ok && /^1[3-9]\d{9}$/.test(result.value)
+					this.contactTargetEmailError = validMobile
+						? ''
+						: (result.ok ? '目标新手机号格式不正确' : result.message)
+					return validMobile ? result.value : ''
+				}
 				const result = validateEmail(this.contactModalValue, { required: true, label: '目标安全邮箱' })
 				this.contactTargetEmailError = result.ok ? '' : result.message
 				return result.ok ? result.value : ''
 			},
 			async sendStepUpChallenge() {
 				if (this.contactModalBusy) return
-				const targetEmail = this.getValidatedStepUpEmail()
-				if (!targetEmail) return
+				const targetContact = this.getValidatedStepUpTarget()
+				if (!targetContact) return
 				if (!this.contactStepUpIdempotencyKey) {
 					this.contactStepUpIdempotencyKey = createSecurityIdempotencyKey('su')
 				}
 				this.contactModalBusy = true
 				try {
-					const purpose = this.isRebindEmail ? 'rebind_email' : 'bind_email'
+					const purpose = this.contactStepUpPurpose
 					const res = await startSecurityStepUpChallenge(
 						purpose,
 						this.contactStepUpMethod,
-						targetEmail,
+						targetContact,
 						this.contactStepUpIdempotencyKey
 					)
 					this.contactStepUpIdempotencyKey = null
@@ -1084,8 +1232,8 @@
 			},
 			async submitStepUpVerify() {
 				if (this.contactModalBusy) return
-				const targetEmail = this.getValidatedStepUpEmail()
-				if (!targetEmail) return
+				const targetContact = this.getValidatedStepUpTarget()
+				if (!targetContact) return
 				const method = this.contactStepUpMethod
 				if (method === 'password' && !this.contactStepUpPassword) {
 					this.contactStepUpError = '请输入当前登录密码'
@@ -1103,11 +1251,11 @@
 				}
 				this.contactModalBusy = true
 				try {
-					const purpose = this.isRebindEmail ? 'rebind_email' : 'bind_email'
+					const purpose = this.contactStepUpPurpose
 					const res = await verifySecurityStepUp({
 						purpose,
 						method,
-						targetContact: targetEmail,
+						targetContact,
 						currentPassword: method === 'password' ? this.contactStepUpPassword : null,
 						challengeId: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpChallengeId : null,
 						code: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpCode : null
@@ -1122,7 +1270,10 @@
 					this.contactStepUpIdempotencyKey = null
 					this.contactModalIdempotencyKey = null
 					this.contactModalStep = 'bind'
-					uni.showToast({ title: this.isRebindEmail ? '身份复核通过，请发送新邮箱验证码' : '身份授权通过，请验证目标邮箱', icon: 'none' })
+					const stepUpToast = this.isRebindPhone
+						? '身份复核通过，请发送新手机验证码'
+						: (this.isRebindEmail ? '身份复核通过，请发送新邮箱验证码' : '身份授权通过，请验证目标邮箱')
+					uni.showToast({ title: stepUpToast, icon: 'none' })
 				} catch (e) {
 					this.contactStepUpError = e.message || '二次身份认证失败'
 				} finally {
@@ -1197,10 +1348,11 @@
 					uni.showToast({ title: '请输入6位验证码', icon: 'none' })
 					return
 				}
+				const isRebindSuccess = this.isRebindPhone || this.isRebindEmail
 				this.contactModalBusy = true
 				try {
 					await verifySecurityContact(this.contactModalChallengeId, code, val, this.contactStepUpGrant)
-					uni.showToast({ title: '绑定成功', icon: 'success' })
+					uni.showToast({ title: isRebindSuccess ? '更换成功' : '绑定成功', icon: 'success' })
 					this.closeContactModal()
 					await this.loadSecurityInfo()
 				} catch (e) {
@@ -3037,6 +3189,11 @@
 		padding: 32rpx;
 		box-sizing: border-box;
 	}
+	/* #ifdef H5 */
+	.dialog-panel .uni-input-input:is(:autofill, :-webkit-autofill) {
+		box-shadow: 0 0 0 100px #f8fafc inset;
+	}
+	/* #endif */
 	.dialog-header {
 		display: flex;
 		flex-direction: row;
