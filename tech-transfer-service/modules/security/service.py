@@ -608,6 +608,11 @@ def get_security_summary(
         cur.execute(
             """
             SELECT uc.username, uc.password_configured,
+                   (uc.status = 'active' AND uc.password_configured AND uc.password_hash IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM user_role ur WHERE ur.user_id = uc.user_id
+                      AND ur.role_code IN ('admin', 'platform_admin', 'org_admin'))
+                    AND NOT EXISTS (SELECT 1 FROM organization_membership om WHERE om.user_id = uc.user_id
+                      AND om.role = 'admin' AND om.status = 'active')) AS can_recover_password,
                    EXISTS(SELECT 1 FROM external_identity ei WHERE ei.user_id = %s
                           AND ei.issuer = 'wechat-mini' AND ei.unlinked_at IS NULL) AS wechat_bound
             FROM user_credential uc
@@ -670,6 +675,7 @@ def get_security_summary(
         auth_time=auth_time,
         has_sid=has_sid,
     )
+    can_recover_password = bool(cred.get("can_recover_password") and cred.get("username"))
 
     return {
         "passwordConfigured": password_configured,
@@ -680,6 +686,13 @@ def get_security_summary(
         "capabilities": {
             "smsEnabled": bool(settings.SMS_ENABLED),
             "emailEnabled": bool(settings.EMAIL_ENABLED),
+        },
+        "passwordRecovery": {
+            "account": cred["username"] if can_recover_password else None,
+            "sms": can_recover_password and "old_phone_otp" in step_up_methods,
+            "emailOtp": can_recover_password and "old_email_otp" in step_up_methods,
+            "smsCooldownSeconds": settings.SMS_PHONE_COOLDOWN_SECONDS,
+            "emailCooldownSeconds": settings.EMAIL_COOLDOWN_SECONDS,
         },
         "stepUpMethods": step_up_methods,
     }

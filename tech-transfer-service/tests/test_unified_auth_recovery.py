@@ -386,6 +386,9 @@ def test_security_summary_and_revoke_all_sessions():
         assert summary["passwordConfigured"] is True
         assert summary["phone"]["value"] == "138****8000"
         assert summary["phone"]["verified"] is False
+        assert summary["passwordRecovery"]["account"] is None
+        assert summary["passwordRecovery"]["sms"] is False
+        assert summary["passwordRecovery"]["emailOtp"] is False
 
     with patch("modules.security.service.get_cursor") as mock_gc:
         cur = MagicMock()
@@ -395,6 +398,21 @@ def test_security_summary_and_revoke_all_sessions():
         executed_sqls = [str(call.args[0]) for call in cur.execute.call_args_list]
         assert any("session_version = session_version + 1" in s for s in executed_sqls)
         assert any("UPDATE auth_session SET status = 'revoked'" in s for s in executed_sqls)
+
+
+def test_security_summary_exposes_only_eligible_password_recovery_channels():
+    with (
+        patch("modules.security.service.get_cursor") as mock_gc,
+        patch("modules.security.service.get_available_step_up_methods", return_value=["password", "old_email_otp"]),
+    ):
+        cur = mock_gc.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"username": "email-only", "can_recover_password": True}
+        cur.fetchall.side_effect = [[], []]
+        options = get_security_summary(1)["passwordRecovery"]
+
+    assert options["account"] == "email-only"
+    assert options["sms"] is False
+    assert options["emailOtp"] is True
 
 
 # ── 8. API 路由端点端到端测试 ────────────────────────────────────

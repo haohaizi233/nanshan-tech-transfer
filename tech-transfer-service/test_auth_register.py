@@ -182,9 +182,7 @@ def main(phones):
 
     # 9. 后台 username 注册（Vue 注册页）：填手机号后双通道可登录
     admin_username = "ttphone" + suffix
-    r = register(
-        phone_c, pwd, request_registration_proof(phone_c), username=admin_username, displayName="后台注册用户"
-    )
+    r = register(phone_c, pwd, request_registration_proof(phone_c), username=admin_username, displayName="后台注册用户")
     check("后台 username 注册 code=0", r.json().get("code") == 0, r.text[:200])
     uid_c = ((r.json().get("data") or {}).get("user") or {}).get("userId")
 
