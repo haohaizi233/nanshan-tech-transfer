@@ -9,11 +9,18 @@
 		</view>
 		<block v-else>
 		<view class="header">
-			<text class="header__title">AI 智能匹配</text>
-			<text class="header__desc">对话描述需求，或输入 / 调用技能</text>
+			<view class="header__top">
+				<view class="header__intro">
+					<text class="header__title">AI 智能匹配</text>
+					<text class="header__desc">对话描述需求，或输入 / 调用技能</text>
+				</view>
+				<button class="header__clear" hover-class="header__clear--pressed" @click="clearConversation">
+					<view class="header__clear-icon" aria-hidden="true" />
+					<text>清空对话</text>
+				</button>
+			</view>
 			<AiGeneratedMark class="header__mark" />
 			<text class="header__scope">检索提示：匹配结果不包含您自己发布的需求和成果。</text>
-			<text class="header__desc" @click="clearConversation">清空对话</text>
 		</view>
 
 		<scroll-view
@@ -1579,6 +1586,66 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 		background: #ffffff;
 		border-bottom: 1rpx solid #eef1f5;
 	}
+
+	.header__top {
+		display: flex;
+		align-items: center;
+		gap: 20rpx;
+	}
+
+	.header__intro {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.header .header__clear {
+		display: flex;
+		flex: 0 0 auto;
+		align-items: center;
+		gap: 9rpx;
+		min-height: 64rpx;
+		margin: 0;
+		padding: 0 16rpx;
+		border: 1rpx solid #dde5f0;
+		border-radius: 12rpx;
+		background: #f7f9fc;
+		color: #475569;
+		font-size: 23rpx;
+		font-weight: 500;
+		line-height: 1.4;
+		white-space: nowrap;
+	}
+
+	.header__clear::after { border: 0; }
+	.header .header__clear--pressed {
+		border-color: #c5d5ec;
+		background: #eaf1fb;
+		color: #2658ac;
+	}
+
+	.header__clear-icon {
+		position: relative;
+		width: 16rpx;
+		height: 15rpx;
+		margin: 5rpx 3rpx 0;
+		box-sizing: border-box;
+		border: 2rpx solid currentColor;
+		border-top: 0;
+		border-radius: 0 0 4rpx 4rpx;
+	}
+
+	.header__clear-icon::before,
+	.header__clear-icon::after {
+		position: absolute;
+		left: 50%;
+		border-radius: 2rpx;
+		background: currentColor;
+		content: '';
+		transform: translateX(-50%);
+	}
+
+	.header__clear-icon::before { top: -4rpx; width: 22rpx; height: 2rpx; }
+	.header__clear-icon::after { top: -7rpx; width: 8rpx; height: 2rpx; }
 
 	.header__title {
 		display: block;
