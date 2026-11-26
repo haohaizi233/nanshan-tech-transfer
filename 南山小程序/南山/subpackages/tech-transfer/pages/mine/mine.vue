@@ -1555,10 +1555,15 @@
 					}
 					this.recoveryBusy = false
 					this.closeRecoveryModal()
-					uni.showToast({ title: '密码已重置，请登录', icon: 'success' })
 					this.authMode = 'login'
 					this.authPasswordVisible = false
 					this.authForm.password = ''
+					uni.showModal({
+						title: '密码已重置',
+						content: '请使用新密码重新登录。',
+						showCancel: false,
+						confirmText: '重新登录'
+					})
 				} catch (e) {
 					if (this.isCurrentRecovery(seq)) this.recoveryError = e?.message || '重置失败，请稍后重试。'
 				} finally {

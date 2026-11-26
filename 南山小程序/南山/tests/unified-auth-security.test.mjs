@@ -204,3 +204,38 @@ test('rejected recovery code stays in the dialog with an inline error until edit
 	state.onRecoveryCodeInput({ detail: { value: '01234' } })
 	assert.equal(state.recoveryError, '')
 })
+
+test('reset success presents a readable confirmation after returning to login', async () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	const start = source.indexOf('async submitRecoveryNewPassword() {')
+	const end = source.indexOf('async onSetInitialPassword()', start)
+	const steps = []
+	const { submitRecoveryNewPassword } = vm.runInNewContext(`({${source.slice(start, end)}})`, {
+		completePasswordRecovery: async () => steps.push('reset'),
+		logout: async () => steps.push('logout'),
+		uni: {
+			showToast: () => steps.push('toast'),
+			showModal: ({ title, content, showCancel, confirmText }) => {
+				assert.equal(title, '密码已重置')
+				assert.equal(content, '请使用新密码重新登录。')
+				assert.equal(showCancel, false)
+				assert.equal(confirmText, '重新登录')
+				assert.equal(state.viewMode, 'auth')
+				assert.equal(state.authMode, 'login')
+				steps.push('confirmation')
+			},
+		},
+	})
+	const state = {
+		recoveryRequestSeq: 0, recoveryGrant: 'grant', recoveryOwner: 'account-a',
+		recoveryNewPassword: 'example-password', recoveryConfirmPassword: 'example-password',
+		viewMode: 'home', authForm: { password: 'old-password' },
+		isCurrentRecovery: () => true,
+		resetSecurityInfo() {},
+		closeRecoveryModal() { steps.push('close') },
+	}
+
+	await submitRecoveryNewPassword.call(state)
+	assert.deepEqual(steps, ['reset', 'logout', 'close', 'confirmation'])
+	assert.equal(state.authForm.password, '')
+})
