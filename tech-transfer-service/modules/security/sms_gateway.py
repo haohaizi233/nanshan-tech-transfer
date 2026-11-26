@@ -210,7 +210,7 @@ def start_sms_binding(
 
 
 def _send(
-    user_id: int,
+    user_id: int | None,
     phone: str,
     purpose: str,
     challenge_id: str,
@@ -227,7 +227,8 @@ def _send(
         provider = get_sms_provider()
     except ProviderError as exc:
         raise DeliveryStageError("config", getattr(exc, "reason_code", "provider_config_invalid")) from None
-    decision = engine.reserve(phone, str(user_id), context.ip, context.device_id, challenge_id)
+    account = str(user_id) if user_id is not None else "register:" + phone
+    decision = engine.reserve(phone, account, context.ip, context.device_id, challenge_id)
     if not _allowed(decision):
         _audit(getattr(decision, "rule_id", "send.limit"), context, challenge_id, decision="THROTTLE")
         rule = getattr(decision, "rule_id", "sms.risk.blocked")
@@ -236,13 +237,23 @@ def _send(
     ttl = settings.SMS_CODE_TTL_SECONDS
     try:
         with get_cursor(commit=True) as cur:
-            # Serialize per user and purpose. Same task UUID can never be sent twice.
-            cur.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
-            cur.execute(
-                """UPDATE auth_challenge SET status='cancelled' WHERE user_id=%s
-                AND purpose=%s AND status IN ('pending','pending_send')""",
-                (user_id, purpose),
-            )
+            if user_id is None:
+                fingerprint = _fingerprint(phone)
+                cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", ("register:" + fingerprint,))
+                cur.execute(
+                    """UPDATE auth_challenge SET status='cancelled'
+                    WHERE user_id IS NULL AND purpose='register' AND destination_fingerprint=%s
+                    AND status IN ('pending','pending_send')""",
+                    (fingerprint,),
+                )
+            else:
+                # Serialize per user and purpose. Same task UUID can never be sent twice.
+                cur.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
+                cur.execute(
+                    """UPDATE auth_challenge SET status='cancelled' WHERE user_id=%s
+                    AND purpose=%s AND status IN ('pending','pending_send')""",
+                    (user_id, purpose),
+                )
             cur.execute(
                 """INSERT INTO auth_challenge
                 (id,user_id,purpose,channel,destination_fingerprint,destination_masked,code_hash,

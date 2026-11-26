@@ -41,9 +41,18 @@ class LoginRequest(RequestBody):
     password: str | None = Field(None, description="密码")
 
 
-class RegisterRequest(RequestBody):
+class RegistrationChallengeRequest(RequestBody):
+    phone: str = Field(..., min_length=11, max_length=20)
+
+
+class RegistrationProofRequest(RequestBody):
+    challengeId: str = Field(..., pattern=r"^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")
+    code: str = Field(..., strict=True, pattern=r"^[0-9]{6}$")
+
+
+class RegisterRequest(RegistrationProofRequest):
     username: str | None = Field(None, description="后台用户名注册")
-    phone: str | None = Field(None, description="小程序手机号注册")
+    phone: str = Field(..., description="待确权的手机号")
     password: str = Field(..., min_length=1, description="密码")
     displayName: str | None = None
     email: str | None = None
@@ -271,7 +280,7 @@ class CooperationCompleteRequest(VersionBody):
 # ── institution registration ────────────────────────────────
 
 
-class InstitutionRegistrationRequest(RequestBody):
+class InstitutionRegistrationRequest(RegistrationProofRequest):
     kind: str = Field(..., description="university/institute/enterprise/invest/service/other")
     name: str = Field(..., min_length=1, max_length=128)
     contactName: str = Field(..., min_length=1, max_length=64)

@@ -29,7 +29,7 @@ class SmsRiskEngine(BaseRiskEngine):
     def check_request(self, ip, account, device_id, phone=None, purpose="reset_password"):
         if not self.config.SMS_RISK_ENGINE_ENABLED:
             return RiskDecision(DecisionAction.DENY, "sms.risk.disabled")
-        if purpose not in {"reset_password", "bind_phone"}:
+        if purpose not in {"reset_password", "bind_phone", "register"}:
             return RiskDecision(DecisionAction.DENY, "sms.purpose.disabled")
         if self._is_dev_bypass_allowed():
             return RiskDecision(DecisionAction.ALLOW, "sms.allow.dev_mode")

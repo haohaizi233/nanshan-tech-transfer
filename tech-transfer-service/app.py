@@ -137,6 +137,8 @@ async def security_headers(request, call_next):
             "/reset-password",
             "/forgot-password",
             f"{settings.API_PREFIX}/auth/recovery",
+            f"{settings.API_PREFIX}/auth/register",
+            f"{settings.API_PREFIX}/institution-registrations",
             f"{settings.API_PREFIX}/me/security",
         )
     )

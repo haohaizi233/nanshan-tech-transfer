@@ -243,7 +243,7 @@ class SendCloudSmsProvider(SmsProvider):
     def send_task(
         self, phone: str, code: str, purpose: str, expires_in_seconds: int = 300, *, send_request_id: str
     ) -> SmsReceipt:
-        if purpose not in {"password_recovery", "reset_password", "bind_phone"}:
+        if purpose not in {"password_recovery", "reset_password", "bind_phone", "register"}:
             raise ProviderError("不支持的短信用途")
         if (
             not isinstance(send_request_id, str)

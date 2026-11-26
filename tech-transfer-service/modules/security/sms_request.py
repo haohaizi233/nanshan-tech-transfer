@@ -153,6 +153,8 @@ class SmsBodyLimitMiddleware:
 
     async def __call__(self, scope, receive, send):
         paths = (
+            "/auth/register/challenge",
+            "/auth/register",
             "/auth/recovery/start",
             "/auth/recovery/verify",
             "/auth/recovery/complete",
