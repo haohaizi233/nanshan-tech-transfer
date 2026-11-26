@@ -28,14 +28,23 @@
 				</view>
 				<view class="form-item">
 					<text class="label">密码 <text class="required">*</text></text>
-					<input
-						class="input"
-						password
-						maxlength="128"
-						:value="authForm.password"
-						:placeholder="authMode === 'register' ? '设置密码（至少8位）' : '请输入密码'"
-						@input="onAuthInput('password', $event)"
-					/>
+					<view class="auth-password-field">
+						<input
+							class="input auth-password-input"
+							:password="!authPasswordVisible"
+							maxlength="128"
+							:value="authForm.password"
+							:placeholder="authMode === 'register' ? '设置密码（至少8位）' : '请输入密码'"
+							@input="onAuthInput('password', $event)"
+						/>
+						<button
+							class="auth-password-toggle"
+							:aria-label="authPasswordVisible ? '隐藏密码' : '显示密码'"
+							@click="authPasswordVisible = !authPasswordVisible"
+						>
+							<view class="auth-password-eye" :class="{ 'is-hidden': !authPasswordVisible }" aria-hidden="true" />
+						</button>
+					</view>
 					<text v-if="authMode === 'register'" class="password-hint">密码长度为8–128位，建议组合使用字母、数字和符号。</text>
 					<text v-if="authMode === 'register' && authForm.password && authForm.password.trim().length < 8" class="password-error">密码太短，还需输入{{ 8 - authForm.password.trim().length }}位（首尾空格不计入）。</text>
 				</view>
@@ -114,7 +123,15 @@
 					/>
 				</view>
 				<view class="form-item">
-					<text class="label">公司 <text class="required">*</text></text>
+					<view class="profile-field-header">
+						<text class="label">公司 <text class="required">*</text></text>
+						<button
+							v-if="!isOrgCertified && certification.canApply && form.company.trim()"
+							class="security-btn profile-field-action"
+							size="mini"
+							@click="goProfileOrgJoin"
+						>申请加入</button>
+					</view>
 					<view v-if="isOrgCertified" class="locked-row">
 						<input class="input input-disabled" disabled :value="certifiedOrgName" />
 						<text class="cert-badge">认证</text>
@@ -158,8 +175,18 @@
 					<input class="input input-disabled" disabled :value="authPhone" />
 				</view>
 				<view class="form-item">
-					<text class="label">邮箱 <text class="required">*</text></text>
-					<input class="input" :value="form.email" placeholder="请输入邮箱" @input="onFieldInput('email', $event)" />
+					<view class="profile-field-header">
+						<text class="label">邮箱 <text class="required">*</text></text>
+						<button
+							v-if="emailFeatureEnabled"
+							class="security-btn profile-field-action"
+							size="mini"
+							:disabled="contactModalBusy"
+							@click="openContactModal('email', form.email)"
+						>{{ hasVerifiedSecurityEmail ? '更换安全邮箱' : '绑定安全邮箱' }}</button>
+					</view>
+					<input class="input" inputmode="email" :value="form.email" placeholder="请输入邮箱" @input="onFieldInput('email', $event)" />
+					<text v-if="emailFeatureEnabled" class="profile-email-hint">填写邮箱即可继续，安全邮箱可稍后绑定。</text>
 				</view>
 				<view class="form-item">
 					<text class="label">微信 <text class="required">*</text></text>
@@ -365,7 +392,7 @@
 						<input class="input" type="text" inputmode="email" :disabled="contactModalBusy" :value="contactModalValue" @input="onTargetEmailInput" placeholder="例如 name@example.com" />
 						<text v-if="contactTargetEmailError" class="contact-form-error" role="alert">{{ contactTargetEmailError }}</text>
 					</view>
-					<view v-if="(securityInfo.stepUpMethods || []).length > 1" class="form-item">
+					<view v-if="securityInfo && (securityInfo.stepUpMethods || []).length > 1" class="form-item">
 						<text class="label">验证方式</text>
 						<view class="channel-picker">
 							<view
@@ -577,6 +604,7 @@
 			return {
 				viewMode: 'auth',
 				authMode: 'login',
+				authPasswordVisible: false,
 				authBusy: false,
 				registrationCode: '',
 				registrationChallengeId: '',
@@ -595,15 +623,9 @@
 				initialPassword: '',
 				passwordBusy: false,
 				passwordError: '',
-				securityInfo: {
-					phone: null,
-					email: null,
-					wechatBound: false,
-					passwordConfigured: true,
-					capabilities: { smsEnabled: true, emailEnabled: true },
-					stepUpMethods: ['password'],
-					sessionVersion: 1
-				},
+				securityInfo: null,
+				securityInfoScope: null,
+				securityInfoRequestId: 0,
 				sessionRevokeBusy: false,
 				showContactModal: false,
 				contactModalType: 'phone',
@@ -674,6 +696,8 @@
 				intentionPendingCount: 0,
 				intentionSuccessCount: 0,
 				companySuggestions: [],
+				companyOrgId: null,
+				orgJoinProfileScope: null,
 				showingCompanySuggestions: false,
 				companySuggestionRequestId: 0,
 				memberships: (initialCertification && initialCertification.memberships) || [],
@@ -718,8 +742,11 @@
 			displayCompany() {
 				return this.certifiedOrgName || (this.profile && this.profile.company) || ''
 			},
+			hasVerifiedSecurityEmail() {
+				return Boolean(this.securityInfo && this.securityInfo.email && this.securityInfo.email.verified)
+			},
 			isRebindEmail() {
-				return this.contactModalType === 'email' && Boolean(this.securityInfo && this.securityInfo.email && this.securityInfo.email.verified)
+				return this.contactModalType === 'email' && this.hasVerifiedSecurityEmail
 			},
 			emailFeatureEnabled() {
 				if (!this.securityInfo || !this.securityInfo.capabilities) return true
@@ -739,6 +766,9 @@
 		},
 		onUnload() {
 			this.clearSecurityTimers()
+		},
+		onHide() {
+			this.authPasswordVisible = false
 		},
 		beforeUnmount() {
 			this.clearSecurityTimers()
@@ -804,13 +834,24 @@
 				return this.onWechatLogin(code)
 			},
 			async loadSecurityInfo() {
-				if (!isLoggedIn()) return
+				const scope = isLoggedIn() ? getPageStateScope() : null
+				if (this.securityInfoScope !== scope) this.resetSecurityInfo(scope)
+				if (!scope) return
+				const requestId = ++this.securityInfoRequestId
 				try {
 					const info = await getSecurityInfo()
-					if (info) this.securityInfo = info
+					if (info && requestId === this.securityInfoRequestId && scope === getPageStateScope()) {
+						this.securityInfo = info
+					}
 				} catch (e) {
 					console.error('[mine] loadSecurityInfo error:', e)
 				}
+			},
+			resetSecurityInfo(scope = null) {
+				this.securityInfoRequestId += 1
+				this.securityInfoScope = scope
+				this.securityInfo = null
+				if (this.showContactModal) this.closeContactModal()
 			},
 			clearSecurityTimers() {
 				this.resetRegistrationChallenge()
@@ -842,7 +883,8 @@
 			onContactCodeInput(e) {
 				this.contactModalCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
 			},
-			openContactModal(type) {
+			openContactModal(type, initialValue = '') {
+				if (this.contactModalBusy) return
 				if (type === 'email' && !this.emailFeatureEnabled) {
 					uni.showToast({ title: '安全邮箱功能当前未启用', icon: 'none' })
 					return
@@ -852,7 +894,7 @@
 					return
 				}
 				this.contactModalType = type
-				this.contactModalValue = ''
+				this.contactModalValue = initialValue.trim()
 				this.contactModalCode = ''
 				this.contactModalChallengeId = null
 				this.contactModalCountdown = 0
@@ -1432,12 +1474,12 @@
 				const requestId = (this._dashboardRequestId || 0) + 1
 				this._dashboardRequestId = requestId
 				const scope = getPageStateScope()
+				const preserveProfile = this.orgJoinProfileScope === scope
+				this.orgJoinProfileScope = null
 				this.cachedAccounts = listCachedAccounts()
 				this.authPhone = getSessionPhone()
 				this.profile = getUserProfile()
-				if (isLoggedIn()) {
-					this.loadSecurityInfo()
-				}
+				this.loadSecurityInfo()
 
 				if (this.editing) {
 				this.viewMode = 'profile'
@@ -1445,9 +1487,9 @@
 				this.viewMode = 'home'
 			} else if (isAuthenticated() || needsProfile()) {
 				this.viewMode = 'profile'
-				if (this.profile) this.fillForm(this.profile)
-				else {
-					this.form.phone = this.authPhone
+				if (!preserveProfile) {
+					if (this.profile) this.fillForm(this.profile)
+					else this.form.phone = this.authPhone
 				}
 			} else {
 				this.viewMode = 'auth'
@@ -1595,14 +1637,15 @@
 					this.registrationError = phoneCheck.message
 					return
 				}
-				this.resetRegistrationChallenge()
-				const seq = this.registrationRequestSeq
+				this.registrationError = ''
+				const seq = ++this.registrationRequestSeq
 				this.registrationSending = true
 				try {
 					const result = await startRegistrationChallenge(phoneCheck.value)
 					if (seq !== this.registrationRequestSeq) return
 					if (!result || !result.challengeId) throw new Error('未收到有效的验证码请求，请重试')
 					this.registrationChallengeId = result.challengeId
+					this.registrationCode = ''
 					this.startRegistrationCountdown(Number(result.cooldownSeconds) || 60)
 					uni.showToast({ title: '验证码发送请求已受理', icon: 'none' })
 				} catch (e) {
@@ -1615,6 +1658,7 @@
 			},
 			toggleAuthMode() {
 				if (this.authBusy) return
+				this.authPasswordVisible = false
 				this.resetRegistrationChallenge()
 				this.authMode = this.authMode === 'login' ? 'register' : 'login'
 			},
@@ -1624,6 +1668,7 @@
 			},
 			fillCachedAccount(item) {
 				if (this.authBusy) return
+				this.authPasswordVisible = false
 				this.resetRegistrationChallenge()
 				this.authForm.phone = item.phone
 				this.authForm.password = ''
@@ -1651,6 +1696,7 @@
 				return
 			}
 			this.authBusy = true
+			this.authPasswordVisible = false
 			this.registrationError = ''
 			uni.showLoading({ title: this.authMode === 'register' ? '注册中...' : '登录中...', mask: true })
 			let res
@@ -1678,6 +1724,7 @@
 			if (!res.needProfile) this.resumePublishDraftAfterLogin()
 		},
 			fillForm(profile) {
+				this.companyOrgId = null
 				this.form = {
 					avatar: profile.avatar || '/static/logo.png',
 					avatarFileId: profile.avatarFileId || null,
@@ -1713,6 +1760,8 @@
 				this.loadCompanySuggestions(this.form.company)
 			},
 			onCompanyInput(e) {
+				this.companyOrgId = null
+				this.companySuggestions = []
 				this.form.company = e.detail.value
 				this.showingCompanySuggestions = true
 				this.loadCompanySuggestions(e.detail.value)
@@ -1729,6 +1778,7 @@
 			},
 			selectCompanySuggestion(org) {
 				this.form.company = org.name || ''
+				this.companyOrgId = org.id
 				this.showingCompanySuggestions = false
 			},
 			onWxAvatar(e) {
@@ -1847,6 +1897,7 @@
 					content: '退出后账号仍会保留登录历史，可再次登录切换',
 					success: async (res) => {
 						if (!res.confirm) return
+						this.resetSecurityInfo()
 						await logout()
 						this.editing = false
 						this.authForm.password = ''
@@ -1871,6 +1922,15 @@
 			goOrgJoin() {
 				clearCachedOrganizationCertification()
 				HostBridge.navigate('pages/org-join/org-join')
+			},
+			goProfileOrgJoin() {
+				const name = this.form.company.trim()
+				if (!name || this.isOrgCertified || !this.certification.canApply) return
+				this.showingCompanySuggestions = false
+				this.orgJoinProfileScope = getPageStateScope()
+				clearCachedOrganizationCertification()
+				const orgTarget = JSON.stringify({ name, id: this.companyOrgId })
+				HostBridge.navigate('pages/org-join/org-join', { orgTarget })
 			},
 			goOrgApply() {
 				clearCachedOrganizationCertification()
@@ -2202,6 +2262,30 @@
 		margin-bottom: 22rpx;
 	}
 
+	.profile-field-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12rpx;
+		margin-bottom: 10rpx;
+	}
+
+	.profile-field-header .label {
+		margin-bottom: 0;
+	}
+
+	.security-btn.profile-field-action {
+		padding: 0 16rpx;
+		line-height: 2;
+	}
+
+	.profile-email-hint {
+		display: block;
+		margin-top: 10rpx;
+		font-size: 24rpx;
+		color: #64748b;
+	}
+
 	.label {
 		display: block;
 		font-size: 28rpx;
@@ -2223,6 +2307,78 @@
 
 	.input-disabled {
 		color: #999999;
+	}
+
+	.auth-password-field {
+		--auth-password-background: #f7f9fc;
+		display: flex;
+		align-items: center;
+		background: var(--auth-password-background);
+		border-radius: 12rpx;
+	}
+
+	.input.auth-password-input {
+		flex: 1;
+		min-width: 0;
+		padding-right: 0;
+		background: transparent;
+	}
+
+	/* #ifdef H5 */
+	.auth-password-input .uni-input-input:is(:autofill, :-webkit-autofill) {
+		box-shadow: 0 0 0 100px var(--auth-password-background) inset;
+	}
+
+	.auth-password-input .uni-input-input::-ms-reveal {
+		display: none;
+	}
+	/* #endif */
+
+	.auth-password-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 80rpx;
+		width: 80rpx;
+		height: 80rpx;
+		margin: 0;
+		padding: 0;
+		background: transparent;
+		color: #64748b;
+	}
+
+	.auth-password-toggle::after {
+		border: 0;
+	}
+
+	.auth-password-eye {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 34rpx;
+		height: 34rpx;
+	}
+
+	.auth-password-eye::before {
+		content: '';
+		width: 23rpx;
+		height: 23rpx;
+		box-sizing: border-box;
+		border: 3rpx solid currentColor;
+		border-radius: 75% 15%;
+		transform: rotate(45deg);
+		background: radial-gradient(circle, currentColor 4rpx, transparent 5rpx);
+	}
+
+	.auth-password-eye.is-hidden::after {
+		content: '';
+		position: absolute;
+		width: 36rpx;
+		height: 3rpx;
+		background: currentColor;
+		box-shadow: 0 2rpx var(--auth-password-background);
+		transform: rotate(45deg);
 	}
 
 	.company-select {

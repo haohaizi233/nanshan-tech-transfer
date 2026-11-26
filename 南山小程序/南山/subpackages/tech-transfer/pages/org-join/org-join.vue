@@ -107,6 +107,8 @@
 				keyword: '',
 				searched: false,
 				loading: false,
+				searchRequestId: 0,
+				orgTarget: null,
 				candidates: [],
 				selectedOrg: null,
 				submitting: false,
@@ -121,6 +123,16 @@
 				}
 			}
 		},
+		onLoad(options) {
+			const raw = options && options.orgTarget
+			if (typeof raw !== 'string') return
+			try {
+				const target = JSON.parse(raw.startsWith('{') ? raw : decodeURIComponent(raw))
+				if (typeof target?.name === 'string' && target.name.trim()) this.orgTarget = target
+			} catch {
+				// 无法读取的跳转参数按普通搜索入口处理。
+			}
+		},
 		onShow() {
 			if (!isLoggedIn()) {
 				safeBackWithToast('请先登录', 800)
@@ -129,6 +141,14 @@
 			// 认证状态由后台审核决定，每次进入页面都重拉接口，
 			// 页面缓存只负责首屏渲染，避免审核通过后仍显示「正在申请加入」。
 			this.loadCertification()
+			const target = this.orgTarget
+			if (target) {
+				this.orgTarget = null
+				this.keyword = target.name.trim()
+				this.candidates = []
+				this.selectedOrg = null
+				this.doSearch({ selectExact: true, orgId: target.id })
+			}
 		},
 		computed: {
 			certificationHint() {
@@ -152,6 +172,8 @@
 			onKeywordInput(e) {
 				const next = e.detail.value
 				if (next !== this.keyword) {
+					this.searchRequestId += 1
+					this.loading = false
 					this.keyword = next
 					this.candidates = []
 					this.selectedOrg = null
@@ -162,22 +184,32 @@
 			onFieldInput(key, e) {
 				this.form[key] = e.detail.value
 			},
-			async doSearch() {
+			async doSearch({ selectExact = false, orgId = null } = {}) {
 				const kw = (this.keyword || '').trim()
 				if (!kw) {
 					uni.showToast({ title: '请输入机构名称', icon: 'none' })
 					return
 				}
+				const requestId = ++this.searchRequestId
 				this.loading = true
 				this.searched = true
 				try {
 					const data = await searchInstitutions(kw, 1, 20)
+					if (requestId !== this.searchRequestId) return
 					this.candidates = data.list || []
+					if (selectExact) {
+						const matches = this.candidates.filter(org => orgId != null
+							? String(org.id) === String(orgId)
+							: org.name.trim().toLowerCase() === kw.toLowerCase())
+						this.selectedOrg = matches.length === 1 ? matches[0] : null
+					}
 					this.markPageStateFresh('search')
 				} catch (e) {
-					uni.showToast({ title: (e && e.message) || '搜索失败', icon: 'none' })
+					if (requestId === this.searchRequestId) {
+						uni.showToast({ title: (e && e.message) || '搜索失败', icon: 'none' })
+					}
 				} finally {
-					this.loading = false
+					if (requestId === this.searchRequestId) this.loading = false
 				}
 			},
 			selectOrg(org) {

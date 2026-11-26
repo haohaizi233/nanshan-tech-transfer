@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import vm from 'node:vm'
 
 const root = new URL('../', import.meta.url)
 const patentDetail = readFileSync(new URL('subpackages/tech-transfer/pages/patent-detail/patent-detail.vue', root), 'utf8')
 const mine = readFileSync(new URL('subpackages/tech-transfer/pages/mine/mine.vue', root), 'utf8')
+const orgJoin = readFileSync(new URL('subpackages/tech-transfer/pages/org-join/org-join.vue', root), 'utf8')
 const home = readFileSync(new URL('subpackages/tech-transfer/pages/home/home.vue', root), 'utf8')
 const dockDetail = readFileSync(new URL('subpackages/tech-transfer/pages/dock-detail/dock-detail.vue', root), 'utf8')
 const achievementList = readFileSync(new URL('subpackages/tech-transfer/pages/achievement-list/achievement-list.vue', root), 'utf8')
@@ -83,4 +85,68 @@ test('uses the certification backdrop and compact actions in one unverified card
   assert.match(mine, /<button class="org-action-btn" size="mini" @click="goOrgJoin">加入机构<\/button>/)
   assert.match(mine, /<button class="org-action-btn ghost" size="mini" @click="goOrgApply">机构入驻<\/button>/)
   assert.match(mine, /\.org-card-unverified\s*\{[\s\S]*min-height:\s*132rpx/)
+})
+
+test('the company shortcut opens the join page with the current company and selected directory ID', () => {
+  const start = mine.indexOf('goProfileOrgJoin() {')
+  const end = mine.indexOf('goOrgApply() {', start)
+  const calls = []
+  const methods = vm.runInNewContext(`({${mine.slice(start, end)}})`, {
+    HostBridge: { navigate: (...args) => calls.push(args) },
+    clearCachedOrganizationCertification() {},
+    getPageStateScope: () => 'user-1',
+  })
+  const state = {
+    form: { company: ' 示例机构 ' }, companyOrgId: 17, certification: { canApply: true },
+    goOrgJoin: methods.goOrgJoin,
+  }
+  methods.goProfileOrgJoin.call(state)
+  assert.equal(calls[0][0], 'pages/org-join/org-join')
+  assert.deepEqual(JSON.parse(calls[0][1].orgTarget), { name: '示例机构', id: 17 })
+})
+
+test('prefilled search selects the matching directory ID or a unique exact name', async () => {
+  const start = orgJoin.indexOf('async doSearch(')
+  const end = orgJoin.indexOf('selectOrg(org) {', start)
+  const first = { id: 7, name: '示例机构' }
+  const second = { id: 17, name: '示例机构' }
+  let list = [first, second, { id: 27, name: '示例机构分部' }]
+  const { doSearch } = vm.runInNewContext(`({${orgJoin.slice(start, end)}})`, {
+    searchInstitutions: async () => ({ list }),
+  })
+  const state = { keyword: '示例机构', selectedOrg: null, searchRequestId: 0, markPageStateFresh() {} }
+  await doSearch.call(state, { selectExact: true })
+  assert.equal(state.selectedOrg, null)
+  await doSearch.call(state, { selectExact: true, orgId: '17' })
+  assert.equal(state.selectedOrg, second)
+  list = [first, list[2]]
+  await doSearch.call(state, { selectExact: true })
+  assert.equal(state.selectedOrg, first)
+})
+
+test('returning from an institution application keeps the unfinished profile for the same account', async () => {
+  const start = mine.indexOf('async refresh() {')
+  const end = mine.indexOf('async loadMemberships()', start)
+  const { refresh } = vm.runInNewContext(`({${mine.slice(start, end)}})`, {
+    getPageStateScope: () => 'user-1',
+    listCachedAccounts: () => [],
+    getSessionPhone: () => '13800138000',
+    getUserProfile: () => ({ company: '旧资料' }),
+    isLoggedIn: () => true,
+    isAuthenticated: () => true,
+    needsProfile: () => true,
+  })
+  const state = {
+    form: { company: '示例机构', email: 'name@example.com' },
+    orgJoinProfileScope: 'user-1',
+    fillForm(profile) { this.form = profile },
+    loadSecurityInfo() {},
+    loadMyPublicationCounts() {},
+    loadInteractionCounts() {},
+    loadMemberships() {},
+  }
+  await refresh.call(state)
+  assert.equal(state.viewMode, 'profile')
+  assert.deepEqual(state.form, { company: '示例机构', email: 'name@example.com' })
+  assert.equal(state.orgJoinProfileScope, null)
 })
