@@ -259,16 +259,19 @@ def test_real_redis_postgres_concurrent_requests_send_once(pg, sender):
 
 def test_phone_binding_uses_gateway_and_single_consumption(pg, sender):
     provider, engine = sender
-    result = gateway.start_sms_binding(1, "13900139000", gateway.SendContext("ip", "dev", "r"), engine)
+    with pg(commit=True) as c:
+        c.execute("INSERT INTO app_user(id) VALUES (2)")
+        c.execute("INSERT INTO user_credential(user_id,username,phone,password_hash) VALUES(2,'user2',NULL,'old')")
+    result = gateway.start_sms_binding(2, "13900139000", gateway.SendContext("ip", "dev", "r"), engine)
     cid = result["challengeId"]
     code = provider.get_last_code("13900139000")
     assert engine.reserve.call_count == 1
     assert code
-    service.verify_and_bind_contact(1, cid, code, "13900139000")
+    service.verify_and_bind_contact(2, cid, code, "13900139000")
     with pytest.raises(BizError):
-        service.verify_and_bind_contact(1, cid, code, "13900139000")
+        service.verify_and_bind_contact(2, cid, code, "13900139000")
     with pg() as c:
-        c.execute("SELECT verification_method FROM account_contact WHERE status='active'")
+        c.execute("SELECT verification_method FROM account_contact WHERE user_id=2 AND status='active'")
         assert c.fetchone()["verification_method"] == "sms"
 
 

@@ -24,7 +24,7 @@ from modules.security.email_gateway import start_email_binding
 from modules.security.provider import MockEmailProvider, MockSmsProvider, reset_providers_for_test
 from modules.security.risk_engine import DecisionAction, RiskDecision
 from modules.security.service import _fingerprint, _hmac_code_v2, verify_and_bind_contact
-from modules.security.sms_gateway import SendContext
+from modules.security.sms_gateway import SendContext, start_sms_binding
 from modules.security.step_up import (
     _target_fingerprint,
     issue_step_up_grant,
@@ -567,3 +567,130 @@ def test_su13_to_su18_incomplete_legacy_challenge_and_grant_consumption_guards(s
                 target_contact="after7003@qq.com",
                 consume=True,
             )
+
+
+def test_rebind_phone_enforces_step_up_and_target_binding(su_env):
+    """更换已绑定安全手机必须完成二次认证与目标手机号强绑定，禁止无 Grant / 同号 / 跨目标 / 跨用途 / 重放换绑。"""
+    schema, _em, sms = su_env
+    _seed(schema, 7004, email="u7004@qq.com", phone="13800137004")
+    s_phone = password_login_session("su_7004", "InitPass!2026")
+    ctx_phone = _ctx(s_phone["accessToken"], 7004)
+
+    # 1. 无 step_up_grant 企图换绑已绑定手机号 -> 403 且 0 次短信外呼
+    with pytest.raises(BizError) as exc_no_grant:
+        start_sms_binding(7004, "13900137004", SendContext("192.0.2.74", "d74", "r74a"))
+    assert exc_no_grant.value.http_status == 403
+    assert sms.sent_messages == []
+
+    # 即使库中已有待验证 sms 挑战，无 Grant 提交 verify_and_bind_contact 仍必须 403 阻断
+    cid_direct = str(uuid.uuid4())
+    with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+        cur.execute(
+            "INSERT INTO auth_challenge(id, user_id, purpose, channel, destination_fingerprint, destination_masked, "
+            "code_hash, status, send_state, expires_at, code_hash_version) "
+            "VALUES (%s, 7004, 'bind_phone', 'sms', %s, '139***', %s, 'pending', 'accepted', NOW() + INTERVAL '5 minutes', 2)",
+            (
+                cid_direct,
+                _fingerprint("13900137004"),
+                _hmac_code_v2(cid_direct, "bind_phone", "sms", "13900137004", "112233"),
+            ),
+        )
+    with pytest.raises(BizError) as exc_verify_no_grant:
+        verify_and_bind_contact(7004, cid_direct, "112233", "13900137004", step_up_grant=None, session_ctx=ctx_phone)
+    assert exc_verify_no_grant.value.http_status == 403
+
+    # 2. 更换为相同手机号 -> 400
+    with pytest.raises(BizError, match="新手机号与当前已绑定安全手机号相同"):
+        issue_step_up_grant(
+            7004,
+            purpose="rebind_phone",
+            method="password",
+            session_fingerprint=ctx_phone.fingerprint_for_purpose("rebind_phone"),
+            session_ctx=ctx_phone,
+            current_password="InitPass!2026",
+            target_contact="13800137004",
+        )
+
+    # 3. 签发绑向 phone A 的 rebind_phone Grant，不得用于 phone B；rebind_email Grant 亦不得用于 rebind_phone
+    grant_phone_a = issue_step_up_grant(
+        7004,
+        purpose="rebind_phone",
+        method="password",
+        session_fingerprint=ctx_phone.fingerprint_for_purpose("rebind_phone"),
+        session_ctx=ctx_phone,
+        current_password="InitPass!2026",
+        target_contact="13900137004",
+    )["stepUpGrant"]
+    grant_email = issue_step_up_grant(
+        7004,
+        purpose="rebind_email",
+        method="password",
+        session_fingerprint=ctx_phone.fingerprint_for_purpose("rebind_email"),
+        session_ctx=ctx_phone,
+        current_password="InitPass!2026",
+        target_contact="new7004@qq.com",
+    )["stepUpGrant"]
+
+    with pytest.raises(BizError) as exc_cross_phone:
+        start_sms_binding(
+            7004,
+            "13900137999",
+            SendContext("192.0.2.74", "d74", "r74b"),
+            step_up_grant=grant_phone_a,
+            session_ctx=ctx_phone,
+        )
+    assert exc_cross_phone.value.http_status == 403
+
+    with pytest.raises(BizError) as exc_cross_purpose:
+        start_sms_binding(
+            7004,
+            "13900137004",
+            SendContext("192.0.2.74", "d74", "r74c"),
+            step_up_grant=grant_email,
+            session_ctx=ctx_phone,
+        )
+    assert exc_cross_purpose.value.http_status == 403
+    assert sms.sent_messages == []
+
+    # 4. 正常换绑完整闭环 + 核销后重放拒绝 + DB 状态更新
+    start_res = start_sms_binding(
+        7004,
+        "13900137004",
+        SendContext("192.0.2.74", "d74", "r74d"),
+        step_up_grant=grant_phone_a,
+        session_ctx=ctx_phone,
+    )
+    assert start_res["isRebind"] is True
+    otp_sms = sms.get_last_code("13900137004")
+    assert otp_sms
+    done = verify_and_bind_contact(
+        7004,
+        start_res["challengeId"],
+        otp_sms,
+        "13900137004",
+        step_up_grant=grant_phone_a,
+        session_ctx=ctx_phone,
+    )
+    assert done["ok"] is True
+
+    with _schema_cursor(PG_DSN, schema, commit=False) as cur:
+        cur.execute(
+            "SELECT normalized_value FROM account_contact WHERE user_id=7004 AND contact_type='phone' AND status='active'"
+        )
+        assert cur.fetchone()["normalized_value"] == "13900137004"
+        cur.execute("SELECT phone FROM user_credential WHERE user_id=7004")
+        assert cur.fetchone()["phone"] == "13900137004"
+
+    with pytest.raises(BizError) as exc_replay:
+        with _schema_cursor(PG_DSN, schema, commit=True) as cur:
+            validate_step_up_grant(
+                cur,
+                user_id=7004,
+                grant_token=grant_phone_a,
+                purpose="rebind_phone",
+                session_fingerprint=ctx_phone.fingerprint_for_purpose("rebind_phone"),
+                session_ctx=ctx_phone,
+                target_contact="13900137004",
+                consume=True,
+            )
+    assert exc_replay.value.http_status == 403

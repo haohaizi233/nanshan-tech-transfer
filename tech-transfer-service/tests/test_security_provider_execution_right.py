@@ -44,7 +44,7 @@ from modules.security.state_machine import (
     claim_send_execution_right,
     transition_delivery_state,
 )
-from modules.security.step_up import session_context_from_request, start_step_up_challenge
+from modules.security.step_up import issue_step_up_grant, session_context_from_request, start_step_up_challenge
 
 PG_DSN = os.getenv("SMS_TEST_POSTGRES_DSN") or (
     "postgresql://postgres:postgres123@127.0.0.1:5432/postgres" if os.getenv("SMS_TEST_POSTGRES") == "1" else None
@@ -885,18 +885,30 @@ def test_hf01_http_finalize_conflict_and_recovery_enqueue_fail_closed(pg_redis):
             assert r_su_retry.status_code == 503
             assert spy_em.call_count == 1
 
-            # 2) /me/security/contact/challenge (sms) finalize 返回 False -> 503，保 key 标 unknown，同键重放仍仅 1 次发送
+            # 2) /me/security/contact/challenge (sms rebind) 持有效 rebind_phone stepUpGrant 时，
+            # finalize 返回 False -> 503，保 key 标 unknown，同键重放仍仅 1 次发送
+            sctx = session_context_from_request(SimpleNamespace(headers={"Authorization": f"Bearer {tok}"}), 3021)
+            assert sctx is not None
+            su_phone = issue_step_up_grant(
+                3021,
+                purpose="rebind_phone",
+                method="password",
+                session_fingerprint=sctx.fingerprint_for_purpose("rebind_phone"),
+                session_ctx=sctx,
+                current_password="InitPass!2026",
+                target_contact="13900139021",
+            )["stepUpGrant"]
             with patch("routes.me.finalize_http_idempotency", return_value=False):
                 r_ct = http_client.post(
                     "/api/tech-transfer/v1/me/security/contact/challenge",
-                    json={"contactType": "phone", "contactValue": "13900139021"},
+                    json={"contactType": "phone", "contactValue": "13900139021", "stepUpGrant": su_phone},
                     headers={"Authorization": f"Bearer {tok}", "Idempotency-Key": "hf-ct-finalize-false"},
                 )
             assert r_ct.status_code == 503
             assert spy_sms.call_count == 1
             r_ct_retry = http_client.post(
                 "/api/tech-transfer/v1/me/security/contact/challenge",
-                json={"contactType": "phone", "contactValue": "13900139021"},
+                json={"contactType": "phone", "contactValue": "13900139021", "stepUpGrant": su_phone},
                 headers={"Authorization": f"Bearer {tok}", "Idempotency-Key": "hf-ct-finalize-false"},
             )
             assert r_ct_retry.status_code == 503
