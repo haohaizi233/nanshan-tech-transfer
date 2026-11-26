@@ -2,6 +2,8 @@ import hmac
 import json
 import time
 import uuid
+from contextlib import nullcontext
+from typing import TYPE_CHECKING
 
 from config import settings
 from core import auth_cache
@@ -13,6 +15,9 @@ from db import get_cursor, run_with_deadlock_retry
 from modules.audit.service import record as audit_record
 from modules.identity.context import IdentityContext
 from modules.identity.provider import ExternalIdentity
+
+if TYPE_CHECKING:
+    from modules.security.registration import VerifiedRegistration
 
 
 def _generate_user_no(cur) -> str:
@@ -288,7 +293,9 @@ def _issue_session(cur, user_id: int, roles: list[str]) -> dict:
     }
 
 
-def register_user(phone: str, password: str, display_name: str | None = None) -> dict:
+def register_user(
+    phone: str, password: str, display_name: str | None = None, *, registration: "VerifiedRegistration | None" = None
+) -> dict:
     """手机号注册：创建 app_user + user_profile + user_credential + user_role。
 
     注册成功后直接签发会话（免登录），返回与 password_login_session 相同结构。
@@ -308,7 +315,7 @@ def register_user(phone: str, password: str, display_name: str | None = None) ->
     if len(password) > 128:
         raise bad_request("密码长度不能超过128位", details="密码长度不能超过128位")
 
-    with get_cursor(commit=True) as cur:
+    with nullcontext(registration.cursor) if registration else get_cursor(commit=True) as cur:
         # 检查手机号是否已注册（phone 唯一索引 + username 唯一约束双查，
         # 兼容迁移 012 回填前 username=手机号 的存量记录）
         cur.execute(
@@ -349,6 +356,9 @@ def register_user(phone: str, password: str, display_name: str | None = None) ->
             "VALUES (%s, %s, %s, %s, 'active')",
             (user_id, phone, hash_password(password), phone),
         )
+
+        if registration:
+            registration.bind_phone(user_id)
 
         # 签发会话
         roles = _get_roles(cur, user_id)
@@ -505,7 +515,9 @@ def create_password_account(
     return user_id, user_no
 
 
-def register_password_user(body: dict, request_id: str | None = None) -> dict:
+def register_password_user(
+    body: dict, request_id: str | None = None, *, registration: "VerifiedRegistration | None" = None
+) -> dict:
     """注册普通用户：账号创建后即可登录，不绑定机构，也不授予后台管理角色。"""
     import re
 
@@ -520,7 +532,7 @@ def register_password_user(body: dict, request_id: str | None = None) -> dict:
     if len(password) < 8 or len(password) > 128:
         raise bad_request("密码长度须为 8-128 位")
 
-    with get_cursor(commit=True) as cur:
+    with nullcontext(registration.cursor) if registration else get_cursor(commit=True) as cur:
         cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
         if cur.fetchone():
             code, _message, status = TT_COMMON_40903
@@ -534,6 +546,8 @@ def register_password_user(body: dict, request_id: str | None = None) -> dict:
             phone,
             email,
         )
+        if registration:
+            registration.bind_phone(user_id)
         audit_record(
             "user.registration.submit",
             "app_user",

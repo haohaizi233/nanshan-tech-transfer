@@ -1,5 +1,4 @@
 import json
-import secrets
 import time
 import urllib.error
 import urllib.parse
@@ -14,6 +13,7 @@ from core.errors import (
     TT_AUTH_40106,
     TT_AUTH_40902,
     TT_AUTH_40903,
+    TT_AUTH_40904,
     BizError,
     bad_request,
     forbidden,
@@ -24,7 +24,6 @@ from modules.identity.service import (
     _get_roles,
     _issue_session,
     build_user_response,
-    create_password_account,
 )
 
 _token_lock = Lock()
@@ -123,7 +122,6 @@ def wechat_login_session(login_code: str, phone_code: str | None = None, *, bind
     phone = exchange_phone_code(phone_code, openid) if phone_code else None
     if bind_user_id is not None and not phone:
         raise bad_request("绑定微信需要授权核验手机号")
-    is_new = False
     try:
         with get_cursor(commit=True) as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("wechat:" + settings.WECHAT_APPID,))
@@ -167,9 +165,7 @@ def wechat_login_session(login_code: str, phone_code: str | None = None, *, bind
                 else:
                     if bind_user_id is not None:
                         raise forbidden("授权手机号与当前账号登录手机号不一致")
-                    user_id, _ = create_password_account(cursor, phone, secrets.token_urlsafe(48), phone=phone)
-                    cursor.execute("UPDATE user_credential SET password_configured=false WHERE user_id=%s", (user_id,))
-                    is_new = True
+                    raise BizError(*TT_AUTH_40904)
                 cursor.execute(
                     "INSERT INTO external_identity (user_id, issuer, tenant_id, external_subject) "
                     "VALUES (%s, 'wechat-mini', %s, %s)",
@@ -188,7 +184,7 @@ def wechat_login_session(login_code: str, phone_code: str | None = None, *, bind
             cursor.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
             result = _issue_session(cursor, user_id, _get_roles(cursor, user_id))
             result["user"] = build_user_response(cursor, user_id)
-            result["isNewUser"] = is_new
+            result["isNewUser"] = False
             return result
     except IntegrityError:
         raise BizError("TT_COMMON_40903", "账号或微信已绑定，请重新登录后重试", 409) from None

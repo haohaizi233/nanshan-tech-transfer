@@ -15,6 +15,8 @@ membership 的系统管理员状态机（approve/reject_organization_application
 """
 
 import re
+from contextlib import contextmanager, nullcontext
+from typing import TYPE_CHECKING
 
 import psycopg2
 
@@ -28,11 +30,23 @@ from modules.membership.service import (
     reject_organization_application,
 )
 
+if TYPE_CHECKING:
+    from modules.security.registration import VerifiedRegistration
+
+
+@contextmanager
+def _institution_registration_cursor():
+    with transaction() as conn, conn.cursor() as cur:
+        yield cur
+
+
 PUBLIC_KINDS = ("university", "institute", "enterprise", "invest", "service", "other")
 LIST_STATUSES = ("pending", "approved", "rejected", "cancelled")
 
 
-def create_institution_registration(body: dict, request_id=None) -> dict:
+def create_institution_registration(
+    body: dict, request_id=None, *, registration: "VerifiedRegistration | None" = None
+) -> dict:
     if not isinstance(body, dict):
         raise bad_request("请求体必须是 JSON 对象")
 
@@ -70,7 +84,7 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
         raise bad_request("intro 长度不能超过 5000")
 
     try:
-        with transaction() as conn, conn.cursor() as cur:
+        with nullcontext(registration.cursor) if registration else _institution_registration_cursor() as cur:
             cur.execute("SELECT 1 FROM user_credential WHERE username=%s", (username,))
             if cur.fetchone():
                 raise conflict("该登录账号已存在")
@@ -107,6 +121,8 @@ def create_institution_registration(body: dict, request_id=None) -> dict:
                 request_id=request_id,
                 cur=cur,
             )
+            if registration:
+                registration.bind_phone(user_id)
             audit_record(
                 "institution_registration.submit",
                 "organization_application",

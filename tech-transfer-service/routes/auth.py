@@ -15,6 +15,7 @@ from core.request_schemas import (
     RecoveryVerifyRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    RegistrationChallengeRequest,
     WechatBindRequest,
     WechatLoginRequest,
     WechatWebBindRequest,
@@ -50,6 +51,7 @@ from modules.security.idempotency import (
     wait_for_idempotency_settlement,
 )
 from modules.security.rate_limiter import check_verify_challenge_rate
+from modules.security.registration import start_registration_challenge, verified_registration
 from modules.security.service import (
     complete_password_recovery,
     get_recovery_capabilities,
@@ -270,26 +272,22 @@ def login(body: LoginRequest, request: Request):
     return success(result)
 
 
-@router.post("/register", summary="注册（username 用户名或 phone 手机号两种模式）")
+@router.post("/register/challenge", summary="发送注册手机号验证码")
+def register_challenge(body: RegistrationChallengeRequest, context: SmsRequestContext = Depends(validate_sms_request)):
+    send_context = SendContext(context.ip, context.device_id, context.request_id)
+    return success(start_registration_challenge(body.phone, send_context))
+
+
+@router.post("/register", summary="核验手机号并注册")
 def register(body: RegisterRequest, request: Request):
-    body = body.as_dict()
-    username = (body.get("username") or "").strip()
-
-    # 防批量注册：按 IP 限频
     check_register_rate(request)
-
-    if username:
-        # Vue 后台注册页：用户名 + 密码（可选 displayName/phone/email），注册后跳登录
-        return success(
-            register_password_user(body, request_id=get_request_id()),
-            "注册成功，请登录",
-        )
-    # 小程序手机号注册：创建用户并直接签发会话（免登录）
-    phone = (body.get("phone") or "").strip()
-    password = body.get("password") or ""
-    display_name = (body.get("displayName") or "").strip() or None
-    result = register_user(phone, password, display_name)
-    return success(result)
+    with verified_registration(body.phone, body.challengeId, body.code) as registration:
+        if body.username and body.username.strip():
+            profile = body.model_dump(exclude={"challengeId", "code"})
+            profile["phone"] = registration.phone
+            result = register_password_user(profile, request_id=get_request_id(), registration=registration)
+            return success(result, "注册成功，请登录")
+        return success(register_user(registration.phone, body.password, body.displayName, registration=registration))
 
 
 @router.post("/bootstrap")

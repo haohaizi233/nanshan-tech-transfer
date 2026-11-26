@@ -7,6 +7,7 @@ from core.rate_limit import check_register_rate
 from core.request_schemas import InstitutionRegistrationRequest
 from core.response import get_request_id, success
 from modules.institution_registration.service import create_institution_registration
+from modules.security.registration import verified_registration
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["institution-registrations"])
 
@@ -15,7 +16,10 @@ router = APIRouter(prefix="/api/tech-transfer/v1", tags=["institution-registrati
 def submit_institution_registration(request: Request, body: InstitutionRegistrationRequest):
     # 公开注册端点：与 /auth/register 同样按 IP 限频，防批量账号创建。
     check_register_rate(request)
-    data = create_institution_registration(body.as_dict(), request_id=get_request_id())
+    with verified_registration(body.contactPhone, body.challengeId, body.code) as registration:
+        profile = body.model_dump(exclude={"challengeId", "code"})
+        profile["contactPhone"] = registration.phone
+        data = create_institution_registration(profile, request_id=get_request_id(), registration=registration)
     return JSONResponse(
         status_code=201,
         content=success(data, "机构注册申请已提交，请等待平台审核"),
