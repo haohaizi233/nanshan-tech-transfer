@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import { validateEmail, validatePhone } from '../../utils/contactValidation.js'
@@ -9,6 +9,11 @@ const mode = ref('user')
 const submitting = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+const verification = reactive({
+  user: { phone: '', challengeId: '', code: '', countdown: 0, deadline: 0, sending: false, requestSeq: 0 },
+  institution: { phone: '', challengeId: '', code: '', countdown: 0, deadline: 0, sending: false, requestSeq: 0 },
+})
+let countdownTimer = null
 
 const TABS = [
   { value: 'user', label: '普通用户注册', panelId: 'register-panel-user', tabId: 'register-tab-user' },
@@ -19,6 +24,88 @@ const userForm = reactive({ displayName: '', username: '', phone: '', email: '',
 const institutionForm = reactive({
   kind: 'enterprise', name: '', region: '', creditCode: '', intro: '',
   contactName: '', contactPhone: '', email: '', username: '', password: '', confirmPassword: '',
+})
+
+const activeRegistration = (registrationMode = mode.value) => registrationMode === 'user'
+  ? { state: verification.user, phone: userForm.phone }
+  : { state: verification.institution, phone: institutionForm.contactPhone }
+
+const clearChallenge = state => {
+  state.challengeId = ''
+  state.code = ''
+  state.phone = ''
+  state.countdown = 0
+  state.deadline = 0
+  state.requestSeq += 1
+}
+
+watch(() => userForm.phone, value => {
+  if (value.trim() !== verification.user.phone) clearChallenge(verification.user)
+})
+watch(() => institutionForm.contactPhone, value => {
+  if (value.trim() !== verification.institution.phone) clearChallenge(verification.institution)
+})
+
+const startCountdown = (state, seconds) => {
+  state.countdown = Math.max(1, Number(seconds) || 60)
+  state.deadline = Date.now() + state.countdown * 1000
+  if (countdownTimer) return
+  countdownTimer = setInterval(() => {
+    const now = Date.now()
+    for (const challenge of Object.values(verification)) {
+      challenge.countdown = Math.max(0, Math.ceil((challenge.deadline - now) / 1000))
+    }
+    if (!verification.user.countdown && !verification.institution.countdown) {
+      clearInterval(countdownTimer)
+      countdownTimer = null
+    }
+  }, 1000)
+}
+
+const sendRegistrationCode = async () => {
+  const requestedMode = mode.value
+  const { state, phone } = activeRegistration(requestedMode)
+  if (state.sending || state.countdown > 0 || submitting.value) return
+  errorMessage.value = ''
+  const phoneCheck = validatePhone(phone, { required: true, label: '安全手机号' })
+  if (!phoneCheck.ok) {
+    errorMessage.value = phoneCheck.message
+    return
+  }
+
+  clearChallenge(state)
+  const requestSeq = state.requestSeq
+  state.phone = phoneCheck.value
+  state.sending = true
+  try {
+    const result = await api('/auth/register/challenge', {
+      method: 'POST',
+      body: { phone: phoneCheck.value },
+      skipAuthRefresh: true,
+    })
+    if (state.requestSeq !== requestSeq) return
+    if (!result?.challengeId) throw new Error('验证码请求未建立，请稍后重试。')
+    state.challengeId = result.challengeId
+    startCountdown(state, result.cooldownSeconds)
+  } catch (error) {
+    if (state.requestSeq === requestSeq && mode.value === requestedMode) {
+      errorMessage.value = error.message || '验证码发送失败，请稍后重试。'
+    }
+  } finally {
+    state.sending = false
+  }
+}
+
+const registrationProof = (state, phone) => {
+  if (!state.challengeId || state.phone !== phone) throw new Error('请先为当前手机号获取验证码。')
+  if (!/^\d{6}$/.test(state.code)) throw new Error('请输入完整的 6 位数字验证码。')
+  return { challengeId: state.challengeId, code: state.code }
+}
+
+onUnmounted(() => {
+  clearChallenge(verification.user)
+  clearChallenge(verification.institution)
+  if (countdownTimer) clearInterval(countdownTimer)
 })
 
 const switchMode = value => {
@@ -55,13 +142,13 @@ const validatePassword = form => {
 const submitUserRegistration = async () => {
   const error = validatePassword(userForm)
   if (error) throw new Error(error)
+  const phoneCheck = validatePhone(userForm.phone, { required: true })
+  if (!phoneCheck.ok) throw new Error(phoneCheck.message)
+  const proof = registrationProof(verification.user, phoneCheck.value)
   const body = { username: userForm.username.trim(), password: userForm.password }
   if (userForm.displayName.trim()) body.displayName = userForm.displayName.trim()
-  if (userForm.phone.trim()) {
-    const phoneCheck = validatePhone(userForm.phone, { required: false })
-    if (!phoneCheck.ok) throw new Error(phoneCheck.message)
-    body.phone = phoneCheck.value
-  }
+  body.phone = phoneCheck.value
+  Object.assign(body, proof)
   if (userForm.email.trim()) {
     const emailCheck = validateEmail(userForm.email, { required: false })
     if (!emailCheck.ok) throw new Error(emailCheck.message)
@@ -77,12 +164,14 @@ const submitInstitutionRegistration = async () => {
   }
   const phoneCheck = validatePhone(institutionForm.contactPhone, { required: true, label: '联系电话' })
   if (!phoneCheck.ok) throw new Error(phoneCheck.message)
+  const proof = registrationProof(verification.institution, phoneCheck.value)
   const error = validatePassword(institutionForm)
   if (error) throw new Error(error)
   const body = {
     kind: institutionForm.kind, name: institutionForm.name.trim(),
     contactName: institutionForm.contactName.trim(), contactPhone: phoneCheck.value,
     username: institutionForm.username.trim(), password: institutionForm.password,
+    challengeId: proof.challengeId, code: proof.code,
   }
   if (institutionForm.region.trim()) body.region = institutionForm.region.trim()
   if (institutionForm.creditCode.trim()) body.creditCode = institutionForm.creditCode.trim()
@@ -154,7 +243,7 @@ const submit = async () => {
           class="form-grid"
         >
             <label>姓名或昵称<input v-model="userForm.displayName" maxlength="64" placeholder="选填" /></label>
-            <label>手机号码<input v-model="userForm.phone" maxlength="32" placeholder="选填" /></label>
+            <label class="full-width">安全手机号 <em>*</em><span class="phone-code-row"><input v-model="userForm.phone" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="11 位手机号" /><button type="button" class="secondary" :disabled="verification.user.sending || verification.user.countdown > 0 || submitting" @click="sendRegistrationCode">{{ verification.user.sending ? '发送中…' : verification.user.countdown ? `${verification.user.countdown} 秒后重发` : verification.user.challengeId ? '重新发送' : '获取验证码' }}</button></span><input v-model="verification.user.code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="输入短信验证码" /><small>验证通过后，此号码将作为账号安全手机号。</small></label>
             <label>登录账号 <em>*</em><input v-model="userForm.username" maxlength="64" placeholder="4-64 位：字母、数字、._-" /></label>
             <label>电子邮箱<input v-model="userForm.email" type="email" maxlength="128" placeholder="选填" /></label>
             <label>登录密码 <em>*</em><input v-model="userForm.password" type="password" maxlength="128" autocomplete="new-password" placeholder="设置 8–128 位密码" /><small class="password-hint">密码长度为 8–128 位，建议组合使用字母、数字和符号。</small><small v-if="userForm.password && userForm.password.length < 8" class="password-error" role="status">密码太短，还需输入 {{ 8 - userForm.password.length }} 位。</small></label>
@@ -178,7 +267,7 @@ const submit = async () => {
           <h2>首位机构管理员</h2>
           <div class="form-grid">
             <label>联系人姓名 <em>*</em><input v-model="institutionForm.contactName" maxlength="64" /></label>
-            <label>联系电话 <em>*</em><input v-model="institutionForm.contactPhone" maxlength="32" /></label>
+            <label>安全手机号 <em>*</em><span class="phone-code-row"><input v-model="institutionForm.contactPhone" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="11 位手机号" /><button type="button" class="secondary" :disabled="verification.institution.sending || verification.institution.countdown > 0 || submitting" @click="sendRegistrationCode">{{ verification.institution.sending ? '发送中…' : verification.institution.countdown ? `${verification.institution.countdown} 秒后重发` : verification.institution.challengeId ? '重新发送' : '获取验证码' }}</button></span><input v-model="verification.institution.code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="输入短信验证码" /><small>验证通过后，此号码将作为账号安全手机号。</small></label>
             <label>电子邮箱<input v-model="institutionForm.email" type="email" maxlength="128" placeholder="选填" /></label>
             <label>登录账号 <em>*</em><input v-model="institutionForm.username" maxlength="64" placeholder="4-64 位：字母、数字、._-" /></label>
             <label>登录密码 <em>*</em><input v-model="institutionForm.password" type="password" maxlength="128" autocomplete="new-password" placeholder="设置 8–128 位密码" /><small class="password-hint">密码长度为 8–128 位，建议组合使用字母、数字和符号。</small><small v-if="institutionForm.password && institutionForm.password.length < 8" class="password-error" role="status">密码太短，还需输入 {{ 8 - institutionForm.password.length }} 位。</small></label>
@@ -198,5 +287,11 @@ const submit = async () => {
 .password-hint, .password-error { display: block; margin-top: 6px; font-size: 12px; font-weight: 400; line-height: 1.6; }
 .password-hint { color: #64748b; }
 .password-error { color: #c53030; }
+.phone-code-row { display: flex; align-items: center; gap: 8px; }
+.phone-code-row input { min-width: 0; }
+.phone-code-row button { flex: 0 0 auto; margin-top: 7px; padding: 10px 12px; font-size: 13px; }
+.phone-code-row button:disabled { cursor: not-allowed; opacity: .6; }
+.code-input { margin-top: 8px; }
+.full-width small { display: block; margin-top: 6px; color: #64748b; font-size: 12px; font-weight: 400; }
 .register-page { min-height: 100vh; padding: 48px 20px; background: radial-gradient(circle at 12% 6%, #dceeff 0, transparent 30%), #f5f7fb; }.register-card { box-sizing: border-box; max-width: 840px; margin: 0 auto; padding: 38px 44px; border: 1px solid #e4eaf2; border-radius: 18px; background: #fff; box-shadow: 0 20px 50px rgba(34, 62, 100, .12); }.heading { margin-bottom: 26px; }.brand { margin: 0; color: #1677ff; font-size: 13px; font-weight: 700; letter-spacing: .04em; }.heading h1 { margin: 8px 0; color: #1f2d3d; font-size: 28px; }.heading p:last-child { margin: 0; color: #718096; line-height: 1.7; }.mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 28px; padding: 5px; border-radius: 10px; background: #f1f5f9; }.mode-tabs button { padding: 11px; border: 0; border-radius: 7px; background: transparent; color: #64748b; font: inherit; font-weight: 650; cursor: pointer; }.mode-tabs button.active { background: #fff; color: #1677ff; box-shadow: 0 2px 8px rgba(22, 119, 255, .13); }h2 { margin: 28px 0 16px; padding-top: 24px; border-top: 1px solid #edf1f5; color: #25364a; font-size: 18px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }label { display: block; color: #344154; font-size: 14px; font-weight: 650; }em { color: #ef4444; font-style: normal; }input, select, textarea { box-sizing: border-box; width: 100%; margin-top: 7px; padding: 10px 11px; border: 1px solid #d7e0eb; border-radius: 7px; color: #243447; font: inherit; font-weight: 400; outline: none; }input:focus, select:focus, textarea:focus { border-color: #1677ff; box-shadow: 0 0 0 3px rgba(22,119,255,.1); }textarea { resize: vertical; }.full-width { margin-top: 18px; }.message { margin: 18px 0 0; padding: 11px 13px; border-radius: 7px; font-size: 14px; }.error { color: #c53030; background: #fff1f1; }.success { color: #177245; background: #edf9f0; }.actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 30px; }button { padding: 10px 19px; border: 0; border-radius: 7px; font: inherit; font-weight: 650; cursor: pointer; }.primary { color: #fff; background: #1677ff; }.primary:disabled { cursor: not-allowed; opacity: .65; }.secondary { color: #475569; background: #edf2f7; }@media (max-width: 640px) { .register-card { padding: 28px 22px; }.form-grid { grid-template-columns: 1fr; }.register-page { padding: 22px 12px; } }
 </style>

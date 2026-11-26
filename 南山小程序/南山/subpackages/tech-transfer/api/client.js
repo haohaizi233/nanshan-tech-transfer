@@ -218,14 +218,15 @@ export function extractResponseErrorMessage(res, fallback = '操作失败') {
  * 手机号注册（创建账号并直接签发会话）
  * @returns {Promise<{accessToken, refreshToken, expiresIn, user, isNewUser}>}
  */
-export async function authRegister(phone, password, displayName) {
+export async function authRegister(phone, password, challengeId, code) {
   const res = await HostBridge.request({
     method: 'POST',
     path: '/auth/register',
     body: {
       phone,
       password,
-      displayName: displayName || undefined,
+      challengeId,
+      code,
     },
   })
   if (res.code === 0) {

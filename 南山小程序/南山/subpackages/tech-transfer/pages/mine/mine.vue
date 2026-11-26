@@ -10,7 +10,7 @@
 					<button v-if="!wechatPhoneRequired" class="wechat-btn" :disabled="wechatBusy" @click="onWechatLogin">微信快捷登录</button>
 					<WechatPrivacyGate v-else-if="privacyAuthorizationNeeded" :contract-name="privacyContractName" @agree="onPrivacyAuthorized" />
 					<button v-else class="wechat-btn" open-type="getPhoneNumber" :disabled="wechatBusy" @getphonenumber="onWechatPhone">授权手机号并登录</button>
-					<text class="login-desc">首次需授权手机号；已有账号请先用原密码登录后绑定微信</text>
+					<text class="login-desc">新用户请用短信验证码注册，登录后可绑定微信</text>
 				</view>
 				<!-- #endif -->
 
@@ -21,6 +21,7 @@
 						type="number"
 						maxlength="11"
 						:value="authForm.phone"
+						:disabled="authBusy"
 						placeholder="请输入11位手机号"
 						@input="onAuthInput('phone', $event)"
 					/>
@@ -39,7 +40,18 @@
 					<text v-if="authMode === 'register' && authForm.password && authForm.password.trim().length < 8" class="password-error">密码太短，还需输入{{ 8 - authForm.password.trim().length }}位（首尾空格不计入）。</text>
 				</view>
 
-				<button class="login-btn" type="primary" @click="onAuthSubmit">
+				<view v-if="authMode === 'register'" class="form-item">
+					<text class="label">短信验证码 <text class="required">*</text></text>
+					<view class="code-input-row">
+						<input class="input code-input" type="text" inputmode="numeric" maxlength="6" :value="registrationCode" placeholder="请输入6位短信验证码" @input="onRegistrationCodeInput" />
+						<button class="send-code-btn" size="mini" :disabled="registrationSending || registrationCountdown > 0 || authBusy" @click="sendRegistrationCode">
+							{{ registrationCountdown > 0 ? registrationCountdown + 's' : '获取验证码' }}
+						</button>
+					</view>
+					<text class="password-hint">验证通过后，此号码将设为安全手机号。</text>
+					<text v-if="registrationError" class="password-error" role="alert">{{ registrationError }}</text>
+				</view>
+				<button class="login-btn" type="primary" :disabled="authBusy || registrationSending" @click="onAuthSubmit">
 					{{ authMode === 'register' ? '注册并继续' : '登录' }}
 				</button>
 				<view class="auth-helper-row">
@@ -350,7 +362,8 @@
 					</text>
 					<view class="form-item">
 						<text class="label">{{ isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址' }}</text>
-						<input class="input" type="text" :value="contactModalValue" @input="onTargetEmailInput" placeholder="请先输入要绑定的邮箱地址" />
+						<input class="input" type="text" inputmode="email" :disabled="contactModalBusy" :value="contactModalValue" @input="onTargetEmailInput" placeholder="例如 name@example.com" />
+						<text v-if="contactTargetEmailError" class="contact-form-error" role="alert">{{ contactTargetEmailError }}</text>
 					</view>
 					<view v-if="(securityInfo.stepUpMethods || []).length > 1" class="form-item">
 						<text class="label">验证方式</text>
@@ -378,6 +391,7 @@
 							</button>
 						</view>
 					</view>
+					<text v-if="contactStepUpError" class="contact-form-error" role="alert">{{ contactStepUpError }}</text>
 					<button class="primary-action-btn" :disabled="contactModalBusy" @click="submitStepUpVerify">验证并继续</button>
 				</view>
 				<view v-else class="dialog-body">
@@ -498,6 +512,7 @@
 			saveUserProfile,
 			logout,
 			registerAccount,
+			startRegistrationChallenge,
 			loginAccount,
 			loginWithWechat,
 			getWechatLoginConfig,
@@ -562,6 +577,14 @@
 			return {
 				viewMode: 'auth',
 				authMode: 'login',
+				authBusy: false,
+				registrationCode: '',
+				registrationChallengeId: '',
+				registrationCountdown: 0,
+				registrationTimer: null,
+				registrationRequestSeq: 0,
+				registrationSending: false,
+				registrationError: '',
 				editing: false,
 				showAvatarSheet: false,
 				wechatLoginEnabled: false,
@@ -585,6 +608,8 @@
 				showContactModal: false,
 				contactModalType: 'phone',
 				contactModalStep: 'bind',
+				contactTargetEmailError: '',
+				contactStepUpError: '',
 				contactStepUpMethod: 'password',
 				contactStepUpPassword: '',
 				contactStepUpChallengeId: null,
@@ -753,6 +778,10 @@
 					const result = await loginWithWechat(typeof phoneCode === 'string' ? phoneCode : undefined, bind)
 					if (!result.ok) {
 						if (result.code === 'TT_AUTH_40902') this.wechatPhoneRequired = true
+						if (result.code === 'TT_AUTH_40904') {
+							this.wechatPhoneRequired = false
+							this.authMode = 'register'
+						}
 						uni.showToast({ title: result.message || '微信登录失败', icon: 'none', duration: 3000 })
 						return
 					}
@@ -784,6 +813,7 @@
 				}
 			},
 			clearSecurityTimers() {
+				this.resetRegistrationChallenge()
 				if (this.contactModalTimer) {
 					clearInterval(this.contactModalTimer)
 					this.contactModalTimer = null
@@ -851,9 +881,13 @@
 				} else {
 					this.contactModalStep = 'bind'
 				}
+				this.contactTargetEmailError = ''
+				this.contactStepUpError = ''
 				this.showContactModal = true
 			},
 			onTargetEmailInput(e) {
+				this.contactTargetEmailError = ''
+				this.contactStepUpError = ''
 				this.contactModalValue = String((e && e.detail && e.detail.value) || '')
 				this.contactStepUpChallengeId = null
 				this.contactStepUpCode = ''
@@ -862,6 +896,8 @@
 				this.contactModalIdempotencyKey = null
 			},
 			resetEmailStepUpTarget() {
+				this.contactTargetEmailError = ''
+				this.contactStepUpError = ''
 				this.contactStepUpChallengeId = null
 				this.contactStepUpCode = ''
 				this.contactStepUpGrant = null
@@ -898,13 +934,16 @@
 					this.contactStepUpTimer = null
 				}
 			},
+			getValidatedStepUpEmail() {
+				this.contactStepUpError = ''
+				const result = validateEmail(this.contactModalValue, { required: true, label: '目标安全邮箱' })
+				this.contactTargetEmailError = result.ok ? '' : result.message
+				return result.ok ? result.value : ''
+			},
 			async sendStepUpChallenge() {
 				if (this.contactModalBusy) return
-				const targetEmail = (this.contactModalValue || '').trim()
-				if (!targetEmail) {
-					uni.showToast({ title: '请先输入目标邮箱地址', icon: 'none' })
-					return
-				}
+				const targetEmail = this.getValidatedStepUpEmail()
+				if (!targetEmail) return
 				if (!this.contactStepUpIdempotencyKey) {
 					this.contactStepUpIdempotencyKey = createSecurityIdempotencyKey('su')
 				}
@@ -948,30 +987,27 @@
 							}
 						}, 1000)
 					}
-					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+					this.contactStepUpError = e.message || '二次认证验证码发送失败'
 				} finally {
 					this.contactModalBusy = false
 				}
 			},
 			async submitStepUpVerify() {
 				if (this.contactModalBusy) return
-				const targetEmail = (this.contactModalValue || '').trim()
-				if (!targetEmail) {
-					uni.showToast({ title: '请先输入目标邮箱地址', icon: 'none' })
-					return
-				}
+				const targetEmail = this.getValidatedStepUpEmail()
+				if (!targetEmail) return
 				const method = this.contactStepUpMethod
 				if (method === 'password' && !this.contactStepUpPassword) {
-					uni.showToast({ title: '请输入当前登录密码', icon: 'none' })
+					this.contactStepUpError = '请输入当前登录密码'
 					return
 				}
 				if (method === 'old_email_otp' || method === 'old_phone_otp') {
 					if (!this.contactStepUpChallengeId) {
-						uni.showToast({ title: '请先获取二次认证验证码', icon: 'none' })
+						this.contactStepUpError = '请先获取二次认证验证码'
 						return
 					}
 					if ((this.contactStepUpCode || '').trim().length !== 6) {
-						uni.showToast({ title: '请输入6位数字验证码', icon: 'none' })
+						this.contactStepUpError = '请输入6位数字验证码'
 						return
 					}
 				}
@@ -987,7 +1023,7 @@
 						code: (method === 'old_email_otp' || method === 'old_phone_otp') ? this.contactStepUpCode : null
 					})
 					if (!res || !res.stepUpGrant) {
-						uni.showToast({ title: '二次认证未返回有效凭据', icon: 'none' })
+						this.contactStepUpError = '二次认证未返回有效凭据，请重试'
 						return
 					}
 					this.contactStepUpGrant = res.stepUpGrant
@@ -998,7 +1034,7 @@
 					this.contactModalStep = 'bind'
 					uni.showToast({ title: this.isRebindEmail ? '身份复核通过，请发送新邮箱验证码' : '身份授权通过，请验证目标邮箱', icon: 'none' })
 				} catch (e) {
-					uni.showToast({ title: e.message || '二次身份认证失败', icon: 'none' })
+					this.contactStepUpError = e.message || '二次身份认证失败'
 				} finally {
 					this.contactModalBusy = false
 				}
@@ -1529,19 +1565,73 @@
 				const loaded = await Promise.all([favorites, cooperations])
 				return loaded.every(Boolean)
 			},
+			resetRegistrationChallenge() {
+				this.registrationRequestSeq += 1
+				this.registrationChallengeId = ''
+				this.registrationCode = ''
+				this.registrationError = ''
+				this.registrationSending = false
+				this.startRegistrationCountdown(0)
+			},
+			startRegistrationCountdown(seconds) {
+				clearInterval(this.registrationTimer)
+				this.registrationTimer = null
+				this.registrationCountdown = seconds
+				if (!seconds) return
+				const until = Date.now() + seconds * 1000
+				this.registrationTimer = setInterval(() => {
+					this.registrationCountdown = Math.max(0, Math.ceil((until - Date.now()) / 1000))
+					if (!this.registrationCountdown) this.startRegistrationCountdown(0)
+				}, 1000)
+			},
+			onRegistrationCodeInput(e) {
+				this.registrationCode = String(e.detail.value).replace(/[^0-9]/g, '').slice(0, 6)
+				this.registrationError = ''
+			},
+			async sendRegistrationCode() {
+				if (this.registrationSending || this.registrationCountdown || this.authBusy) return
+				const phoneCheck = validatePhone(this.authForm.phone, { required: true })
+				if (!phoneCheck.ok) {
+					this.registrationError = phoneCheck.message
+					return
+				}
+				this.resetRegistrationChallenge()
+				const seq = this.registrationRequestSeq
+				this.registrationSending = true
+				try {
+					const result = await startRegistrationChallenge(phoneCheck.value)
+					if (seq !== this.registrationRequestSeq) return
+					if (!result || !result.challengeId) throw new Error('未收到有效的验证码请求，请重试')
+					this.registrationChallengeId = result.challengeId
+					this.startRegistrationCountdown(Number(result.cooldownSeconds) || 60)
+					uni.showToast({ title: '验证码发送请求已受理', icon: 'none' })
+				} catch (e) {
+					if (seq !== this.registrationRequestSeq) return
+					this.registrationError = e.message || '验证码发送失败，请稍后重试'
+					if (e.retryAfter > 0) this.startRegistrationCountdown(Math.min(3600, e.retryAfter))
+				} finally {
+					if (seq === this.registrationRequestSeq) this.registrationSending = false
+				}
+			},
 			toggleAuthMode() {
+				if (this.authBusy) return
+				this.resetRegistrationChallenge()
 				this.authMode = this.authMode === 'login' ? 'register' : 'login'
 			},
 			onAuthInput(key, e) {
+				if (key === 'phone' && this.authForm.phone !== e.detail.value) this.resetRegistrationChallenge()
 				this.authForm[key] = e.detail.value
 			},
 			fillCachedAccount(item) {
+				if (this.authBusy) return
+				this.resetRegistrationChallenge()
 				this.authForm.phone = item.phone
 				this.authForm.password = ''
 				this.authMode = 'login'
 				uni.showToast({ title: '已填入手机号，请输入密码', icon: 'none' })
 			},
 			async onAuthSubmit() {
+			if (this.authBusy || this.registrationSending) return
 			const phone = (this.authForm.phone || '').trim()
 			const password = (this.authForm.password || '').trim()
 			if (!phone) {
@@ -1556,19 +1646,28 @@
 				uni.showToast({ title: '请设置8–128位密码，首尾空格不计入', icon: 'none', duration: 3000 })
 				return
 			}
+			if (this.authMode === 'register' && (!this.registrationChallengeId || !/^\d{6}$/.test(this.registrationCode))) {
+				this.registrationError = '请获取并输入6位短信验证码'
+				return
+			}
+			this.authBusy = true
+			this.registrationError = ''
 			uni.showLoading({ title: this.authMode === 'register' ? '注册中...' : '登录中...', mask: true })
 			let res
 			try {
 				res = this.authMode === 'register'
-					? await registerAccount(phone, password)
+					? await registerAccount(phone, password, this.registrationChallengeId, this.registrationCode)
 					: await loginAccount(phone, password)
 			} finally {
+				this.authBusy = false
 				uni.hideLoading()
 			}
 			if (!res.ok) {
-				uni.showToast({ title: res.message || '操作失败', icon: 'none', duration: 2500 })
+				if (this.authMode === 'register') this.registrationError = res.message || '注册失败，请重试'
+				else uni.showToast({ title: res.message || '操作失败', icon: 'none', duration: 2500 })
 				return
 			}
+			this.resetRegistrationChallenge()
 			this.authForm.password = ''
 			this.editing = false
 			uni.showToast({
@@ -1788,6 +1887,7 @@
 .login-card .password-hint, .login-card .password-error { display: block; margin-top: 12rpx; font-size: 24rpx; line-height: 1.6; }
 .login-card .password-hint { color: #64748b; }
 .login-card .password-error { color: #c53030; }
+.contact-form-error { display: block; margin-top: 8rpx; color: #c53030; font-size: 24rpx; }
 	.wechat-login, .account-settings {
 		margin-top: 24rpx;
 		margin-bottom: 24rpx;

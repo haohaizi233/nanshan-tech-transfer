@@ -198,11 +198,15 @@ export function getDockBlockMessage(type, detail) {
 	return ''
 }
 
+export function startRegistrationChallenge(phone) {
+	return publicRequest('POST', '/auth/register/challenge', null, { phone })
+}
+
 /**
  * 注册（后端 /auth/register：创建用户 + 直接签发会话）
  * @returns {Promise<{ ok: boolean, message?: string }>}
  */
-export async function registerAccount(phone, password) {
+export async function registerAccount(phone, password, challengeId, code) {
 	const p = (phone || '').trim()
 	const pwd = (password || '').trim()
 	const phoneCheck = validatePhone(p, { required: true })
@@ -210,10 +214,13 @@ export async function registerAccount(phone, password) {
 	if (!pwd) return { ok: false, message: '请输入密码' }
 	if (pwd.length < 8) return { ok: false, message: '密码至少8位' }
 	if (pwd.length > 128) return { ok: false, message: '密码长度不能超过128位' }
+	if (!challengeId || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+		return { ok: false, message: '请获取并输入6位短信验证码' }
+	}
 	try {
 		// 注册新账号前清理旧会话缓存，避免旧账号残留
 		clearAllTtCacheKeys()
-		await authRegister(p, pwd)
+		await authRegister(p, pwd, challengeId, code)
 		pushHistoryPhone(p)
 		return { ok: true }
 	} catch (e) {
