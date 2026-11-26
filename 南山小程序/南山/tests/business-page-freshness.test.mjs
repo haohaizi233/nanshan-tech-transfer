@@ -360,6 +360,8 @@ test('returning to a fresh dashboard fetches current counts instead of waiting f
     getMyAchievements: async () => ({ total: 4 }),
     getMyFavorites: async () => ({ total: 2 }),
     getMyCooperations: async () => ({ total: 0 }),
+    subscribeNotificationBadge: () => () => {},
+    refreshNotificationBadge: async () => {},
   })
   component.mixins[0].onLoad.call(page, {})
   page.loadMemberships = async () => true

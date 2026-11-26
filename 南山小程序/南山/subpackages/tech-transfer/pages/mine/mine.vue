@@ -277,7 +277,12 @@
 				</view>
 			</view>
 
-			<button @click="openNotifications">消息通知</button>
+			<button class="inbox-entry" @click="openNotifications">
+				<view class="inbox-entry-symbol" aria-hidden="true"><view class="inbox-entry-bell" /></view>
+				<text class="inbox-entry-title">消息通知</text>
+				<text v-if="unreadNotifications" class="inbox-entry-badge">{{ unreadNotifications > 99 ? '99+' : unreadNotifications }} 未读</text>
+				<view class="inbox-entry-chevron" aria-hidden="true" />
+			</button>
 			<view class="module-grid">
 				<view class="module-box" @click="goMyList('demand')">
 					<image class="module-icon" src="/static/icons/mine/demand.png" mode="aspectFit"></image>
@@ -581,6 +586,7 @@
 	import { mediaDisplayUrl } from '../../api/media-url.mjs'
 	import { chooseAvatarImage } from '../../api/avatar-picker.mjs'
 	import HostBridge from '../../../../host/host-bridge.js'
+	import { refreshNotificationBadge, subscribeNotificationBadge } from '../../../../utils/notification-poller.js'
 	import { createPageStateMixin, getPageStateScope } from '../../api/page-state-cache.mjs'
 
 	export default {
@@ -603,6 +609,8 @@
 			const initialCertification = cachedCertification && cachedCertification.certification
 			return {
 				viewMode: 'auth',
+				unreadNotifications: 0,
+				unsubscribeInboxBadge: null,
 				authMode: 'login',
 				authPasswordVisible: false,
 				authBusy: false,
@@ -758,6 +766,10 @@
 			}
 		},
 		onShow() {
+			if (!this.unsubscribeInboxBadge) {
+				this.unsubscribeInboxBadge = subscribeNotificationBadge(count => { this.unreadNotifications = count })
+			}
+			if (isLoggedIn()) refreshNotificationBadge()
 			// #ifdef MP-WEIXIN
 			this.loadWechatConfig()
 			this.loadPrivacySetting()
@@ -769,12 +781,21 @@
 		},
 		onHide() {
 			this.authPasswordVisible = false
+			this.stopInboxBadge()
 		},
 		beforeUnmount() {
+			this.stopInboxBadge()
 			this.clearSecurityTimers()
 		},
 		methods: {
-            openNotifications() { uni.navigateTo({url:'/subpackages/tech-transfer/pages/notifications/notifications'}) },
+			openNotifications() {
+				HostBridge.navigate('pages/notifications/notifications')
+			},
+			stopInboxBadge() {
+				if (!this.unsubscribeInboxBadge) return
+				this.unsubscribeInboxBadge()
+				this.unsubscribeInboxBadge = null
+			},
 			loadPrivacySetting() {
 				// #ifdef MP-WEIXIN
 				if (typeof wx !== 'undefined' && typeof wx.getPrivacySetting === 'function') {
@@ -2683,6 +2704,70 @@
 		border: 1rpx solid #2b73f8;
 		border-radius: 12rpx;
 		font-size: 24rpx;
+	}
+
+	.inbox-entry {
+		display: flex;
+		align-items: center;
+		gap: 18rpx;
+		width: 100%;
+		box-sizing: border-box;
+		margin: 0 0 18rpx;
+		padding: 16rpx 24rpx;
+		border: 1rpx solid #e2e8f1;
+		border-radius: 18rpx;
+		background: #fff;
+		color: #172033;
+		text-align: left;
+		line-height: 1.4;
+	}
+
+	.inbox-entry::after { border: 0; }
+	.inbox-entry.button-hover { background: #f3f7ff; }
+	.inbox-entry-symbol {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 54rpx;
+		height: 54rpx;
+		border-radius: 14rpx;
+		background: #eaf1ff;
+	}
+	.inbox-entry-bell {
+		position: relative;
+		width: 22rpx;
+		height: 23rpx;
+		box-sizing: border-box;
+		border: 3rpx solid #265ed0;
+		border-radius: 14rpx 14rpx 4rpx 4rpx;
+	}
+	.inbox-entry-bell::after {
+		position: absolute;
+		bottom: -8rpx;
+		left: 50%;
+		width: 8rpx;
+		height: 3rpx;
+		border-radius: 4rpx;
+		background: #265ed0;
+		content: '';
+		transform: translateX(-50%);
+	}
+	.inbox-entry-title { flex: 1; font-size: 28rpx; font-weight: 600; }
+	.inbox-entry-badge {
+		padding: 5rpx 12rpx;
+		border-radius: 20rpx;
+		background: #eaf1ff;
+		color: #205bd2;
+		font-size: 22rpx;
+		font-weight: 600;
+	}
+	.inbox-entry-chevron {
+		width: 12rpx;
+		height: 12rpx;
+		margin-right: 4rpx;
+		border: solid #64748b;
+		border-width: 2rpx 2rpx 0 0;
+		transform: rotate(45deg);
 	}
 
 	.module-grid {
