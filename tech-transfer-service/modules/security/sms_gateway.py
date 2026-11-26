@@ -14,7 +14,10 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from modules.security.step_up import SessionAuthContext
 
 from config import settings
 from core.errors import BizError, bad_request
@@ -187,13 +190,21 @@ def start_sms_binding(
     context: SendContext,
     engine: Any = None,
     *,
+    step_up_grant: str | None = None,
+    session_fingerprint: str | None = None,
+    session_ctx: SessionAuthContext | None = None,
     idempotency_claim: IdempotencyClaim | None = None,
 ) -> dict[str, Any]:
+    """发起安全手机号绑定或换绑挑战（换绑已绑定手机号强制要求强绑定 Step-up Grant）。"""
     phone = normalize_phone(phone)
     engine = engine or _engine()
     challenge_id = str(uuid.uuid4())
-    with get_cursor() as cur:
-        cur.execute("SELECT id FROM app_user WHERE id=%s AND status='active' AND deleted_at IS NULL", (user_id,))
+    is_rebind = False
+    with get_cursor(commit=True) as cur:
+        # 锁顺序：app_user -> account_contact -> step_up_grant
+        cur.execute(
+            "SELECT id FROM app_user WHERE id=%s AND status='active' AND deleted_at IS NULL FOR UPDATE", (user_id,)
+        )
         if not cur.fetchone():
             raise bad_request("账号不可用")
         cur.execute(
@@ -203,10 +214,33 @@ def start_sms_binding(
         )
         if cur.fetchone():
             raise bad_request("无法绑定此联系方式")
+        cur.execute(
+            """SELECT normalized_value FROM account_contact WHERE user_id=%s AND contact_type='phone'
+            AND status='active' AND verified_at IS NOT NULL ORDER BY updated_at DESC LIMIT 1 FOR UPDATE""",
+            (user_id,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            is_rebind = True
+            if existing["normalized_value"] == phone:
+                raise bad_request("新手机号与当前已绑定安全手机号相同")
+            from modules.security.step_up import validate_step_up_grant
+
+            validate_step_up_grant(
+                cur,
+                user_id=user_id,
+                grant_token=step_up_grant,
+                purpose="rebind_phone",
+                session_fingerprint=session_fingerprint or "",
+                session_ctx=session_ctx,
+                target_contact=phone,
+                consume=False,
+            )
     _send(user_id, phone, "bind_phone", challenge_id, context, engine, idempotency_claim=idempotency_claim)
     return {
         "challengeId": challenge_id,
         "maskedDestination": phone[:3] + "****" + phone[-4:],
+        "isRebind": is_rebind,
         "message": "验证码发送请求已受理",
     }
 

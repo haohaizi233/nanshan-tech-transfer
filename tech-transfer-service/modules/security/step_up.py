@@ -91,8 +91,8 @@ SECURITY_OPERATION_POLICIES: dict[str, SecurityOperationPolicy] = {
     ),
     "rebind_phone": SecurityOperationPolicy(
         purpose="rebind_phone",
-        requires_step_up=False,
-        requires_target_binding=False,
+        requires_step_up=True,
+        requires_target_binding=True,
         allowed_methods=("password", "old_email_otp", "old_phone_otp", "recent_auth"),
         max_auth_age_seconds=settings.STEP_UP_RECENT_AUTH_SECONDS,
     ),
@@ -328,12 +328,20 @@ def _get_verified_contact_for_step_up(cur: Any, user_id: int, contact_type: str)
     return str(row["normalized_value"])
 
 
+def _target_label(purpose: str) -> str:
+    return "目标手机号" if purpose in {"bind_phone", "rebind_phone"} else "目标邮箱地址"
+
+
 def _normalize_target_contact(purpose: str, target_contact: str | None) -> str | None:
     raw = (target_contact or "").strip()
     if not raw:
         return None
-    if purpose in {"bind_email", "rebind_email"} or "@" in raw:
+    if purpose in {"bind_email", "rebind_email"} or (purpose not in {"bind_phone", "rebind_phone"} and "@" in raw):
         return str(normalize_email(raw))
+    if purpose in {"bind_phone", "rebind_phone"}:
+        from modules.security.sms_gateway import normalize_phone
+
+        return str(normalize_phone(raw))
     return raw.lower()
 
 
@@ -372,7 +380,7 @@ def start_step_up_challenge(
     if policy.requires_target_binding:
         norm_target = _normalize_target_contact(purpose, target_contact)
         if not norm_target:
-            raise bad_request("邮箱二次认证必须指定目标邮箱地址")
+            raise bad_request(f"二次认证必须指定{_target_label(purpose)}")
         target_fp = _target_fingerprint(norm_target, purpose=purpose)
 
     contact_type = "email" if method == "old_email_otp" else "phone"
@@ -397,6 +405,14 @@ def start_step_up_challenge(
                 raise bad_request("当前账号已绑定安全邮箱，请进入换绑流程")
             if existing_email and existing_email == norm_target:
                 raise bad_request("新邮箱与当前已绑定安全邮箱相同")
+        elif purpose in {"bind_phone", "rebind_phone"}:
+            existing_phone = _get_verified_contact_for_step_up(cur, user_id, "phone")
+            if purpose == "rebind_phone" and not existing_phone:
+                raise bad_request("当前账号尚未绑定安全手机号，请先完成首次绑定")
+            if purpose == "bind_phone" and existing_phone:
+                raise bad_request("当前账号已绑定安全手机号，请进入换绑流程")
+            if existing_phone and norm_target and existing_phone == norm_target:
+                raise bad_request("新手机号与当前已绑定安全手机号相同")
         dest = _get_verified_contact_for_step_up(cur, user_id, contact_type)
 
     if not dest:
@@ -827,18 +843,23 @@ def issue_step_up_grant(
     if not effective_fp:
         raise BizError(TT_COMMON_40102[0], "当前会话无效，请重新登录", 401)
 
-    require_modern = purpose in {"bind_email", "rebind_email"} or method in {"old_email_otp", "old_phone_otp"}
+    require_modern = purpose in {"bind_email", "rebind_email", "rebind_phone"} or method in {
+        "old_email_otp",
+        "old_phone_otp",
+    }
     if require_modern and not session_id:
         raise BizError(TT_COMMON_40102[0], "当前会话版本过旧或缺少会话标识，请重新登录后操作", 401)
 
+    norm_target: str | None = None
     target_fp: str | None = None
+    target_label = _target_label(purpose)
     if policy.requires_target_binding:
         norm_target = _normalize_target_contact(purpose, target_contact)
         if not norm_target:
-            raise bad_request("签发邮箱敏感操作授权必须绑定目标邮箱")
+            raise bad_request(f"签发敏感操作授权必须绑定{target_label}")
         target_fp = _target_fingerprint(norm_target, purpose=purpose)
         if not target_fp:
-            raise bad_request("目标邮箱格式不正确")
+            raise bad_request(f"{target_label}格式不正确")
     elif target_contact:
         target_fp = _target_fingerprint(target_contact, purpose=purpose)
 
@@ -883,6 +904,13 @@ def issue_step_up_grant(
         elif require_modern:
             sess_res = validate_session_state(user_id, session_id, current_ver, cur=cur, require_modern=True)
             raise_for_session_state(sess_res, require_modern=True)
+
+        if purpose == "rebind_phone":
+            existing_phone = _get_verified_contact_for_step_up(cur, user_id, "phone")
+            if not existing_phone:
+                raise bad_request("当前账号尚未绑定安全手机号，请先完成首次绑定")
+            if norm_target and existing_phone == norm_target:
+                raise bad_request("新手机号与当前已绑定安全手机号相同")
 
         has_password = bool(
             account.get("cred_status") == "active"
@@ -947,7 +975,7 @@ def issue_step_up_grant(
             if policy.requires_target_binding:
                 row_target = row.get("target_fingerprint")
                 if not row_target or not target_fp or not hmac.compare_digest(str(row_target), target_fp):
-                    raise BizError("TT_COMMON_40301", "二次验证挑战绑定的目标邮箱不一致", 403)
+                    raise BizError("TT_COMMON_40301", f"二次验证挑战绑定的{target_label}不一致", 403)
 
             dest = _get_verified_contact_for_step_up(cur, user_id, contact_type)
             if not dest:
@@ -1030,12 +1058,12 @@ def validate_step_up_grant(
     policy = get_security_operation_policy(purpose)
     token = (grant_token or "").strip()
     if not token:
-        msg = (
-            "更换已绑定安全邮箱前须先完成二次身份认证"
-            if purpose == "rebind_email"
-            else "绑定安全邮箱前须先完成安全身份授权"
-        )
-        raise BizError("TT_COMMON_40301", msg, 403)
+        missing_messages = {
+            "rebind_email": "更换已绑定安全邮箱前须先完成二次身份认证",
+            "bind_email": "绑定安全邮箱前须先完成安全身份授权",
+            "rebind_phone": "更换已绑定安全手机号前须先完成二次身份认证",
+        }
+        raise BizError("TT_COMMON_40301", missing_messages.get(purpose, "执行该安全操作前须先完成二次身份认证"), 403)
 
     effective_fp, session_id, _ = _resolve_session_binding(
         purpose=purpose,
@@ -1086,7 +1114,7 @@ def validate_step_up_grant(
         stored_target_fp = row.get("target_fingerprint")
         expected_fp = _target_fingerprint(target_contact, purpose=purpose)
         if not stored_target_fp or not expected_fp or not hmac.compare_digest(str(stored_target_fp), expected_fp):
-            raise BizError("TT_COMMON_40301", "二次身份认证授权绑定的目标邮箱与当前请求不一致", 403)
+            raise BizError("TT_COMMON_40301", f"二次身份认证授权绑定的{_target_label(purpose)}与当前请求不一致", 403)
 
     if consume:
         cur.execute(

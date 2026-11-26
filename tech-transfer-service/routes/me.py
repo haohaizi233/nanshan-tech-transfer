@@ -162,11 +162,14 @@ def post_step_up_challenge(
     ctx = SendContext(context.ip, context.device_id, context.request_id)
     target_norm = ""
     if body.targetContact and body.targetContact.strip():
-        target_norm = (
-            str(normalize_email(body.targetContact))
-            if "@" in body.targetContact or body.purpose in {"bind_email", "rebind_email"}
-            else body.targetContact.strip().lower()
-        )
+        if body.purpose in {"bind_email", "rebind_email"} or (
+            body.purpose not in {"bind_phone", "rebind_phone"} and "@" in body.targetContact
+        ):
+            target_norm = str(normalize_email(body.targetContact))
+        elif body.purpose in {"bind_phone", "rebind_phone"}:
+            target_norm = normalize_phone(body.targetContact)
+        else:
+            target_norm = body.targetContact.strip().lower()
     if body.method == "old_email_otp" and not settings.EMAIL_ENABLED:
         raise BizError("TT_COMMON_50301", "邮箱安全验证功能暂未开放", 503)
 

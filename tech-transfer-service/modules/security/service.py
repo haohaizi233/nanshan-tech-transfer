@@ -720,7 +720,17 @@ def start_contact_binding_challenge(
     if ct == "phone":
         from modules.security.sms_gateway import start_sms_binding
 
-        return dict(start_sms_binding(user_id, contact_value, ctx, idempotency_claim=idempotency_claim))
+        return dict(
+            start_sms_binding(
+                user_id,
+                contact_value,
+                ctx,
+                step_up_grant=step_up_grant,
+                session_fingerprint=session_fingerprint,
+                session_ctx=session_ctx,
+                idempotency_claim=idempotency_claim,
+            )
+        )
 
     from modules.security.email_gateway import start_email_binding
 
@@ -858,6 +868,8 @@ def verify_and_bind_contact(
                 existing_phone = cur.fetchone()
                 if existing_phone:
                     is_rebind = True
+                    if existing_phone["normalized_value"] == normalized_val:
+                        raise bad_request("新手机号与当前已绑定安全手机号相同")
 
             # 检查唯一性冲突（防并发抢绑同一联系方式）
             cur.execute(
@@ -903,6 +915,18 @@ def verify_and_bind_contact(
                     """,
                     (user_id, user_id),
                 )
+                from modules.security.step_up import validate_step_up_grant
+
+                validate_step_up_grant(
+                    cur,
+                    user_id=user_id,
+                    grant_token=step_up_grant,
+                    purpose="rebind_phone",
+                    session_fingerprint=session_fingerprint or "",
+                    session_ctx=session_ctx,
+                    target_contact=normalized_val,
+                    consume=True,
+                )
 
             cur.execute(
                 """
@@ -936,9 +960,7 @@ def verify_and_bind_contact(
             else:
                 metrics.inc("email_challenge_verified_total", channel="email_otp", purpose="bind_email")
 
-            audit_action = (
-                "user.rebind_email" if (contact_type == "email" and is_rebind) else f"user.bind_{contact_type}"
-            )
+            audit_action = f"user.rebind_{contact_type}" if is_rebind else f"user.bind_{contact_type}"
             audit_record(
                 audit_action,
                 "account_contact",
@@ -954,7 +976,10 @@ def verify_and_bind_contact(
     if old_email_to_notify and is_rebind:
         _send_security_notification_best_effort(old_email_to_notify, "email_rebound")
 
-    return {"ok": True, "message": f"安全{'手机号' if contact_type == 'phone' else '邮箱'}绑定成功"}
+    return {
+        "ok": True,
+        "message": f"安全{'手机号' if contact_type == 'phone' else '邮箱'}{'更换' if is_rebind else '绑定'}成功",
+    }
 
 
 def revoke_all_user_sessions(user_id: int) -> dict[str, Any]:
