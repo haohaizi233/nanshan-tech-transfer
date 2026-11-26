@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import vm from 'node:vm'
 import {
 	setInitialPassword,
 	changePassword,
@@ -97,4 +98,51 @@ test('mine.vue enforces Step-up and target email binding on initial email bind a
 	assert.match(source, /rebind_email/)
 	assert.match(source, /targetContact:\s*targetEmail/)
 	assert.match(source, /createSecurityIdempotencyKey/)
+})
+
+test('profile email shortcut prefills the existing verification dialog without saving the form', () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	const start = source.indexOf('openContactModal(type')
+	const end = source.indexOf('onTargetEmailInput(e)', start)
+	const { openContactModal } = vm.runInNewContext(`({${source.slice(start, end)}})`)
+	const state = {
+		emailFeatureEnabled: true,
+		securityInfo: { stepUpMethods: ['recent_auth'] },
+		form: { email: ' name@example.com ', company: '未保存的公司' },
+	}
+
+	openContactModal.call(state, 'email', state.form.email)
+	assert.equal(state.showContactModal, true)
+	assert.equal(state.contactModalStep, 'stepUp')
+	assert.equal(state.contactModalValue, 'name@example.com')
+	assert.equal(state.contactStepUpMethod, 'recent_auth')
+	assert.deepEqual(state.form, { email: ' name@example.com ', company: '未保存的公司' })
+})
+
+test('changing accounts clears old security info and ignores its pending response', async () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	const start = source.indexOf('async loadSecurityInfo() {')
+	const end = source.indexOf('clearSecurityTimers() {', start)
+	let scope = 'account-a'
+	const pending = []
+	const methods = vm.runInNewContext(`({${source.slice(start, end)}})`, {
+		isLoggedIn: () => Boolean(scope),
+		getPageStateScope: () => scope,
+		getSecurityInfo: () => new Promise(resolve => pending.push(resolve)),
+	})
+	const original = { email: { verified: true } }
+	const state = { ...methods, securityInfo: original, securityInfoScope: scope, securityInfoRequestId: 0 }
+	const a = state.loadSecurityInfo()
+	scope = 'account-b'
+	const b = state.loadSecurityInfo()
+	assert.equal(state.securityInfo, null)
+	const current = { email: null, stepUpMethods: ['recent_auth'] }
+	pending[1](current)
+	await b
+	pending[0](original)
+	await a
+	assert.equal(state.securityInfo, current)
+	scope = null
+	await state.loadSecurityInfo()
+	assert.equal(state.securityInfo, null)
 })

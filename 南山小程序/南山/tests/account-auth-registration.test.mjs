@@ -92,3 +92,43 @@ test('mine.vue template uses 8-digit password placeholder and maxlength', () => 
   assert.match(source, /设置密码（至少8位）/)
   assert.doesNotMatch(source, /设置密码（至少6位）/)
 })
+
+test('switching between registration and login masks a revealed password without changing it', () => {
+  const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+  const start = source.indexOf('toggleAuthMode() {')
+  const end = source.indexOf('onAuthInput(key, e) {', start)
+  const { toggleAuthMode } = vm.runInNewContext(`({${source.slice(start, end)}})`)
+  const state = {
+    authMode: 'register',
+    authPasswordVisible: true,
+    authForm: { password: 'example-password' },
+    resetRegistrationChallenge() {},
+  }
+  toggleAuthMode.call(state)
+  assert.equal(state.authMode, 'login')
+  assert.equal(state.authPasswordVisible, false)
+  assert.equal(state.authForm.password, 'example-password')
+})
+
+test('failed registration resend preserves the current challenge and code', async () => {
+  const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+  const start = source.indexOf('async sendRegistrationCode() {')
+  const end = source.indexOf('toggleAuthMode() {', start)
+  const { sendRegistrationCode } = vm.runInNewContext(`({${source.slice(start, end)}})`, {
+    validatePhone: value => ({ ok: true, value }),
+    startRegistrationChallenge: async () => { throw new Error('网络连接失败') },
+  })
+  const state = {
+    authForm: { phone: '13800138000' },
+    registrationRequestSeq: 0, registrationChallengeId: 'old', registrationCode: '012345',
+    resetRegistrationChallenge() {
+      this.registrationRequestSeq++
+      this.registrationChallengeId = ''
+      this.registrationCode = ''
+    },
+  }
+  await sendRegistrationCode.call(state)
+  assert.equal(state.registrationChallengeId, 'old')
+  assert.equal(state.registrationCode, '012345')
+  assert.equal(state.registrationSending, false)
+})
