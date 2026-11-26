@@ -1459,7 +1459,7 @@ requirements:
       - tech-transfer-service/tests/test_wechat_login.py
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py
     test_nodes:
-      - tech-transfer-service/tests/test_wechat_login.py::test_new_verified_phone_creates_one_regular_user_not_a_mock_identity
+      - tech-transfer-service/tests/test_wechat_login.py::test_new_wechat_phone_requires_sms_registration_before_linking
       - tech-transfer-service/tests/test_security_session_transaction_postgres.py::test_tx01_to_tx07_session_rotation_revocation_and_recovery_concurrency
     expected_outcome: PASS
 
