@@ -272,19 +272,24 @@ export default {
 .detail-backdrop {
   position: fixed;
   z-index: 20;
-  inset: 0;
+  top: 0;
+  right: var(--window-right, 0px);
+  bottom: 0;
+  left: var(--window-left, 0px);
   display: flex;
   align-items: flex-end;
-  justify-content: center;
-  background: rgba(17, 26, 44, .45);
+  box-sizing: border-box;
+  padding: 24rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+  background: rgba(17, 26, 44, .36);
 }
 .detail-sheet {
   width: 100%;
-  max-width: 650px;
   box-sizing: border-box;
-  padding: 22rpx 30rpx calc(36rpx + env(safe-area-inset-bottom));
-  border-radius: 30rpx 30rpx 0 0;
+  padding: 22rpx 28rpx 30rpx;
+  border-radius: 24rpx;
   background: #fff;
+  box-shadow: 0 12rpx 36rpx rgba(17, 26, 44, .18);
 }
 .detail-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12rpx; }
 .detail-close {
