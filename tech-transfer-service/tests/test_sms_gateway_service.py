@@ -12,6 +12,33 @@ from core.request_schemas import ContactChallengeRequest, RecoveryStartRequest
 from modules.security import service
 
 
+@pytest.mark.parametrize("phase", ["request", "reserve"])
+def test_registration_rate_limit_returns_retry_after(phase, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import app
+    from config import settings
+    from modules.security import registration, sms_gateway
+    from modules.security.risk_engine import DecisionAction, RiskDecision
+
+    allow = RiskDecision(DecisionAction.ALLOW, "sms.allow")
+    throttle = RiskDecision(DecisionAction.THROTTLE, "sms.phone.cooldown", 42)
+    engine = MagicMock()
+    engine.check_request.return_value = throttle if phase == "request" else allow
+    engine.reserve.return_value = throttle
+    monkeypatch.setattr(registration, "_engine", lambda: engine)
+    monkeypatch.setattr(sms_gateway, "_engine", lambda: engine)
+    monkeypatch.setattr(sms_gateway, "_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sms_gateway, "get_sms_provider", lambda: None)
+    monkeypatch.setattr(settings, "SMS_ENABLED", True)
+
+    client = TestClient(app, base_url="https://testserver")
+    response = client.post("/api/tech-transfer/v1/auth/register/challenge", json={"phone": "13800138000"})
+    assert response.status_code == 429
+    assert response.headers.get("Retry-After") == "42"
+    assert response.json()["details"]["retryAfter"] == 42
+
+
 def row(**values):
     return dict(
         id="1",

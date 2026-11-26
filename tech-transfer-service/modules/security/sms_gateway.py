@@ -119,7 +119,9 @@ def request_gate(context: SendContext, account: str, phone: str | None = None, p
         # Same response independent of eligibility; no bypass from human verification.
         if "redis" in getattr(decision, "rule_id", ""):
             raise BizError("TT_COMMON_50301", "安全验证服务暂时不可用，请稍后重试", 503)
-        raise BizError("TT_COMMON_42901", "操作过于频繁或需要额外安全验证，请稍后重试", 429)
+        retry_after = getattr(decision, "retry_after", 0)
+        details = {"retryAfter": retry_after} if retry_after > 0 else None
+        raise BizError("TT_COMMON_42901", "操作过于频繁或需要额外安全验证，请稍后重试", 429, details=details)
 
 
 def start_sms_recovery(
@@ -232,7 +234,9 @@ def _send(
     if not _allowed(decision):
         _audit(getattr(decision, "rule_id", "send.limit"), context, challenge_id, decision="THROTTLE")
         rule = getattr(decision, "rule_id", "sms.risk.blocked")
-        raise DeliveryStageError("risk", risk_reason(rule), risk_rule_id=rule)
+        raise DeliveryStageError(
+            "risk", risk_reason(rule), risk_rule_id=rule, retry_after=getattr(decision, "retry_after", 0)
+        )
     code = f"{secrets.randbelow(1_000_000):06d}"
     ttl = settings.SMS_CODE_TTL_SECONDS
     try:

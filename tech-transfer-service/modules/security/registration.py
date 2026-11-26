@@ -32,7 +32,8 @@ def start_registration_challenge(phone: str, context: SendContext) -> dict[str, 
         _send(None, phone, "register", challenge_id, context, _engine())
     except DeliveryStageError as exc:
         if exc.http_status == 429:
-            raise BizError("TT_COMMON_42901", "请求过于频繁，请稍后重试", 429) from None
+            details = {"retryAfter": exc.retry_after} if exc.retry_after > 0 else None
+            raise BizError("TT_COMMON_42901", "请求过于频繁，请稍后重试", 429, details=details) from None
         if not exc.outcome_unknown or not exc.request_attempted:
             raise BizError("TT_COMMON_50301", "短信验证暂时不可用，请稍后重试", 503) from None
         # A provider timeout can still deliver this code. Its persisted Challenge
