@@ -172,3 +172,35 @@ test('forgot-current-password uses fresh recovery options for the signed-in acco
 	assert.equal(state.recoveryCapabilities.sms, false)
 	assert.equal(state.recoveryContacts.email_otp, 'a***@example.test')
 })
+
+test('rejected recovery code stays in the dialog with an inline error until edited', async () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	const inputStart = source.indexOf('onRecoveryCodeInput(e) {')
+	const inputEnd = source.indexOf('closeRecoveryModal() {', inputStart)
+	const verifyStart = source.indexOf('async verifyRecoveryCode() {')
+	const verifyEnd = source.indexOf('async submitRecoveryNewPassword()', verifyStart)
+	const toasts = []
+	const state = {
+		...vm.runInNewContext(`({${source.slice(inputStart, inputEnd)}${source.slice(verifyStart, verifyEnd)}})`, {
+			verifyPasswordRecovery: async () => {
+				throw Object.assign(new Error('验证凭据无效'), { code: 'TT_AUTH_RECOVERY_INVALID' })
+			},
+			uni: { showToast: payload => toasts.push(payload) },
+		}),
+		recoveryRequestSeq: 0,
+		recoveryChallengeId: 'active-challenge',
+		recoveryCode: '012345',
+		recoveryStep: 2,
+		isCurrentRecovery: () => true,
+	}
+
+	await state.verifyRecoveryCode()
+	assert.equal(state.recoveryStep, 2)
+	assert.match(state.recoveryError, /验证码.*重新获取/)
+	assert.equal(state.recoveryCode, '012345')
+	assert.equal(state.recoveryBusy, false)
+	assert.deepEqual(toasts, [])
+
+	state.onRecoveryCodeInput({ detail: { value: '01234' } })
+	assert.equal(state.recoveryError, '')
+})

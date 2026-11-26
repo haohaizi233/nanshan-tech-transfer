@@ -481,7 +481,7 @@
 
 		<!-- 弹窗 3：找回密码 -->
 		<view v-if="showRecoveryModal" class="dialog-mask" @click="closeRecoveryModal">
-			<view class="dialog-panel" @click.stop>
+			<view class="dialog-panel recovery-dialog" @click.stop>
 				<view class="dialog-header">
 					<text class="dialog-title">{{ recoveryOwner ? '验证身份并重置密码' : '找回密码' }}</text>
 					<text class="dialog-close" @click="closeRecoveryModal">×</text>
@@ -511,17 +511,19 @@
 						</view>
 					</view>
 					<text v-if="!recoveryOptionsLoading && !recoveryOptionsError && !recoveryCapabilities.sms && !recoveryCapabilities.emailOtp" class="dialog-desc">{{ recoveryUnavailableMessage }}</text>
+					<text v-if="recoveryError" class="password-feedback-error" role="alert">{{ recoveryError }}</text>
 					<button class="primary-action-btn" :disabled="recoveryBusy || recoveryOptionsLoading || !!recoveryOptionsError || recoveryCountdown > 0 || (!recoveryCapabilities.sms && !recoveryCapabilities.emailOtp)" @click="sendRecoveryChallenge">{{ recoveryCountdown > 0 ? recoveryCountdown + ' 秒后可重发' : '获取验证码' }}</button>
 					<view v-if="recoveryChallengeId && !recoveryBusy" class="countdown-row">
 						<text class="resend-text" @click="recoveryStep = 2">返回输入验证码</text>
 					</view>
 				</view>
 				<view v-else-if="recoveryStep === 2" class="dialog-body">
-				<text v-if="recoveryOwner" class="dialog-desc">验证请求已提交，请查收{{ recoveryChannel === 'sms' ? '短信' : '邮箱' }}{{ recoveryContacts[recoveryChannel] ? '（' + recoveryContacts[recoveryChannel] + '）' : '' }}。若未收到，可重试或更换验证方式。</text>
-				<text v-else class="dialog-desc">验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
+					<text v-if="recoveryOwner" class="dialog-desc">验证请求已提交，请查收{{ recoveryChannel === 'sms' ? '短信' : '邮箱' }}{{ recoveryContacts[recoveryChannel] ? '（' + recoveryContacts[recoveryChannel] + '）' : '' }}。若未收到，可重试或更换验证方式。</text>
+					<text v-else class="dialog-desc">验证请求已提交。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
 					<view class="form-item">
 						<text class="label">6位数字验证码</text>
-						<input class="input" type="text" inputmode="numeric" maxlength="6" :value="recoveryCode" @input="onRecoveryCodeInput" placeholder="请输入6位验证码" />
+						<input class="input" type="text" inputmode="numeric" maxlength="6" :disabled="recoveryBusy" :value="recoveryCode" @input="onRecoveryCodeInput" placeholder="请输入6位验证码" />
+						<text v-if="recoveryError" class="password-feedback-error" role="alert">{{ recoveryError }}</text>
 					</view>
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="verifyRecoveryCode">验证并下一步</button>
 					<view class="countdown-row">
@@ -536,12 +538,13 @@
 					<text class="dialog-desc">身份验证通过，请设置新密码</text>
 					<view class="form-item">
 						<text class="label">新密码</text>
-						<input class="input" password maxlength="128" v-model="recoveryNewPassword" placeholder="设置8—128位新密码" />
+						<input class="input" password maxlength="128" v-model="recoveryNewPassword" @input="recoveryError = ''" placeholder="设置8—128位新密码" />
 					</view>
 					<view class="form-item">
 						<text class="label">确认新密码</text>
-						<input class="input" password maxlength="128" v-model="recoveryConfirmPassword" placeholder="请再次输入新密码" />
+						<input class="input" password maxlength="128" v-model="recoveryConfirmPassword" @input="recoveryError = ''" placeholder="请再次输入新密码" />
 					</view>
+					<text v-if="recoveryError" class="password-feedback-error" role="alert">{{ recoveryError }}</text>
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="submitRecoveryNewPassword">完成并使用新密码登录</button>
 				</view>
 			</view>
@@ -682,6 +685,7 @@
 				recoveryOwner: null,
 				recoveryOptionsLoading: false,
 				recoveryOptionsError: '',
+				recoveryError: '',
 				recoveryUnavailableMessage: '',
 				recoveryStep: 1,
 				recoveryAccount: '',
@@ -1318,6 +1322,7 @@
 				this.recoveryCapabilities = { sms: false, emailOtp: false, cooldownSeconds: 60 }
 				this.recoveryContacts = {}
 				this.recoveryUnavailableMessage = ''
+				this.recoveryError = ''
 				this.recoveryCode = ''
 				this.recoveryChallengeId = null
 				this.recoveryGrant = null
@@ -1378,13 +1383,14 @@
 			selectRecoveryChannel(ch) {
 				if (this.recoveryBusy || this.recoveryOptionsLoading) return
 				if (ch === 'sms' && !this.recoveryCapabilities.sms) {
-					uni.showToast({ title: '短信找回通道当前未启用', icon: 'none' })
+					this.recoveryError = '短信验证当前不可用。'
 					return
 				}
 				if (ch === 'email_otp' && !this.recoveryCapabilities.emailOtp) {
-					uni.showToast({ title: '邮箱验证码找回通道当前未启用', icon: 'none' })
+					this.recoveryError = '邮箱验证当前不可用。'
 					return
 				}
+				this.recoveryError = ''
 				if (this.recoveryChannel !== ch) {
 					this.recoveryChannel = ch
 					this.recoveryChallengeId = null
@@ -1396,10 +1402,12 @@
 			},
 			returnToRecoveryOptions() {
 				if (this.recoveryBusy) return
+				this.recoveryError = ''
 				this.recoveryStep = 1
 			},
 			onRecoveryAccountInput(e) {
 				this.recoveryAccount = String((e && e.detail && e.detail.value) || '')
+				this.recoveryError = ''
 				this.recoveryChallengeId = null
 				this.recoveryCode = ''
 				this.recoveryGrant = null
@@ -1407,6 +1415,7 @@
 			},
 			onRecoveryCodeInput(e) {
 				this.recoveryCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
+				this.recoveryError = ''
 			},
 			closeRecoveryModal() {
 				if (this.recoveryBusy && this.recoveryStep === 3) return
@@ -1414,6 +1423,7 @@
 				this.recoveryRequestSeq += 1
 				this.recoveryBusy = false
 				this.recoveryOptionsLoading = false
+				this.recoveryError = ''
 				this.recoveryOwner = null
 				this.recoveryAccount = ''
 				this.recoveryContacts = {}
@@ -1445,17 +1455,15 @@
 			async sendRecoveryChallenge() {
 				if (this.recoveryBusy || this.recoveryOptionsLoading || this.recoveryOptionsError || this.recoveryCountdown
 					|| !this.isCurrentRecovery(this.recoveryRequestSeq)) return
+				this.recoveryError = ''
 				const acc = (this.recoveryAccount || '').trim()
 				if (!acc) {
-					uni.showToast({ title: '请输入账号、手机号或邮箱', icon: 'none' })
+					this.recoveryError = '请输入账号、手机号或邮箱。'
 					return
 				}
-				if (this.recoveryChannel === 'sms' && !this.recoveryCapabilities.sms) {
-					uni.showToast({ title: '短信找回通道当前未启用', icon: 'none' })
-					return
-				}
-				if (this.recoveryChannel === 'email_otp' && !this.recoveryCapabilities.emailOtp) {
-					uni.showToast({ title: '邮箱验证码找回通道当前未启用', icon: 'none' })
+				const available = this.recoveryChannel === 'sms' ? this.recoveryCapabilities.sms : this.recoveryCapabilities.emailOtp
+				if (!available) {
+					this.recoveryError = '当前验证方式不可用，请更换方式。'
 					return
 				}
 				if (!this.recoveryIdempotencyKey) {
@@ -1471,7 +1479,6 @@
 					this.recoveryChallengeId = res.challengeId
 					this.recoveryCode = ''
 					this.recoveryGrant = null
-					uni.showToast({ title: '验证请求已受理', icon: 'none' })
 					this.recoveryStep = 2
 					const caps = this.recoveryCapabilities
 					const cooldown = this.recoveryChannel === 'sms' ? caps.smsCooldownSeconds : caps.emailCooldownSeconds
@@ -1484,20 +1491,21 @@
 					if (e && e.retryAfter > 0) {
 						this.startRecoveryCountdown(e.retryAfter)
 					}
-					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+					this.recoveryError = e?.message || '验证码发送失败，请稍后重试。'
 				} finally {
 					if (seq === this.recoveryRequestSeq) this.recoveryBusy = false
 				}
 			},
 			async verifyRecoveryCode() {
 				if (this.recoveryBusy || !this.isCurrentRecovery(this.recoveryRequestSeq)) return
+				this.recoveryError = ''
 				const code = (this.recoveryCode || '').trim()
 				if (!this.recoveryChallengeId) {
-					uni.showToast({ title: '请先获取验证码', icon: 'none' })
+					this.recoveryError = '请先获取验证码。'
 					return
 				}
-				if (code.length !== 6) {
-					uni.showToast({ title: '请输入6位验证码', icon: 'none' })
+				if (!/^\d{6}$/.test(code)) {
+					this.recoveryError = '请输入完整的 6 位数字验证码。'
 					return
 				}
 				const seq = ++this.recoveryRequestSeq
@@ -1509,24 +1517,28 @@
 						this.recoveryGrant = res.recoveryGrant
 						this.recoveryStep = 3
 					} else {
-						uni.showToast({ title: '验证失败', icon: 'none' })
+						this.recoveryError = '暂时无法完成验证，请重试。'
 					}
 				} catch (e) {
-					if (this.isCurrentRecovery(seq)) uni.showToast({ title: e.message || '验证码错误或已失效', icon: 'none' })
+					if (!this.isCurrentRecovery(seq)) return
+					this.recoveryError = e?.code === 'TT_AUTH_RECOVERY_INVALID'
+						? '验证码不正确或已失效，请检查后重试，或重新获取验证码。'
+						: e?.message || '暂时无法完成验证，请重试。'
 				} finally {
 					if (seq === this.recoveryRequestSeq) this.recoveryBusy = false
 				}
 			},
 			async submitRecoveryNewPassword() {
 				if (this.recoveryBusy || !this.recoveryGrant || !this.isCurrentRecovery(this.recoveryRequestSeq)) return
+				this.recoveryError = ''
 				const next = this.recoveryNewPassword.trim()
 				const confirm = this.recoveryConfirmPassword.trim()
 				if (next.length < 8 || next.length > 128) {
-					uni.showToast({ title: '新密码长度须为8—128位', icon: 'none' })
+					this.recoveryError = '新密码长度须为 8–128 位。'
 					return
 				}
 				if (next !== confirm) {
-					uni.showToast({ title: '两次输入的新密码不一致', icon: 'none' })
+					this.recoveryError = '两次输入的新密码不一致。'
 					return
 				}
 				const seq = ++this.recoveryRequestSeq
@@ -1541,14 +1553,14 @@
 						this.editing = false
 						this.viewMode = 'auth'
 					}
-					uni.showToast({ title: '密码已重置，请登录', icon: 'success' })
 					this.recoveryBusy = false
 					this.closeRecoveryModal()
+					uni.showToast({ title: '密码已重置，请登录', icon: 'success' })
 					this.authMode = 'login'
 					this.authPasswordVisible = false
 					this.authForm.password = ''
 				} catch (e) {
-					if (this.isCurrentRecovery(seq)) uni.showToast({ title: e.message || '重置失败，可能凭证已过期', icon: 'none' })
+					if (this.isCurrentRecovery(seq)) this.recoveryError = e?.message || '重置失败，请稍后重试。'
 				} finally {
 					if (seq === this.recoveryRequestSeq) this.recoveryBusy = false
 				}
@@ -3026,6 +3038,10 @@
 		justify-content: space-between;
 		align-items: center;
 		margin-bottom: 20rpx;
+	}
+	.recovery-dialog {
+		max-height: 100%;
+		overflow-y: auto;
 	}
 	.dialog-title {
 		font-size: 32rpx;
