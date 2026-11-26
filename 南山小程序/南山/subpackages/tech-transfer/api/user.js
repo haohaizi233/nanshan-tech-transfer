@@ -12,14 +12,15 @@
  */
 
 import {
+	apiRequest,
 	authLogin,
 	authRegister,
 	authLogout,
 	authWechat,
 	getCurrentUser,
+	publicRequest,
 	setCurrentUser
 } from './client.js'
-import { apiRequest } from './client.js'
 import { uploadContentFile } from './file.js'
 import HostBridge from '../../../host/host-bridge.js'
 import { validateEmail, validatePhone } from './contact-validation.mjs'

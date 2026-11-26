@@ -88,7 +88,9 @@ const sendRegistrationCode = async () => {
     state.challengeId = result.challengeId
     startCountdown(state, result.cooldownSeconds)
   } catch (error) {
-    if (state.requestSeq === requestSeq && mode.value === requestedMode) {
+    if (state.requestSeq !== requestSeq) return
+    if (error.retryAfter > 0) startCountdown(state, Math.min(3600, error.retryAfter))
+    if (mode.value === requestedMode) {
       errorMessage.value = error.message || '验证码发送失败，请稍后重试。'
     }
   } finally {
