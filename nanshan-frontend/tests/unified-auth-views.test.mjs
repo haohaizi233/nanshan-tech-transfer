@@ -38,8 +38,12 @@ test('AccountSecurityView.vue provides unified security center', () => {
 	assert.match(source, /\/me\/security\/revoke-sessions/)
 	assert.match(source, /bind_email/)
 	assert.match(source, /rebind_email/)
+	assert.match(source, /rebind_phone/)
+	assert.match(source, /更换安全手机号 · 二次身份认证/)
 	assert.match(source, /targetContact/)
 	assert.match(source, /Idempotency-Key/)
+	assert.match(source, /autocomplete="new-password"/)
+	assert.doesNotMatch(source, /autocomplete="current-password"/)
 	assert.doesNotMatch(source, /type === 'email'\s*&&\s*securityData\.value\?\.email\?\.verified[\s\S]{0,60}bindStage\.value = 'stepUp'/)
 })
 

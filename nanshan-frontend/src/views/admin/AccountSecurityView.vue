@@ -34,6 +34,8 @@ const bindLoading = ref(false)
 const bindError = ref('')
 const countdown = ref(0)
 const stepUpCountdown = ref(0)
+const targetInputReadonly = ref(true)
+const stepUpPwdReadonly = ref(true)
 let timer = null
 let stepUpTimer = null
 
@@ -57,8 +59,15 @@ const bindForm = reactive({
 const availableStepUpMethods = computed(() => securityData.value?.stepUpMethods || [])
 const emailEnabled = computed(() => Boolean(securityData.value?.capabilities?.emailEnabled))
 const smsEnabled = computed(() => Boolean(securityData.value?.capabilities?.smsEnabled))
+const isRebindPhone = computed(() => bindType.value === 'phone' && Boolean(securityData.value?.phone?.verified))
 const isRebindEmail = computed(() => bindType.value === 'email' && Boolean(securityData.value?.email?.verified))
-const stepUpPurpose = computed(() => (isRebindEmail.value ? 'rebind_email' : 'bind_email'))
+const requiresStepUp = computed(() => bindType.value === 'email' || isRebindPhone.value)
+const stepUpPurpose = computed(() => {
+  if (bindType.value === 'phone') {
+    return isRebindPhone.value ? 'rebind_phone' : 'bind_phone'
+  }
+  return isRebindEmail.value ? 'rebind_email' : 'bind_email'
+})
 
 const clearTimers = () => {
   if (timer) {
@@ -75,6 +84,8 @@ const resetModalMemory = () => {
   clearTimers()
   countdown.value = 0
   stepUpCountdown.value = 0
+  targetInputReadonly.value = true
+  stepUpPwdReadonly.value = true
   bindError.value = ''
   stepUpForm.currentPassword = ''
   stepUpForm.challengeId = ''
@@ -137,7 +148,8 @@ onUnmounted(() => {
 const openBindModal = (type) => {
   resetModalMemory()
   bindType.value = type
-  if (type === 'email') {
+  const hasVerifiedPhone = Boolean(securityData.value?.phone?.verified)
+  if (type === 'email' || (type === 'phone' && hasVerifiedPhone)) {
     bindStage.value = 'stepUp'
     const methods = availableStepUpMethods.value
     stepUpForm.method = methods.length ? methods[0] : 'password'
@@ -167,6 +179,8 @@ const resetEmailStepUpTarget = () => {
   clearTimers()
   countdown.value = 0
   stepUpCountdown.value = 0
+  targetInputReadonly.value = true
+  stepUpPwdReadonly.value = true
   stepUpForm.challengeId = ''
   stepUpForm.code = ''
   stepUpForm.maskedDestination = ''
@@ -187,13 +201,23 @@ const onBindOtpInput = (event) => {
   bindForm.code = sanitizeOtpCode(event?.target?.value ?? bindForm.code)
 }
 
+const validateStepUpTarget = () => {
+  const targetContact = bindForm.contactValue.trim()
+  if (!targetContact) {
+    bindError.value = bindType.value === 'phone' ? '请先输入要更换的目标新手机号' : '请先输入要绑定的目标邮箱地址'
+    return ''
+  }
+  if (bindType.value === 'phone' && !/^1[3-9]\d{9}$/.test(targetContact)) {
+    bindError.value = '请输入正确的11位新手机号'
+    return ''
+  }
+  return targetContact
+}
+
 const handleSendStepUpCode = async () => {
   if (bindLoading.value) return
-  const targetEmail = bindForm.contactValue.trim()
-  if (!targetEmail) {
-    bindError.value = '请先输入要绑定的目标邮箱地址'
-    return
-  }
+  const targetContact = validateStepUpTarget()
+  if (!targetContact) return
   if (!stepUpForm.idempotencyKey) {
     stepUpForm.idempotencyKey = createIdempotencyKey('su')
   }
@@ -206,7 +230,7 @@ const handleSendStepUpCode = async () => {
       body: {
         purpose: stepUpPurpose.value,
         method: stepUpForm.method,
-        targetContact: targetEmail,
+        targetContact,
       },
     })
     stepUpForm.idempotencyKey = ''
@@ -228,11 +252,8 @@ const handleSendStepUpCode = async () => {
 
 const handleVerifyStepUp = async () => {
   if (bindLoading.value) return
-  const targetEmail = bindForm.contactValue.trim()
-  if (!targetEmail) {
-    bindError.value = '请先输入要绑定的目标邮箱地址'
-    return
-  }
+  const targetContact = validateStepUpTarget()
+  if (!targetContact) return
   if (stepUpForm.method === 'password' && !stepUpForm.currentPassword) {
     bindError.value = '请输入当前登录密码'
     return
@@ -255,7 +276,7 @@ const handleVerifyStepUp = async () => {
       body: {
         purpose: stepUpPurpose.value,
         method: stepUpForm.method,
-        targetContact: targetEmail,
+        targetContact,
         currentPassword: stepUpForm.method === 'password' ? stepUpForm.currentPassword : null,
         challengeId:
           stepUpForm.method === 'old_email_otp' || stepUpForm.method === 'old_phone_otp'
@@ -347,11 +368,13 @@ const handleConfirmBind = async () => {
       method: 'POST',
       body,
     })
+    const wasRebind = isRebindPhone.value || isRebindEmail.value
+    const labelType = bindType.value === 'phone' ? '手机号' : '邮箱'
     bindModalVisible.value = false
     resetModalMemory()
     await alertDialog({
-      title: '绑定成功',
-      message: `安全${bindType.value === 'phone' ? '手机号' : '邮箱'}已成功确权绑定`,
+      title: wasRebind ? '更换成功' : '绑定成功',
+      message: `安全${labelType}已成功${wasRebind ? '更换' : '确权绑定'}`,
     })
     loadSecurity()
   } catch (err) {
@@ -420,7 +443,7 @@ const handleRevokeAllSessions = async () => {
         <div class="card-head-row">
           <div>
             <h3 class="card-title">安全联系方式（用于密码恢复与二次验证）</h3>
-            <p class="card-sub">仅完成双向验证的已确权联系方式才可用于找回密码；更换已绑定邮箱需先通过二次身份认证</p>
+            <p class="card-sub">仅完成双向验证的已确权联系方式才可用于找回密码；更换已绑定安全手机或安全邮箱须先通过二次身份认证</p>
           </div>
         </div>
 
@@ -485,29 +508,60 @@ const handleRevokeAllSessions = async () => {
         <h3>
           {{
             bindStage === 'stepUp'
-              ? (isRebindEmail ? '更换安全邮箱 · 二次身份认证' : '绑定安全邮箱 · 身份授权')
-              : (bindType === 'phone' ? '绑定安全手机号' : (isRebindEmail ? '更换安全邮箱' : '绑定安全邮箱'))
+              ? (isRebindPhone
+                  ? '更换安全手机号 · 二次身份认证'
+                  : (isRebindEmail ? '更换安全邮箱 · 二次身份认证' : '绑定安全邮箱 · 身份授权'))
+              : (bindType === 'phone'
+                  ? (isRebindPhone ? '更换安全手机号' : '绑定安全手机号')
+                  : (isRebindEmail ? '更换安全邮箱' : '绑定安全邮箱'))
           }}
         </h3>
 
-        <!-- 阶段 1：目标邮箱确认与二次身份认证（首次绑定与换绑均强制） -->
+        <!-- 阶段 1：目标联系方式确认与二次身份认证（首次绑定邮箱、更换邮箱与更换手机号均强制） -->
         <div v-if="bindStage === 'stepUp'">
           <p class="modal-tip">
             {{
-              isRebindEmail
-                ? `检测到当前账号已绑定安全邮箱（${securityData.email?.value || ''}）。更换前须先输入目标新邮箱并完成二次身份认证。`
-                : '首次绑定安全邮箱须先输入目标邮箱地址并完成本次会话身份授权。'
+              isRebindPhone
+                ? `检测到当前账号已绑定安全手机号（${securityData.phone?.value || ''}）。更换前须先输入目标新手机号并完成二次身份认证。`
+                : (isRebindEmail
+                    ? `检测到当前账号已绑定安全邮箱（${securityData.email?.value || ''}）。更换前须先输入目标新邮箱并完成二次身份认证。`
+                    : '首次绑定安全邮箱须先输入目标邮箱地址并完成本次会话身份授权。')
             }}
           </p>
 
           <div class="form-item">
-            <label>{{ isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址' }}</label>
+            <label>{{ isRebindPhone ? '目标新手机号' : (isRebindEmail ? '目标新邮箱地址' : '目标安全邮箱地址') }}</label>
             <input
+              v-if="bindType === 'phone'"
+              :key="`stepup-phone-${bindStage}`"
               v-model="bindForm.contactValue"
-              type="email"
+              type="tel"
+              inputmode="numeric"
+              maxlength="11"
+              name="stepup-target-contact"
+              autocomplete="off"
+              :readonly="targetInputReadonly"
+              class="input-control"
+              placeholder="请先输入11位目标新手机号"
+              :disabled="bindLoading || stepUpCountdown > 0"
+              @pointerdown="targetInputReadonly = false"
+              @focus="targetInputReadonly = false"
+              @input="onTargetEmailEdited"
+            />
+            <input
+              v-else
+              :key="`stepup-email-${bindStage}`"
+              v-model="bindForm.contactValue"
+              type="text"
+              inputmode="email"
+              name="stepup-target-contact"
+              autocomplete="off"
+              :readonly="targetInputReadonly"
               class="input-control"
               placeholder="请先输入要绑定的邮箱地址"
               :disabled="bindLoading || stepUpCountdown > 0"
+              @pointerdown="targetInputReadonly = false"
+              @focus="targetInputReadonly = false"
               @input="onTargetEmailEdited"
             />
           </div>
@@ -526,10 +580,14 @@ const handleRevokeAllSessions = async () => {
             <input
               v-model="stepUpForm.currentPassword"
               type="password"
-              autocomplete="current-password"
+              name="stepup-verify-secret"
+              autocomplete="new-password"
+              :readonly="stepUpPwdReadonly"
               class="input-control"
               placeholder="请输入当前登录密码"
               :disabled="bindLoading"
+              @pointerdown="stepUpPwdReadonly = false"
+              @focus="stepUpPwdReadonly = false"
             />
           </div>
 
@@ -544,6 +602,8 @@ const handleRevokeAllSessions = async () => {
                 type="text"
                 inputmode="numeric"
                 maxlength="6"
+                name="stepup-otp-code"
+                autocomplete="one-time-code"
                 class="input-control"
                 placeholder="请输入6位数字验证码"
                 :disabled="bindLoading"
@@ -575,19 +635,26 @@ const handleRevokeAllSessions = async () => {
           <p class="modal-tip">系统将发送一次性 6 位验证码以确权归属，完成验证后方可作为安全凭证使用。</p>
 
           <div class="form-item">
-            <label>{{ bindType === 'phone' ? '手机号' : '已授权目标邮箱' }}</label>
+            <label>{{ requiresStepUp ? (bindType === 'phone' ? '已授权目标手机号' : '已授权目标邮箱') : '手机号' }}</label>
             <input
-              v-if="bindType === 'phone'"
+              v-if="!requiresStepUp"
               v-model="bindForm.contactValue"
-              type="text"
+              type="tel"
+              inputmode="numeric"
+              maxlength="11"
+              name="bind-phone-contact"
+              autocomplete="off"
+              :readonly="targetInputReadonly"
               class="input-control"
               placeholder="请输入11位大陆手机号"
               :disabled="bindLoading || countdown > 0"
+              @pointerdown="targetInputReadonly = false"
+              @focus="targetInputReadonly = false"
             />
             <div v-else class="code-row">
               <input
                 :value="bindForm.contactValue"
-                type="email"
+                type="text"
                 class="input-control"
                 disabled
               />
@@ -597,7 +664,7 @@ const handleRevokeAllSessions = async () => {
                 :disabled="bindLoading"
                 @click="resetEmailStepUpTarget"
               >
-                修改目标邮箱
+                {{ bindType === 'phone' ? '修改目标手机号' : '修改目标邮箱' }}
               </button>
             </div>
           </div>
@@ -610,6 +677,8 @@ const handleRevokeAllSessions = async () => {
                 type="text"
                 inputmode="numeric"
                 maxlength="6"
+                name="bind-otp-code"
+                autocomplete="one-time-code"
                 class="input-control"
                 placeholder="请输入6位数字验证码"
                 :disabled="bindLoading"
@@ -631,7 +700,7 @@ const handleRevokeAllSessions = async () => {
           <div class="modal-btns">
             <button class="cancel-btn" :disabled="bindLoading" @click="closeBindModal">取消</button>
             <button class="confirm-btn" :disabled="bindLoading" @click="handleConfirmBind">
-              {{ bindLoading ? '处理中…' : '确认确权绑定' }}
+              {{ bindLoading ? '处理中…' : ((isRebindPhone || isRebindEmail) ? '确认更换' : '确认确权绑定') }}
             </button>
           </div>
         </div>
