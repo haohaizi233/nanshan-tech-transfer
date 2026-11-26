@@ -459,7 +459,10 @@
 				</view>
 				<view class="dialog-body">
 					<view v-if="!isSettingInitial" class="form-item">
-						<text class="label">当前密码</text>
+						<view class="profile-field-header">
+							<text class="label">当前密码</text>
+							<button class="security-btn profile-field-action" size="mini" :disabled="passwordBusy" @click="openPasswordRecovery">忘记当前密码</button>
+						</view>
 						<input class="input" password maxlength="128" v-model="pwdModalCurrent" placeholder="请输入当前密码" />
 					</view>
 					<view class="form-item">
@@ -480,38 +483,53 @@
 		<view v-if="showRecoveryModal" class="dialog-mask" @click="closeRecoveryModal">
 			<view class="dialog-panel" @click.stop>
 				<view class="dialog-header">
-					<text class="dialog-title">找回密码</text>
+					<text class="dialog-title">{{ recoveryOwner ? '验证身份并重置密码' : '找回密码' }}</text>
 					<text class="dialog-close" @click="closeRecoveryModal">×</text>
 				</view>
 				<view v-if="recoveryStep === 1" class="dialog-body">
-					<text class="dialog-desc">请输入注册账号、安全手机号或安全邮箱，并通过已确权方式完成身份验证</text>
-					<view class="form-item">
+					<text class="dialog-desc">{{ recoveryOwner ? '请选择已绑定的安全手机号或安全邮箱。通过一种方式验证后即可设置新密码。' : '请输入注册账号、安全手机号或安全邮箱，并通过已确权方式完成身份验证。' }}</text>
+					<view v-if="!recoveryOwner" class="form-item">
 						<text class="label">账号 / 手机号 / 邮箱</text>
-						<input class="input" :value="recoveryAccount" @input="onRecoveryAccountInput" placeholder="请输入用户名、手机号或邮箱" />
+						<input class="input" :value="recoveryAccount" :disabled="recoveryBusy" @input="onRecoveryAccountInput" placeholder="请输入用户名、手机号或邮箱" />
 					</view>
-					<view class="form-item">
+					<text v-if="recoveryOptionsLoading" class="dialog-desc" role="status">正在加载验证方式…</text>
+					<view v-else-if="recoveryOptionsError" class="form-item">
+						<text class="password-feedback-error" role="alert">{{ recoveryOptionsError }}</text>
+						<button class="security-btn profile-field-action" size="mini" @click="loadRecoveryCapabilities">重新加载</button>
+					</view>
+					<view v-else class="form-item">
 						<text class="label">接收通道</text>
 						<view class="channel-picker">
 							<view :class="['channel-tab', recoveryChannel === 'sms' ? 'active' : '', !recoveryCapabilities.sms ? 'disabled' : '']" @click="selectRecoveryChannel('sms')">
-								短信验证码{{ !recoveryCapabilities.sms ? '（未启用）' : '' }}
+								短信验证码{{ !recoveryCapabilities.sms ? '（不可用）' : '' }}
+								<text v-if="recoveryCapabilities.sms && recoveryContacts.sms" class="recovery-contact">{{ recoveryContacts.sms }}</text>
 							</view>
 							<view :class="['channel-tab', recoveryChannel === 'email_otp' ? 'active' : '', !recoveryCapabilities.emailOtp ? 'disabled' : '']" @click="selectRecoveryChannel('email_otp')">
-								邮箱验证码{{ !recoveryCapabilities.emailOtp ? '（未启用）' : '' }}
+								邮箱验证码{{ !recoveryCapabilities.emailOtp ? '（不可用）' : '' }}
+								<text v-if="recoveryCapabilities.emailOtp && recoveryContacts.email_otp" class="recovery-contact">{{ recoveryContacts.email_otp }}</text>
 							</view>
 						</view>
 					</view>
-					<button class="primary-action-btn" :disabled="recoveryBusy || (!recoveryCapabilities.sms && !recoveryCapabilities.emailOtp)" @click="sendRecoveryChallenge">获取验证码</button>
+					<text v-if="!recoveryOptionsLoading && !recoveryOptionsError && !recoveryCapabilities.sms && !recoveryCapabilities.emailOtp" class="dialog-desc">{{ recoveryUnavailableMessage }}</text>
+					<button class="primary-action-btn" :disabled="recoveryBusy || recoveryOptionsLoading || !!recoveryOptionsError || recoveryCountdown > 0 || (!recoveryCapabilities.sms && !recoveryCapabilities.emailOtp)" @click="sendRecoveryChallenge">{{ recoveryCountdown > 0 ? recoveryCountdown + ' 秒后可重发' : '获取验证码' }}</button>
+					<view v-if="recoveryChallengeId && !recoveryBusy" class="countdown-row">
+						<text class="resend-text" @click="recoveryStep = 2">返回输入验证码</text>
+					</view>
 				</view>
 				<view v-else-if="recoveryStep === 2" class="dialog-body">
-					<text class="dialog-desc">验证请求已受理。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
+					<text v-if="recoveryOwner" class="dialog-desc">验证请求已受理，请查收{{ recoveryChannel === 'sms' ? '短信' : '邮箱' }}{{ recoveryContacts[recoveryChannel] ? '（' + recoveryContacts[recoveryChannel] + '）' : '' }}。若未收到，可重试或更换验证方式。</text>
+					<text v-else class="dialog-desc">验证请求已受理。如果账号存在且绑定了可用的安全联系方式，验证码将发送至对应地址。请检查短信或邮箱；若未收到，可稍后重试或切换方式。</text>
 					<view class="form-item">
 						<text class="label">6位数字验证码</text>
-						<input class="input" type="text" maxlength="6" :value="recoveryCode" @input="onRecoveryCodeInput" placeholder="请输入6位验证码" />
+						<input class="input" type="text" inputmode="numeric" maxlength="6" :value="recoveryCode" @input="onRecoveryCodeInput" placeholder="请输入6位验证码" />
 					</view>
 					<button class="primary-action-btn" :disabled="recoveryBusy" @click="verifyRecoveryCode">验证并下一步</button>
 					<view class="countdown-row">
 						<text v-if="recoveryCountdown > 0" class="countdown-text">{{ recoveryCountdown }}秒后可重新提交请求</text>
 						<text v-else class="resend-text" @click="sendRecoveryChallenge">重新获取验证码</text>
+					</view>
+					<view class="countdown-row">
+						<text class="resend-text" @click="returnToRecoveryOptions">{{ recoveryOwner ? '更换验证方式' : '更换账号或验证方式' }}</text>
 					</view>
 				</view>
 				<view v-else-if="recoveryStep === 3" class="dialog-body">
@@ -661,18 +679,23 @@
 				pwdModalNew: '',
 				pwdModalConfirm: '',
 				showRecoveryModal: false,
+				recoveryOwner: null,
+				recoveryOptionsLoading: false,
+				recoveryOptionsError: '',
+				recoveryUnavailableMessage: '',
 				recoveryStep: 1,
 				recoveryAccount: '',
 				recoveryChannel: 'sms',
-				recoveryCapabilities: { sms: true, emailOtp: false, emailLink: false, cooldownSeconds: 60 },
+				recoveryCapabilities: { sms: false, emailOtp: false, cooldownSeconds: 60 },
+				recoveryContacts: {},
 				recoveryCode: '',
 				recoveryChallengeId: null,
-				recoveryDestinationMasked: '',
 				recoveryGrant: null,
 				recoveryIdempotencyKey: null,
 				recoveryNewPassword: '',
 				recoveryConfirmPassword: '',
 				recoveryCountdown: 0,
+				recoveryRetryAt: {},
 				recoveryTimer: null,
 				recoveryBusy: false,
 				recoveryRequestSeq: 0,
@@ -1276,35 +1299,69 @@
 					}
 				})
 			},
+			openPasswordRecovery() {
+				if (this.passwordBusy || this.isSettingInitial || !isLoggedIn()) return
+				this.closePasswordModal()
+				this.pwdModalCurrent = ''
+				this.pwdModalNew = ''
+				this.pwdModalConfirm = ''
+				return this.beginRecovery(getPageStateScope())
+			},
 			openRecoveryModal() {
+				return this.beginRecovery()
+			},
+			beginRecovery(owner = null) {
+				this.recoveryOwner = owner
 				this.recoveryStep = 1
-				this.recoveryAccount = this.authForm.phone || ''
-				this.recoveryChannel = this.recoveryCapabilities.sms ? 'sms' : (this.recoveryCapabilities.emailOtp ? 'email_otp' : 'sms')
+				this.recoveryAccount = owner ? '' : this.authForm.phone || ''
+				this.recoveryChannel = 'sms'
+				this.recoveryCapabilities = { sms: false, emailOtp: false, cooldownSeconds: 60 }
+				this.recoveryContacts = {}
+				this.recoveryUnavailableMessage = ''
 				this.recoveryCode = ''
 				this.recoveryChallengeId = null
-				this.recoveryDestinationMasked = ''
 				this.recoveryGrant = null
 				this.recoveryIdempotencyKey = null
 				this.recoveryNewPassword = ''
 				this.recoveryConfirmPassword = ''
 				this.recoveryCountdown = 0
+				this.recoveryRetryAt = {}
 				if (this.recoveryTimer) {
 					clearInterval(this.recoveryTimer)
 					this.recoveryTimer = null
 				}
 				this.showRecoveryModal = true
-				this.loadRecoveryCapabilities()
+				return this.loadRecoveryCapabilities()
+			},
+			isCurrentRecovery(seq) {
+				return this.showRecoveryModal && seq === this.recoveryRequestSeq
+					&& (!this.recoveryOwner || this.recoveryOwner === getPageStateScope())
 			},
 			async loadRecoveryCapabilities() {
+				if (this.recoveryOptionsLoading) return
 				const seq = ++this.recoveryRequestSeq
+				this.recoveryOptionsLoading = true
+				this.recoveryOptionsError = ''
 				try {
-					const caps = await getRecoveryCapabilities()
-					if (seq !== this.recoveryRequestSeq || !caps) return
+					const info = this.recoveryOwner ? await getSecurityInfo() : null
+					const caps = this.recoveryOwner ? info?.passwordRecovery : await getRecoveryCapabilities()
+					if (!this.isCurrentRecovery(seq)) return
+					if (!caps) throw new Error('未能加载验证方式，请重试。')
 					const normalized = {
 						sms: Boolean(caps.sms),
 						emailOtp: Boolean(caps.emailOtp),
-						emailLink: Boolean(caps.emailLink),
-						cooldownSeconds: Number(caps.cooldownSeconds) > 0 ? Number(caps.cooldownSeconds) : 60
+						cooldownSeconds: Number(caps.cooldownSeconds) || 60,
+						smsCooldownSeconds: Number(caps.smsCooldownSeconds),
+						emailCooldownSeconds: Number(caps.emailCooldownSeconds),
+					}
+					if (this.recoveryOwner) {
+						this.recoveryAccount = caps.account || ''
+						this.recoveryContacts = { sms: info.phone?.value, email_otp: info.email?.value }
+						this.recoveryUnavailableMessage = caps.account
+							? '当前没有可用的安全联系方式。可先到账户与安全绑定，再回来验证。'
+							: '当前账号不支持自助重置。请使用当前密码修改，或联系平台管理员。'
+					} else {
+						this.recoveryUnavailableMessage = '当前没有可用的找回通道，请稍后重试。'
 					}
 					this.recoveryCapabilities = normalized
 					if (this.recoveryChannel === 'sms' && !normalized.sms && normalized.emailOtp) {
@@ -1313,10 +1370,13 @@
 						this.recoveryChannel = 'sms'
 					}
 				} catch {
-					// Keep safe fallback capabilities if public capability query fails transiently
+					if (this.isCurrentRecovery(seq)) this.recoveryOptionsError = '未能加载验证方式，请重试。'
+				} finally {
+					if (this.isCurrentRecovery(seq)) this.recoveryOptionsLoading = false
 				}
 			},
 			selectRecoveryChannel(ch) {
+				if (this.recoveryBusy || this.recoveryOptionsLoading) return
 				if (ch === 'sms' && !this.recoveryCapabilities.sms) {
 					uni.showToast({ title: '短信找回通道当前未启用', icon: 'none' })
 					return
@@ -1330,24 +1390,34 @@
 					this.recoveryChallengeId = null
 					this.recoveryCode = ''
 					this.recoveryGrant = null
-					this.recoveryDestinationMasked = ''
 					this.recoveryIdempotencyKey = null
+					this.updateRecoveryCountdown()
 				}
+			},
+			returnToRecoveryOptions() {
+				if (this.recoveryBusy) return
+				this.recoveryStep = 1
 			},
 			onRecoveryAccountInput(e) {
 				this.recoveryAccount = String((e && e.detail && e.detail.value) || '')
 				this.recoveryChallengeId = null
 				this.recoveryCode = ''
 				this.recoveryGrant = null
-				this.recoveryDestinationMasked = ''
 				this.recoveryIdempotencyKey = null
 			},
 			onRecoveryCodeInput(e) {
 				this.recoveryCode = String((e && e.detail && e.detail.value) || '').replace(/\D/g, '').slice(0, 6)
 			},
 			closeRecoveryModal() {
+				if (this.recoveryBusy && this.recoveryStep === 3) return
 				this.showRecoveryModal = false
 				this.recoveryRequestSeq += 1
+				this.recoveryBusy = false
+				this.recoveryOptionsLoading = false
+				this.recoveryOwner = null
+				this.recoveryAccount = ''
+				this.recoveryContacts = {}
+				this.recoveryChallengeId = null
 				this.recoveryNewPassword = ''
 				this.recoveryConfirmPassword = ''
 				this.recoveryCode = ''
@@ -1360,20 +1430,21 @@
 			},
 			startRecoveryCountdown(seconds) {
 				const secs = Math.max(1, Math.min(3600, Number(seconds) || 60))
-				this.recoveryCountdown = secs
-				if (this.recoveryTimer) clearInterval(this.recoveryTimer)
-				this.recoveryTimer = setInterval(() => {
-					if (this.recoveryCountdown <= 1) {
-						clearInterval(this.recoveryTimer)
-						this.recoveryTimer = null
-						this.recoveryCountdown = 0
-					} else {
-						this.recoveryCountdown -= 1
-					}
-				}, 1000)
+				this.recoveryRetryAt[this.recoveryChannel] = Date.now() + secs * 1000
+				this.updateRecoveryCountdown()
+				if (!this.recoveryTimer) this.recoveryTimer = setInterval(this.updateRecoveryCountdown, 1000)
+			},
+			updateRecoveryCountdown() {
+				const now = Date.now()
+				this.recoveryCountdown = Math.max(0, Math.ceil(((this.recoveryRetryAt[this.recoveryChannel] || 0) - now) / 1000))
+				if (this.recoveryTimer && !Object.values(this.recoveryRetryAt).some(deadline => deadline > now)) {
+					clearInterval(this.recoveryTimer)
+					this.recoveryTimer = null
+				}
 			},
 			async sendRecoveryChallenge() {
-				if (this.recoveryBusy) return
+				if (this.recoveryBusy || this.recoveryOptionsLoading || this.recoveryOptionsError || this.recoveryCountdown
+					|| !this.isCurrentRecovery(this.recoveryRequestSeq)) return
 				const acc = (this.recoveryAccount || '').trim()
 				if (!acc) {
 					uni.showToast({ title: '请输入账号、手机号或邮箱', icon: 'none' })
@@ -1394,16 +1465,19 @@
 				this.recoveryBusy = true
 				try {
 					const res = await startPasswordRecovery(acc, this.recoveryChannel, this.recoveryIdempotencyKey)
+					if (!this.isCurrentRecovery(seq)) return
 					this.recoveryIdempotencyKey = null
-					if (seq !== this.recoveryRequestSeq || !this.showRecoveryModal) return
+					if (!res?.challengeId) throw new Error('验证码请求未建立，请稍后重试')
 					this.recoveryChallengeId = res.challengeId
-					this.recoveryDestinationMasked = res.destinationMasked || ''
 					this.recoveryCode = ''
 					this.recoveryGrant = null
-					uni.showToast({ title: '验证请求已提交；如果账号存在且绑定了可用安全联系方式，验证码将发送', icon: 'none', duration: 2500 })
+					uni.showToast({ title: '验证请求已受理', icon: 'none' })
 					this.recoveryStep = 2
-					this.startRecoveryCountdown((this.recoveryCapabilities && this.recoveryCapabilities.cooldownSeconds) || 60)
+					const caps = this.recoveryCapabilities
+					const cooldown = this.recoveryChannel === 'sms' ? caps.smsCooldownSeconds : caps.emailCooldownSeconds
+					this.startRecoveryCountdown(cooldown || caps.cooldownSeconds)
 				} catch (e) {
+					if (!this.isCurrentRecovery(seq)) return
 					if (!shouldReuseSecurityIdempotencyKey(e)) {
 						this.recoveryIdempotencyKey = null
 					}
@@ -1412,11 +1486,11 @@
 					}
 					uni.showToast({ title: e.message || '发送失败', icon: 'none' })
 				} finally {
-					this.recoveryBusy = false
+					if (seq === this.recoveryRequestSeq) this.recoveryBusy = false
 				}
 			},
 			async verifyRecoveryCode() {
-				if (this.recoveryBusy) return
+				if (this.recoveryBusy || !this.isCurrentRecovery(this.recoveryRequestSeq)) return
 				const code = (this.recoveryCode || '').trim()
 				if (!this.recoveryChallengeId) {
 					uni.showToast({ title: '请先获取验证码', icon: 'none' })
@@ -1430,7 +1504,7 @@
 				this.recoveryBusy = true
 				try {
 					const res = await verifyPasswordRecovery(this.recoveryChallengeId, code)
-					if (seq !== this.recoveryRequestSeq || !this.showRecoveryModal) return
+					if (!this.isCurrentRecovery(seq)) return
 					if (res && res.recoveryGrant) {
 						this.recoveryGrant = res.recoveryGrant
 						this.recoveryStep = 3
@@ -1438,13 +1512,13 @@
 						uni.showToast({ title: '验证失败', icon: 'none' })
 					}
 				} catch (e) {
-					uni.showToast({ title: e.message || '验证码错误或已失效', icon: 'none' })
+					if (this.isCurrentRecovery(seq)) uni.showToast({ title: e.message || '验证码错误或已失效', icon: 'none' })
 				} finally {
-					this.recoveryBusy = false
+					if (seq === this.recoveryRequestSeq) this.recoveryBusy = false
 				}
 			},
 			async submitRecoveryNewPassword() {
-				if (this.recoveryBusy) return
+				if (this.recoveryBusy || !this.recoveryGrant || !this.isCurrentRecovery(this.recoveryRequestSeq)) return
 				const next = this.recoveryNewPassword.trim()
 				const confirm = this.recoveryConfirmPassword.trim()
 				if (next.length < 8 || next.length > 128) {
@@ -1455,17 +1529,28 @@
 					uni.showToast({ title: '两次输入的新密码不一致', icon: 'none' })
 					return
 				}
+				const seq = ++this.recoveryRequestSeq
 				this.recoveryBusy = true
 				try {
 					await completePasswordRecovery(this.recoveryGrant, next)
+					if (!this.isCurrentRecovery(seq)) return
+					if (this.recoveryOwner) {
+						this.resetSecurityInfo()
+						await logout()
+						this.profile = null
+						this.editing = false
+						this.viewMode = 'auth'
+					}
 					uni.showToast({ title: '密码已重置，请登录', icon: 'success' })
+					this.recoveryBusy = false
 					this.closeRecoveryModal()
 					this.authMode = 'login'
+					this.authPasswordVisible = false
 					this.authForm.password = ''
 				} catch (e) {
-					uni.showToast({ title: e.message || '重置失败，可能凭证已过期', icon: 'none' })
+					if (this.isCurrentRecovery(seq)) uni.showToast({ title: e.message || '重置失败，可能凭证已过期', icon: 'none' })
 				} finally {
-					this.recoveryBusy = false
+					if (seq === this.recoveryRequestSeq) this.recoveryBusy = false
 				}
 			},
 			async onSetInitialPassword() {
@@ -2991,6 +3076,13 @@
 	}
 	.channel-tab.disabled {
 		opacity: 0.5;
+	}
+	.recovery-contact {
+		display: block;
+		margin-top: 6rpx;
+		font-size: 22rpx;
+		font-weight: 400;
+		overflow-wrap: anywhere;
 	}
 	.security-btn[disabled] {
 		opacity: 0.55;

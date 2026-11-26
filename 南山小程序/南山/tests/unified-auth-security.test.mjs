@@ -146,3 +146,29 @@ test('changing accounts clears old security info and ignores its pending respons
 	await state.loadSecurityInfo()
 	assert.equal(state.securityInfo, null)
 })
+test('forgot-current-password uses fresh recovery options for the signed-in account', async () => {
+	const source = readFileSync(new URL('../subpackages/tech-transfer/pages/mine/mine.vue', import.meta.url), 'utf8')
+	const start = source.indexOf('openPasswordRecovery() {')
+	const end = source.indexOf('selectRecoveryChannel(ch) {', start)
+	const methods = vm.runInNewContext(`({${source.slice(start, end)}})`, {
+		isLoggedIn: () => true,
+		getPageStateScope: () => 'account-a',
+		getSecurityInfo: async () => ({
+			passwordRecovery: { account: 'verified-owner', sms: false, emailOtp: true },
+			email: { value: 'a***@example.test' },
+		}),
+	})
+	const state = {
+		...methods, authForm: { phone: 'stale-login-form' }, recoveryRequestSeq: 0,
+		showPasswordModal: true, pwdModalCurrent: 'old-input',
+		closePasswordModal() { this.showPasswordModal = false },
+	}
+	await state.openPasswordRecovery()
+	assert.equal(state.showPasswordModal, false)
+	assert.equal(state.pwdModalCurrent, '')
+	assert.equal(state.showRecoveryModal, true)
+	assert.equal(state.recoveryAccount, 'verified-owner')
+	assert.equal(state.recoveryChannel, 'email_otp')
+	assert.equal(state.recoveryCapabilities.sms, false)
+	assert.equal(state.recoveryContacts.email_otp, 'a***@example.test')
+})
