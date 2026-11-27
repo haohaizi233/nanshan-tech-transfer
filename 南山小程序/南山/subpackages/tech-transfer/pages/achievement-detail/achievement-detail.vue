@@ -77,7 +77,7 @@
       <!-- 技术简介 -->
       <view v-if="detail.techIntro" class="section-card">
         <text class="section-title">技术简介</text>
-        <text class="section-text">{{ detail.techIntro }}</text>
+        <text v-for="(para, pIdx) in splitParagraphs(detail.techIntro)" :key="pIdx" class="section-text section-text-paragraph">{{ para }}</text>
       </view>
 
       <view v-if="detail.media && detail.media.length" class="section-card">
@@ -89,7 +89,7 @@
 
       <view v-for="section in dynamicSections" :key="section.code + section.sortOrder" class="section-card">
         <text class="section-title">{{ section.title }}</text>
-        <text class="section-text">{{ section.content }}</text>
+        <text v-for="(para, pIdx) in splitParagraphs(section.content)" :key="pIdx" class="section-text section-text-paragraph">{{ para }}</text>
       </view>
 
       <view v-if="detail.patents && detail.patents.length" class="section-card">
@@ -110,7 +110,7 @@
       <!-- 技术路线 -->
       <view v-if="detail.techRoute" class="section-card">
         <text class="section-title">技术路线</text>
-        <text class="section-text">{{ detail.techRoute }}</text>
+        <text v-for="(para, pIdx) in splitParagraphs(detail.techRoute)" :key="pIdx" class="section-text section-text-paragraph">{{ para }}</text>
       </view>
 
       <!-- 应用领域 -->
@@ -394,6 +394,13 @@ export default {
       if (!url) return
       HostBridge.navigate('pages/web-view/web-view', { url })
     },
+    splitParagraphs(text) {
+      return String(text || '')
+        .replace(/\r\n?/g, '\n')
+        .split(/\n+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    },
     goBack() {
       safeNavigateBack(1)
     },
@@ -538,7 +545,15 @@ export default {
   display: block;
   font-size: 28rpx;
   color: #555;
-  line-height: 1.6;
+  line-height: 1.75;
+  text-align: left;
+  word-break: break-word;
+}
+.section-text-paragraph {
+  margin-bottom: 16rpx;
+}
+.section-text-paragraph:last-child {
+  margin-bottom: 0;
 }
 .media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; }
 .media-image { width: calc(50% - 6rpx); height: 210rpx; border-radius: 10rpx; background: #eef4ff; }

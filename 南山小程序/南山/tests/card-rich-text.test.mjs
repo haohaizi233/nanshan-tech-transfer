@@ -9,16 +9,16 @@ test('formatCardRichNodes 空值安全返回空数组', () => {
   assert.deepEqual(formatCardRichNodes('   '), [])
 })
 
-test('普通文本自动分段并添加首行缩进 2em、舒适行高和两端对齐', () => {
+test('普通文本自动分段并采用左对齐、舒适行高和零首行缩进', () => {
   const text = '第一段科技成果描述。\n第二段包含更多技术细节。'
   const nodes = formatCardRichNodes(text)
   assert.equal(nodes.length, 2)
   assert.equal(nodes[0].name, 'div')
-  assert.match(nodes[0].attrs.style, /text-indent:\s*2em/)
+  assert.match(nodes[0].attrs.style, /text-indent:\s*0/)
   assert.match(nodes[0].attrs.style, /line-height:\s*1\.[78]/)
-  assert.match(nodes[0].attrs.style, /text-align:\s*justify/)
+  assert.match(nodes[0].attrs.style, /text-align:\s*left/)
   assert.equal(nodes[0].children[0].text, '第一段科技成果描述。')
-  assert.match(nodes[1].attrs.style, /text-indent:\s*2em/)
+  assert.match(nodes[1].attrs.style, /text-indent:\s*0/)
   assert.equal(nodes[1].children[0].text, '第二段包含更多技术细节。')
 })
 
@@ -45,11 +45,11 @@ test('支持代码与高亮 `代码/关键词`', () => {
   assert.equal(codes[1].children[0].text, 'PyTorch')
 })
 
-test('列表项不缩进 2em，采用列表内边距', () => {
+test('列表项采用列表内边距，普通段落不强制 2em 缩进', () => {
   const text = '该组合包含如下专利：\n1. 城市地铁站域特征识别\n2. 轨迹生成方法与装置'
   const nodes = formatCardRichNodes(text)
   assert.equal(nodes.length, 3)
-  assert.match(nodes[0].attrs.style, /text-indent:\s*2em/)
+  assert.match(nodes[0].attrs.style, /text-indent:\s*0/)
   assert.doesNotMatch(nodes[1].attrs.style, /text-indent:\s*2em/)
   assert.match(nodes[1].attrs.style, /padding-left/)
   assert.equal(nodes[1].children[0].text, '1. 城市地铁站域特征识别')

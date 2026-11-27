@@ -13,11 +13,11 @@ export function formatCardRichNodes(value, options = {}) {
   const {
     lineHeight = '1.75',
     color = '#334155',
-    marginBottom = '10rpx',
+    marginBottom = '14rpx',
     codeBg = '#f1f5f9',
     codeColor = '#2563eb',
     quoteBorder = '#3b82f6',
-    defaultIndent = '2em',
+    defaultIndent = '0',
   } = options
 
   return raw
@@ -54,7 +54,7 @@ export function formatCardRichNodes(value, options = {}) {
           return { type: 'text', text: part }
         })
 
-      let style = `margin:0 0 ${marginBottom};line-height:${lineHeight};color:${color};word-break:break-word;text-align:justify;`
+      let style = `margin:0 0 ${marginBottom};line-height:${lineHeight};color:${color};word-break:break-word;text-align:left;`
       if (heading) {
         style += 'font-weight:600;font-size:1.06em;color:#0f172a;text-indent:0;'
       } else if (list) {

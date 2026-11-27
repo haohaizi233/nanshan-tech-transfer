@@ -88,11 +88,15 @@
 				</view>
 				<view v-if="detail.demandDesc" class="field">
 					<text class="field-label">需求说明</text>
-					<text class="field-value field-value-user-text">{{ detail.demandDesc }}</text>
+					<view class="text-paragraphs">
+						<text v-for="(para, pIdx) in splitParagraphs(detail.demandDesc)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
+					</view>
 				</view>
                                 <view v-if="detail.companyIntro" class="field">
                                         <text class="field-label">公司简介</text>
-                                        <text class="field-value field-muted field-value-user-text">{{ detail.companyIntro }}</text>
+                                        <view class="text-paragraphs">
+                                                <text v-for="(para, pIdx) in splitParagraphs(detail.companyIntro)" :key="pIdx" class="field-value field-muted field-value-user-text text-paragraph">{{ para }}</text>
+                                        </view>
                                 </view>
                                 <view v-if="demandImages.length" class="field">
                                         <text class="field-label">需求图片</text>
@@ -133,15 +137,21 @@
 				</view>
 				<view v-if="detail.techIntro" class="field">
 					<text class="field-label">技术简介</text>
-					<text class="field-value field-value-user-text">{{ detail.techIntro }}</text>
+					<view class="text-paragraphs">
+						<text v-for="(para, pIdx) in splitParagraphs(detail.techIntro)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
+					</view>
 				</view>
 				<view v-if="detail.purpose" class="field">
 					<text class="field-label">成果用途</text>
-					<text class="field-value field-value-user-text">{{ detail.purpose }}</text>
+					<view class="text-paragraphs">
+						<text v-for="(para, pIdx) in splitParagraphs(detail.purpose)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
+					</view>
 				</view>
 				<view v-if="detail.techPath" class="field">
 					<text class="field-label">技术路径</text>
-					<text class="field-value field-value-user-text">{{ detail.techPath }}</text>
+					<view class="text-paragraphs">
+						<text v-for="(para, pIdx) in splitParagraphs(detail.techPath)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
+					</view>
 				</view>
 				<view v-if="detail.patentHolder" class="field">
 					<text class="field-label">专利持有人</text>
@@ -161,7 +171,9 @@
 				</view>
 				<view v-for="section in detail.sections" :key="section.code + section.sortOrder" class="field">
 					<text class="field-label">{{ section.title }}</text>
-					<text class="field-value field-value-user-text">{{ section.content }}</text>
+					<view class="text-paragraphs">
+						<text v-for="(para, pIdx) in splitParagraphs(section.content)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
+					</view>
 				</view>
 				<view v-if="detail.patents && detail.patents.length" class="field">
 					<text class="field-label">关联专利</text>
@@ -766,6 +778,13 @@
 					}
                                 })
                         },
+			splitParagraphs(text) {
+				return String(text || '')
+					.replace(/\r\n?/g, '\n')
+					.split(/\n+/)
+					.map((s) => s.trim())
+					.filter(Boolean)
+			},
 			mediaSrc(item) {
 				return mediaDisplayUrl(
 					item,
@@ -1111,20 +1130,29 @@
 		display: block;
 		font-size: 26rpx;
 		color: #555555;
-		line-height: 1.8;
-		text-indent: 2em;
+		line-height: 1.78;
+		text-indent: 0;
 		word-break: break-word;
 		overflow-wrap: break-word;
 		white-space: pre-wrap;
-		text-align: justify;
+		text-align: left;
 	}
 
 	.field-value-user-text {
-		text-indent: 2em;
-		line-height: 1.8;
+		text-indent: 0;
+		line-height: 1.78;
+		text-align: left;
 		word-break: break-word;
 		overflow-wrap: break-word;
 		white-space: pre-wrap;
+	}
+
+	.text-paragraph {
+		margin-bottom: 16rpx;
+	}
+
+	.text-paragraph:last-child {
+		margin-bottom: 0;
 	}
 
 	.title-en { display: block; margin: -4rpx 0 16rpx; color: #7c8798; font-size: 24rpx; line-height: 1.4; }

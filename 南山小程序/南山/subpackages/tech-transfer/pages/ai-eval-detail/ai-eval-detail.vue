@@ -1290,7 +1290,7 @@
 	font-size: 24rpx;
 	color: #66748c;
 	line-height: 1.75;
-	text-align: justify;
+	text-align: left;
 }
 
 /* 进度条：胶囊轨道 + 分档渐变填充 */
@@ -1320,9 +1320,9 @@
 	display: block;
 	font-size: 28rpx;
 	color: #2c3e5e;
-	line-height: 1.9;
-	text-indent: 2em;
-	text-align: justify;
+	line-height: 1.85;
+	text-indent: 0;
+	text-align: left;
 	padding: 26rpx 28rpx;
 	background: linear-gradient(90deg, rgba(43, 115, 248, 0.08), rgba(43, 115, 248, 0.02));
 	border-left: 6rpx solid #2b73f8;
@@ -1365,7 +1365,7 @@
 	font-size: 26rpx;
 	color: #3d4c66;
 	line-height: 1.7;
-	text-align: justify;
+	text-align: left;
 }
 
 /* ---------- 11. AI 评价报告：章节式排版（标题 / 正文分层） ---------- */
@@ -1393,10 +1393,10 @@
 	display: block;
 	font-size: 27rpx;
 	color: #4a5568;
-	line-height: 1.95;
-	letter-spacing: 0.8rpx;
-	text-indent: 2em;
-	text-align: justify;
+	line-height: 1.85;
+	letter-spacing: 0.4rpx;
+	text-indent: 0;
+	text-align: left;
 }
 
 /* ---------- 12. 历史评估记录 ---------- */

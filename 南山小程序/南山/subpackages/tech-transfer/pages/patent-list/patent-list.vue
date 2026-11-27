@@ -638,9 +638,9 @@ export default {
   display: block;
   font-size: 26rpx;
   color: #4a5568;
-	text-indent: 2em;
+  text-indent: 0;
   line-height: 1.75;
-  text-align: justify;
+  text-align: left;
   word-break: break-word;
 }
 

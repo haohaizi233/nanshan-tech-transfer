@@ -93,9 +93,9 @@
                 </view>
                 <text v-if="formatMaturity(item)" class="meta-maturity">{{ formatMaturity(item) }}</text>
               </view>
-              <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
             </view>
           </view>
+          <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
           <view v-if="item.applicationFields && item.applicationFields.length" class="field-tags">
             <text v-for="(field, idx) in item.applicationFields.slice(0, 3)" :key="idx" class="field-tag">{{ field }}</text>
           </view>
@@ -455,12 +455,17 @@ export default {
 
 .card-summary {
   display: flex;
+  align-items: stretch;
   min-width: 0;
+  margin-bottom: 16rpx;
 }
 
 .card-content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .cover {
@@ -476,7 +481,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 16rpx;
+  margin-bottom: 12rpx;
 }
 
 .card-title {
@@ -503,7 +508,7 @@ export default {
   align-items: center;
   flex-wrap: wrap;
   gap: 8rpx;
-  margin-bottom: 12rpx;
+  margin-bottom: 0;
 }
 
 .meta-source {
@@ -527,9 +532,8 @@ export default {
 	color: #4a5568;
 	line-height: 1.75;
 	margin-bottom: 16rpx;
-	/* 人工填写的摘要与详情正文使用相同的两字符首行缩进。 */
-	text-indent: 2em;
-	text-align: justify;
+	text-indent: 0;
+	text-align: left;
 	word-break: break-word;
 	-webkit-line-clamp: 2;
 	overflow: hidden;

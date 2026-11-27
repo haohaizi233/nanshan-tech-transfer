@@ -356,8 +356,9 @@ export default {
   font-size: 26rpx;
   color: #444;
   line-height: 1.8;
-  text-indent: 2em;
-  margin-bottom: 14rpx;
+  text-indent: 0;
+  text-align: left;
+  margin-bottom: 16rpx;
   word-break: break-word;
 }
 

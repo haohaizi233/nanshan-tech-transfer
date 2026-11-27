@@ -786,9 +786,9 @@
 	}
 
 	.info-text-user-text {
-		text-indent: 2em;
+		text-indent: 0;
 		line-height: 1.75;
-		text-align: justify;
+		text-align: left;
 		word-break: break-word;
 		color: #4a5568;
 	}

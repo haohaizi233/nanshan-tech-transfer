@@ -21,7 +21,7 @@ export function formatReplyNodes(value) {
         return { type: 'text', text: part }
       })
       const style = 'margin:0 0 12px;line-height:1.85;word-break:break-word;'
-        + (heading ? 'font-weight:600;font-size:1.08em;' : list ? 'padding-left:1em;' : quote ? 'border-left:3px solid #cbd5e1;padding-left:12px;color:#64748b;' : 'text-indent:2em;')
+        + (heading ? 'font-weight:600;font-size:1.08em;' : list ? 'padding-left:1em;' : quote ? 'border-left:3px solid #cbd5e1;padding-left:12px;color:#64748b;' : 'text-indent:0;')
       return { name: 'div', attrs: { style }, children }
     })
 }

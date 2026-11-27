@@ -456,9 +456,9 @@
 		font-size: 26rpx;
 		color: #4a5568;
 		line-height: 1.75;
-		text-align: justify;
+		text-align: left;
 		word-break: break-word;
-		text-indent: 2em;
+		text-indent: 0;
 	}
 
 	.contact {
