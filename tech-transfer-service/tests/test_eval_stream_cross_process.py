@@ -18,7 +18,7 @@ def _redis_reachable(url: str) -> bool:
     try:
         import redis
 
-        client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=1.0)
+        client = redis.Redis.from_url(url, protocol=2, decode_responses=True, socket_connect_timeout=1.0)
         return bool(client.ping())
     except Exception:
         return False

@@ -6,7 +6,7 @@
 
 ## 2. 最小跨进程修复方案
 - 保留原有 PostgreSQL 任务队列（`SKIP LOCKED` + Lease + Heartbeat + CAS + 超时回收）与 `eval_stream` 对外接口不变，不引入 Kafka。
-- 在 [eval_stream.py](file:///d:/Users/Administrator/Desktop/南山小程序/tech-transfer-service/modules/ai/eval_stream.py) 接入基于 Redis Streams 的跨进程通道（`ai:eval:stream:{task_id}`，`MAXLEN ~ 512`，TTL `600s`；元数据 `ai:eval:meta:{task_id}`）：
+- 在 [eval_stream.py](file:///d:/Users/Administrator/Desktop/南山小程序/tech-transfer-service/modules/ai/eval_stream.py) 接入基于 Redis List（`RPUSH` + `LTRIM` 有界 512 + TTL `600s`）与 `PUBLISH`/`SUBSCRIBE`（`protocol=2` 兼容 Redis 3.x ~ 7.x）的跨进程通道（`ai:eval:events:{task_id}`、`ai:eval:meta:{task_id}`）：
   - `execution_id` 围栏：[worker.py](file:///d:/Users/Administrator/Desktop/南山小程序/tech-transfer-service/modules/ai/worker.py) 传入 `v{version}` 作为 `execution_id`，旧执行者或过期版本产生的迟到增量/终态被拦截；
   - 终态不可逆：一旦写入 `succeeded` / `failed`，后续增量和重复终态一律丢弃；
   - 断线重连回放：`subscribe()` 从 Stream 头构建全文 `snapshot` 并从最新 ID 继续 `XREAD BLOCK`；
