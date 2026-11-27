@@ -634,7 +634,6 @@ def soft_delete_demand_admin(scope: dict, demand_id: int, request_id=None) -> di
 # ── 审计日志查询 ─────────────────────────────────────────────
 
 
-
 # ── helpers ──────────────────────────────────────────────────
 
 
@@ -1010,7 +1009,6 @@ def dashboard_trend(days) -> dict:
 
 
 # ── P0-2 Institution 管理端 ─────────────────────────────────
-
 
 
 # ── P0-3 Cooperation 管理端（READ ONLY + 平台协助运营操作走 cooperation 模块） ──

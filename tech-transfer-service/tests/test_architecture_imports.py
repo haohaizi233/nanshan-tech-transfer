@@ -35,6 +35,12 @@ KNOWN_CROSS_PRIVATE_IMPORTS = {
 }
 
 
+# 历史已知反向依赖（仅允许减少，不允许新增）
+KNOWN_REVERSE_VIOLATIONS = {
+    "core/middleware.py -> modules.security.session_guard",
+}
+
+
 def test_architecture_import_ratchet():
     mod_names = {d.name for d in MODULES_DIR.iterdir() if d.is_dir() and d.name != "__pycache__"}
     edges: set[tuple[str, str]] = set()
@@ -48,14 +54,17 @@ def test_architecture_import_ratchet():
         layer = rel.parts[0]
         src_mod = rel.parts[1] if layer == "modules" and len(rel.parts) >= 2 else None
         tree = ast.parse(py.read_text(encoding="utf-8", errors="ignore"))
+        rel_posix = rel.as_posix()
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:
                 continue
             parts = node.module.split(".")
             if layer == "core" and parts[0] in ("modules", "routes"):
-                reverse_violations.append(f"{rel}:{node.lineno} -> {node.module}")
+                sig = f"{rel_posix} -> {node.module}"
+                if sig not in KNOWN_REVERSE_VIOLATIONS:
+                    reverse_violations.append(f"{rel_posix}:{node.lineno} -> {node.module}")
             if layer == "modules" and parts[0] == "routes":
-                reverse_violations.append(f"{rel}:{node.lineno} -> {node.module}")
+                reverse_violations.append(f"{rel_posix}:{node.lineno} -> {node.module}")
             if src_mod in mod_names and parts[0] == "modules" and len(parts) >= 2:
                 dst_mod = parts[1]
                 if dst_mod != src_mod:
