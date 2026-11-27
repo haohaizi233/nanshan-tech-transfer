@@ -38,10 +38,14 @@ test('same-origin H5 deployment keeps pageLocation.origin so base /h5/ does not 
     port: '',
     origin: 'https://inanshan.sjhcip.com',
   }
+  const env = { appEnv: 'local', hostMode: 'local' }
   assert.equal(
-    resolveMediaUrl('/api/tech-transfer/v1/files/1486', { appEnv: 'local', hostMode: 'local' }, publicLoc),
+    resolveMediaUrl('/api/tech-transfer/v1/files/1486', env, publicLoc),
     'https://inanshan.sjhcip.com/api/tech-transfer/v1/files/1486',
   )
+  for (const path of ['/api/tech-transfer/v1/capital-icons/poc.png', '/api/tech-transfer/v1/institutions/101/icon.png']) {
+    assert.equal(resolveMediaUrl(path, env, publicLoc), `${publicLoc.origin}${path}`)
+  }
   assert.equal(
     mediaDisplayUrl(
       { url: '/api/tech-transfer/v1/files/1486?variant=thumbnail' },
