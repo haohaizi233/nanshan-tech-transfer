@@ -120,18 +120,15 @@
 								@click.stop="onToggleFavorite('result', item)"
 							>{{ item.favorited ? '★' : '☆' }}</text>
 						</view>
-						<view v-if="item.source" class="meta-row">
-							<view class="meta-item meta-item-full">
-								<text class="meta-label">来源</text>
-								<view class="meta-value-row">
-									<text class="meta-value">{{ item.source }}</text>
-									<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
-										<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
-										<text>认证</text>
-									</view>
-								</view>
+						<view v-if="item.source" class="result-source">
+							<text class="result-source-label">来源</text>
+							<text class="result-source-name">{{ item.source }}</text>
+							<view v-if="item.orgCertified" class="cert-badge cert-badge-with-icon">
+								<image class="cert-badge-icon-inline" src="/static/icons/mine/certification-badge.png" mode="aspectFit"></image>
+								<text>认证</text>
 							</view>
 						</view>
+						<AchievementCardGallery v-if="item.previewImages && item.previewImages.length" :images="item.previewImages" :title="item.title" />
 						<view v-if="item.techIntro" class="info-block">
 							<text class="info-label">技术简介</text>
 							<text class="info-text info-text-user-text">{{ item.techIntro }}</text>
@@ -190,6 +187,7 @@
 <script>
 	import HostBridge from '../../../../host/host-bridge.js'
 	import AppTabbar from '../../components/app-tabbar.vue'
+	import AchievementCardGallery from '../../components/achievement-card-gallery.vue'
 			import { getCurrentUser } from '../../api/client.js'
 	import { ensureLoginForDock, getUserProfile } from '../../api/user.js'
 	import { getCapitalGroups } from '../../constants/capital-modules.js'
@@ -209,6 +207,7 @@
 		})],
 		components: {
 			AppTabbar,
+			AchievementCardGallery,
 		},
 		data() {
 			return {
@@ -703,13 +702,32 @@
 		margin: 0;
 	}
 
-	.meta-value-row {
+	.result-source {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
-		flex-wrap: wrap;
-		gap: 8rpx;
+		gap: 12rpx;
+		margin: 0 0 18rpx;
+		font-size: 25rpx;
+		line-height: 1.45;
+	}
+
+	.result-source-label {
+		flex-shrink: 0;
+		color: #626f80;
+	}
+
+	.result-source-name {
 		min-width: 0;
+		color: #304157;
+		font-weight: 500;
+		word-break: break-word;
+		overflow-wrap: anywhere;
+	}
+
+	.result-source .cert-badge {
+		flex-shrink: 0;
+		white-space: nowrap;
 	}
 
 	.star-btn {
@@ -738,10 +756,6 @@
 		flex: 1;
 		display: flex;
 		flex-direction: column;
-	}
-
-	.meta-item-full {
-		flex: 1;
 	}
 
 	.meta-label {

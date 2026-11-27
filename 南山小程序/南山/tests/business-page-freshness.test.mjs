@@ -23,6 +23,7 @@ function loadPage(name, overrides = {}) {
     createPageStateMixin: options => cache.createPageStateMixin({ ...options, storage, scope: () => '7' }),
     AI_FEATURE_ENABLED: true,
     AppTabbar: {},
+    AchievementCardGallery: {},
     FormattedText: {},
     ContactCard: {},
     WechatPrivacyGate: {},

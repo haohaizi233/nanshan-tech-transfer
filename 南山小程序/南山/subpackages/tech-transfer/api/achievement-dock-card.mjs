@@ -68,6 +68,7 @@ export function toAchievementPreviewCard(item = {}, favorited = false) {
     title: item.title || '',
     source: item.sourceOrgName || '',
     orgCertified: !!item.orgCertified,
+    previewImages: Array.isArray(item.previewImages) ? item.previewImages : item.cover ? [item.cover] : [],
     techIntro: item.techIntro || '',
     price,
     favorited,

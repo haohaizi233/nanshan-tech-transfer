@@ -31,6 +31,14 @@ test('hides the docking entry for an owned achievement in preview cards', () => 
   assert.equal(toAchievementPreviewCard({ id: 2, isMine: false }).canDock, true)
 })
 
+test('achievement preview cards retain gallery order and fall back to the older cover field', () => {
+  const cover = { fileId: 1, url: '/files/1', thumbnailUrl: '/files/1?variant=thumbnail' }
+  const other = { fileId: 2, url: '/files/2' }
+  assert.deepEqual(toAchievementPreviewCard({ cover, previewImages: [cover, other] }).previewImages, [cover, other])
+  assert.deepEqual(toAchievementPreviewCard({ cover }).previewImages, [cover])
+  assert.deepEqual(toAchievementPreviewCard({}).previewImages, [])
+})
+
 test('shows Chinese maturity labels instead of raw callback codes', () => {
   assert.equal(formatMaturityLabel('01_idea'), '概念阶段')
   assert.equal(formatMaturityLabel('02_lab', '02_lab'), '实验室验证')
