@@ -23,6 +23,8 @@ function loadPage(name, overrides = {}) {
     createPageStateMixin: options => cache.createPageStateMixin({ ...options, storage, scope: () => '7' }),
     AI_FEATURE_ENABLED: true,
     AppTabbar: {},
+    FormattedText: {},
+    ContactCard: {},
     WechatPrivacyGate: {},
     CAPABILITY_OPTIONS: [],
     getCapitalGroups: () => [],
@@ -54,6 +56,34 @@ function loadPage(name, overrides = {}) {
   Object.assign(page, component.methods)
   return { component, page, storage }
 }
+
+test('achievement contact actions follow the detail masking flag', () => {
+  const calls = []
+  const copies = []
+  const { component, page } = loadPage('dock-detail', {
+    uni: {
+      showToast() {},
+      makePhoneCall: ({ phoneNumber }) => calls.push(phoneNumber),
+      setClipboardData: ({ data }) => copies.push(data),
+    },
+  })
+  Object.defineProperty(page, 'displayContact', {
+    get: () => component.computed.displayContact.call(page),
+  })
+  page.type = 'result'
+  page.detail = { phone: '13800138000', email: 'member@example.org', contactMasked: true }
+  page.onCall()
+  page.onCopy(page.detail.email, '邮箱')
+  assert.deepEqual(calls, [])
+  assert.deepEqual(copies, [])
+
+  page.detail.contactMasked = false
+  page.onCall()
+  page.onCopy(page.detail.email, '邮箱')
+  assert.deepEqual(calls, ['13800138000'])
+  assert.deepEqual(copies, ['member@example.org'])
+  assert.equal(component.computed.contactTip.call(page), '')
+})
 
 test('WeChat album selection invokes the native media picker and replaces the temporary preview', async () => {
   const { page } = loadPage('mine', {

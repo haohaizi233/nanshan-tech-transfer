@@ -157,9 +157,7 @@
 						</view>
 						<view v-for="(sec, sIndex) in reportSections" :key="sIndex" class="report-sec">
 							<text class="report-sec__heading aie-fade-up">{{ sec.heading }}</text>
-							<view class="report-sec__paragraphs aie-fade-up">
-								<text v-for="(para, pIdx) in splitParagraphs(sec.content)" :key="pIdx" class="report-sec__content report-sec__paragraph">{{ para }}</text>
-							</view>
+							<formatted-text class="aie-fade-up" :text="sec.content" text-class="report-sec__content" />
 						</view>
 						</view>
 						</block>
@@ -237,6 +235,7 @@
 	import { AI_EVAL_NOTICE } from '../../api/ai-disclosure.mjs'
 	import { openEvalTaskStream, extractStreamData, extractStreamSections } from '../../api/ai-eval-stream.mjs'
 	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
+	import FormattedText from '../../components/formatted-text.vue'
 	import HostBridge from '../../../../host/host-bridge.js'
 	import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
@@ -270,7 +269,8 @@
 
 	export default {
 		components: {
-			AiGeneratedMark
+			AiGeneratedMark,
+			FormattedText
 		},
 		mixins: [createPageStateMixin({
 			route: 'pages/ai-eval-detail/ai-eval-detail',

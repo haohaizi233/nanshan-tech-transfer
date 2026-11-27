@@ -88,7 +88,7 @@
 				<view class="section-head"><text class="section-title">媒体资料</text><text class="add-link" @click="chooseMedia">{{ uploading ? '上传中…' : '+ 添加图片' }}</text></view>
 				<view v-if="!form.media.length" class="upload-hint">可设置一张封面及多张成果图，动态图片不会进入小程序包</view>
 				<view v-for="(media, index) in form.media" :key="media.fileId || media.id || index" class="media-item">
-					<image class="media-thumb" :src="mediaSrc(media)" mode="aspectFill" /><view class="media-info"><text class="media-name">{{ media.name }}</text><text class="media-role" @click="toggleCover(index)">{{ media.role === 'cover' ? '封面图' : '设为封面' }}</text></view><text class="remove-link" @click="removeMedia(index)">删除</text>
+					<image class="media-thumb" :src="mediaSrc(media)" mode="aspectFill" @click="previewUploadedMedia(media)" /><view class="media-info"><text class="media-name">{{ media.name }}</text><text class="media-role" @click="toggleCover(index)">{{ media.role === 'cover' ? '封面图' : '设为封面' }}</text></view><text class="remove-link" @click="removeMedia(index)">删除</text>
 				</view>
 			</view>
 
@@ -179,6 +179,7 @@
 	import { uploadContentFile } from '../../api/file.js'
 	import PublishPreview from '../../components/publish-preview.vue'
 	import { mediaDisplayUrl } from '../../api/media-url.mjs'
+	import { previewImageUrls } from '../../utils/image-preview.mjs'
 	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
 	const MATURITY_OPTIONS = [
@@ -422,6 +423,10 @@
 					HostBridge.getEnvironment() || {},
 					HostBridge.getStorage('tt_access_token') || '',
 				)
+			},
+			previewUploadedMedia(media) {
+				const urls = (this.form.media || []).map((item) => this.mediaSrc(item)).filter(Boolean)
+				previewImageUrls(urls, this.mediaSrc(media))
 			},
 			showPreviewError(message) {
 				this.previewError = message

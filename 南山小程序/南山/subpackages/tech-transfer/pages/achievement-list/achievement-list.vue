@@ -79,6 +79,7 @@
               mode="aspectFill"
               lazy-load
               @error="onCoverError(item.id)"
+              @click.stop="previewCover(item)"
             />
             <view class="card-content">
               <view class="card-head">
@@ -129,6 +130,8 @@ import { getAchievements, getAchievementCategories, getAchievementIndustries } f
 import { mediaDisplayUrl } from '../../api/media-url.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
 import { createPageStateMixin } from '../../api/page-state-cache.mjs'
+import { formatPreviewText } from '../../utils/paragraph-text.mjs'
+import { previewSingleImage } from '../../utils/image-preview.mjs'
 
 const MATURITY_LABELS = {
   '01_idea': '概念阶段',
@@ -218,7 +221,16 @@ export default {
       }
     },
     formatIntroPreview(text) {
-      return String(text || '').replace(/\s+/g, ' ').trim()
+      return formatPreviewText(text)
+    },
+    previewCover(item) {
+      if (!item || !item.cover || !item.cover.url || this.coverErrored[item.id]) return
+      const fullUrl = mediaDisplayUrl(
+        { url: item.cover.url },
+        HostBridge.getEnvironment() || {},
+        HostBridge.getStorage('tt_access_token') || '',
+      ) || this.coverDisplayUrl(item.cover)
+      previewSingleImage(fullUrl)
     },
     currentListQuery() {
       return JSON.stringify([this.keyword, this.activeCategory, this.activeIndustryId])

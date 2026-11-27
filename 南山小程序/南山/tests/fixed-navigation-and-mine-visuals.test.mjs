@@ -28,15 +28,26 @@ test('switches patent reader cards instead of scrolling between all sections', (
 })
 
 test('uses 2em first-line indent on every paragraph and explicit paragraph spacing', () => {
-	assert.match(dockDetail, /splitParagraphs\(detail\.techIntro\)/)
-	assert.match(dockDetail, /\.field-value\s*\{[\s\S]*text-indent:\s*0[\s\S]*text-align:\s*left/)
-	assert.match(dockDetail, /\.field-value-user-text\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
-	assert.match(dockDetail, /\.text-paragraph\s*\{[\s\S]*text-indent:\s*2em[\s\S]*margin-bottom:\s*14rpx/)
+	const formattedText = readFileSync(new URL('subpackages/tech-transfer/components/formatted-text.vue', root), 'utf8')
+	const achDetail = readFileSync(new URL('subpackages/tech-transfer/pages/achievement-detail/achievement-detail.vue', root), 'utf8')
+	const postDemand = readFileSync(new URL('subpackages/tech-transfer/pages/post-demand/post-demand.vue', root), 'utf8')
+	const postResult = readFileSync(new URL('subpackages/tech-transfer/pages/post-result/post-result.vue', root), 'utf8')
+
+	assert.match(formattedText, /\.ft-indent\s*\{[\s\S]*text-indent:\s*2em/)
+	assert.match(formattedText, /\.ft-paragraph\s*\{[\s\S]*margin-bottom:\s*14rpx/)
+	assert.match(dockDetail, /<formatted-text[\s\S]*detail\.techIntro/)
+	assert.match(dockDetail, /\.field-value\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
+	assert.match(dockDetail, /previewInventorAvatar/)
+	assert.match(achDetail, /<formatted-text[\s\S]*detail\.techIntro/)
+	assert.match(achDetail, /@click="previewMedia\(media\)"/)
 	assert.match(home, /class="info-text info-text-user-text"[^>]*>\{\{ item\.demandDesc \}\}/)
 	assert.match(home, /class="info-text info-text-user-text"[^>]*>\{\{ item\.techIntro \}\}/)
 	assert.match(home, /\.info-text-user-text\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
 	assert.match(achievementList, /\.tech-intro\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
+	assert.match(achievementList, /@click\.stop="previewCover\(item\)"/)
 	assert.match(patentList, /\.tech-intro\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
+	assert.match(postDemand, /@click="previewAttachmentImage\(attachment\)"/)
+	assert.match(postResult, /@click="previewUploadedMedia\(media\)"/)
 })
 
 test('uses the certification artwork as a subtle right-side scene instead of a second card frame', () => {

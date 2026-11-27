@@ -5,7 +5,7 @@
       <scroll-view scroll-y class="body" :show-scrollbar="false">
         <view v-for="item in visibleItems" :key="item.label" class="row">
           <text class="label">{{ item.label }}</text>
-          <text class="value">{{ item.value }}</text>
+          <formatted-text :text="item.value" text-class="value" />
         </view>
         <view v-if="previewImages.length" :class="['preview-images', previewImages.length === 1 ? 'preview-images-single' : '']">
           <image
@@ -28,7 +28,10 @@
 </template>
 
 <script>
+import FormattedText from './formatted-text.vue'
+
 export default {
+  components: { FormattedText },
   options: {
     virtualHost: true,
     styleIsolation: 'shared',

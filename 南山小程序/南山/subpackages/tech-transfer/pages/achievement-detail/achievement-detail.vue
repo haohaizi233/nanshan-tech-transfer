@@ -77,19 +77,19 @@
       <!-- 技术简介 -->
       <view v-if="detail.techIntro" class="section-card">
         <text class="section-title">技术简介</text>
-        <text v-for="(para, pIdx) in splitParagraphs(detail.techIntro)" :key="pIdx" class="section-text section-text-paragraph">{{ para }}</text>
+        <formatted-text :text="detail.techIntro" text-class="section-text" />
       </view>
 
       <view v-if="detail.media && detail.media.length" class="section-card">
         <text class="section-title">成果资料</text>
         <view class="media-grid">
-          <image v-for="media in detail.media" :key="media.fileId" class="media-image" :src="mediaSrc(media)" mode="aspectFill" />
+          <image v-for="media in detail.media" :key="media.fileId" class="media-image" :src="mediaSrc(media)" mode="aspectFill" @click="previewMedia(media)" />
         </view>
       </view>
 
       <view v-for="section in dynamicSections" :key="section.code + section.sortOrder" class="section-card">
         <text class="section-title">{{ section.title }}</text>
-        <text v-for="(para, pIdx) in splitParagraphs(section.content)" :key="pIdx" class="section-text section-text-paragraph">{{ para }}</text>
+        <formatted-text :text="section.content" linkify text-class="section-text" @open-link="openLink($event.url)" />
       </view>
 
       <view v-if="detail.patents && detail.patents.length" class="section-card">
@@ -110,7 +110,7 @@
       <!-- 技术路线 -->
       <view v-if="detail.techRoute" class="section-card">
         <text class="section-title">技术路线</text>
-        <text v-for="(para, pIdx) in splitParagraphs(detail.techRoute)" :key="pIdx" class="section-text section-text-paragraph">{{ para }}</text>
+        <formatted-text :text="detail.techRoute" text-class="section-text" />
       </view>
 
       <!-- 应用领域 -->
@@ -151,25 +151,11 @@
       </view>
 
       <!-- 联系方式 -->
-      <view v-if="detail.contactName" class="section-card">
-        <text class="section-title">联系方式</text>
-        <view class="info-row">
-          <text class="info-label">联系人</text>
-          <text class="info-value">{{ detail.contactName }}</text>
-        </view>
-        <view v-if="detail.contactTitle" class="info-row">
-          <text class="info-label">职务</text>
-          <text class="info-value">{{ detail.contactTitle }}</text>
-        </view>
-        <view v-if="detail.contactPhone" class="info-row">
-          <text class="info-label">电话</text>
-          <text class="info-value">{{ detail.contactPhone }}</text>
-        </view>
-        <view v-if="detail.contactEmail" class="info-row">
-          <text class="info-label">邮箱</text>
-          <text class="info-value">{{ detail.contactEmail }}</text>
-        </view>
-      </view>
+      <contact-card
+        :contact="detail"
+        separate-title
+        variant="card"
+      />
     </view>
 
     <!-- 底部操作区：我要对接（与需求侧 dock-detail 同一对接流程） -->
@@ -195,6 +181,9 @@ import { createPageStateMixin } from '../../api/page-state-cache.mjs'
 import HostBridge from '../../../../host/host-bridge.js'
 import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 import { safeNavigateBack } from '../../utils/nav.mjs'
+import FormattedText from '../../components/formatted-text.vue'
+import ContactCard from '../../components/contact-card.vue'
+import { previewImageUrls } from '../../utils/image-preview.mjs'
 
 const PRICING_MODE_LABELS = {
   'negotiable': '面议',
@@ -204,6 +193,7 @@ const PRICING_MODE_LABELS = {
 }
 
 export default {
+  components: { FormattedText, ContactCard },
   mixins: [createPageStateMixin({
     route: 'pages/achievement-detail/achievement-detail',
     groups: [{ name: 'detail', dataClass: 'detail', fields: ['achId', 'detail'] }],
@@ -394,6 +384,10 @@ export default {
       if (!url) return
       HostBridge.navigate('pages/web-view/web-view', { url })
     },
+    previewMedia(media) {
+      const urls = ((this.detail && this.detail.media) || []).map((m) => this.mediaSrc(m)).filter(Boolean)
+      previewImageUrls(urls, this.mediaSrc(media))
+    },
     splitParagraphs(text) {
       return String(text || '')
         .replace(/\r\n?/g, '\n')
@@ -561,7 +555,7 @@ export default {
   margin-bottom: 0;
 }
 .media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; }
-.media-image { width: calc(50% - 6rpx); height: 210rpx; border-radius: 10rpx; background: #eef4ff; }
+.media-image { width: calc(50% - 6rpx); height: 210rpx; border-radius: 10rpx; background: #eef4ff; cursor: pointer; }
 .link-row { display: flex; align-items: center; min-height: 72rpx; border-bottom: 1rpx solid #edf1f5; }
 .link-row-clickable { cursor: pointer; }
 .link-row:last-child { border-bottom: none; }

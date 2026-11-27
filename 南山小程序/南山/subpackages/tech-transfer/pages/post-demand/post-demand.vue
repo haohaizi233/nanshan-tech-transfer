@@ -63,7 +63,7 @@
 			<view class="section-head"><text class="section-title">附件资料</text><view><text class="add-link" @click="chooseDemandImage">+ 添加配图</text><text class="add-link add-link-gap" @click="chooseAttachment">{{ uploading ? '上传中…' : '+ 添加附件' }}</text></view></view>
 			<view v-if="!form.attachments.length" class="upload-hint">可上传需求说明、图片或技术资料，单文件最大 20MB</view>
 			<view v-for="(attachment, index) in form.attachments" :key="attachment.fileId || attachment.id" class="attachment-row">
-				<image v-if="isImageAttachment(attachment)" class="attachment-thumb" :src="mediaSrc(attachment)" mode="aspectFill" />
+				<image v-if="isImageAttachment(attachment)" class="attachment-thumb" :src="mediaSrc(attachment)" mode="aspectFill" @click="previewAttachmentImage(attachment)" />
 				<text class="attachment-name">{{ attachment.name }}</text><text class="remove-link" @click="removeAttachment(index)">删除</text>
 			</view>
 		</view>
@@ -109,6 +109,7 @@
         import HostBridge from '../../../../host/host-bridge.js'
         import PublishPreview from '../../components/publish-preview.vue'
 	import { isImageMedia, mediaDisplayUrl } from '../../api/media-url.mjs'
+	import { previewImageUrls } from '../../utils/image-preview.mjs'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
 	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 
@@ -339,6 +340,13 @@
 				},
 				removeAttachment(index) { this.form.attachments.splice(index, 1) },
 				isImageAttachment(item) { return isImageMedia(item) },
+				previewAttachmentImage(attachment) {
+					const urls = (this.form.attachments || [])
+						.filter((item) => this.isImageAttachment(item))
+						.map((item) => this.mediaSrc(item))
+						.filter(Boolean)
+					previewImageUrls(urls, this.mediaSrc(attachment))
+				},
 				mediaSrc(item) {
 					return mediaDisplayUrl(
 						item,

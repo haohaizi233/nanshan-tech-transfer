@@ -203,7 +203,7 @@
 		<view v-else class="logged-wrap">
 			<view class="profile-card">
 				<view class="profile-head">
-					<image class="avatar lg" :src="avatarDisplayUrl(profile.avatar)" mode="aspectFill"></image>
+					<image class="avatar lg" :src="avatarDisplayUrl(profile.avatar)" mode="aspectFill" @click.stop="previewAvatar(profile.avatar)"></image>
 					<view class="profile-main">
 						<view class="name-row">
 							<text class="nickname">{{ profile.nickname }}</text>
@@ -621,6 +621,7 @@
 <script>
 	import AppTabbar from '../../components/app-tabbar.vue'
 	import WechatPrivacyGate from '../../components/wechat-privacy-gate.vue'
+	import { previewSingleImage } from '../../utils/image-preview.mjs'
 	import {
 			getUserProfile,
 			isLoggedIn,
@@ -1744,6 +1745,10 @@
 			avatarDisplayUrl(url) {
 				if (!url || url === '/static/logo.png') return '/static/logo.png'
 				return mediaDisplayUrl({ url }, HostBridge.getEnvironment() || {}, HostBridge.getStorage('tt_access_token') || '')
+			},
+			previewAvatar(url) {
+				if (!url || url === '/static/logo.png') return
+				previewSingleImage(this.avatarDisplayUrl(url))
 			},
 			async refresh() {
 				const requestId = (this._dashboardRequestId || 0) + 1

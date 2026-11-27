@@ -88,15 +88,11 @@
 				</view>
 				<view v-if="detail.demandDesc" class="field">
 					<text class="field-label">需求说明</text>
-					<view class="text-paragraphs">
-						<text v-for="(para, pIdx) in splitParagraphs(detail.demandDesc)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
-					</view>
+					<formatted-text :text="detail.demandDesc" text-class="field-value field-value-user-text" />
 				</view>
                                 <view v-if="detail.companyIntro" class="field">
                                         <text class="field-label">公司简介</text>
-                                        <view class="text-paragraphs">
-                                                <text v-for="(para, pIdx) in splitParagraphs(detail.companyIntro)" :key="pIdx" class="field-value field-muted field-value-user-text text-paragraph">{{ para }}</text>
-                                        </view>
+                                        <formatted-text :text="detail.companyIntro" :muted="true" text-class="field-value field-value-user-text" />
                                 </view>
                                 <view v-if="demandImages.length" class="field">
                                         <text class="field-label">需求图片</text>
@@ -137,21 +133,15 @@
 				</view>
 				<view v-if="detail.techIntro" class="field">
 					<text class="field-label">技术简介</text>
-					<view class="text-paragraphs">
-						<text v-for="(para, pIdx) in splitParagraphs(detail.techIntro)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
-					</view>
+					<formatted-text :text="detail.techIntro" linkify text-class="field-value field-value-user-text" @open-link="openLink" />
 				</view>
 				<view v-if="detail.purpose" class="field">
 					<text class="field-label">成果用途</text>
-					<view class="text-paragraphs">
-						<text v-for="(para, pIdx) in splitParagraphs(detail.purpose)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
-					</view>
+					<formatted-text :text="detail.purpose" linkify text-class="field-value field-value-user-text" @open-link="openLink" />
 				</view>
 				<view v-if="detail.techPath" class="field">
 					<text class="field-label">技术路径</text>
-					<view class="text-paragraphs">
-						<text v-for="(para, pIdx) in splitParagraphs(detail.techPath)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
-					</view>
+					<formatted-text :text="detail.techPath" linkify text-class="field-value field-value-user-text" @open-link="openLink" />
 				</view>
 				<view v-if="detail.patentHolder" class="field">
 					<text class="field-label">专利持有人</text>
@@ -171,9 +161,7 @@
 				</view>
 				<view v-for="section in detail.sections" :key="section.code + section.sortOrder" class="field">
 					<text class="field-label">{{ section.title }}</text>
-					<view class="text-paragraphs">
-						<text v-for="(para, pIdx) in splitParagraphs(section.content)" :key="pIdx" class="field-value field-value-user-text text-paragraph">{{ para }}</text>
-					</view>
+					<formatted-text :text="section.content" linkify text-class="field-value field-value-user-text" @open-link="openLink" />
 				</view>
 				<view v-if="detail.patents && detail.patents.length" class="field">
 					<text class="field-label">关联专利</text>
@@ -185,40 +173,21 @@
 				</view>
 				<view v-if="detail.inventors && detail.inventors.length" class="field">
 					<text class="field-label">成果完成人</text>
-					<view v-for="inventor in detail.inventors" :key="inventor.id" class="inventor-row"><image v-if="inventor.avatarUrl" class="inventor-avatar" :src="mediaSrc({ url: inventor.avatarUrl })" mode="aspectFill" /><text class="field-value">{{ inventor.name }}{{ inventor.title ? ' · ' + inventor.title : '' }}{{ inventor.orgName ? ' · ' + inventor.orgName : '' }}</text></view>
+					<view v-for="inventor in detail.inventors" :key="inventor.id" class="inventor-row"><image v-if="inventor.avatarUrl" class="inventor-avatar" :src="mediaSrc({ url: inventor.avatarUrl })" mode="aspectFill" @click="previewInventorAvatar(inventor.avatarUrl)" /><text class="field-value">{{ inventor.name }}{{ inventor.title ? ' · ' + inventor.title : '' }}{{ inventor.orgName ? ' · ' + inventor.orgName : '' }}</text></view>
 				</view>
 			</block>
 		</view>
 
 		<!-- 下方：联系方式 -->
-		<view class="section">
-			<view class="section-head">
-				<text class="section-title">{{ contactSectionTitle }}</text>
-			</view>
-			<view class="contact-card">
-				<view v-if="intention && intention.counterpartDisplayName" class="contact-row">
-					<text class="contact-label">对接对象</text>
-					<text class="contact-value">{{ intention.counterpartDisplayName }}</text>
-				</view>
-				<view class="contact-row">
-					<text class="contact-label">联系人</text>
-					<text class="contact-value">{{ displayContact.displayName }}{{ displayContact.orgTitle ? '（' + displayContact.orgTitle + '）' : '' }}</text>
-				</view>
-				<view v-if="displayContact.phone" class="contact-row" @click="onCall">
-					<text class="contact-label">电话</text>
-					<text class="contact-value contact-link">{{ displayContact.phone }}</text>
-				</view>
-				<view v-if="displayContact.email" class="contact-row" @click="onCopy(displayContact.email, '邮箱')">
-					<text class="contact-label">邮箱</text>
-					<text class="contact-value contact-link">{{ displayContact.email }}</text>
-				</view>
-				<view v-if="displayContact.wechat" class="contact-row" @click="onCopy(displayContact.wechat, '微信号')">
-					<text class="contact-label">微信</text>
-					<text class="contact-value contact-link">{{ displayContact.wechat }}</text>
-				</view>
-			</view>
-			<text class="tip">{{ contactTip }}</text>
-		</view>
+		<contact-card
+			:title="contactSectionTitle"
+			:counterpart-name="(intention && intention.counterpartDisplayName) || ''"
+			:contact="displayContact"
+			:tip="contactTip"
+			interactive
+			@call="onCall"
+			@copy="onCopy($event.value, $event.label)"
+		/>
 
 		<!-- 底部操作区 -->
 			<view class="confirm-wrap">
@@ -343,6 +312,9 @@
         import { toAchievementDockCard } from '../../api/achievement-dock-card.mjs'
 	import { isImageMedia, mediaDisplayUrl, splitDemandAttachments } from '../../api/media-url.mjs'
 	import { safeBackWithToast } from '../../utils/nav.mjs'
+	import FormattedText from '../../components/formatted-text.vue'
+	import ContactCard from '../../components/contact-card.vue'
+	import { previewImageUrls, previewSingleImage } from '../../utils/image-preview.mjs'
 	import { ensureLoginForDock, canProposeDock, getDockBlockMessage } from '../../api/user.js'
 	import { createPageStateMixin, invalidatePageStateKeys } from '../../api/page-state-cache.mjs'
 	import {
@@ -373,6 +345,7 @@
 	}
 
 	export default {
+		components: { FormattedText, ContactCard },
 		mixins: [createPageStateMixin({
 			route: 'pages/dock-detail/dock-detail',
 			groups: [{ name: 'detail', dataClass: 'detail', fields: ['detail'] }],
@@ -441,7 +414,7 @@
 					phone: this.detail && this.detail.phone,
 					email: this.detail && this.detail.email,
 					wechat: this.detail && this.detail.wechat,
-					masked: false
+					masked: this.detail && this.detail.contactMasked
 				}
 			},
 			contactSectionTitle() {
@@ -466,6 +439,8 @@
 				if (this.intention && this.displayContact.masked) {
 					return this.displayContact.reason || '联系方式已脱敏，正式对接后可见'
 				}
+				if (!this.intention && this.type === 'result' && this.detail &&
+					(this.detail.contactMasked === false || this.detail.isMine)) return ''
 				return this.intention
 					? '对方联系方式已按当前对接状态更新'
 					: '为保护发布方隐私，对接被接受前联系方式已脱敏'
@@ -750,7 +725,7 @@
 				if (!ensureLoginForDock()) return
 				const phone = this.displayContact.phone
 				if (!phone) return
-				if (phone.indexOf('*') >= 0) {
+				if (this.displayContact.masked || phone.indexOf('*') >= 0) {
 					uni.showToast({ title: '联系方式已脱敏，正式对接后可见', icon: 'none' })
 					return
 				}
@@ -764,7 +739,7 @@
 					uni.showToast({ title: '暂无' + label, icon: 'none' })
 					return
 				}
-				if (text.indexOf('*') >= 0) {
+				if (this.displayContact.masked || text.indexOf('*') >= 0) {
 					uni.showToast({ title: '联系方式已脱敏，正式对接后可见', icon: 'none' })
 					return
 				}
@@ -795,8 +770,11 @@
 			previewImageList(items, current) {
 				const urls = (items || []).map((item) => this.mediaSrc(item)).filter(Boolean)
 				const active = this.mediaSrc(current) || urls[0]
-				if (!active) return
-				uni.previewImage({ urls: urls.length ? urls : [active], current: active })
+				previewImageUrls(urls, active)
+			},
+			previewInventorAvatar(avatarUrl) {
+				if (!avatarUrl) return
+				previewSingleImage(this.mediaSrc({ url: avatarUrl }))
 			},
 			previewDemandImage(media) {
 				this.previewImageList(this.demandImages, media)
@@ -1131,11 +1109,11 @@
 		font-size: 26rpx;
 		color: #555555;
 		line-height: 1.78;
-		text-indent: 0;
+		text-indent: 2em;
 		word-break: break-word;
 		overflow-wrap: break-word;
 		white-space: pre-wrap;
-		text-align: left;
+		text-align: justify;
 	}
 
 	.field-value-user-text {
@@ -1159,11 +1137,11 @@
 
 	.title-en { display: block; margin: -4rpx 0 16rpx; color: #7c8798; font-size: 24rpx; line-height: 1.4; }
 	.media-grid { display: flex; flex-wrap: wrap; gap: 12rpx; justify-content: center; }
-	.media-thumb { width: 196rpx; height: 148rpx; border-radius: 10rpx; background: #eef3fa; }
+	.media-thumb { width: 196rpx; height: 148rpx; border-radius: 10rpx; background: #eef3fa; cursor: pointer; }
 	.media-grid.single .media-thumb { width: 560rpx; height: 420rpx; max-width: 100%; }
-	.link-value { color: #2b73f8; text-indent: 0; margin-bottom: 8rpx; }
-	.inventor-row { display: flex; align-items: center; min-height: 58rpx; }
-	.inventor-avatar { width: 52rpx; height: 52rpx; flex-shrink: 0; border-radius: 50%; margin-right: 14rpx; }
+	.link-value { color: #2b73f8; margin-bottom: 8rpx; }
+	.inventor-row { display: flex; align-items: center; min-height: 58rpx; padding-left: 2em; }
+	.inventor-avatar { width: 52rpx; height: 52rpx; flex-shrink: 0; border-radius: 50%; margin-right: 14rpx; cursor: pointer; }
 	.inventor-row .field-value { text-indent: 0; }
 
         .field {
@@ -1177,49 +1155,6 @@
         .attachment-row { display: flex; align-items: center; min-height: 68rpx; border-bottom: 1rpx solid #edf1f5; }
         .attachment-name { flex: 1; color: #2b73f8; font-size: 26rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .attachment-arrow { color: #8fa0b5; font-size: 38rpx; }
-
-	.contact-card {
-		background-color: #f7f9fc;
-		border-radius: 12rpx;
-		padding: 8rpx 20rpx;
-	}
-
-	.contact-row {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		padding: 22rpx 0;
-		border-bottom: 1rpx solid #e8ecf2;
-	}
-
-	.contact-row:last-child {
-		border-bottom: none;
-	}
-
-	.contact-label {
-		width: 120rpx;
-		font-size: 28rpx;
-		color: #555555;
-		flex-shrink: 0;
-	}
-
-	.contact-value {
-		flex: 1;
-		font-size: 28rpx;
-		color: #222222;
-	}
-
-	.contact-link {
-		color: #2b73f8;
-	}
-
-	.tip {
-		display: block;
-		margin-top: 20rpx;
-		font-size: 24rpx;
-		color: #999999;
-		line-height: 1.5;
-	}
 
 	.confirm-wrap {
 		margin-top: 8rpx;
