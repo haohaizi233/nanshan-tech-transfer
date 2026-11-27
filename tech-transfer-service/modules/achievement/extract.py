@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from modules.achievement.maturity import MATURITY_LABELS, MATURITY_LEVELS
 
@@ -84,6 +85,34 @@ _PRIVATE_CONTACT_KEYS = {"contactName", "contactPhone", "contactEmail", "contact
 _CONTACT_LABEL_RE = re.compile(
     r"^\s*(?:联系方式|联络方式|联系号码|手机号码|电子邮件|座机|微信ID)\s*(?:[:：]\s*(.*))?$", re.I
 )
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
+_BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._\-+/=]{12,}", re.I)
+_SENSITIVE_QUERY_KEYS = frozenset(
+    {
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "auth",
+        "secret",
+        "key",
+        "api_key",
+        "apikey",
+        "code",
+        "signature",
+        "sig",
+        "password",
+        "passwd",
+        "pwd",
+        "reset_token",
+        "ticket",
+        "session",
+        "session_id",
+        "sid",
+        "otp",
+    }
+)
+_SENSITIVE_QUERY_SUFFIXES = ("_token", "_secret", "_key", "_password", "_passwd")
 _PUBLIC_TEXT_CONTACT_RE = re.compile(
     r"(?P<url>https?://[^\s<>，。；！？、（）【】《》]+)"
     r"|(?:mailto:)?(?:" + EMAIL_RE.pattern + r")"
@@ -95,8 +124,32 @@ _PUBLIC_TEXT_CONTACT_RE = re.compile(
 _CONTACT_VALUE_LINE_RE = re.compile(r"[\s\d+*()（）-]{5,}")
 
 
+def _is_sensitive_query_key(name: str) -> bool:
+    lower = (name or "").strip().lower()
+    return lower in _SENSITIVE_QUERY_KEYS or lower.endswith(_SENSITIVE_QUERY_SUFFIXES)
+
+
+def _sanitize_url(url: str) -> str:
+    """保留公开 URL 主体与非敏感查询参数，剥离 URL 内的账号凭据与认证 Token 参数。"""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[-1]
+    query = parts.query
+    if query:
+        kept_params = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if not _is_sensitive_query_key(k)]
+        query = urlencode(kept_params, doseq=True)
+    fragment = parts.fragment
+    if fragment and any(tok in fragment.lower() for tok in ("token=", "secret=", "password=", "auth=")):
+        fragment = ""
+    return urlunsplit((parts.scheme, netloc, parts.path, query, fragment))
+
+
 def strip_private_contact_text(text: str | None) -> str | None:
-    """保留公开正文及网站，联系方式只通过受权限控制的字段返回。"""
+    """保留公开正文及网站，联系方式与敏感凭据只通过受权限控制的字段返回。"""
     if not text:
         return text
 
@@ -120,7 +173,9 @@ def strip_private_contact_text(text: str | None) -> str | None:
             pending = None
             continue
         pending = None
-        cleaned = _PUBLIC_TEXT_CONTACT_RE.sub(lambda m: m.group("url") or "", line)
+        cleaned = _PUBLIC_TEXT_CONTACT_RE.sub(lambda m: _sanitize_url(m.group("url")) if m.group("url") else "", line)
+        cleaned = _JWT_RE.sub("[REDACTED]", cleaned)
+        cleaned = _BEARER_RE.sub("[REDACTED]", cleaned)
         if cleaned == line or cleaned.strip(" \t:：,，.;；。/、"):
             kept.append(cleaned.rstrip())
 

@@ -243,6 +243,18 @@ def test_migration_038_fresh_upgrade_dirty_convergence_idempotency_and_schema_ga
             _apply_sql(cur, schema, sql_039)
             _apply_sql(cur, schema, sql_039)
 
+            # P3-3: 仅到 039 仍缺少 040 注册确权约束，Schema Gate 应阻断；补齐 040 后通过
+            gate_039 = check_required_security_schema(cur)
+            assert gate_039["ok"] is False
+            sql_040 = (
+                (MIGRATION_DIR / "040_registration_sms.sql")
+                .read_text(encoding="utf-8")
+                .replace("'public.auth_challenge'", "'auth_challenge'")
+                .replace("public.", "")
+            )
+            _apply_sql(cur, schema, sql_040)
+            _apply_sql(cur, schema, sql_040)
+
             gate_post = check_required_security_schema(cur)
             assert gate_post["ok"] is True, gate_post
             with patch.object(settings, "APP_ENV", "production"):
@@ -542,7 +554,14 @@ def test_hf03_migration_039_conservative_provenance_and_schema_gate():
             assert r_f["execution_stage"] == "response_persisted"
             assert r_f["stage_provenance"] == "explicit"
 
-            # 039 Schema 门禁在 production 下通过；若人为移除 stage_provenance 或 risk_sync_state 约束则阻断
+            # P3-3: 补齐 040 后 Schema 门禁在 production 下通过；若人为移除约束则阻断
+            sql_040 = (
+                (MIGRATION_DIR / "040_registration_sms.sql")
+                .read_text(encoding="utf-8")
+                .replace("'public.auth_challenge'", "'auth_challenge'")
+                .replace("public.", "")
+            )
+            _apply_sql(cur, schema, sql_040)
             with patch.object(settings, "APP_ENV", "production"):
                 assert assert_required_security_schema(cur)["ok"] is True
             cur.execute(

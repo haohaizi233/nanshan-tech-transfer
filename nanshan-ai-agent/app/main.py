@@ -46,6 +46,7 @@ from app.formatters import (
     number_text,
 )
 
+from app.privacy import sanitize_text_for_llm
 from app.reranker import rerank_results
 from app.advisor import enrich_cards, local_reply, result_message
 from app.runtime_budget import reset_deadline, set_deadline
@@ -277,8 +278,9 @@ def _respond(route, request, records, facts=None):
     formatter = format_achievement_card if route.intent == "search_achievement" else format_demand_card
     cards = enrich_cards([formatter(item) for item in records], records, route)
     trace_count("returned_count", len(cards))
+    msg = sanitize_text_for_llm(result_message(request.message, cards, route, facts))
     return ChatResponse(
-        success=True, intent=route.intent, message=result_message(request.message, cards, route, facts),
+        success=True, intent=route.intent, message=msg,
         data=cards, queryPlan=route.model_dump(),
     )
 
@@ -482,11 +484,12 @@ def _process_ai_chat(request: ChatRequest):
             response.queryPlan = request.context.queryPlan
         return response
     emit_stage("routing")
+    sanitized_message = sanitize_text_for_llm(request.message)
     try:
         if resolution.route is not None:
             route = resolution.route
         else:
-            route = classify_intent(request.message)
+            route = classify_intent(sanitized_message)
     except ValueError:
         return _clarification("请确认筛选条件，预算、价格范围或成熟度存在冲突，不能直接取消条件检索。")
     except LLMError as exc:

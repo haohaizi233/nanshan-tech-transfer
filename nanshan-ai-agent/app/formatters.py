@@ -2,6 +2,8 @@ import json
 from decimal import Decimal
 from typing import Any
 
+from app.privacy import sanitize_text_for_llm
+
 
 MATURITY_MAP = {
     "01_idea": "概念阶段",
@@ -284,9 +286,7 @@ def format_achievement_card(
     item: dict
 ) -> dict:
 
-    application_fields = normalize_list(
-        item.get("application_fields")
-    )
+    application_fields = [c for c in (sanitize_text_for_llm(v) for v in normalize_list(item.get("application_fields"))) if c]
 
     return {
         "card_type": "achievement",
@@ -295,15 +295,15 @@ def format_achievement_card(
         "id": item.get("id"),
 
         "title": empty_text(
-            item.get("title")
+            sanitize_text_for_llm(item.get("title"))
         ),
 
         "organization": empty_text(
-            item.get("source_org_name")
+            sanitize_text_for_llm(item.get("source_org_name"))
         ),
 
         "description": empty_text(
-            item.get("tech_intro")
+            sanitize_text_for_llm(item.get("tech_intro"))
         ),
 
         "maturity": format_maturity(
@@ -331,9 +331,7 @@ def format_demand_card(
     item: dict
 ) -> dict:
 
-    coop_mode = normalize_list(
-        item.get("coop_mode")
-    )
+    coop_mode = [c for c in (sanitize_text_for_llm(v) for v in normalize_list(item.get("coop_mode"))) if c]
 
     return {
         "card_type": "demand",
@@ -342,19 +340,19 @@ def format_demand_card(
         "id": item.get("id"),
 
         "title": empty_text(
-            item.get("title")
+            sanitize_text_for_llm(item.get("title"))
         ),
 
         "organization": empty_text(
-            item.get("org_name_snapshot")
+            sanitize_text_for_llm(item.get("org_name_snapshot"))
         ),
 
         "description": empty_text(
-            item.get("description")
+            sanitize_text_for_llm(item.get("description"))
         ),
 
         "region": empty_text(
-            item.get("region")
+            sanitize_text_for_llm(item.get("region"))
         ),
 
         "budget": format_demand_budget(

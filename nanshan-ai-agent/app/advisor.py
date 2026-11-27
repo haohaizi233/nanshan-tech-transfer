@@ -1,6 +1,7 @@
 import re
 
 from app.formatters import normalize_list
+from app.privacy import sanitize_text_for_llm
 
 
 _GUIDES = {
@@ -95,14 +96,14 @@ def local_reply(message: str, resolve_references: bool = True) -> str | None:
 
 def _source_text(value, depth=0) -> str:
     if isinstance(value, str):
-        return value[:2000]
+        return sanitize_text_for_llm(value[:2000])
     if depth > 3 or value is None:
         return ""
     if isinstance(value, list):
         return "；".join(_source_text(item, depth + 1) for item in value[:8])
     if isinstance(value, dict):
         return "；".join(_source_text(item, depth + 1) for item in list(value.values())[:8])
-    return str(value)[:100]
+    return sanitize_text_for_llm(str(value)[:100])
 
 
 def _normalize_analysis(value) -> str | None:
@@ -147,7 +148,9 @@ def grounded_explanation(ranking: dict, item: dict) -> tuple[list[str], str]:
         if quote in _source_text(item.get(entry["field"])) and quote not in evidence:
             evidence.append(quote)
     analysis = _normalize_analysis(ranking.get("analysis"))
-    if not evidence or analysis is None or len(analysis) > 180:
+    if analysis is not None:
+        analysis = sanitize_text_for_llm(analysis)
+    if not evidence or not analysis or len(analysis) > 180:
         return evidence, ""
     if _UNSUPPORTED_PATTERNS.search(analysis):
         return evidence, ""

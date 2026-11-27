@@ -62,24 +62,43 @@ async def lifespan(_: FastAPI):
     # 启动即建池（DB 不可用时降级为空池懒填充，不阻塞本地测试启动）
     init_pool()
     if settings.is_production_like:
-        from modules.security.schema_gate import assert_required_security_schema
+        from modules.security.schema_gate import (
+            assert_required_application_schema,
+            assert_required_security_schema,
+        )
 
         assert_required_security_schema()
+        assert_required_application_schema()
     else:
         try:
-            from modules.security.schema_gate import check_required_security_schema
+            from modules.security.schema_gate import (
+                check_required_application_schema,
+                check_required_security_schema,
+            )
 
             gate = check_required_security_schema()
             if not gate["ok"]:
                 logging.getLogger("nanshan.security.schema_gate").warning(
-                    "本地环境安全 Schema 尚未升级到 %s: missing_columns=%s missing_constraints=%s",
+                    "本地环境安全 Schema 尚未升级到 %s: missing_columns=%s missing_constraints=%s missing_indexes=%s",
                     gate["required_version"],
                     gate["missing_columns"],
                     gate["missing_constraints"],
+                    gate.get("missing_indexes"),
+                )
+            app_gate = check_required_application_schema()
+            if not app_gate["ok"]:
+                logging.getLogger("nanshan.security.schema_gate").warning(
+                    "本地环境应用 Schema 尚未升级到 %s: missing_columns=%s",
+                    app_gate["required_version"],
+                    app_gate["missing_columns"],
                 )
         except Exception:
             pass
+    from modules.security.maintenance import start_security_maintenance, stop_security_maintenance
+
+    start_security_maintenance()
     yield
+    stop_security_maintenance()
     close_pool()
 
 
@@ -424,6 +443,25 @@ def health():
                 "data": {"status": "degraded", "database": "unavailable", "db": False},
             },
         )
+
+
+def _read_build_info() -> dict[str, str]:
+    import os
+
+    from modules.security.schema_gate import REQUIRED_APPLICATION_SCHEMA_VERSION
+
+    return {
+        "applicationVersion": str(settings.APP_VERSION),
+        "gitCommit": os.getenv("GIT_COMMIT", "").strip() or "unknown",
+        "schemaVersion": REQUIRED_APPLICATION_SCHEMA_VERSION,
+        "buildTime": os.getenv("BUILD_TIME", "").strip() or "unknown",
+    }
+
+
+@app.get("/health/version", tags=["health"], summary="脱敏发布版本信息")
+@app.get("/api/health/version", tags=["health"], summary="脱敏发布版本信息")
+def health_version():
+    return {"code": 0, "message": "ok", "data": _read_build_info()}
 
 
 if __name__ == "__main__":
