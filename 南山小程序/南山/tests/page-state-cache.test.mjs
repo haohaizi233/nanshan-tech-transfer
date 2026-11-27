@@ -306,3 +306,31 @@ test('invalidating a group stops the hide hook from laundering its snapshot', ()
   mixin.onHide.call(page)
   assert.equal(readPageState('pages/org-manage/org-manage:list', 'u1', 'list', storage), null)
 })
+
+test('page mixin ignores legacy coverErrored and undeclared fields in persisted storage', () => {
+  const storage = createStorage()
+  writePageState(
+    'pages/achievement-list/achievement-list:list',
+    'u1',
+    'list',
+    {
+      list: [{ id: 1021 }],
+      coverErrored: { 1021: true },
+      extraStaleField: 'should-not-restore',
+      __pageCacheValidatedAt: Date.now(),
+    },
+    storage,
+  )
+  const mixin = createPageStateMixin({
+    route: 'pages/achievement-list/achievement-list',
+    groups: [{ name: 'list', dataClass: 'list', fields: ['list', 'coverErrored'] }],
+    scope: () => 'u1',
+    storage,
+  })
+  const page = { $data: { list: [], coverErrored: {} }, list: [], coverErrored: {} }
+  Object.assign(page, mixin.methods)
+  mixin.onLoad.call(page, {})
+  assert.deepEqual(page.list, [{ id: 1021 }])
+  assert.deepEqual(page.coverErrored, {})
+  assert.equal('extraStaleField' in page, false)
+})

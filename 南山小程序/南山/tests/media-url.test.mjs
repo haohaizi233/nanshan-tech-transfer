@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -28,6 +29,38 @@ test('local host mode still follows the H5 tunnel origin rule', () => {
     ),
     'http://192.168.1.8:8025',
   )
+})
+
+test('same-origin H5 deployment keeps pageLocation.origin so base /h5/ does not rewrite /api/ URLs', () => {
+  const publicLoc = {
+    protocol: 'https:',
+    hostname: 'inanshan.sjhcip.com',
+    port: '',
+    origin: 'https://inanshan.sjhcip.com',
+  }
+  assert.equal(
+    resolveMediaUrl('/api/tech-transfer/v1/files/1486', { appEnv: 'local', hostMode: 'local' }, publicLoc),
+    'https://inanshan.sjhcip.com/api/tech-transfer/v1/files/1486',
+  )
+  assert.equal(
+    mediaDisplayUrl(
+      { url: '/api/tech-transfer/v1/files/1486?variant=thumbnail' },
+      { appEnv: 'production', hostMode: 'local' },
+      '',
+      publicLoc,
+    ),
+    'https://inanshan.sjhcip.com/api/tech-transfer/v1/files/1486?variant=thumbnail',
+  )
+})
+
+test('achievement-list resets coverErrored on refresh, avoids Vue2 $set, and does not cache coverErrored', () => {
+  const src = readFileSync(
+    new URL('../subpackages/tech-transfer/pages/achievement-list/achievement-list.vue', import.meta.url),
+    'utf8',
+  )
+  assert.doesNotMatch(src, /fields:\s*\[[^\]]*coverErrored/)
+  assert.match(src, /if\s*\(reset\)\s*\{[\s\S]*?this\.coverErrored\s*=\s*\{\}/)
+  assert.doesNotMatch(src, /\$set\(this\.coverErrored/)
 })
 
 test('display URL prefers the local temp path and appends access_token for remote files', () => {

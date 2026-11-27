@@ -149,7 +149,7 @@ export default {
   mixins: [createPageStateMixin({
     route: 'pages/achievement-list/achievement-list',
     groups: [
-      { name: 'list', dataClass: 'list', fields: ['keyword', 'activeCategory', 'activeIndustryId', 'list', 'listQuery', 'page', 'pageSize', 'total', 'hasMore', 'coverErrored'] },
+      { name: 'list', dataClass: 'list', fields: ['keyword', 'activeCategory', 'activeIndustryId', 'list', 'listQuery', 'page', 'pageSize', 'total', 'hasMore'] },
       { name: 'dictionary', dataClass: 'dictionary', fields: ['categories', 'industries'] },
     ],
   })],
@@ -228,6 +228,7 @@ export default {
       if (reset) {
         this.page = 1
         this.hasMore = true
+        this.coverErrored = {}
         if (this.listQuery !== query) {
           this.list = []
           this.total = 0
@@ -309,8 +310,8 @@ export default {
       return `${min} 万`
     },
     onCoverError(id) {
-      // 封面加载失败时回退到占位图，避免列表出现碎图（R2-59）
-      this.$set(this.coverErrored, id, true)
+      // 封面加载失败时回退到占位图，避免列表出现碎图（R2-59）；兼容 Vue 3 无 $set
+      this.coverErrored = { ...this.coverErrored, [id]: true }
     },
     openDetail(id) {
       // 需求与成果统一走 dock-detail：该页包含详情、联系方式、对接状态与动作，

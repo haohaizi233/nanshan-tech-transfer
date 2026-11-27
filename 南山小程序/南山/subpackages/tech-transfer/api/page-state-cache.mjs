@@ -11,7 +11,7 @@ export const PAGE_STATE_STALE_RETENTION = 7 * 24 * 60 * 60 * 1000
 
 const VERSION = 1
 const SENSITIVE_KEY = /(token|authorization|password|passwd|secret|credential)/i
-const TRANSIENT_KEY = /^(loading|submitting|saving|uploading|retrying|error|loadError|timer|.*Timer|requestTask|tempFilePath|localFilePath|rawFile)$/i
+const TRANSIENT_KEY = /^(loading|submitting|saving|uploading|retrying|error|loadError|coverErrored|timer|.*Timer|requestTask|tempFilePath|localFilePath|rawFile)$/i
 const TRANSIENT_PATH_KEY = /(?:temp|tmp|local).*(?:path|file)|(?:path|file).*(?:temp|tmp|local)/i
 const pendingWrites = new Map()
 const pageMeta = new WeakMap()
@@ -341,7 +341,12 @@ export function createPageStateMixin({ route, groups = [], cacheKey, scope = get
       meta.scrollTop = Number(value.__pageScrollTop) || meta.scrollTop
       delete value.__pageCacheValidatedAt
       delete value.__pageScrollTop
-      Object.assign(page, value)
+      const allowedFields = new Set(group.fields)
+      const restoredValue = {}
+      for (const [k, v] of Object.entries(value)) {
+        if (allowedFields.has(k) && !TRANSIENT_KEY.test(k)) restoredValue[k] = v
+      }
+      Object.assign(page, restoredValue)
       meta.restored[group.name] = true
       meta.validatedAt[group.name] = validatedAt
       meta.freshUntil[group.name] = group.dataClass === 'draft'
