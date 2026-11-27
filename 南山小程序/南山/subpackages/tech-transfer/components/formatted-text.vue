@@ -4,11 +4,11 @@
     :class="['ft-preview', { 'ft-indent': indent, 'ft-muted': muted }, textClass]"
     :style="{ '-webkit-line-clamp': lines }"
   >{{ previewText }}</text>
-  <view v-else-if="paragraphs.length" class="ft-paragraphs">
+  <view v-else-if="paragraphs.length" :class="['ft-paragraphs', { 'ft-list': mode === 'list' }]">
     <view
       v-for="(para, idx) in paragraphs"
       :key="idx"
-      :class="['ft-paragraph', { 'ft-indent': indent, 'ft-muted': muted }, textClass]"
+      :class="['ft-paragraph', { 'ft-indent': indent && mode !== 'list', 'ft-muted': muted, 'ft-list-row': mode === 'list' }, textClass]"
     >
       <HttpLinkText v-if="linkify" :text="para" @open-link="$emit('open-link', $event)" />
       <text v-else>{{ para }}</text>
@@ -105,5 +105,35 @@ export default {
 
 .ft-muted {
   color: #666666;
+}
+
+.ft-list {
+  padding: 4rpx 20rpx;
+  border: 1rpx solid #e6edf5;
+  border-radius: 12rpx;
+  background: #f6f9fc;
+}
+
+.ft-list-row {
+  position: relative;
+  margin-bottom: 0;
+  padding: 14rpx 0 14rpx 24rpx;
+  color: #405168;
+  text-align: left;
+}
+
+.ft-list-row + .ft-list-row {
+  border-top: 1rpx solid #e6edf5;
+}
+
+.ft-list-row::before {
+  content: '';
+  position: absolute;
+  top: 33rpx;
+  left: 2rpx;
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 50%;
+  background: #2b73f8;
 }
 </style>

@@ -161,7 +161,13 @@
 				</view>
 				<view v-for="section in detail.sections" :key="section.code + section.sortOrder" class="field">
 					<text class="field-label">{{ section.title }}</text>
-					<formatted-text :text="section.content" linkify text-class="field-value field-value-user-text" @open-link="openLink" />
+					<formatted-text
+						:text="section.content"
+						:mode="section.title === '补充说明' ? 'list' : 'paragraphs'"
+						:text-class="section.title === '补充说明' ? '' : 'field-value field-value-user-text'"
+						linkify
+						@open-link="openLink"
+					/>
 				</view>
 				<view v-if="detail.patents && detail.patents.length" class="field">
 					<text class="field-label">关联专利</text>
