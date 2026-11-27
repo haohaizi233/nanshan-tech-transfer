@@ -30,6 +30,7 @@
           <text class="section-title ai-eval-title">AI 智能评估</text>
           <text v-if="latestEval && latestEval.ratingLabel" class="ai-eval-rating">{{ latestEval.ratingLabel }}</text>
         </view>
+        <AiGeneratedMark mode="badge" class="ai-eval-mark" />
         <view v-if="evalLoading" class="ai-eval-loading">
           <view class="ai-spinner"></view>
           <text class="ai-eval-hint">正在获取评估结果…</text>
@@ -183,6 +184,7 @@ import { AI_FEATURE_ENABLED } from '../../../../config/feature-flags.js'
 import { safeNavigateBack } from '../../utils/nav.mjs'
 import FormattedText from '../../components/formatted-text.vue'
 import ContactCard from '../../components/contact-card.vue'
+import AiGeneratedMark from '../../components/ai-generated-mark.vue'
 import { previewImageUrls } from '../../utils/image-preview.mjs'
 
 const PRICING_MODE_LABELS = {
@@ -193,7 +195,7 @@ const PRICING_MODE_LABELS = {
 }
 
 export default {
-  components: { FormattedText, ContactCard },
+  components: { FormattedText, ContactCard, AiGeneratedMark },
   mixins: [createPageStateMixin({
     route: 'pages/achievement-detail/achievement-detail',
     groups: [{ name: 'detail', dataClass: 'detail', fields: ['achId', 'detail'] }],
@@ -661,7 +663,11 @@ export default {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16rpx;
+  margin-bottom: 12rpx;
+}
+
+.ai-eval-mark {
+  margin-bottom: 12rpx;
 }
 
 .ai-eval-title {

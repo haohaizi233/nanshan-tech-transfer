@@ -11,3 +11,7 @@ export const AI_MATCH_NOTICE =
 
 export const AI_EVAL_NOTICE =
   '本页评估结论由人工智能生成，仅供参考，不构成专业建议。'
+
+export const AI_BADGE_CAPTION = '由人工智能生成，仅供参考'
+
+export const AI_FOOTER_NOTICE = '以上内容由人工智能生成，仅供参考，请注意甄别'

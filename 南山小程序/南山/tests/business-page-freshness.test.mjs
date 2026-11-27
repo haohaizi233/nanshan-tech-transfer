@@ -26,6 +26,7 @@ function loadPage(name, overrides = {}) {
     AchievementCardGallery: {},
     FormattedText: {},
     ContactCard: {},
+    AiGeneratedMark: {},
     WechatPrivacyGate: {},
     CAPABILITY_OPTIONS: [],
     getCapitalGroups: () => [],

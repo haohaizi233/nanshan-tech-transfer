@@ -284,6 +284,10 @@
 			</view>
 			<button class="composer__btn" size="mini" :disabled="!canSend" @click="onSend">{{ sendLabel }}</button>
 			</view>
+			<view class="composer__disclosure">
+				<text class="composer__disclosure-tag">AI生成</text>
+				<text class="composer__disclosure-text">{{ footerDisclosure }}</text>
+			</view>
 		</view>
 
 		<AppTabbar active="ai" />
@@ -294,6 +298,7 @@
 <script>
 	import AppTabbar from '../../components/app-tabbar.vue'
 	import AiGeneratedMark from '../../components/ai-generated-mark.vue'
+	import { AI_FOOTER_NOTICE } from '../../api/ai-disclosure.mjs'
 	import { getMyDemands, toDemandCard } from '../../api/demand.js'
 	import {
 		chatWithAgent,
@@ -377,6 +382,7 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	data() {
 		return {
 			aiEnabled: AI_FEATURE_ENABLED,
+			footerDisclosure: AI_FOOTER_NOTICE,
 			messages: [createWelcomeMessage()],
 			suggestions: getChatSuggestions(),
 			cardViewCounts: {},
@@ -2247,8 +2253,34 @@ const _chatMemoryCache = new Map()  // scope -> { messages, pendingQueue, inputT
 	.composer__hint {
 		display: block;
 		margin-bottom: 10rpx;
+		font-size: 22rpx;
+		color: #64748b;
+	}
+
+	.composer__disclosure {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-top: 10rpx;
+	}
+
+	.composer__disclosure-tag {
+		flex-shrink: 0;
+		padding: 2rpx 10rpx;
+		border-radius: 6rpx;
+		background: #eaf2ff;
+		color: #1d5fe6;
 		font-size: 20rpx;
-		color: #999999;
+		font-weight: 700;
+		line-height: 1.4;
+	}
+
+	.composer__disclosure-text {
+		margin-left: 8rpx;
+		font-size: 22rpx;
+		color: #64748b;
+		line-height: 1.4;
 	}
 
 	.composer__row {

@@ -46,6 +46,7 @@ function createPage(storage = {}, overrides = {}) {
     AI_FEATURE_ENABLED,
     AppTabbar: {},
     AiGeneratedMark: {},
+    AI_FOOTER_NOTICE: '以上内容由人工智能生成，仅供参考，请注意甄别',
     uni: store,
     async getChatHistory() { throw new Error('History service unavailable') },
     ...overrides,
