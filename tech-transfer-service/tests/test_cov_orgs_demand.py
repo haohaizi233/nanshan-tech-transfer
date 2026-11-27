@@ -2261,6 +2261,31 @@ class TestFileAccess:
         assert name == "a.png"
 
     @patch("modules.file.service.get_cursor")
+    def test_get_uploaded_file_inventor_avatar_public_ok(self, mock_gc, tmp_path):
+        media = tmp_path / "media"
+        media.mkdir()
+        key = "32/avatar.jpg"
+        fpath = media / key
+        fpath.parent.mkdir(parents=True)
+        fpath.write_bytes(_png_bytes())
+        cur = _cur_seq(
+            _fat(id=1487, storage_key=key, original_name="avatar.jpg", mime_type="image/jpeg", created_by=32),
+            {"1": 1},  # inventor.avatar_file_id readability check passes
+        )
+        _gc(mock_gc, cur)
+        from modules.file.service import get_uploaded_file
+
+        with patch("modules.file.service.settings") as mock_settings:
+            mock_settings.media_root_path = media
+            _path, mime, name = get_uploaded_file(1487, None)
+        assert (mime, name) == ("image/jpeg", "avatar.jpg")
+        sql, params = cur.execute.call_args_list[1].args
+        assert "inventor inv" in sql
+        assert "achievement_inventor ai" in sql
+        assert "inv.avatar_file_id = %s" in sql
+        assert len(params) == 18
+
+    @patch("modules.file.service.get_cursor")
     def test_get_uploaded_file_forbidden(self, mock_gc, tmp_path):
         media = tmp_path / "media"
         media.mkdir()

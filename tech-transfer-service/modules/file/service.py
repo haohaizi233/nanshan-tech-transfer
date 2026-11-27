@@ -245,9 +245,28 @@ def get_uploaded_file(
                         WHERE user_id = %s AND role = 'admin' AND status = 'active'
                     ))
                 )
+                UNION ALL
+                SELECT 1 FROM inventor inv
+                JOIN achievement_inventor ai ON ai.inventor_id = inv.id
+                JOIN achievement a ON a.id = ai.achievement_id AND a.deleted_at IS NULL
+                WHERE inv.avatar_file_id = %s AND (
+                    a.status = 'published'
+                    OR (%s IS NOT NULL AND a.owner_user_id = %s)
+                    OR %s
+                    OR (%s IS NOT NULL AND a.org_id IN (
+                        SELECT org_id FROM organization_membership
+                        WHERE user_id = %s AND role = 'admin' AND status = 'active'
+                    ))
+                )
                 LIMIT 1
                 """,
                 (
+                    file_id,
+                    user_id,
+                    user_id,
+                    can_review_import_media,
+                    user_id,
+                    user_id,
                     file_id,
                     user_id,
                     user_id,
