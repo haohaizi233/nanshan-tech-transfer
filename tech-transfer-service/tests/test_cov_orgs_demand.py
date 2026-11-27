@@ -2197,6 +2197,27 @@ class TestFileThumbnail:
             thumb, _mime = get_uploaded_thumbnail(src, "image/png", 4)
         assert thumb.exists()
 
+    def test_card_thumbnail_trims_blank_edges_and_keeps_chart_marks(self, tmp_path):
+        from PIL import Image, ImageDraw
+
+        from modules.file.service import _write_thumbnail
+
+        source = tmp_path / "chart.png"
+        target = tmp_path / "card.jpg"
+        image = Image.new("RGBA", (180, 140))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((12, 10, 167, 129), fill="white")
+        draw.rectangle((28, 22, 137, 117), fill=(10, 40, 150))
+        draw.rectangle((149, 23, 153, 112), fill=(195, 32, 30))
+        image.save(source)
+
+        _write_thumbnail(source, target, card_preview=True)
+        with Image.open(target) as card:
+            assert card.width < 150 and card.height < 120
+            assert any(red > 120 and green < 90 and blue < 90 for red, green, blue in card.getdata())
+        with Image.open(source) as original:
+            assert original.size == (180, 140)
+
     def test_get_thumbnail_bad_image(self, tmp_path):
         from modules.file.service import get_uploaded_thumbnail
 

@@ -2370,6 +2370,17 @@ components:
         title: { type: string }
         orgName: { type: [string, 'null'] }
         categoryName: { type: [string, 'null'] }
+        previewImages:
+          type: array
+          description: 成果列表预览图片，封面优先，最多三张
+          maxItems: 3
+          items:
+            type: object
+            required: [fileId, url, thumbnailUrl]
+            properties:
+              fileId: { type: integer, format: int64 }
+              url: { type: string }
+              thumbnailUrl: { type: string }
         maturityLevel: { $ref: '#/components/schemas/MaturityLevel' }
         maturityDesc: { type: [string, 'null'] }
         pricingMode: { $ref: '#/components/schemas/PricingMode' }

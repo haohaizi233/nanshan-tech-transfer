@@ -129,7 +129,9 @@ test('achievement preview cards use the API thumbnail rather than fetching a cov
   assert.match(list, /coverDisplayUrl\(item\.cover\)/)
   assert.match(list, /thumbnailUrl \|\| cover\.url/)
   assert.match(service, /thumbnailUrl/)
-  assert.match(service, /variant=thumbnail/)
+  // _list_image 统一以 ?variant=<variant> 拼出缩略图地址，封面默认 variant="thumbnail"。
+  assert.match(service, /variant="thumbnail"/)
+  assert.match(service, /variant=\{variant\}/)
 })
 
 test('achievement price helper never invents negotiable pricing for absent data', () => {

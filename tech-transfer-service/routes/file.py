@@ -129,11 +129,14 @@ def get_uploaded(request: Request, file_id: int, variant: str = "", user: dict =
         can_review_import_media=can_review_import_media,
     )
     if variant:
-        if variant != "thumbnail":
+        if variant not in ("thumbnail", "card-preview"):
             from core.errors import bad_request
 
             raise bad_request("不支持的文件变体")
-        path, mime = get_uploaded_thumbnail(path, mime, file_id)
+        if variant == "card-preview":
+            path, mime = get_uploaded_thumbnail(path, mime, file_id, card_preview=True)
+        else:
+            path, mime = get_uploaded_thumbnail(path, mime, file_id)
     # access_token 经 query 串传递是小程序 <image> 无法设置请求头的折中方案。
     # 已知风险：token 可能出现在 Referer/服务端日志。短期缓解：禁止缓存；
     # 中期应改为短期签名 URL（HMAC + 过期），届时移除 query access_token。

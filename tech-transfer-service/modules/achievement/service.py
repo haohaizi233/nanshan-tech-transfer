@@ -11,6 +11,7 @@ Architecture source: 04-backend-domain-design.md §4.5, 05-data-model-design.md 
 
 import json
 
+from config import settings
 from core.contact_validation import validate_email, validate_phone
 from core.cooperation_capacity import normalize_cooperation_capacity
 from core.errors import (
@@ -94,6 +95,11 @@ def _parse_page_args(args):
     return page, page_size, keyword, category, maturity, industry_id
 
 
+def _list_image(file_id, variant="thumbnail"):
+    url = f"{settings.MEDIA_BASE_URL.rstrip('/')}/{file_id}"
+    return {"fileId": file_id, "url": url, "thumbnailUrl": f"{url}?variant={variant}"}
+
+
 def _row_to_list_item(row, user_id=None):
     fields = row.get("application_fields")
     if fields and isinstance(fields, str):
@@ -131,15 +137,8 @@ def _row_to_list_item(row, user_id=None):
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
         "isMine": user_id is not None and row.get("owner_user_id") == user_id,
         "platformAssisted": row.get("owner_user_id") is None,
-        "cover": (
-            {
-                "fileId": cover_id,
-                "url": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}",
-                "thumbnailUrl": f"{__import__('config').settings.MEDIA_BASE_URL.rstrip('/')}/{cover_id}?variant=thumbnail",
-            }
-            if cover_id
-            else None
-        ),
+        "cover": _list_image(cover_id) if cover_id else None,
+        "previewImages": [_list_image(file_id, "card-preview") for file_id in (row.get("preview_file_ids") or [])],
     }
 
 
@@ -188,7 +187,16 @@ def list_achievements(args, user_id=None):
                COALESCE((SELECT jsonb_agg(jsonb_build_object('id',i.id,'code',i.code,'name',i.name,'parentId',i.parent_id) ORDER BY ai.sort_order,ai.id)
                          FROM achievement_industry ai JOIN industry i ON i.id=ai.industry_id AND i.enabled
                          WHERE ai.achievement_id=a.id), '[]'::jsonb) AS industries,
-               (SELECT am.file_id FROM achievement_media am JOIN file_object fo ON fo.id=am.file_id AND fo.status='active' WHERE am.achievement_id=a.id AND am.media_role='cover' ORDER BY am.sort_order,am.id LIMIT 1) AS cover_file_id
+               (SELECT am.file_id FROM achievement_media am JOIN file_object fo ON fo.id=am.file_id AND fo.status='active' WHERE am.achievement_id=a.id AND am.media_role='cover' ORDER BY am.sort_order,am.id LIMIT 1) AS cover_file_id,
+               ARRAY(SELECT am.file_id
+                     FROM achievement_media am
+                     JOIN file_object fo ON fo.id=am.file_id AND fo.status='active'
+                     WHERE am.achievement_id=a.id AND fo.mime_type LIKE 'image/%%'
+                       AND am.media_role IN ('cover', 'gallery', 'diagram', 'product')
+                     GROUP BY am.file_id
+                     ORDER BY MIN(CASE WHEN am.media_role='cover' THEN 0 ELSE 1 END),
+                              MIN(am.sort_order), MIN(am.id)
+                     LIMIT 3) AS preview_file_ids
         FROM achievement a
         LEFT JOIN achievement_category c ON a.category_id=c.id
         LEFT JOIN institution o ON a.org_id=o.id

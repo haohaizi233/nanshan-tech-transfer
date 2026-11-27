@@ -142,6 +142,15 @@ def _gc(cur):
 
 
 class TestListAchievements:
+    def test_list_image_urls_use_preview_order_and_keep_the_legacy_cover(self):
+        from modules.achievement.service import _row_to_list_item
+
+        item = _row_to_list_item(_row(cover_file_id=9, preview_file_ids=[9, 6, 7]))
+        assert item["cover"]["fileId"] == 9
+        assert [image["fileId"] for image in item["previewImages"]] == [9, 6, 7]
+        assert item["cover"]["thumbnailUrl"].endswith("/9?variant=thumbnail")
+        assert item["previewImages"][1]["thumbnailUrl"].endswith("/6?variant=card-preview")
+
     @patch("modules.achievement.service.get_cursor")
     def test_list_with_all_filters(self, mock_gc):
         cur = _cur()

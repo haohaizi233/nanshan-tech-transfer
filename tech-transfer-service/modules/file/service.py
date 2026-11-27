@@ -20,7 +20,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageOps
 
 from config import settings
 from core.errors import bad_request, forbidden, not_found
@@ -122,10 +122,41 @@ def _image_dimensions(suffix: str, data: bytes) -> tuple[int | None, int | None]
         return None, None
 
 
-def _write_thumbnail(source: Path, target: Path) -> None:
+def _trim_card_border(image: Image.Image) -> Image.Image:
+    """裁去透明外边及连续近白边，保留图例、刻度和少量安全边距。"""
+    rgba = image.convert("RGBA")
+    bounds = rgba.getchannel("A").getbbox()
+    if bounds:
+        rgba = rgba.crop(bounds)
+    rgba.thumbnail((640, 640), Image.Resampling.LANCZOS)
+    white = Image.new("RGBA", rgba.size, "white")
+    rgb = Image.alpha_composite(white, rgba).convert("RGB")
+    red, green, blue = rgb.split()
+    darkest = ImageChops.darker(ImageChops.darker(red, green), blue)
+    content = darkest.point(lambda value: 255 if value < 248 else 0).getbbox()
+    if not content:
+        return rgb
+
+    width, height = rgb.size
+    left, top, right, bottom = content
+    margin = 2
+    return rgb.crop(
+        (
+            min(max(0, left - margin), width // 8),
+            min(max(0, top - margin), height // 8),
+            max(min(width, right + margin), width - width // 8),
+            max(min(height, bottom + margin), height - height // 8),
+        )
+    )
+
+
+def _write_thumbnail(source: Path, target: Path, *, card_preview: bool = False) -> None:
     """生成列表专用 JPEG 缩略图；调用方负责缓存键和权限校验。"""
     with Image.open(source) as image:
-        image.thumbnail((320, 320), Image.Resampling.LANCZOS)
+        if card_preview:
+            image = _trim_card_border(ImageOps.exif_transpose(image))
+        else:
+            image.thumbnail((320, 320), Image.Resampling.LANCZOS)
         if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
             background = Image.new("RGB", image.size, "white")
             alpha = image.getchannel("A") if image.mode in ("RGBA", "LA") else image.convert("RGBA").getchannel("A")
@@ -142,19 +173,20 @@ def _write_thumbnail(source: Path, target: Path) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def thumbnail_path_for_file(file_id: int) -> Path:
-    return settings.media_root_path / ".thumbnails" / f"{int(file_id)}.jpg"
+def thumbnail_path_for_file(file_id: int, *, card_preview: bool = False) -> Path:
+    suffix = "-card-v1" if card_preview else ""
+    return settings.media_root_path / ".thumbnails" / f"{int(file_id)}{suffix}.jpg"
 
 
-def get_uploaded_thumbnail(path: Path, mime: str, file_id: int) -> tuple[Path, str]:
+def get_uploaded_thumbnail(path: Path, mime: str, file_id: int, *, card_preview: bool = False) -> tuple[Path, str]:
     """返回缓存缩略图。非图片明确拒绝，避免以缩略图接口读取附件。"""
     if not (mime or "").startswith("image/"):
         raise bad_request("仅图片支持缩略图")
-    thumbnail = thumbnail_path_for_file(file_id)
+    thumbnail = thumbnail_path_for_file(file_id, card_preview=card_preview)
     try:
         stale = not thumbnail.exists() or thumbnail.stat().st_mtime_ns < path.stat().st_mtime_ns
         if stale:
-            _write_thumbnail(path, thumbnail)
+            _write_thumbnail(path, thumbnail, card_preview=card_preview)
     except (OSError, ValueError, Image.UnidentifiedImageError):
         raise bad_request("图片缩略图生成失败")
     return thumbnail, "image/jpeg"
@@ -336,6 +368,7 @@ def delete_uploaded_file(file_id: int, user_id: int) -> None:
         )
     (settings.media_root_path / row["storage_key"]).unlink(missing_ok=True)
     thumbnail_path_for_file(file_id).unlink(missing_ok=True)
+    thumbnail_path_for_file(file_id, card_preview=True).unlink(missing_ok=True)
 
 
 def proxy_file(file_id: str) -> tuple[Path, str]:
