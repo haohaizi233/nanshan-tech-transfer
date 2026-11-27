@@ -125,9 +125,12 @@ def test_recovery_e2e_otp_and_link_complete_and_headers(_e2e_env):
         patch("modules.security.email_gateway.get_cursor") as mock_em_gc,
         patch("modules.security.email_gateway._engine") as em_eng,
         patch("modules.security.email_gateway.audit_record"),
+        patch("modules.security.email_gateway._verify_email_worker_ownership"),
+        patch("modules.security.email_gateway.claim_send_execution_right") as claim_send,
     ):
         em_eng.return_value.check_request.return_value = RiskDecision(DecisionAction.ALLOW)
         em_eng.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
+        claim_send.return_value.outcome = "transitioned"
         mock_sms_gc.return_value.__enter__.return_value = cur
         mock_em_gc.return_value.__enter__.return_value = cur
         r_start = client.post(

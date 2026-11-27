@@ -9,7 +9,6 @@ from core.errors import (
     TT_INST_40901,
     BizError,
 )
-from core.pagination import parse_page_args
 from db import get_cursor
 from modules.admin.schemas import (
     INST_KINDS,
@@ -47,7 +46,15 @@ INST_EDITABLE = {
 
 
 def _page_args(args, default_size=20, max_size=100):
-    return parse_page_args(args, default_size=default_size, max_size=max_size)
+    try:
+        page = max(1, int(args.get("page") or 1))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        page_size = max(1, min(max_size, int(args.get("pageSize") or default_size)))
+    except (ValueError, TypeError):
+        page_size = default_size
+    return page, page_size
 
 
 def _page_of(rows, page, page_size, total, fn):

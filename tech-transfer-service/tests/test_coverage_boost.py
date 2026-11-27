@@ -276,7 +276,7 @@ class TestAdminDashboardFixed:
         result = notification_summary({"orgIds": [1]})
         assert isinstance(result, dict)
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.audit.get_cursor")
     def test_list_audit_logs(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = {"c": 0}
@@ -290,7 +290,7 @@ class TestAdminDashboardFixed:
         assert result["total"] == 0
         assert "list" in result
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.audit.get_cursor")
     def test_list_audit_logs_with_filters(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = {"c": 1}
@@ -317,7 +317,7 @@ class TestAdminDashboardFixed:
 
 
 class TestAdminInstitutionsFixed:
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_list_institutions_admin_empty(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = {"c": 0}
@@ -330,7 +330,7 @@ class TestAdminInstitutionsFixed:
         assert isinstance(result, dict)
         assert result["total"] == 0
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_list_institutions_admin_with_filters(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = {"c": 1}
@@ -356,7 +356,7 @@ class TestAdminInstitutionsFixed:
         result = list_institutions_admin({"kind": "enterprise", "status": "active", "keyword": "测试"})
         assert result["total"] == 1
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_get_institution_admin_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = {
@@ -380,7 +380,7 @@ class TestAdminInstitutionsFixed:
         assert isinstance(result, dict)
         assert result["id"] == 1
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_get_institution_admin_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
@@ -623,7 +623,7 @@ class TestAdminInstitutionCrud:
         with pytest.raises(BizError):
             create_institution({"userId": 1, "userNo": "U001"}, {"name": ""})
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_update_institution_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
@@ -635,7 +635,7 @@ class TestAdminInstitutionCrud:
         with pytest.raises(BizError):
             update_institution({"userId": 1, "userNo": "U001"}, 999, {"name": "test", "kind": "enterprise"})
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_set_institution_status_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
@@ -647,7 +647,7 @@ class TestAdminInstitutionCrud:
         with pytest.raises(BizError):
             set_institution_status({"userId": 1, "userNo": "U001"}, 999, "enable")
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_delete_institution_not_found(self, mock_gc):
         cur = MagicMock()
         cur.fetchone.return_value = None
@@ -680,8 +680,8 @@ class TestAdminInstitutionCrud:
         result = _normalize_import_item({"name": "测试机构", "kind": "service"})
         assert isinstance(result, dict)
 
-    @patch("modules.admin.service.audit_record")
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.audit_record")
+    @patch("modules.admin.institutions.get_cursor")
     def test_import_institutions_returns_canonical_rows_for_row_refresh(self, mock_gc, _mock_audit):
         cur = MagicMock()
         cur.fetchone.side_effect = [None, {"id": 42}]

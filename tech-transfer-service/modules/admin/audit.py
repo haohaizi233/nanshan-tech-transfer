@@ -6,9 +6,15 @@ from db import get_cursor
 
 
 def _page_args(args, default_size=20, max_size=100):
-    from core.pagination import parse_page_args
-
-    return parse_page_args(args, default_size=default_size, max_size=max_size)
+    try:
+        page = max(1, int(args.get("page") or 1))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        page_size = max(1, min(max_size, int(args.get("pageSize") or default_size)))
+    except (ValueError, TypeError):
+        page_size = default_size
+    return page, page_size
 
 
 def list_audit_logs(args) -> dict:

@@ -231,7 +231,7 @@ class TestReviewAndOffline:
 
 
 class TestInstitutionAdmin:
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_list_institutions_admin(self, mock_gc):
         from modules.admin.service import list_institutions_admin
 
@@ -249,7 +249,7 @@ class TestInstitutionAdmin:
         assert item["serialNo"] == 8
         assert item["logoUrl"] == ""
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_get_institution_admin(self, mock_gc):
         from modules.admin.service import get_institution_admin
 
@@ -263,7 +263,7 @@ class TestInstitutionAdmin:
         assert result["platformTypeKey"] == "poc"
         assert result["createdAt"] == _TS.isoformat()
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_create_institution(self, mock_gc):
         from modules.admin.service import create_institution
 
@@ -278,7 +278,7 @@ class TestInstitutionAdmin:
         sqls = [c.args[0] for c in cur.execute.call_args_list]
         assert any("INSERT INTO institution" in s for s in sqls)
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_update_institution(self, mock_gc):
         from modules.admin.service import update_institution
 
@@ -292,7 +292,7 @@ class TestInstitutionAdmin:
         assert update_calls
         assert list(update_calls[0].args[1]) == ["新简介", 101]
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_set_institution_status(self, mock_gc):
         from modules.admin.service import set_institution_status
 
@@ -303,7 +303,7 @@ class TestInstitutionAdmin:
 
         assert result == {"status": "disabled"}
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_import_institutions_update_branch(self, mock_gc):
         from modules.admin.service import import_institutions
 
@@ -325,7 +325,7 @@ class TestInstitutionAdmin:
         assert result["list"][0]["id"] == 7
         assert result["list"][0]["name"] == "资本方"
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_delete_institution(self, mock_gc):
         from modules.admin.service import delete_institution
 

@@ -392,7 +392,7 @@ class TestAdminServiceDashboard:
         result = notification_summary({"isPlatformAdmin": True})
         assert isinstance(result, dict)
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.audit.get_cursor")
     def test_list_audit_logs(self, mock_gc):
         cur = _mock_cursor(fetchone_val={"c": 0}, fetchall_val=[])
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
@@ -404,7 +404,7 @@ class TestAdminServiceDashboard:
 
 
 class TestAdminServiceInstitutions:
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_list_institutions_admin(self, mock_gc):
         cur = _mock_cursor(fetchone_val={"c": 0}, fetchall_val=[])
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
@@ -414,7 +414,7 @@ class TestAdminServiceInstitutions:
         result = list_institutions_admin({"page": "1", "pageSize": "10"})
         assert isinstance(result, dict)
 
-    @patch("modules.admin.service.get_cursor")
+    @patch("modules.admin.institutions.get_cursor")
     def test_get_institution_admin(self, mock_gc):
         cur = _mock_cursor(fetchone_val=None)
         mock_gc.return_value.__enter__ = MagicMock(return_value=cur)
