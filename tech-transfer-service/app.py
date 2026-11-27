@@ -464,6 +464,106 @@ def health_version():
     return {"code": 0, "message": "ok", "data": _read_build_info()}
 
 
+@app.get("/health/live", tags=["health"], summary="存活探针（Liveness）")
+@app.get("/api/health/live", tags=["health"], summary="存活探针（Liveness）")
+def health_live():
+    return {"code": 0, "message": "ok", "data": {"status": "alive"}}
+
+
+@app.get("/health/ready", tags=["health"], summary="就绪探针（Readiness：DB + Schema + Redis）")
+@app.get("/api/health/ready", tags=["health"], summary="就绪探针（Readiness：DB + Schema + Redis）")
+def health_ready():
+    checks: dict[str, str] = {"database": "unknown", "schema": "unknown", "redis": "skipped"}
+    ok = True
+    try:
+        with get_cursor() as cur:
+            cur.execute("SELECT 1")
+            checks["database"] = "ok"
+            from modules.security.schema_gate import (
+                check_required_application_schema,
+                check_required_security_schema,
+            )
+
+            sec_gate = check_required_security_schema(cur)
+            app_gate = check_required_application_schema(cur)
+            checks["schema"] = "ok" if (sec_gate["ok"] and app_gate["ok"]) else "mismatch"
+            if checks["schema"] != "ok":
+                ok = False
+    except Exception:
+        checks["database"] = "unavailable"
+        ok = False
+
+    if getattr(settings, "REDIS_ENABLED", False):
+        try:
+            import redis as redis_lib
+
+            r = redis_lib.Redis.from_url(
+                settings.REDIS_URL, protocol=2, decode_responses=True, socket_connect_timeout=1.0
+            )
+            checks["redis"] = "ok" if r.ping() else "unavailable"
+        except Exception:
+            checks["redis"] = "unavailable"
+        if checks["redis"] != "ok":
+            ok = False
+
+    if not ok:
+        return JSONResponse(status_code=503, content={"code": 1, "message": "not ready", "data": checks})
+    return {"code": 0, "message": "ok", "data": checks}
+
+
+@app.get("/health/deps", tags=["health"], summary="依赖与 Worker 健康详情（需管理员或内部密钥）")
+@app.get("/api/health/deps", tags=["health"], summary="依赖与 Worker 健康详情（需管理员或内部密钥）")
+def health_deps(request: Request):
+    import hmac
+    import os
+
+    internal_key = (os.getenv("INTERNAL_HEALTH_KEY") or "").strip()
+    supplied = (request.headers.get("X-Internal-Health-Key") or "").strip()
+    authorized = bool(internal_key and supplied and hmac.compare_digest(supplied, internal_key))
+    if not authorized and not settings.is_local:
+        from core.errors import TT_COMMON_40101, BizError
+
+        code, _, status = TT_COMMON_40101
+        raise BizError(code, "需要内部健康检查凭据", status)
+
+    from modules.security.maintenance import get_security_maintenance_status
+
+    storage_writable = False
+    try:
+        media_root = settings.media_root_path
+        media_root.mkdir(parents=True, exist_ok=True)
+        probe = media_root / ".health_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        storage_writable = True
+    except Exception:
+        storage_writable = False
+
+    ai_status = "unconfigured"
+    ai_base = str(getattr(settings, "AI_AGENT_BASE", "") or "").strip()
+    if ai_base:
+        try:
+            req = urllib.request.Request(f"{ai_base.rstrip('/')}/health", method="GET")
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                ai_status = "ok" if resp.status == 200 else f"http_{resp.status}"
+        except Exception:
+            ai_status = "unreachable"
+
+    ready_resp = health_ready()
+    ready_data = ready_resp["data"] if isinstance(ready_resp, dict) else {"status": "degraded"}
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "dependencies": ready_data,
+            "aiAgent": ai_status,
+            "storageWritable": storage_writable,
+            "securityMaintenance": get_security_maintenance_status(),
+            "version": _read_build_info(),
+        },
+    }
+
+
 if __name__ == "__main__":
     assert_environment()
     import uvicorn

@@ -12,13 +12,38 @@ from core.errors import (
 from core.pagination import parse_page_args
 from db import get_cursor
 from modules.admin.schemas import (
-    INST_EDITABLE,
     INST_KINDS,
-    INST_STATUSES,
     PLATFORM_TYPE_KEYS,
-    PLATFORM_TYPE_LABELS,
 )
 from modules.audit.service import record as audit_record
+
+INST_STATUSES = ("active", "disabled")
+PLATFORM_TYPE_LABELS = {
+    "poc": "概念验证中心",
+    "pilot": "中小试基地",
+    "other": "其他",
+}
+
+INST_EDITABLE = {
+    "name": "name",
+    "region": "region",
+    "intro": "intro",
+    "detailInfo": "detail_info",
+    "label": "label",
+    "logoFileId": "logo_file_id",
+    "sortOrder": "sort_order",
+    "userType": "user_type",
+    "detailActivityId": "detail_activity_id",
+    "platformType": "platform_type",
+    "platformTypeKey": "platform_type_key",
+    "unit": "support_unit",
+    "functionText": "functions",
+    "contact": "contact_person",
+    "phone": "contact_mobile",
+    "serialNo": "serial_no",
+    "sourceStatus": "source_status",
+    "orderNum": "order_num",
+}
 
 
 def _page_args(args, default_size=20, max_size=100):

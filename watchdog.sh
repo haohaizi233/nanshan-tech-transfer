@@ -1,54 +1,53 @@
 #!/bin/bash
 set -eo pipefail
 
-PYTHON="/Users/mac/.pyenv/versions/py313/bin/python3"
-FRPC="/opt/homebrew/bin/frpc"
-FRPC_CONF="/Users/mac/Desktop/frp_0.71.0_windows_amd64/frp_0.71.0_windows_amd64/frpc.toml"
-PG_ISREADY="/opt/homebrew/bin/pg_isready"
-CHECK_INTERVAL=10
-EXTERNAL_CHECK_INTERVAL=300  # 5分钟
-LOG_DIR="/Users/mac/nanshan-logs"
-mkdir -p "$LOG_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${NANSHAN_PROJECT_ROOT:-$SCRIPT_DIR}"
+[ -f "${PROJECT_ROOT}/.env" ] && set -a && . "${PROJECT_ROOT}/.env" && set +a
 
-# 服务列表：name|port|workdir|cmd|health_type
-SERVICES="postgres|5432|/|pg_check|pg
-nanshan-backend|8787|/Users/mac/Desktop/南山小程序/tech-transfer-service|$PYTHON -m uvicorn app:app --host 127.0.0.1 --port 8787|http
-nanshan-ai|8001|/Users/mac/Desktop/南山小程序/nanshan-ai-agent|$PYTHON -m uvicorn app.main:app --host 127.0.0.1 --port 8001|http
-stock-api|8007|/Users/mac/Desktop/ai_stock/ai_stock/stock_api|$PYTHON -m uvicorn main:app --host 127.0.0.1 --port 8007|http"
+PYTHON="${NANSHAN_PYTHON:-python3}"
+FRPC="${FRPC_BIN:-frpc}"
+FRPC_CONF="${FRPC_CONF:-}"
+PG_ISREADY="${PG_ISREADY_BIN:-pg_isready}"
+CHECK_INTERVAL="${WATCHDOG_CHECK_INTERVAL:-10}"
+EXTERNAL_CHECK_INTERVAL="${WATCHDOG_EXTERNAL_CHECK_INTERVAL:-300}"
+LOG_DIR="${NANSHAN_LOG_DIR:-${PROJECT_ROOT}/logs}"
+PID_DIR="${NANSHAN_PID_DIR:-${PROJECT_ROOT}/.pids}"
+mkdir -p "$LOG_DIR" "$PID_DIR"
 
-# 外部接口列表：name|url|check_type
-EXTERNAL_SERVICES="patent-api|http://43.138.138.200:8081/docs|http
-external-ai|http://43.138.138.200:8588/v1/models|http|x-api-key: 8588"
+MAIN_PORT="${PORT:-8787}"
+AI_AGENT_PORT="${AI_AGENT_PORT:-8001}"
+PG_HOST="${DB_HOST:-127.0.0.1}"
+PG_PORT="${DB_PORT:-5432}"
 
-# 启动服务
+# 服务列表：name|port|workdir|cmd|health_type（仅管理南山科转通自身服务，禁止混入无关项目）
+SERVICES="postgres|${PG_PORT}|/|pg_check|pg
+nanshan-backend|${MAIN_PORT}|${PROJECT_ROOT}/tech-transfer-service|$PYTHON -m uvicorn app:app --host 127.0.0.1 --port ${MAIN_PORT}|http
+nanshan-ai|${AI_AGENT_PORT}|${PROJECT_ROOT}/nanshan-ai-agent|$PYTHON -m uvicorn app.main:app --host 127.0.0.1 --port ${AI_AGENT_PORT}|http"
+
+# 外部接口列表：可通过环境变量 EXTERNAL_SERVICES 注入
+EXTERNAL_SERVICES="${EXTERNAL_SERVICES:-}"
+
+# 启动服务（基于 PID 文件管理，严禁按端口号强杀未知进程）
 start_service() {
     local name=$1 port=$2 workdir=$3 cmd=$4 health_type=$5
-    
+    local pid_file="${PID_DIR}/${name}.pid"
+
     if [[ "$name" == "postgres" ]]; then
-        if ! $PG_ISREADY -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-            echo "[$(date)] 启动 PostgreSQL..."
-            brew services start postgresql@18 2>/dev/null || true
-            sleep 3
+        if ! $PG_ISREADY -h "$PG_HOST" -p "$PG_PORT" >/dev/null 2>&1; then
+            echo "[$(date)] PostgreSQL (${PG_HOST}:${PG_PORT}) 未就绪，请检查系统服务"
         fi
         return
     fi
-    
-    if lsof -i :$port -t >/dev/null 2>&1; then return; fi
-    
-    # 清理残留进程（防止端口冲突）
-    local old_pid
-    old_pid=$(lsof -i :$port -t 2>/dev/null || true)
-    if [[ -n "$old_pid" ]]; then
-        echo "[$(date)] 清理残留进程: $name (PID=$old_pid)"
-        kill $old_pid 2>/dev/null || true
-        sleep 2
+
+    if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+        return
     fi
-    
+
     echo "[$(date)] 启动 $name (port $port)..."
     cd "$workdir"
     $cmd >> "$LOG_DIR/${name}.log" 2>&1 &
-    echo $! > "$LOG_DIR/${name}.pid"
-    # 记录启动时间（用于宽限期检查）
+    echo $! > "$pid_file"
     date +%s > "$LOG_DIR/${name}_start_time"
 }
 

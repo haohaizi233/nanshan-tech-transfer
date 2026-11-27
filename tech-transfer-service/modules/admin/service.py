@@ -632,7 +632,7 @@ def soft_delete_demand_admin(scope: dict, demand_id: int, request_id=None) -> di
 
 
 # ── 审计日志查询 ─────────────────────────────────────────────
-
+from modules.admin.audit import list_audit_logs as list_audit_logs
 
 # ── helpers ──────────────────────────────────────────────────
 
@@ -1009,7 +1009,39 @@ def dashboard_trend(days) -> dict:
 
 
 # ── P0-2 Institution 管理端 ─────────────────────────────────
-
+from modules.admin.institutions import (
+    _inst_admin_item as _inst_admin_item,
+)
+from modules.admin.institutions import (
+    _normalize_import_item as _normalize_import_item,
+)
+from modules.admin.institutions import (
+    _to_int_or_none as _to_int_or_none,
+)
+from modules.admin.institutions import (
+    _validate_inst_payload as _validate_inst_payload,
+)
+from modules.admin.institutions import (
+    create_institution as create_institution,
+)
+from modules.admin.institutions import (
+    delete_institution as delete_institution,
+)
+from modules.admin.institutions import (
+    get_institution_admin as get_institution_admin,
+)
+from modules.admin.institutions import (
+    import_institutions as import_institutions,
+)
+from modules.admin.institutions import (
+    list_institutions_admin as list_institutions_admin,
+)
+from modules.admin.institutions import (
+    set_institution_status as set_institution_status,
+)
+from modules.admin.institutions import (
+    update_institution as update_institution,
+)
 
 # ── P0-3 Cooperation 管理端（READ ONLY + 平台协助运营操作走 cooperation 模块） ──
 
