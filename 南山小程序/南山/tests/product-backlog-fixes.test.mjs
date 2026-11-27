@@ -36,6 +36,8 @@ test('home and dock-detail hide gray meta strips when location/budget/source are
   assert.match(dock, /v-if="detail\.company \|\| detail\.location"/)
   assert.match(dock, /v-if="detail\.budget \|\| detail\.deadline"/)
   assert.match(dock, /v-if="detail\.source" class="meta-row"/)
+  assert.match(dock, /\.meta-full\s*\{[^}]*flex-direction:\s*row/)
+  assert.match(dock, /\.meta-full\s+\.meta-value-row\s*\{[^}]*flex-wrap:\s*nowrap/)
 })
 
 test('search achievements fall back to the public list when keyword is empty', () => {

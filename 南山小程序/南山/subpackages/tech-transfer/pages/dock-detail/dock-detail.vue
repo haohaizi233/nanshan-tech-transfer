@@ -53,7 +53,7 @@
 					<text class="mine-status-text">状态：{{ detail.statusLabel }}</text>
 				</view>
 				<view v-if="detail.company || detail.location" class="meta-row">
-					<view v-if="detail.company" class="meta-item">
+					<view v-if="detail.company" :class="['meta-item', { 'meta-full': !detail.location }]">
 						<text class="meta-label">公司名称</text>
 						<view class="meta-value-row">
 							<text class="meta-value">{{ detail.company }}</text>
@@ -63,17 +63,17 @@
 							</view>
 						</view>
 					</view>
-					<view v-if="detail.location" class="meta-item">
+					<view v-if="detail.location" :class="['meta-item', { 'meta-full': !detail.company }]">
 						<text class="meta-label">地点</text>
 						<text class="meta-value">{{ detail.location }}</text>
 					</view>
 				</view>
 				<view v-if="detail.budget || detail.deadline" class="meta-row">
-					<view v-if="detail.budget" class="meta-item">
+					<view v-if="detail.budget" :class="['meta-item', { 'meta-full': !detail.deadline }]">
 						<text class="meta-label">预算</text>
 						<text class="meta-value meta-em">{{ detail.budget }}</text>
 					</view>
-					<view v-if="detail.deadline" class="meta-item">
+					<view v-if="detail.deadline" :class="['meta-item', { 'meta-full': !detail.budget }]">
 						<text class="meta-label">期望周期</text>
 						<text class="meta-value">{{ detail.deadline }}</text>
 					</view>
@@ -1014,12 +1014,18 @@
 
 	.meta-item {
 		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 	}
 
 	.meta-full {
 		flex: 1;
+		min-width: 0;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16rpx;
 	}
 
 	.meta-label {
@@ -1029,11 +1035,22 @@
 		margin-bottom: 8rpx;
 	}
 
+	.meta-full .meta-label {
+		margin-bottom: 0;
+		flex-shrink: 0;
+		white-space: nowrap;
+		font-size: 28rpx;
+		color: #333333;
+		font-weight: 600;
+	}
+
 	.meta-value {
 		min-width: 0;
 		font-size: 26rpx;
 		color: #555555;
 		font-weight: 400;
+		word-break: break-word;
+		overflow-wrap: anywhere;
 	}
 
 	.meta-value-row {
@@ -1042,6 +1059,30 @@
 		align-items: center;
 		flex-wrap: wrap;
 		gap: 8rpx;
+	}
+
+	.meta-full .meta-value-row {
+		flex: 1;
+		min-width: 0;
+		flex-wrap: nowrap;
+		justify-content: flex-end;
+		gap: 10rpx;
+	}
+
+	.meta-full .meta-value {
+		min-width: 0;
+		color: #304157;
+		font-weight: 500;
+		text-align: right;
+	}
+
+	.meta-full .meta-value.meta-em {
+		color: #2b73f8;
+	}
+
+	.meta-value-row .cert-badge {
+		flex-shrink: 0;
+		white-space: nowrap;
 	}
 
 	.meta-em {
