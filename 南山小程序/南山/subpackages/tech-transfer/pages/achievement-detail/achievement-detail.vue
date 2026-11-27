@@ -545,12 +545,17 @@ export default {
   display: block;
   font-size: 28rpx;
   color: #555;
-  line-height: 1.75;
-  text-align: left;
+  line-height: 1.8;
+  text-indent: 2em;
+  text-align: justify;
   word-break: break-word;
 }
 .section-text-paragraph {
-  margin-bottom: 16rpx;
+  display: block;
+  text-indent: 2em;
+  text-align: justify;
+  line-height: 1.8;
+  margin-bottom: 14rpx;
 }
 .section-text-paragraph:last-child {
   margin-bottom: 0;

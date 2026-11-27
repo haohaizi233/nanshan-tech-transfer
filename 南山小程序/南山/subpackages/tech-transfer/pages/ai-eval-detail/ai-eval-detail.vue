@@ -157,7 +157,9 @@
 						</view>
 						<view v-for="(sec, sIndex) in reportSections" :key="sIndex" class="report-sec">
 							<text class="report-sec__heading aie-fade-up">{{ sec.heading }}</text>
-							<text class="report-sec__content aie-fade-up">{{ sec.content }}</text>
+							<view class="report-sec__paragraphs aie-fade-up">
+								<text v-for="(para, pIdx) in splitParagraphs(sec.content)" :key="pIdx" class="report-sec__content report-sec__paragraph">{{ para }}</text>
+							</view>
 						</view>
 						</view>
 						</block>
@@ -499,6 +501,12 @@
 					this.history = result.list || []
 					this.historyTotal = result.total || 0
 				} catch (e) {}
+			},
+			splitParagraphs(text) {
+				return String(text || '')
+					.split(/\r?\n+/)
+					.map((s) => s.trim())
+					.filter(Boolean)
 			},
 			openHistoryTask(item) {
 				if (item.taskId && item.taskId !== this.taskId) {
@@ -1320,9 +1328,9 @@
 	display: block;
 	font-size: 28rpx;
 	color: #2c3e5e;
-	line-height: 1.85;
-	text-indent: 0;
-	text-align: left;
+	line-height: 1.9;
+	text-indent: 2em;
+	text-align: justify;
 	padding: 26rpx 28rpx;
 	background: linear-gradient(90deg, rgba(43, 115, 248, 0.08), rgba(43, 115, 248, 0.02));
 	border-left: 6rpx solid #2b73f8;
@@ -1393,10 +1401,19 @@
 	display: block;
 	font-size: 27rpx;
 	color: #4a5568;
-	line-height: 1.85;
+	line-height: 1.9;
 	letter-spacing: 0.4rpx;
-	text-indent: 0;
-	text-align: left;
+	text-indent: 2em;
+	text-align: justify;
+}
+
+.aie-page .report-sec__paragraph {
+	display: block;
+	margin-bottom: 14rpx;
+}
+
+.aie-page .report-sec__paragraph:last-child {
+	margin-bottom: 0;
 }
 
 /* ---------- 12. 历史评估记录 ---------- */

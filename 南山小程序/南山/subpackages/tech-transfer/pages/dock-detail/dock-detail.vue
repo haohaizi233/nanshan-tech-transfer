@@ -1139,16 +1139,18 @@
 	}
 
 	.field-value-user-text {
-		text-indent: 0;
-		line-height: 1.78;
-		text-align: left;
+		text-indent: 2em;
+		line-height: 1.8;
+		text-align: justify;
 		word-break: break-word;
 		overflow-wrap: break-word;
 		white-space: pre-wrap;
 	}
 
 	.text-paragraph {
-		margin-bottom: 16rpx;
+		display: block;
+		text-indent: 2em;
+		margin-bottom: 14rpx;
 	}
 
 	.text-paragraph:last-child {

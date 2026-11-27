@@ -356,10 +356,14 @@ export default {
   font-size: 26rpx;
   color: #444;
   line-height: 1.8;
-  text-indent: 0;
-  text-align: left;
-  margin-bottom: 16rpx;
+  text-indent: 2em;
+  text-align: justify;
+  margin-bottom: 14rpx;
   word-break: break-word;
+}
+
+.body-paragraph:last-child {
+  margin-bottom: 0;
 }
 
 .body-formula {

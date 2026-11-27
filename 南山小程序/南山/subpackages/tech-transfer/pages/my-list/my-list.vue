@@ -693,9 +693,9 @@
 		font-size: 26rpx;
 		color: #444444;
 		line-height: 1.75;
-		text-align: left;
+		text-align: justify;
 		word-break: break-word;
-		text-indent: 0;
+		text-indent: 2em;
 		margin-top: 10rpx;
 		margin-bottom: 12rpx;
 	}

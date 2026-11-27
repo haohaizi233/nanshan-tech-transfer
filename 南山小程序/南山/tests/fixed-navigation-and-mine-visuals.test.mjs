@@ -27,15 +27,16 @@ test('switches patent reader cards instead of scrolling between all sections', (
   assert.doesNotMatch(patentDetail, /showDescription/)
 })
 
-test('uses flush-left typography and explicit paragraph spacing for detail and preview text', () => {
+test('uses 2em first-line indent on every paragraph and explicit paragraph spacing', () => {
 	assert.match(dockDetail, /splitParagraphs\(detail\.techIntro\)/)
 	assert.match(dockDetail, /\.field-value\s*\{[\s\S]*text-indent:\s*0[\s\S]*text-align:\s*left/)
-	assert.match(dockDetail, /\.text-paragraph\s*\{[\s\S]*margin-bottom:\s*16rpx/)
+	assert.match(dockDetail, /\.field-value-user-text\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
+	assert.match(dockDetail, /\.text-paragraph\s*\{[\s\S]*text-indent:\s*2em[\s\S]*margin-bottom:\s*14rpx/)
 	assert.match(home, /class="info-text info-text-user-text"[^>]*>\{\{ item\.demandDesc \}\}/)
 	assert.match(home, /class="info-text info-text-user-text"[^>]*>\{\{ item\.techIntro \}\}/)
-	assert.match(home, /\.info-text-user-text\s*\{[\s\S]*text-indent:\s*0[\s\S]*text-align:\s*left/)
-	assert.match(achievementList, /\.tech-intro\s*\{[\s\S]*text-indent:\s*0[\s\S]*text-align:\s*left/)
-	assert.match(patentList, /\.tech-intro\s*\{[\s\S]*text-indent:\s*0[\s\S]*text-align:\s*left/)
+	assert.match(home, /\.info-text-user-text\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
+	assert.match(achievementList, /\.tech-intro\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
+	assert.match(patentList, /\.tech-intro\s*\{[\s\S]*text-indent:\s*2em[\s\S]*text-align:\s*justify/)
 })
 
 test('uses the certification artwork as a subtle right-side scene instead of a second card frame', () => {

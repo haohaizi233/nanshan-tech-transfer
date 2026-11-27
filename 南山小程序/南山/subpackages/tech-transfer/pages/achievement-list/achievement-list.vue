@@ -95,7 +95,7 @@
               </view>
             </view>
           </view>
-          <text v-if="item.techIntro" class="tech-intro">{{ item.techIntro }}</text>
+          <text v-if="item.techIntro" class="tech-intro">{{ formatIntroPreview(item.techIntro) }}</text>
           <view v-if="item.applicationFields && item.applicationFields.length" class="field-tags">
             <text v-for="(field, idx) in item.applicationFields.slice(0, 3)" :key="idx" class="field-tag">{{ field }}</text>
           </view>
@@ -216,6 +216,9 @@ export default {
         console.error('[achievement-list] loadIndustries failed:', e)
         return false
       }
+    },
+    formatIntroPreview(text) {
+      return String(text || '').replace(/\s+/g, ' ').trim()
     },
     currentListQuery() {
       return JSON.stringify([this.keyword, this.activeCategory, this.activeIndustryId])
@@ -532,8 +535,8 @@ export default {
 	color: #4a5568;
 	line-height: 1.75;
 	margin-bottom: 16rpx;
-	text-indent: 0;
-	text-align: left;
+	text-indent: 2em;
+	text-align: justify;
 	word-break: break-word;
 	-webkit-line-clamp: 2;
 	overflow: hidden;
