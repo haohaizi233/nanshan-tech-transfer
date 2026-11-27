@@ -23,6 +23,7 @@ from core.errors import (
 from core.masking import mask_contact
 from db import get_cursor
 from modules.achievement.content import load_content, parse_content_payload, sync_content
+from modules.achievement.extract import strip_private_contact_text
 from modules.achievement.maturity import (
     MATURITY_LABELS,
     MATURITY_LEVELS,
@@ -119,7 +120,7 @@ def _row_to_list_item(row, user_id=None):
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
         "industries": industries,
-        "techIntro": (row.get("tech_intro") or "")[:120],
+        "techIntro": (strip_private_contact_text(row.get("tech_intro")) or "")[:120],
         "maturityLevel": row.get("maturity_level"),
         "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
         "applicationFields": fields,
@@ -303,6 +304,16 @@ def get_achievement_detail(ach_id: int, user_id=None):
         "contactWechat": row.get("contact_wechat"),
     }
     contact = raw_contact if contact_visible else mask_contact(raw_contact)
+    if not contact_visible and contact["contactPhone"] and "*" not in contact["contactPhone"]:
+        contact["contactPhone"] = None
+
+    if "sections" in dynamic_content:
+        sections = []
+        for section in dynamic_content["sections"]:
+            content = strip_private_contact_text(section["content"])
+            if content:
+                sections.append({**section, "content": content})
+        dynamic_content = {**dynamic_content, "sections": sections}
 
     return {
         "id": row["id"],
@@ -314,8 +325,8 @@ def get_achievement_detail(ach_id: int, user_id=None):
         "orgCertified": row.get("org_id") is not None,
         "categoryName": row.get("category_name"),
         "categoryCode": row.get("category_code"),
-        "techIntro": row.get("tech_intro"),
-        "techRoute": row.get("tech_route"),
+        "techIntro": strip_private_contact_text(row.get("tech_intro")),
+        "techRoute": strip_private_contact_text(row.get("tech_route")),
         "maturityLevel": row.get("maturity_level"),
         "maturityDesc": resolve_maturity_desc(row.get("maturity_level"), row.get("maturity_desc")),
         "applicationFields": fields,
@@ -324,6 +335,7 @@ def get_achievement_detail(ach_id: int, user_id=None):
         "priceMinWan": float(row["price_min_wan"]) if row.get("price_min_wan") else None,
         "priceMaxWan": float(row["price_max_wan"]) if row.get("price_max_wan") else None,
         **contact,
+        "contactMasked": not contact_visible,
         "viewCount": row.get("view_count", 0),
         "publishedAt": row.get("published_at").strftime("%Y-%m-%d") if row.get("published_at") else None,
         "status": row.get("status"),
@@ -336,7 +348,7 @@ def get_achievement_detail(ach_id: int, user_id=None):
                 "orgName": inv.get("org_name"),
                 "department": inv.get("department"),
                 "title": inv.get("title"),
-                "bio": inv.get("bio"),
+                "bio": strip_private_contact_text(inv.get("bio")),
                 "homepageUrl": inv.get("homepage_url"),
                 "avatarFileId": inv.get("avatar_file_id"),
                 "avatarUrl": (
@@ -344,7 +356,7 @@ def get_achievement_detail(ach_id: int, user_id=None):
                     if inv.get("avatar_file_id")
                     else None
                 ),
-                "contribution": inv.get("contribution"),
+                "contribution": strip_private_contact_text(inv.get("contribution")),
             }
             for inv in inventors
         ],

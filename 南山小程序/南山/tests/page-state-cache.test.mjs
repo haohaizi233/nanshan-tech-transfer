@@ -37,6 +37,19 @@ test('page cache marks list, detail, dictionary and draft entries with their own
   assert.equal(readPageState('draft/result', 'u1', 'draft', storage, 86_409_999).fresh, true)
 })
 
+test('旧版详情快照不会复用，已有草稿仍然可以读取', () => {
+  const storage = createStorage()
+  writePageState('achievement', 'u1', 'detail', { id: 7 }, storage, 10_000)
+  writePageState('draft/result', 'u1', 'draft', { title: '草稿' }, storage, 10_000)
+  const [detailKey, draftKey] = storage.values.keys()
+  storage.values.get(detailKey).version = 1
+  storage.values.get(draftKey).version = 1
+
+  assert.equal(readPageState('achievement', 'u1', 'detail', storage, 10_001), null)
+  assert.equal(storage.values.has(detailKey), false)
+  assert.deepEqual(readPageState('draft/result', 'u1', 'draft', storage, 10_001).value, { title: '草稿' })
+})
+
 test('expired and malformed entries are removed and treated as a cache miss', () => {
   const storage = createStorage()
   writePageState('list', 'u1', 'list', [1], storage, 0)

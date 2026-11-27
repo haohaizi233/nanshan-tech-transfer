@@ -154,6 +154,17 @@ class TestProfileService:
 
 
 class TestFavoriteService:
+    def test_achievement_summary_keeps_website_and_removes_contacts(self):
+        from modules.favorite.service import _target_summary
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {
+            "title": "成果",
+            "status": "published",
+            "tech_intro": "材料研究\n联系邮箱：research@example.org\nhttps://example.org/research",
+        }
+        assert _target_summary(cur, "achievement", 1)["desc"] == "材料研究\nhttps://example.org/research"
+
     def test_validate_target_type_valid(self):
         from modules.favorite.service import _validate_target_type
 

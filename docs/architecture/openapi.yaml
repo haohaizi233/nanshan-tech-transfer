@@ -2413,6 +2413,7 @@ components:
             contactPhone:
               type: [string, 'null']
               description: 脱敏掩码（138****1111）或完整号（权限内）
+            contactMasked: { type: boolean, description: 成果详情的联系方式是否受脱敏限制 }
             contactEmail: { type: [string, 'null'] }
             contactWechat: { type: [string, 'null'] }
             patents:

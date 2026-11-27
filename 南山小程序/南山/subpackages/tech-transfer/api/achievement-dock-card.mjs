@@ -45,6 +45,7 @@ export function toAchievementDockCard(data = {}) {
     phone: data.contactPhone || '',
     email: data.contactEmail || '',
     wechat: data.contactWechat || '',
+    contactMasked: data.contactMasked,
     isMine: !!data.isMine,
     status: data.status || '',
     statusLabel: data.status ? getPublicationStatus(data).label : '',

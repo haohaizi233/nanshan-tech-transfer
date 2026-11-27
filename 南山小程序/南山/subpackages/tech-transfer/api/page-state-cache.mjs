@@ -9,7 +9,8 @@ export const PAGE_STATE_PREFIX = 'tt_page_state_v1:'
 export const PAGE_STATE_MAX_BYTES = 256 * 1024
 export const PAGE_STATE_STALE_RETENTION = 7 * 24 * 60 * 60 * 1000
 
-const VERSION = 1
+// 旧列表和详情快照可能存有成果正文中的明文联系方式。
+const cacheVersion = dataClass => (dataClass === 'list' || dataClass === 'detail') ? 2 : 1
 const SENSITIVE_KEY = /(token|authorization|password|passwd|secret|credential)/i
 const TRANSIENT_KEY = /^(loading|submitting|saving|uploading|retrying|error|loadError|coverErrored|timer|.*Timer|requestTask|tempFilePath|localFilePath|rawFile)$/i
 const TRANSIENT_PATH_KEY = /(?:temp|tmp|local).*(?:path|file)|(?:path|file).*(?:temp|tmp|local)/i
@@ -112,7 +113,7 @@ export function readPageState(key, scope, dataClass = 'list', storage, now = Dat
   try {
     let entry = store.getStorageSync(cacheKey)
     if (typeof entry === 'string') entry = JSON.parse(entry)
-    if (!entry || entry.version !== VERSION || entry.key !== String(key)
+    if (!entry || entry.version !== cacheVersion(dataClass) || entry.key !== String(key)
       || entry.scope !== normalizeScope(scope) || entry.dataClass !== dataClass
       || !Number.isFinite(entry.savedAt) || !Number.isFinite(entry.expiresAt)
       || !Object.prototype.hasOwnProperty.call(entry, 'value')) {
@@ -160,7 +161,7 @@ export function writePageState(key, scope, dataClass = 'list', value, storage, n
     const savedAt = Number(now)
     if (!Number.isFinite(savedAt)) return false
     const entry = {
-      version: VERSION,
+      version: cacheVersion(dataClass),
       key: String(key),
       scope: normalizeScope(scope),
       dataClass,

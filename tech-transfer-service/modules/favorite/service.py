@@ -12,6 +12,7 @@ Architecture source: 04-backend-domain-design.md §4.9, 05-data-model-design.md 
 
 from core.errors import bad_request, favorite_not_found
 from db import get_cursor
+from modules.achievement.extract import strip_private_contact_text
 from modules.audit.service import record as audit_record
 from modules.cooperation.service import can_access_target, is_accepted_dock_party
 
@@ -63,7 +64,7 @@ def _target_summary(cur, target_type: str, target_id: int):
     row = cur.fetchone()
     if not row:
         return None
-    desc = row.get("description") if target_type == "demand" else row.get("tech_intro")
+    desc = row.get("description") if target_type == "demand" else strip_private_contact_text(row.get("tech_intro"))
     return {
         "title": row["title"],
         "orgName": row.get("org_name"),

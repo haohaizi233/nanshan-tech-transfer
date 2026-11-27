@@ -80,6 +80,53 @@ HARVEST_FIELD_KEYS = {
     "techRoute",
 }
 
+_PRIVATE_CONTACT_KEYS = {"contactName", "contactPhone", "contactEmail", "contactWechat"}
+_CONTACT_LABEL_RE = re.compile(
+    r"^\s*(?:联系方式|联络方式|联系号码|手机号码|电子邮件|座机|微信ID)\s*(?:[:：]\s*(.*))?$", re.I
+)
+_PUBLIC_TEXT_CONTACT_RE = re.compile(
+    r"(?P<url>https?://[^\s<>，。；！？、（）【】《》]+)"
+    r"|(?:mailto:)?(?:" + EMAIL_RE.pattern + r")"
+    r"|(?:微信号|微信\s*ID|WeChat)\s*[:：]\s*[A-Za-z][A-Za-z0-9_-]{2,}"
+    r"|(?:tel:)?(?<!\d)(?:(?:\+?86)[ \t-]*)?1[3-9](?:[ \t-]*\d){9}(?!\d)"
+    r"|(?<!\d)(?:\(0\d{2,3}\)|（0\d{2,3}）|0\d{2,3}-)[ \t]*\d{7,8}(?!\d)",
+    re.I,
+)
+_CONTACT_VALUE_LINE_RE = re.compile(r"[\s\d+*()（）-]{5,}")
+
+
+def strip_private_contact_text(text: str | None) -> str | None:
+    """保留公开正文及网站，联系方式只通过受权限控制的字段返回。"""
+    if not text:
+        return text
+
+    kept = []
+    pending = None
+    for line in text.splitlines():
+        if not line.strip():
+            kept.append(line)
+            continue
+        label, value = parse_labeled_line(line)
+        key = FIELD_ALIASES.get(label)
+        extra_label = _CONTACT_LABEL_RE.fullmatch(line)
+        if key in _PRIVATE_CONTACT_KEYS or extra_label:
+            has_value = value if key in _PRIVATE_CONTACT_KEYS else extra_label.group(1)
+            pending = None if has_value else (key or "contact")
+            continue
+        if pending and (
+            _CONTACT_VALUE_LINE_RE.fullmatch(line)
+            or (pending == "contactWechat" and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{2,}", line.strip()))
+        ):
+            pending = None
+            continue
+        pending = None
+        cleaned = _PUBLIC_TEXT_CONTACT_RE.sub(lambda m: m.group("url") or "", line)
+        if cleaned == line or cleaned.strip(" \t:：,，.;；。/、"):
+            kept.append(cleaned.rstrip())
+
+    return "\n".join(kept).strip()
+
+
 _MATURITY_VALUES = {
     **{code: code for code in MATURITY_LEVELS},
     **{label: code for code, label in MATURITY_LABELS.items()},

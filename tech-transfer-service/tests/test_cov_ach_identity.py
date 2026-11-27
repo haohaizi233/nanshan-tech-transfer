@@ -183,6 +183,42 @@ class TestListAchievements:
 
 
 class TestGetAchievementDetail:
+    @pytest.mark.parametrize("user_id, expected_phone", [(None, "138****8000"), (1, "13800138000"), (2, "13800138000")])
+    def test_contact_is_only_returned_through_structured_fields(self, monkeypatch, user_id, expected_phone):
+        from modules.achievement import service
+
+        homepage = "https://example.org/research/13800138000"
+        profile = (
+            "从事新材料研究。\n联系方式：13800138000\n"
+            "联系邮箱\nmember@example.org\n微信号：researcher_123\n"
+            f"个人网站：\n{homepage}"
+        )
+        cur = _cur(fetchone=_row(status="published", tech_intro="研究成果，咨询 member@example.org。"))
+        cur.fetchall.return_value = [{"name": "研究员", "bio": "研究方向\n+86 138 0013 8000"}]
+        monkeypatch.setattr(service, "get_cursor", MagicMock())
+        service.get_cursor.return_value.__enter__.return_value = cur
+        monkeypatch.setattr(service, "has_accepted_intent", lambda *args: user_id == 2)
+        monkeypatch.setattr(
+            service,
+            "load_content",
+            lambda *args: {
+                "sections": [
+                    {"code": "team_intro", "title": "成果完成人简介", "content": profile},
+                    {"code": "other", "title": "补充信息", "content": "联系电话：0755-12345678"},
+                ]
+            },
+        )
+
+        result = service.get_achievement_detail(1, user_id=user_id)
+
+        assert result["contactPhone"] == expected_phone
+        assert "member@example.org" not in result["techIntro"]
+        assert result["inventors"][0]["bio"] == "研究方向"
+        assert result["sections"] == [
+            {"code": "team_intro", "title": "成果完成人简介", "content": f"从事新材料研究。\n个人网站：\n{homepage}"},
+        ]
+        assert result["contactMasked"] is (user_id is None)
+
     @patch("modules.achievement.service.get_cursor")
     def test_published_owner_json_fields_visible_contact(self, mock_gc):
         cur = _cur(fetchone=_row(status="published", application_fields='["a"]', innovation_points='["i"]'))
