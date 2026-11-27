@@ -367,8 +367,8 @@ def test_worker_crash_after_acceptance_is_not_resent(pg, sender, monkeypatch):
     gateway.enqueue_recovery_task("13800138000", "sms", cid, gateway.SendContext("ip", None, "crash-request"))
     run = gateway.run_recovery_task
 
-    def crash(*args):
-        run(*args)
+    def crash(*args, **kwargs):
+        run(*args, **kwargs)
         raise SystemExit("simulated_worker_termination")
 
     with patch.object(gateway, "run_recovery_task", side_effect=crash), pytest.raises(SystemExit):
