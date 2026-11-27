@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { splitHttpLinkText } from '../subpackages/tech-transfer/utils/http-link-text.mjs'
+import {
+  hasHttpLink,
+  parseStandaloneHttpLink,
+  splitHttpLinkText,
+} from '../subpackages/tech-transfer/utils/http-link-text.mjs'
 
 test('正文链接提供独立复制按钮并复制完整网址', () => {
   const component = readFileSync(new URL('../subpackages/tech-transfer/components/http-link-text.vue', import.meta.url), 'utf8')
@@ -23,4 +27,42 @@ test('成果正文识别个人网站和行内链接，保留原文标点与网�
   assert.deepEqual(splitHttpLinkText('https:// 及 javascript:alert(1)'), [
     { text: 'https:// 及 javascript:alert(1)' },
   ])
+})
+
+test('parseStandaloneHttpLink extracts labeled and bare link lines without stretching prose', () => {
+  assert.deepEqual(
+    parseStandaloneHttpLink('个人网站：https://ias.szu.edu.cn/info/1108/3197.htm'),
+    {
+      label: '个人网站',
+      url: 'https://ias.szu.edu.cn/info/1108/3197.htm',
+      text: 'https://ias.szu.edu.cn/info/1108/3197.htm',
+    },
+  )
+  assert.deepEqual(
+    parseStandaloneHttpLink('https://example.org/demo'),
+    {
+      label: '',
+      url: 'https://example.org/demo',
+      text: 'https://example.org/demo',
+    },
+  )
+  assert.equal(parseStandaloneHttpLink('详见 https://example.org/demo，欢迎联系'), null)
+  assert.equal(parseStandaloneHttpLink('个人网站：https://a.example.com 与 https://b.example.com'), null)
+  assert.equal(hasHttpLink('个人网站：https://ias.szu.edu.cn/info/1108/3197.htm'), true)
+  assert.equal(hasHttpLink('纯文本段落'), false)
+})
+
+test('formatted-text and http-link-text render standalone link cards left-aligned without justify stretching', () => {
+  const formatted = readFileSync(
+    new URL('../subpackages/tech-transfer/components/formatted-text.vue', import.meta.url),
+    'utf8',
+  )
+  const linkText = readFileSync(
+    new URL('../subpackages/tech-transfer/components/http-link-text.vue', import.meta.url),
+    'utf8',
+  )
+  assert.match(formatted, /ft-has-link/)
+  assert.match(formatted, /ft-link-block/)
+  assert.match(formatted, /\.ft-paragraph\.ft-has-link[\s\S]*?text-align:\s*left/)
+  assert.match(linkText, /http-link-card/)
 })

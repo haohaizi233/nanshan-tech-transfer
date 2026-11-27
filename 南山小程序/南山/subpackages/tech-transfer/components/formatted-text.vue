@@ -8,7 +8,7 @@
     <view
       v-for="(para, idx) in paragraphs"
       :key="idx"
-      :class="['ft-paragraph', { 'ft-indent': indent && mode !== 'list', 'ft-muted': muted, 'ft-list-row': mode === 'list' }, textClass]"
+      :class="['ft-paragraph', { 'ft-indent': indent && mode !== 'list', 'ft-muted': muted, 'ft-list-row': mode === 'list', 'ft-has-link': paragraphHasLink(para), 'ft-link-block': paragraphIsLinkBlock(para) }, textClass]"
     >
       <HttpLinkText v-if="linkify" :text="para" @open-link="$emit('open-link', $event)" />
       <text v-else>{{ para }}</text>
@@ -18,6 +18,7 @@
 
 <script>
 import { formatPreviewText, splitParagraphs } from '../utils/paragraph-text.mjs'
+import { hasHttpLink, parseStandaloneHttpLink } from '../utils/http-link-text.mjs'
 import HttpLinkText from './http-link-text.vue'
 
 export default {
@@ -66,6 +67,14 @@ export default {
     previewText() {
       if (this.mode !== 'preview') return ''
       return formatPreviewText(this.text)
+    },
+  },
+  methods: {
+    paragraphHasLink(para) {
+      return this.linkify && hasHttpLink(para)
+    },
+    paragraphIsLinkBlock(para) {
+      return this.linkify && Boolean(parseStandaloneHttpLink(para))
     },
   },
 }
@@ -135,5 +144,14 @@ export default {
   height: 8rpx;
   border-radius: 50%;
   background: #2b73f8;
+}
+
+.ft-paragraph.ft-has-link {
+  text-align: left !important;
+}
+
+.ft-paragraph.ft-link-block {
+  text-align: left !important;
+  text-indent: 0 !important;
 }
 </style>
