@@ -40,6 +40,7 @@ from modules.admin.service import (
     set_institution_status,
     update_institution,
 )
+from modules.analytics.service import get_operational_metrics
 from modules.cooperation.service import (
     admin_assist_transition,
     update_assist_status,
@@ -262,3 +263,8 @@ def admin_users_list(request: Request, scope: dict = Depends(backend_identity)):
 @router.get("/admin/users/{user_id}", tags=["admin-users"])
 def admin_users_detail(user_id: int, scope: dict = Depends(backend_identity)):
     return success(get_user_admin(user_id, scope))
+
+
+@router.get("/admin/analytics/metrics", tags=["admin-analytics"], summary="运营业务指标聚合")
+def admin_operational_metrics(days: int = 30, _admin: dict = Depends(admin_identity)):
+    return success(get_operational_metrics(days=days))
