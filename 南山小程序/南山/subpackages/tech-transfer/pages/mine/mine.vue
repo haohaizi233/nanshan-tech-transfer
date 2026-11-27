@@ -625,6 +625,13 @@
 	import AppTabbar from '../../components/app-tabbar.vue'
 	import WechatPrivacyGate from '../../components/wechat-privacy-gate.vue'
 	import {
+		normalizeOtpInput,
+		isValidPhoneNumber,
+		isValidEmailAddress,
+		computeCooldownSeconds,
+		buildContactVerifyPayload,
+	} from '../../utils/mine-security-helpers.mjs'
+	import {
 			getUserProfile,
 			isLoggedIn,
 			isAuthenticated,
