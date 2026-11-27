@@ -5,11 +5,12 @@ Architecture source: 06-api-design.md §capital（公开数据，无需登录）
 P0-1：接管 legacy 三接口的数据源（institution 表），新路径按 kind 统一。
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from core.errors import bad_request
 from core.pagination import parse_page_args
 from core.response import success
+from db import get_cursor
 from modules.institution.service import (
     KINDS,
     get_institution_detail,
@@ -17,6 +18,23 @@ from modules.institution.service import (
 )
 
 router = APIRouter(prefix="/api/tech-transfer/v1", tags=["institution"])
+
+
+@router.get("/capital-icons/{module_key}.png", response_class=Response)
+def capital_icon(module_key: str):
+    with get_cursor() as cursor:
+        cursor.execute(
+            "SELECT png FROM public.capital_module_icon WHERE module_key = %s",
+            (module_key,),
+        )
+        icon = cursor.fetchone()
+    if icon is None:
+        raise HTTPException(status_code=404, detail="图标不存在")
+    return Response(
+        content=bytes(icon["png"]),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/institutions")

@@ -167,7 +167,7 @@
 							@click="openCapital(mod)"
 						>
 							<view class="capital-item__icon">
-								<text class="capital-item__icon-text">{{ mod.iconText }}</text>
+								<image class="capital-item__icon-image" :src="capitalIconUrl(mod.key)" mode="aspectFit" />
 							</view>
 							<view class="capital-item__body">
 								<view class="capital-item__title-row">
@@ -193,6 +193,7 @@
 			import { getCurrentUser } from '../../api/client.js'
 	import { ensureLoginForDock, getUserProfile } from '../../api/user.js'
 	import { getCapitalGroups } from '../../constants/capital-modules.js'
+	import { resolveMediaUrl } from '../../api/media-url.mjs'
 	import { getAchievements } from '../../api/achievement.js'
 	import { toAchievementPreviewCard } from '../../api/achievement-dock-card.mjs'
 	import { getDemands, toDemandCard } from '../../api/demand.js'
@@ -275,6 +276,11 @@
 			}
 		},
 		methods: {
+			capitalIconUrl(key) {
+				const env = HostBridge.getEnvironment() || {}
+				const prefix = env.apiPrefix || '/api/tech-transfer/v1'
+				return resolveMediaUrl(`${prefix}/capital-icons/${key}.png`, env)
+			},
 			createRefreshGuard() {
 				const requestId = (this._refreshRequestId || 0) + 1
 				this._refreshRequestId = requestId
@@ -886,10 +892,9 @@
 		margin-right: 20rpx;
 	}
 
-	.capital-item__icon-text {
-		font-size: 32rpx;
-		font-weight: 600;
-		color: #2b73f8;
+	.capital-item__icon-image {
+		width: 44rpx;
+		height: 44rpx;
 	}
 
 	.capital-item__body {

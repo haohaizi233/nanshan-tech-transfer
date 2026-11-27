@@ -13,8 +13,7 @@ export const CAPITAL_MODULES = [
 		cardHint: '平台名称 / 依托单位 / 平台功能 / 联系方式',
 		source: 'platform',
 		sourceLabel: '验证与中试资源',
-		pending: false,
-		iconText: '验'
+		pending: false
 	},
 	{
 		key: 'pilot',
@@ -23,8 +22,7 @@ export const CAPITAL_MODULES = [
 		cardHint: '平台名称 / 依托单位 / 平台功能 / 联系方式',
 		source: 'platform',
 		sourceLabel: '验证与中试资源',
-		pending: false,
-		iconText: '试'
+		pending: false
 	},
 	{
 		key: 'bank',
@@ -33,8 +31,7 @@ export const CAPITAL_MODULES = [
 		cardHint: '机构名称 / 简介 / Logo',
 		source: 'finance',
 		sourceLabel: '投融资对接',
-		pending: false,
-		iconText: '银'
+		pending: false
 	},
 	{
 		key: 'invest',
@@ -43,8 +40,7 @@ export const CAPITAL_MODULES = [
 		cardHint: '机构名称 / 简介 / Logo',
 		source: 'finance',
 		sourceLabel: '投融资对接',
-		pending: false,
-		iconText: '投'
+		pending: false
 	}
 ]
 

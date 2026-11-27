@@ -11,6 +11,10 @@ test('capital tab hides the pending evaluation service module', () => {
   const home = readFileSync(new URL('../subpackages/tech-transfer/pages/home/home.vue', import.meta.url), 'utf8')
   assert.match(home, /title: '识别结果'/)
   assert.doesNotMatch(home, /成果对接待开通/)
+  assert.deepEqual(groups.flatMap((group) => group.modules.map((item) => item.key)),
+    ['poc', 'pilot', 'bank', 'invest'])
+  assert.match(home, /<image class="capital-item__icon-image" :src="capitalIconUrl\(mod.key\)"/)
+  assert.doesNotMatch(home, /mod\.iconText/)
 })
 
 test('home and dock-detail hide gray meta strips when location/budget/source are empty', () => {
