@@ -13,8 +13,15 @@ test('capital tab hides the pending evaluation service module', () => {
   assert.doesNotMatch(home, /成果对接待开通/)
   assert.deepEqual(groups.flatMap((group) => group.modules.map((item) => item.key)),
     ['poc', 'pilot', 'bank', 'invest'])
-  assert.match(home, /<image class="capital-item__icon-image" :src="capitalIconUrl\(mod.key\)"/)
+  assert.match(home, /<image class="capital-item__icon-image" :src="getCapitalIconUrl\(mod.key\)"/)
   assert.doesNotMatch(home, /mod\.iconText/)
+})
+
+test('capital sublists show category images and preserve available organization logos', () => {
+  const page = readFileSync(new URL('../subpackages/tech-transfer/pages/capital-list/capital-list.vue', import.meta.url), 'utf8')
+  assert.equal((page.match(/:src="categoryIconUrl"/g) || []).length, 2)
+  assert.match(page, /v-if="item\.logoUrl"\s+class="org-logo"[\s\S]*?@error="onLogoError\(item\)"/)
+  assert.doesNotMatch(page, /logoFallback|org-logo__text/)
 })
 
 test('home and dock-detail hide gray meta strips when location/budget/source are empty', () => {

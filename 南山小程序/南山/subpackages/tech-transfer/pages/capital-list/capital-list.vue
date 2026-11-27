@@ -37,6 +37,9 @@
 		<block v-else-if="isPlatform">
 			<view v-for="item in list" :key="item.id" class="card">
 				<view class="card__head">
+					<view class="category-icon category-icon--platform">
+						<image class="category-icon__image" :src="categoryIconUrl" mode="aspectFit" />
+					</view>
 					<text class="card__title">{{ item.name }}</text>
 					<text class="tag">{{ item.platformType || typeLabel(item.platformTypeKey) }}</text>
 				</view>
@@ -80,8 +83,8 @@
 						mode="aspectFit"
 						@error="onLogoError(item)"
 					></image>
-					<view v-else class="org-logo org-logo--fallback">
-						<text class="org-logo__text">{{ logoFallback(item.name) }}</text>
+					<view v-else class="org-logo category-icon">
+						<image class="category-icon__image" :src="categoryIconUrl" mode="aspectFit" />
 					</view>
 					<view class="org-card__main">
 						<view class="org-card__head">
@@ -129,6 +132,7 @@
 		listCapitalItems,
 		fetchPlatformList,
 		fetchOrgList,
+		getCapitalIconUrl,
 		getPlatformTypeLabel
 	} from '../../api/capital.js'
 	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
@@ -164,6 +168,9 @@
 			isDbModule() {
 				return this.isPlatform || this.isOrgModule
 			},
+			categoryIconUrl() {
+				return this.isDbModule ? getCapitalIconUrl(this.moduleKey) : ''
+			},
 			searchPlaceholder() {
 				if (this.isOrgModule) return '搜索机构名称、简介'
 				return '搜索平台名称、依托单位、功能、联系人'
@@ -187,10 +194,6 @@
 		methods: {
 			typeLabel(type) {
 				return getPlatformTypeLabel(type)
-			},
-			logoFallback(name) {
-				const s = String(name || '').trim()
-				return s ? s.slice(0, 1) : '机'
 			},
 			onLogoError(item) {
 				if (!item) return
@@ -368,16 +371,30 @@
 		margin-right: 20rpx;
 	}
 
-	.org-logo--fallback {
+	.category-icon {
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		background: #eaf2ff;
+		border-color: transparent;
 	}
 
-	.org-logo__text {
-		font-size: 36rpx;
-		font-weight: 600;
-		color: #2b73f8;
+	.category-icon--platform {
+		width: 52rpx;
+		height: 52rpx;
+		border-radius: 10rpx;
+		flex-shrink: 0;
+		margin-right: 14rpx;
+	}
+
+	.category-icon__image {
+		width: 48rpx;
+		height: 48rpx;
+	}
+
+	.category-icon--platform .category-icon__image {
+		width: 30rpx;
+		height: 30rpx;
 	}
 
 	.org-card__main {

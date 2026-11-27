@@ -26,6 +26,7 @@ function loadPage(name, overrides = {}) {
     WechatPrivacyGate: {},
     CAPABILITY_OPTIONS: [],
     getCapitalGroups: () => [],
+    getCapitalIconUrl: () => '',
     getCachedOrganizationCertification: () => null,
     listCachedAccounts: () => [],
     getSessionPhone: () => '',

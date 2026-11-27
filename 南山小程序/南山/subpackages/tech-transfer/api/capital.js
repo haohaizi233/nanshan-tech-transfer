@@ -8,6 +8,14 @@
 
 import HostBridge from '../../../host/host-bridge.js'
 import { publicRequest } from './client.js'
+import { resolveMediaUrl } from './media-url.mjs'
+
+export function getCapitalIconUrl(key) {
+  if (!key) return ''
+  const env = HostBridge.getEnvironment() || {}
+  const prefix = env.apiPrefix || '/api/tech-transfer/v1'
+  return resolveMediaUrl(`${prefix}/capital-icons/${key}.png`, env)
+}
 
 /** 相对 logoUrl（/api/file/xx）补全为可访问绝对地址 */
 function absoluteLogoUrl(url) {
