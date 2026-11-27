@@ -182,8 +182,9 @@ def _stream_signal(fn, *args) -> None:
 def _run_evaluation(task: dict, timeout: float | None = None) -> None:
     task_id = task["id"]
     achievement_id = task["target_id"]
-    # SSE 流式：打开进程内频道（幂等），LLM 增量经 on_delta 实时广播
-    _stream_signal(eval_stream.open, task_id)
+    execution_id = f"v{task.get('version', 0)}"
+    # SSE 流式：打开跨进程/进程内频道（幂等），LLM 增量经 on_delta 实时广播
+    _stream_signal(eval_stream.open, task_id, execution_id)
     # 实时阶段回传：每个关键阶段把文案写入 ai_task.progress_stage，
     # 供 GET /ai/evaluation-tasks/{id} 轮询返回（best-effort，失败不影响评估）。
     _report_stage(task_id, progress.STAGE_READING)  # 阶段1：快照加载
@@ -194,7 +195,7 @@ def _run_evaluation(task: dict, timeout: float | None = None) -> None:
         # 阶段2/3/4（LLM 调用 → 解析输出 → 评分换算）由 provider 回传
         on_stage=lambda stage: _report_stage(task_id, stage),
         # 报告原文增量（打字机）：逐 token 推给 SSE 流式总线
-        on_delta=lambda delta: _stream_signal(eval_stream.push_delta, task_id, delta),
+        on_delta=lambda delta: _stream_signal(eval_stream.push_delta, task_id, delta, execution_id),
     )
     legacy = result["legacyScores"]
     _report_stage(task_id, progress.STAGE_SAVING)  # 阶段5：写入数据库
@@ -252,7 +253,7 @@ def _run_evaluation(task: dict, timeout: float | None = None) -> None:
             cur.close()
     if saved:
         # SSE 流式收尾：事务提交后再广播 succeeded，订阅端查库必能读到结果
-        _stream_signal(eval_stream.finish, task_id, "succeeded")
+        _stream_signal(eval_stream.finish, task_id, "succeeded", execution_id)
 
 
 def process_one() -> str:
