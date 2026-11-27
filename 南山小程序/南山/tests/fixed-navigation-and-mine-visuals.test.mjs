@@ -14,6 +14,13 @@ const patentList = readFileSync(new URL('subpackages/tech-transfer/pages/patent-
 const app = readFileSync(new URL('App.vue', root), 'utf8')
 const membership = readFileSync(new URL('subpackages/tech-transfer/api/membership.js', root), 'utf8')
 
+test('the profile avatar opens the same editor as the edit profile button', () => {
+  assert.match(mine, /<button class="profile-avatar-button" aria-label="编辑资料" @click\.stop="onEdit">/)
+  assert.match(mine, /<button class="ghost-btn" @click="onEdit">编辑资料<\/button>/)
+  assert.match(mine, /onEdit\(\)\s*\{[\s\S]*?this\.fillForm\(this\.profile\)[\s\S]*?this\.editing = true[\s\S]*?this\.viewMode = 'profile'/)
+  assert.match(mine, /class="avatar-block" @click="openAvatarSheet"/)
+})
+
 test('keeps the patent reader navigation inside the H5 portrait shell', () => {
   assert.match(patentDetail, /\.reader-nav\s*\{[\s\S]*left:\s*var\(--window-left,\s*0px\)/)
   assert.match(patentDetail, /\.reader-nav\s*\{[\s\S]*right:\s*var\(--window-right,\s*0px\)/)

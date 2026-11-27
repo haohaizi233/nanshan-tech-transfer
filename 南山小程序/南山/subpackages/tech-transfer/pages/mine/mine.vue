@@ -203,7 +203,10 @@
 		<view v-else class="logged-wrap">
 			<view class="profile-card">
 				<view class="profile-head">
-					<image class="avatar lg" :src="avatarDisplayUrl(profile.avatar)" mode="aspectFill" @click.stop="previewAvatar(profile.avatar)"></image>
+					<button class="profile-avatar-button" aria-label="编辑资料" @click.stop="onEdit">
+						<image class="avatar lg" :src="avatarDisplayUrl(profile.avatar)" mode="aspectFill"></image>
+						<text class="profile-avatar-edit" aria-hidden="true">✎</text>
+					</button>
 					<view class="profile-main">
 						<view class="name-row">
 							<text class="nickname">{{ profile.nickname }}</text>
@@ -621,7 +624,6 @@
 <script>
 	import AppTabbar from '../../components/app-tabbar.vue'
 	import WechatPrivacyGate from '../../components/wechat-privacy-gate.vue'
-	import { previewSingleImage } from '../../utils/image-preview.mjs'
 	import {
 			getUserProfile,
 			isLoggedIn,
@@ -1746,10 +1748,6 @@
 				if (!url || url === '/static/logo.png') return '/static/logo.png'
 				return mediaDisplayUrl({ url }, HostBridge.getEnvironment() || {}, HostBridge.getStorage('tt_access_token') || '')
 			},
-			previewAvatar(url) {
-				if (!url || url === '/static/logo.png') return
-				previewSingleImage(this.avatarDisplayUrl(url))
-			},
 			async refresh() {
 				const requestId = (this._dashboardRequestId || 0) + 1
 				this._dashboardRequestId = requestId
@@ -2337,6 +2335,38 @@
 		width: 112rpx;
 		height: 112rpx;
 		border-radius: 56rpx;
+	}
+
+	.profile-avatar-button {
+		position: relative;
+		display: flex;
+		flex: 0 0 112rpx;
+		width: 112rpx;
+		height: 112rpx;
+		margin: 0;
+		padding: 0;
+		overflow: visible;
+		background: transparent;
+	}
+
+	.profile-avatar-button::after {
+		border: 0;
+	}
+
+	.profile-avatar-edit {
+		position: absolute;
+		right: -4rpx;
+		bottom: -4rpx;
+		box-sizing: border-box;
+		width: 38rpx;
+		height: 38rpx;
+		border: 2rpx solid #fff;
+		border-radius: 50%;
+		background: #2067e8;
+		color: #fff;
+		font-size: 25rpx;
+		line-height: 34rpx;
+		text-align: center;
 	}
 
 	.profile-head {
