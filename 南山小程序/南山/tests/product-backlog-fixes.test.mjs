@@ -17,10 +17,12 @@ test('capital tab hides the pending evaluation service module', () => {
   assert.doesNotMatch(home, /mod\.iconText/)
 })
 
-test('capital sublists show category images and preserve available organization logos', () => {
+test('capital sublists request an illustration by institution ID and fall back to category images', () => {
   const page = readFileSync(new URL('../subpackages/tech-transfer/pages/capital-list/capital-list.vue', import.meta.url), 'utf8')
-  assert.equal((page.match(/:src="categoryIconUrl"/g) || []).length, 2)
-  assert.match(page, /v-if="item\.logoUrl"\s+class="org-logo"[\s\S]*?@error="onLogoError\(item\)"/)
+  const api = readFileSync(new URL('../subpackages/tech-transfer/api/capital.js', import.meta.url), 'utf8')
+  assert.equal((page.match(/:src="institutionIconUrl\(item.id\)"/g) || []).length, 2)
+  assert.equal((page.match(/@error="onInstitutionIconError\(item.id\)"/g) || []).length, 2)
+  assert.match(api, /\/institutions\/\$\{id\}\/icon\.png/)
   assert.doesNotMatch(page, /logoFallback|org-logo__text/)
 })
 

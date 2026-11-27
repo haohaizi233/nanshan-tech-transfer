@@ -12,9 +12,17 @@ import { resolveMediaUrl } from './media-url.mjs'
 
 export function getCapitalIconUrl(key) {
   if (!key) return ''
+  return resolveCapitalImageUrl(`/capital-icons/${key}.png`)
+}
+
+export function getInstitutionIconUrl(id) {
+  return resolveCapitalImageUrl(`/institutions/${id}/icon.png`)
+}
+
+function resolveCapitalImageUrl(path) {
   const env = HostBridge.getEnvironment() || {}
   const prefix = env.apiPrefix || '/api/tech-transfer/v1'
-  return resolveMediaUrl(`${prefix}/capital-icons/${key}.png`, env)
+  return resolveMediaUrl(`${prefix}${path}`, env)
 }
 
 /** 相对 logoUrl（/api/file/xx）补全为可访问绝对地址 */

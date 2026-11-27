@@ -38,7 +38,7 @@
 			<view v-for="item in list" :key="item.id" class="card">
 				<view class="card__head">
 					<view class="category-icon category-icon--platform">
-						<image class="category-icon__image" :src="categoryIconUrl" mode="aspectFit" />
+						<image class="category-icon__image" :src="institutionIconUrl(item.id)" mode="aspectFit" @error="onInstitutionIconError(item.id)" />
 					</view>
 					<text class="card__title">{{ item.name }}</text>
 					<text class="tag">{{ item.platformType || typeLabel(item.platformTypeKey) }}</text>
@@ -72,19 +72,12 @@
 			</view>
 		</block>
 
-		<!-- 银行融资 / 投资机构：名称 + Logo + 简短介绍 -->
+		<!-- 银行融资 / 投资机构 -->
 		<block v-else-if="isOrgModule">
 			<view v-for="item in list" :key="item.id" class="org-card">
 				<view class="org-card__top">
-					<image
-						v-if="item.logoUrl"
-						class="org-logo"
-						:src="item.logoUrl"
-						mode="aspectFit"
-						@error="onLogoError(item)"
-					></image>
-					<view v-else class="org-logo category-icon">
-						<image class="category-icon__image" :src="categoryIconUrl" mode="aspectFit" />
+					<view class="org-logo category-icon">
+						<image class="category-icon__image" :src="institutionIconUrl(item.id)" mode="aspectFit" @error="onInstitutionIconError(item.id)" />
 					</view>
 					<view class="org-card__main">
 						<view class="org-card__head">
@@ -133,6 +126,7 @@
 		fetchPlatformList,
 		fetchOrgList,
 		getCapitalIconUrl,
+		getInstitutionIconUrl,
 		getPlatformTypeLabel
 	} from '../../api/capital.js'
 	import { createPageStateMixin } from '../../api/page-state-cache.mjs'
@@ -149,6 +143,7 @@
 				moduleDesc: '',
 				pending: false,
 				list: [],
+				institutionIconErrors: {},
 				loading: false,
 				loadError: '',
 				keyword: '',
@@ -195,9 +190,11 @@
 			typeLabel(type) {
 				return getPlatformTypeLabel(type)
 			},
-			onLogoError(item) {
-				if (!item) return
-				item.logoUrl = ''
+			institutionIconUrl(id) {
+				return this.institutionIconErrors[id] ? this.categoryIconUrl : getInstitutionIconUrl(id)
+			},
+			onInstitutionIconError(id) {
+				if (!this.institutionIconErrors[id]) this.institutionIconErrors[id] = true
 			},
 			onKeywordInput(e) {
 				this.keyword = e.detail.value
@@ -235,6 +232,7 @@
 							? await fetchPlatformList(this.moduleKey, this.keyword, this.page, this.pageSize)
 							: await fetchOrgList(this.moduleKey, this.keyword, this.page, this.pageSize)
 						this.list = res.list || []
+						this.institutionIconErrors = {}
 						this.total = res.total || 0
 						this.pageSize = res.pageSize || this.pageSize
 						this.totalPages = res.totalPages || 0
@@ -362,8 +360,8 @@
 	}
 
 	.org-logo {
-		width: 96rpx;
-		height: 96rpx;
+		width: 80rpx;
+		height: 80rpx;
 		border-radius: 12rpx;
 		background: #f3f5f8;
 		border: 1rpx solid #e8ecf2;
@@ -388,8 +386,8 @@
 	}
 
 	.category-icon__image {
-		width: 48rpx;
-		height: 48rpx;
+		width: 44rpx;
+		height: 44rpx;
 	}
 
 	.category-icon--platform .category-icon__image {

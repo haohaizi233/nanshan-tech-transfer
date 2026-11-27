@@ -28,13 +28,7 @@ def capital_icon(module_key: str):
             (module_key,),
         )
         icon = cursor.fetchone()
-    if icon is None:
-        raise HTTPException(status_code=404, detail="图标不存在")
-    return Response(
-        content=bytes(icon["png"]),
-        media_type="image/png",
-        headers={"Cache-Control": "public, max-age=86400"},
-    )
+    return _icon_response(icon)
 
 
 @router.get("/institutions")
@@ -56,3 +50,29 @@ def institution_detail(inst_id: int):
     if not detail:
         return success(None, "机构不存在或已下架")
     return success(detail)
+
+
+@router.get("/institutions/{inst_id}/icon.png", response_class=Response)
+def institution_icon(inst_id: int):
+    with get_cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT icon.png
+            FROM public.capital_institution_icon AS icon
+            JOIN public.institution AS institution ON institution.id = icon.institution_id
+            WHERE institution.id = %s AND institution.status = 'active'
+            """,
+            (inst_id,),
+        )
+        icon = cursor.fetchone()
+    return _icon_response(icon)
+
+
+def _icon_response(icon: dict | None) -> Response:
+    if icon is None:
+        raise HTTPException(status_code=404, detail="图标不存在")
+    return Response(
+        content=bytes(icon["png"]),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
