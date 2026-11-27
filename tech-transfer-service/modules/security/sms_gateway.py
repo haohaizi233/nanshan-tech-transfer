@@ -134,6 +134,8 @@ def start_sms_recovery(
     engine: Any = None,
     *,
     return_result: bool = False,
+    idempotency_claim: IdempotencyClaim | None = None,
+    worker_owner: str | None = None,
 ) -> Any:
     engine = engine or _engine()
     account = account.strip()
@@ -172,7 +174,16 @@ def start_sms_recovery(
         return recovery_response(challenge_id, "sms")
     target = rows[0]
     phone = normalize_phone(target["normalized_value"])
-    receipt = _send(target["user_id"], phone, "password_recovery", challenge_id, context, engine)
+    receipt = _send(
+        target["user_id"],
+        phone,
+        "password_recovery",
+        challenge_id,
+        context,
+        engine,
+        idempotency_claim=idempotency_claim,
+        worker_owner=worker_owner,
+    )
     if return_result:
         return DeliveryTaskResult(
             challenge_id,
@@ -245,6 +256,27 @@ def start_sms_binding(
     }
 
 
+def _verify_worker_execution_right(challenge_id: str, worker_owner: str | None, *, cur: Any = None) -> None:
+    """确认异步队列 Worker 仍持有该任务的有效执行权，防止迟到 Worker 越权发信。"""
+    if worker_owner is None:
+        return
+    if cur is not None:
+        cur.execute(
+            "SELECT state, execution_owner FROM security_delivery_request WHERE id=%s FOR UPDATE",
+            (challenge_id,),
+        )
+        row = cur.fetchone()
+    else:
+        with get_cursor() as read_cur:
+            read_cur.execute(
+                "SELECT state, execution_owner FROM security_delivery_request WHERE id=%s",
+                (challenge_id,),
+            )
+            row = read_cur.fetchone()
+    if not row or row.get("state") != "processing" or row.get("execution_owner") != worker_owner:
+        raise DeliveryStageError("send_claim", "WORKER_OWNERSHIP_LOST", outcome_unknown=False, provider_called=False)
+
+
 def _send(
     user_id: int | None,
     phone: str,
@@ -254,9 +286,11 @@ def _send(
     engine: Any,
     *,
     idempotency_claim: IdempotencyClaim | None = None,
+    worker_owner: str | None = None,
 ) -> Any:
     from modules.security.service import _fingerprint, _hmac_code
 
+    _verify_worker_execution_right(challenge_id, worker_owner)
     if not settings.SMS_ENABLED:
         raise DeliveryStageError("config", "sms_disabled")
     try:
@@ -275,6 +309,7 @@ def _send(
     ttl = settings.SMS_CODE_TTL_SECONDS
     try:
         with get_cursor(commit=True) as cur:
+            _verify_worker_execution_right(challenge_id, worker_owner, cur=cur)
             if user_id is None:
                 fingerprint = _fingerprint(phone)
                 cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", ("register:" + fingerprint,))
@@ -318,6 +353,8 @@ def _send(
                 details={"decision": "ALLOW", "rule_id": "send.reserved"},
                 cur=cur,
             )
+    except DeliveryStageError:
+        raise
     except Exception:
         transition_risk_checked(
             engine,
@@ -654,17 +691,40 @@ def _set_send_state(
     return res
 
 
-def run_recovery_task(account: str, channel: str, challenge_id: str, context: SendContext) -> DeliveryTaskResult:
+def run_recovery_task(
+    account: str,
+    channel: str,
+    challenge_id: str,
+    context: SendContext,
+    *,
+    idempotency_claim: IdempotencyClaim | None = None,
+    worker_owner: str | None = None,
+) -> DeliveryTaskResult:
     """Run after uniform HTTP response. Never expose business/provider outcome."""
     start = time.monotonic()
     exception_type = None
     try:
         if channel == "sms":
-            result = start_sms_recovery(account, challenge_id, context, return_result=True)
+            result = start_sms_recovery(
+                account,
+                challenge_id,
+                context,
+                return_result=True,
+                idempotency_claim=idempotency_claim,
+                worker_owner=worker_owner,
+            )
         elif channel in {"email_otp", "email_link"}:
             from modules.security.email_gateway import start_email_recovery
 
-            result = start_email_recovery(account, channel, challenge_id, context, return_result=True)
+            result = start_email_recovery(
+                account,
+                channel,
+                challenge_id,
+                context,
+                return_result=True,
+                idempotency_claim=idempotency_claim,
+                worker_owner=worker_owner,
+            )
         else:
             from modules.security.service import start_password_recovery
 
@@ -752,13 +812,15 @@ def enqueue_recovery_task(account: str, channel: str, challenge_id: str, context
 
 
 def run_queued_recovery_task(challenge_id: str) -> bool:
+    worker_owner = f"worker:{uuid.uuid4().hex}"
     try:
         with get_cursor(commit=True) as cur:
             cur.execute(
-                """UPDATE security_delivery_request SET state='processing',claimed_at=NOW()
+                """UPDATE security_delivery_request
+                SET state='processing',claimed_at=NOW(),execution_owner=%s,idem_claimed_at=NOW()
                 WHERE id=%s AND state='queued' AND created_at>NOW()-INTERVAL '5 minutes'
-                RETURNING payload""",
-                (challenge_id,),
+                RETURNING payload, idempotency_key, idempotency_scope""",
+                (worker_owner, challenge_id),
             )
             row = cur.fetchone()
     except Exception as exc:
@@ -773,6 +835,22 @@ def run_queued_recovery_task(challenge_id: str) -> bool:
     if not row:
         return False
     data = row["payload"] if isinstance(row["payload"], dict) else {}
+    idem_key = row.get("idempotency_key")
+    idem_scope = row.get("idempotency_scope")
+    idempotency_claim = (
+        IdempotencyClaim(
+            active=True,
+            key=str(idem_key),
+            scope=str(idem_scope),
+            task_id=challenge_id,
+            execution_owner=worker_owner,
+            execution_stage="pre_provider",
+            state="processing",
+            challenge_id=challenge_id,
+        )
+        if idem_key and idem_scope
+        else None
+    )
     # Never regenerate a code for processing/unknown tasks after a worker crash.
     try:
         result = run_recovery_task(
@@ -780,6 +858,8 @@ def run_queued_recovery_task(challenge_id: str) -> bool:
             data["channel"],
             challenge_id,
             SendContext(data["ip"], data["device_id"], data["request_id"]),
+            idempotency_claim=idempotency_claim,
+            worker_owner=worker_owner,
         )
         if not isinstance(result, DeliveryTaskResult):
             raise TypeError("delivery_result_missing")
@@ -787,7 +867,7 @@ def run_queued_recovery_task(challenge_id: str) -> bool:
         result = DeliveryTaskResult(challenge_id, "INTERNAL_ERROR", "task", "unexpected_worker_exception")
         task_event(logger, result, data.get("request_id"), "worker_error", type(exc).__name__)
     try:
-        return _persist_task_result(challenge_id, result, data.get("request_id"))
+        return _persist_task_result(challenge_id, result, data.get("request_id"), worker_owner=worker_owner)
     except Exception as exc:
         failed = replace(
             result,
@@ -800,7 +880,13 @@ def run_queued_recovery_task(challenge_id: str) -> bool:
         return False
 
 
-def _persist_task_result(challenge_id: str, result: DeliveryTaskResult, request_id: str | None) -> bool:
+def _persist_task_result(
+    challenge_id: str,
+    result: DeliveryTaskResult,
+    request_id: str | None,
+    *,
+    worker_owner: str | None = None,
+) -> bool:
     exec_stage = (
         "provider_unknown"
         if result.outcome_unknown or result.outcome == "PROVIDER_UNKNOWN"
@@ -825,7 +911,8 @@ def _persist_task_result(challenge_id: str, result: DeliveryTaskResult, request_
               END,
               finished_at=NOW(),
               payload=COALESCE(payload,'{}'::jsonb)-'account'-'ip'-'device_id'-'destination'
-              WHERE id=%s AND state='processing'""",
+              WHERE id=%s AND state='processing'
+                AND (%s IS NULL OR execution_owner=%s)""",
             (
                 result.queue_state,
                 result.outcome,
@@ -846,8 +933,12 @@ def _persist_task_result(challenge_id: str, result: DeliveryTaskResult, request_
                 is_unknown,
                 unknown_retention,
                 challenge_id,
+                worker_owner,
+                worker_owner,
             ),
         )
+        if cur.rowcount == 0:
+            return False
         audit_record(
             "sms.task_result" if result.channel == "sms" else "email.task_result",
             "security_delivery_request",

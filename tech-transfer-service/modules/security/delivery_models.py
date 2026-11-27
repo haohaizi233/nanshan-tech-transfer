@@ -339,6 +339,7 @@ def _persist_risk_sync_outcome(
     sync_state: str,
     error_code: str | None = None,
     cursor_factory: Any = None,
+    expected_claimed_at: Any = None,
 ) -> str:
     """持久化 auth_challenge.risk_sync_* 状态并返回最终落盘的 risk_sync_state。"""
     cid_uuid = _parse_uuid_str(challenge_id)
@@ -351,6 +352,13 @@ def _persist_risk_sync_outcome(
     factory = cursor_factory or get_cursor
     diag_logger = logging.getLogger("nanshan.security.risk_coordination")
     err_val = error_code[:64] if error_code else None
+
+    def _fetch_current_state(db_cur: Any, fallback: str) -> str:
+        db_cur.execute("SELECT risk_sync_state FROM auth_challenge WHERE id = %s", (cid_uuid,))
+        existing = db_cur.fetchone()
+        if isinstance(existing, dict) and existing.get("risk_sync_state"):
+            return str(existing["risk_sync_state"])
+        return fallback
 
     try:
         with factory(commit=True) as cur:
@@ -366,12 +374,16 @@ def _persist_risk_sync_outcome(
                         risk_sync_updated_at = NOW()
                     WHERE id = %s
                       AND (risk_sync_target IS NULL OR risk_sync_target = %s)
+                      AND risk_sync_state <> 'synced'
+                      AND (%s IS NULL OR risk_sync_claimed_at = %s)
                     RETURNING risk_sync_state
                     """,
-                    (target_state, cid_uuid, target_state),
+                    (target_state, cid_uuid, target_state, expected_claimed_at, expected_claimed_at),
                 )
                 row = cur.fetchone()
-                return str(row["risk_sync_state"]) if isinstance(row, dict) and row.get("risk_sync_state") else "synced"
+                if isinstance(row, dict) and row.get("risk_sync_state"):
+                    return str(row["risk_sync_state"])
+                return _fetch_current_state(cur, "synced")
 
             if sync_state in {"reservation_missing", "conflict"}:
                 cur.execute(
@@ -384,14 +396,25 @@ def _persist_risk_sync_outcome(
                         risk_sync_claimed_at = NULL,
                         risk_sync_updated_at = NOW()
                     WHERE id = %s
+                      AND (risk_sync_target IS NULL OR risk_sync_target = %s)
+                      AND risk_sync_state <> 'synced'
+                      AND (%s IS NULL OR risk_sync_claimed_at = %s)
                     RETURNING risk_sync_state
                     """,
-                    (sync_state, target_state, err_val, cid_uuid),
+                    (
+                        sync_state,
+                        target_state,
+                        err_val,
+                        cid_uuid,
+                        target_state,
+                        expected_claimed_at,
+                        expected_claimed_at,
+                    ),
                 )
                 row = cur.fetchone()
-                return (
-                    str(row["risk_sync_state"]) if isinstance(row, dict) and row.get("risk_sync_state") else sync_state
-                )
+                if isinstance(row, dict) and row.get("risk_sync_state"):
+                    return str(row["risk_sync_state"])
+                return _fetch_current_state(cur, sync_state)
 
             max_attempts = max(1, int(settings.RISK_SYNC_MAX_ATTEMPTS))
             base_secs = max(1, int(settings.RISK_SYNC_RETRY_BASE_SECONDS))
@@ -418,16 +441,28 @@ def _persist_risk_sync_outcome(
                     risk_sync_claimed_at = NULL,
                     risk_sync_updated_at = NOW()
                 WHERE id = %s
+                  AND (risk_sync_target IS NULL OR risk_sync_target = %s)
+                  AND risk_sync_state <> 'synced'
+                  AND (%s IS NULL OR risk_sync_claimed_at = %s)
                 RETURNING risk_sync_state
                 """,
-                (target_state, max_attempts, max_attempts, max_secs, base_secs, err_val, cid_uuid),
+                (
+                    target_state,
+                    max_attempts,
+                    max_attempts,
+                    max_secs,
+                    base_secs,
+                    err_val,
+                    cid_uuid,
+                    target_state,
+                    expected_claimed_at,
+                    expected_claimed_at,
+                ),
             )
             row = cur.fetchone()
-            return (
-                str(row["risk_sync_state"])
-                if isinstance(row, dict) and row.get("risk_sync_state")
-                else "retryable_failure"
-            )
+            if isinstance(row, dict) and row.get("risk_sync_state"):
+                return str(row["risk_sync_state"])
+            return _fetch_current_state(cur, "retryable_failure")
     except Exception as db_exc:
         diag_logger.warning(
             "Persist risk_sync_state failed (challenge=%s target=%s err=%s)",
@@ -447,6 +482,7 @@ def _transition_risk_checked_detail(
     purpose: str,
     request_id: str | None = None,
     cursor_factory: Any = None,
+    expected_claimed_at: Any = None,
 ) -> tuple[bool, str]:
     diag_logger = logging.getLogger("nanshan.security.risk_coordination")
     try:
@@ -474,6 +510,7 @@ def _transition_risk_checked_detail(
             sync_state="retryable_failure",
             error_code=err_code,
             cursor_factory=cursor_factory,
+            expected_claimed_at=expected_claimed_at,
         )
         return False, persisted_state
 
@@ -483,6 +520,7 @@ def _transition_risk_checked_detail(
             target_state,
             sync_state="synced",
             cursor_factory=cursor_factory,
+            expected_claimed_at=expected_claimed_at,
         )
         return True, persisted_state
 
@@ -509,6 +547,7 @@ def _transition_risk_checked_detail(
         sync_state=classified_state,
         error_code=reason_code,
         cursor_factory=cursor_factory,
+        expected_claimed_at=expected_claimed_at,
     )
     return False, persisted_state
 
@@ -568,7 +607,7 @@ def reconcile_pending_risk_syncs(
                 risk_sync_updated_at = NOW()
             FROM candidate c
             WHERE ac.id = c.id
-            RETURNING ac.id, ac.channel, ac.purpose, ac.risk_sync_target
+            RETURNING ac.id, ac.channel, ac.purpose, ac.risk_sync_target, ac.risk_sync_claimed_at
             """,
             (batch_limit,),
         )
@@ -613,6 +652,7 @@ def reconcile_pending_risk_syncs(
             channel=ch,
             purpose=purp,
             cursor_factory=factory,
+            expected_claimed_at=row.get("risk_sync_claimed_at"),
         )
         if ok:
             summary["synced"] += 1

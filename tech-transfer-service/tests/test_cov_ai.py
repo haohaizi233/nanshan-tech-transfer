@@ -527,12 +527,16 @@ class TestEvalStream:
     def setup_method(self):
         from modules.ai import eval_stream
 
+        # 本类只验证进程内总线语义；强制断开 Redis，避免共享实例残留状态污染用例
+        self._redis_patch = patch("modules.ai.eval_stream._get_redis", return_value=None)
+        self._redis_patch.start()
         eval_stream.clear()
 
     def teardown_method(self):
         from modules.ai import eval_stream
 
         eval_stream.clear()
+        self._redis_patch.stop()
 
     def test_open_and_push(self):
         from modules.ai import eval_stream

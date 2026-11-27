@@ -4,10 +4,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${NANSHAN_PROJECT_ROOT:-$SCRIPT_DIR}"
 PLIST_NAME="com.nanshan.watchdog"
-PLIST_SRC="/Users/mac/Desktop/南山小程序/${PLIST_NAME}.plist"
+PLIST_SRC="${PROJECT_ROOT}/${PLIST_NAME}.plist"
 PLIST_DST="/Library/LaunchDaemons/${PLIST_NAME}.plist"
-LOG_DIR="/Users/mac/Desktop/南山小程序/logs"
+LOG_DIR="${NANSHAN_LOG_DIR:-${PROJECT_ROOT}/logs}"
 
 echo "🔧 安装南山科转通守护进程..."
 
@@ -21,9 +23,11 @@ if launchctl list | grep -q "$PLIST_NAME" 2>/dev/null; then
     launchctl unload "$PLIST_DST" 2>/dev/null || true
 fi
 
-# 3. 复制plist
+# 3. 渲染并复制plist（将路径变量注入实际安装路径）
 echo "📋 安装配置文件..."
-cp "$PLIST_SRC" "$PLIST_DST"
+sed -e "s|__NANSHAN_PROJECT_ROOT__|${PROJECT_ROOT}|g" \
+    -e "s|__NANSHAN_LOG_DIR__|${LOG_DIR}|g" \
+    "$PLIST_SRC" > "$PLIST_DST"
 chown root:wheel "$PLIST_DST"
 chmod 644 "$PLIST_DST"
 

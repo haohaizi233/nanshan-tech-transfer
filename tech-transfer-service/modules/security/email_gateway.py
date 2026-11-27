@@ -122,6 +122,8 @@ def start_email_recovery(
     engine: Any = None,
     *,
     return_result: bool = False,
+    idempotency_claim: IdempotencyClaim | None = None,
+    worker_owner: str | None = None,
 ) -> Any:
     """通过安全邮件网关发起找回密码（email_otp / email_link）。"""
     eng = engine or _engine()
@@ -216,6 +218,8 @@ def start_email_recovery(
         challenge_id,
         context,
         eng,
+        idempotency_claim=idempotency_claim,
+        worker_owner=worker_owner,
     )
     if return_result:
         return DeliveryTaskResult(
@@ -310,6 +314,26 @@ def start_email_binding(
     }
 
 
+def _verify_email_worker_ownership(challenge_id: str, worker_owner: str | None, *, cur: Any = None) -> None:
+    if worker_owner is None:
+        return
+    if cur is not None:
+        cur.execute(
+            "SELECT state, execution_owner FROM security_delivery_request WHERE id=%s FOR UPDATE",
+            (challenge_id,),
+        )
+        row = cur.fetchone()
+    else:
+        with get_cursor() as read_cur:
+            read_cur.execute(
+                "SELECT state, execution_owner FROM security_delivery_request WHERE id=%s",
+                (challenge_id,),
+            )
+            row = read_cur.fetchone()
+    if not row or row.get("state") != "processing" or row.get("execution_owner") != worker_owner:
+        raise DeliveryStageError("send_claim", "WORKER_OWNERSHIP_LOST", outcome_unknown=False, provider_called=False)
+
+
 def _send_email(
     user_id: int,
     email: str,
@@ -326,9 +350,11 @@ def _send_email(
     target_fingerprint: str | None = None,
     source_contact_fingerprint: str | None = None,
     idempotency_claim: IdempotencyClaim | None = None,
+    worker_owner: str | None = None,
 ) -> DeliveryReceipt:
     from modules.security.service import _fingerprint, _hmac_code_v2, _mask_contact
 
+    _verify_email_worker_ownership(challenge_id, worker_owner)
     if not settings.EMAIL_ENABLED:
         metrics.inc("email_request_total", channel=channel, purpose=purpose, reason="CHANNEL_DISABLED")
         raise DeliveryStageError("config", "CHANNEL_DISABLED")
@@ -362,6 +388,7 @@ def _send_email(
 
     try:
         with get_cursor(commit=True) as cur:
+            _verify_email_worker_ownership(challenge_id, worker_owner, cur=cur)
             # 行锁串行化同用户同用途挑战；外部 SMTP/SES 呼叫在事务提交并取得发送执行权后执行。
             cur.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE", (user_id,))
             cur.execute(
@@ -410,6 +437,8 @@ def _send_email(
                 },
                 cur=cur,
             )
+    except DeliveryStageError:
+        raise
     except Exception:
         transition_risk_checked(
             eng,

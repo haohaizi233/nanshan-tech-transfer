@@ -513,8 +513,24 @@ def apply_condition_guards(route: RouteResult, message: str, inherited: bool = F
             if values.get("min_price_wan") is not None or values.get("min_budget_wan") is not None:
                 values["min_price_wan"] = None
                 values["min_budget_wan"] = None
+        elif not inherited:
+            intent = values.get("intent")
+            if intent == "search_achievement":
+                if values.get("min_price_wan") is None and bounds.get("min_wan") is not None:
+                    values["min_price_wan"] = bounds["min_wan"]
+                if values.get("max_price_wan") is None and bounds.get("max_wan") is not None:
+                    values["max_price_wan"] = bounds["max_wan"]
+            elif intent == "search_demand":
+                if values.get("min_budget_wan") is None and bounds.get("min_wan") is not None:
+                    values["min_budget_wan"] = bounds["min_wan"]
+                if values.get("max_budget_wan") is None and bounds.get("max_wan") is not None:
+                    values["max_budget_wan"] = bounds["max_wan"]
 
     # ── 合作方式 ────────────────────────────────────────────
+    if not values.get("coop_modes") and values.get("intent") == "search_demand" and not inherited:
+        detected_coop = taxonomy.detect_coop_modes(text)
+        if detected_coop:
+            values["coop_modes"] = detected_coop
     if values.get("coop_modes"):
         mentioned = [
             mode for mode in values["coop_modes"]
@@ -527,6 +543,14 @@ def apply_condition_guards(route: RouteResult, message: str, inherited: bool = F
             position = text.find(mode)
             if position >= 0 and taxonomy.is_soft_condition(text, position):
                 values["coop_modes"] = []
+                break
+
+    # ── 地域（需求显式地域兜底）──────────────────────────────
+    if not values.get("region") and values.get("intent") == "search_demand" and not inherited:
+        for reg in ("南山", "宝安", "福田", "罗湖", "龙岗", "龙华", "光明", "坪山", "盐田", "大鹏", "深圳", "广州", "北京", "上海", "杭州"):
+            pos = text.find(reg)
+            if pos >= 0 and not taxonomy.is_soft_condition(text, pos):
+                values["region"] = reg
                 break
 
     # ── 软偏好编码补齐 ─────────────────────────────────────

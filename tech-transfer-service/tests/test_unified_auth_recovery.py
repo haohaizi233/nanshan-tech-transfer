@@ -429,10 +429,13 @@ def test_api_recovery_flow_e2e():
         patch("modules.security.sms_gateway.get_cursor") as mock_gc,
         patch("modules.security.sms_gateway._engine") as engine,
         patch("modules.security.sms_gateway.audit_record"),
+        patch("modules.security.sms_gateway._verify_worker_execution_right"),
+        patch("modules.security.sms_gateway.claim_send_execution_right") as claim_send,
         patch.object(_settings, "SMS_ENABLED", True),
     ):
         engine.return_value.check_request.return_value = RiskDecision(DecisionAction.ALLOW)
         engine.return_value.reserve.return_value = RiskDecision(DecisionAction.ALLOW)
+        claim_send.return_value.outcome = "transitioned"
         cur = MagicMock()
         cur.fetchall.return_value = [{"user_id": 200, "normalized_value": "13800138999"}]
         cur.fetchone.return_value = {

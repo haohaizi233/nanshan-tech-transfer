@@ -202,6 +202,14 @@ def evaluate_achievement(
             logger.exception("ai evaluation on_stage callback failed stage=%s", stage)
 
     dim_desc = "；".join(f"{d['key']}（{d['label']}，权重{d['weight']}：{d['hint']}）" for d in evaluation.DIMENSIONS)
+    from modules.achievement.extract import strip_private_contact_text
+
+    sanitized_snapshot = {}
+    for k, v in (snapshot or {}).items():
+        if isinstance(v, str):
+            sanitized_snapshot[k] = strip_private_contact_text(v) or ""
+        else:
+            sanitized_snapshot[k] = v
     system = (
         "你是南山科转通的成果评价专家。只输出 JSON，不要 markdown。\n"
         f"请对成果做多维评价，必须包含六个维度：{dim_desc}。\n"
@@ -219,7 +227,7 @@ def evaluate_achievement(
         "（英文，不要用中文）；score必须是0-100的数字（不要用10分制）；"
         "report输出4-8个小节；所有文字用简体中文。"
     )
-    user = json.dumps({"achievement": snapshot}, ensure_ascii=False, default=str)
+    user = json.dumps({"achievement": sanitized_snapshot}, ensure_ascii=False, default=str)
     _stage(progress.STAGE_ANALYZING)  # 阶段2：LLM 调用中
     llm_start = time.time()
     _seen_len = 0  # 已推送给 on_delta 的累计字数（增量 = 累计文本[_seen_len:]）

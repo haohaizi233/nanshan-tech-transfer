@@ -4,6 +4,7 @@ from typing import Any
 
 from app.config import settings
 from app.advisor import grounded_explanation
+from app.privacy import sanitize_list_for_llm, sanitize_text_for_llm
 
 from app.llm_client import chat_completion, extract_llm_json
 from app.runtime_budget import remaining_seconds
@@ -123,7 +124,7 @@ def _as_list(value: Any) -> list[str]:
 def _achievement_for_llm(item: dict) -> dict:
     """
     只提供重排所需字段。
-    不发送联系方式。
+    不发送联系方式，且对自由文本做隐私脱敏。
     """
     maturity = item.get("maturity_level")
     price_min = item.get("price_min_wan")
@@ -140,14 +141,14 @@ def _achievement_for_llm(item: dict) -> dict:
         price_text = "未填写"
     return {
         "id": item.get("id"),
-        "title": item.get("title"),
-        "organization": item.get("source_org_name"),
-        "tech_intro": _short_text(
+        "title": sanitize_text_for_llm(item.get("title"), 200),
+        "organization": sanitize_text_for_llm(item.get("source_org_name"), 120),
+        "tech_intro": sanitize_text_for_llm(
             item.get("tech_intro"),
             500,
         ),
-        "application_fields": _as_list(item.get("application_fields")),
-        "innovation_points": _as_list(item.get("innovation_points")),
+        "application_fields": sanitize_list_for_llm(item.get("application_fields"), max_items=6, item_max_len=80),
+        "innovation_points": sanitize_list_for_llm(item.get("innovation_points"), max_items=6, item_max_len=80),
         "maturity_level": maturity,
         "maturity_label": _maturity_label(maturity),
         "pricing_mode": item.get("pricing_mode"),
@@ -173,14 +174,14 @@ def _demand_for_llm(item: dict) -> dict:
         budget_text = "未填写"
     return {
         "id": item.get("id"),
-        "title": item.get("title"),
-        "organization": item.get("org_name_snapshot"),
-        "description": _short_text(
+        "title": sanitize_text_for_llm(item.get("title"), 200),
+        "organization": sanitize_text_for_llm(item.get("org_name_snapshot"), 120),
+        "description": sanitize_text_for_llm(
             item.get("description"),
             500,
         ),
-        "region": item.get("region"),
-        "coop_mode": _as_list(item.get("coop_mode")),
+        "region": sanitize_text_for_llm(item.get("region"), 80),
+        "coop_mode": sanitize_list_for_llm(item.get("coop_mode"), max_items=6, item_max_len=80),
         "budget_negotiable": item.get("budget_negotiable"),
         "budget_min_wan": budget_min,
         "budget_max_wan": budget_max,
@@ -389,7 +390,7 @@ def rerank_results(
         return candidates[:top_n]
 
     user_content = {
-        "user_query": _short_text(user_message, 2000),
+        "user_query": sanitize_text_for_llm(user_message, 2000),
         "candidate_type": intent,
         "max_results": top_n,
         "candidates": [],

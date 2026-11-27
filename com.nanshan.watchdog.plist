@@ -10,13 +10,13 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/mac/Desktop/南山小程序/watchdog.sh</string>
+        <string>__NANSHAN_PROJECT_ROOT__/watchdog.sh</string>
         <string>start</string>
     </array>
 
     <!-- 工作目录 -->
     <key>WorkingDirectory</key>
-    <string>/Users/mac/Desktop/南山小程序</string>
+    <string>__NANSHAN_PROJECT_ROOT__</string>
 
     <!-- 开机自启动 -->
     <key>RunAtLoad</key>
@@ -39,9 +39,9 @@
 
     <!-- 日志路径 -->
     <key>StandardOutPath</key>
-    <string>/Users/mac/Desktop/南山小程序/logs/watchdog-stdout.log</string>
+    <string>__NANSHAN_LOG_DIR__/watchdog-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/mac/Desktop/南山小程序/logs/watchdog-stderr.log</string>
+    <string>__NANSHAN_LOG_DIR__/watchdog-stderr.log</string>
 
     <!-- 高优先级（-20到20，越小越高） -->
     <key>Nice</key>

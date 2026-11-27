@@ -13,8 +13,32 @@
 from psycopg2.extras import Json
 
 from db import get_cursor
+from modules.achievement.extract import strip_private_contact_text
 
 _VALID_ROLES = ("user", "assistant")
+
+
+def _sanitize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return strip_private_contact_text(value) or ""
+
+
+def _sanitize_card(card: dict) -> dict:
+    cleaned = dict(card)
+    for key in ("title", "organization", "description", "region", "advisorSummary", "advisorInsight"):
+        if isinstance(cleaned.get(key), str):
+            cleaned[key] = _sanitize_text(cleaned[key])
+    for list_key in ("application_fields", "coop_mode", "matchReason", "advisorCautions"):
+        if isinstance(cleaned.get(list_key), list):
+            cleaned[list_key] = [_sanitize_text(v) if isinstance(v, str) else v for v in cleaned[list_key]]
+    return cleaned
+
+
+def _sanitize_cards(cards):
+    if not isinstance(cards, list):
+        return cards
+    return [_sanitize_card(c) if isinstance(c, dict) else c for c in cards]
 
 
 def _session_generation(cur, user_id):
@@ -133,6 +157,8 @@ def get_turn(user_id: int, turn_id: str) -> dict | None:
 def _insert_turn_messages(
     cur, user_id: int, user_message: str, assistant_message: str, cards=None, generation=None, turn_id=None
 ):
+    cards = _sanitize_cards(cards)
+    assistant_message = _sanitize_text(assistant_message)
     cards_json = Json(cards) if cards is not None else None
     if generation is not None:
         cur.execute(
@@ -354,8 +380,10 @@ def _list_messages(cur, user_id, limit, generation=None):
         {
             "id": row["id"],
             "role": row["role"],
-            "content": row.get("content") or "",
-            "cards": row.get("cards") or None,
+            "content": _sanitize_text(row.get("content") or "")
+            if row["role"] == "assistant"
+            else (row.get("content") or ""),
+            "cards": _sanitize_cards(row.get("cards")) or None,
             "createdAt": row["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
             "turnId": row.get("turn_id"),
             "generation": row.get("generation", 0),

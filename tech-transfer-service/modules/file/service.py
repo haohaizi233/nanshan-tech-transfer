@@ -13,6 +13,7 @@ import hashlib
 import logging
 import mimetypes
 import re
+import threading
 import urllib.error
 import urllib.request
 import uuid
@@ -26,6 +27,24 @@ from config import settings
 from core.errors import bad_request, forbidden, not_found
 from db import get_cursor
 from modules.audit.service import record as audit_record
+
+Image.MAX_IMAGE_PIXELS = 25_000_000
+
+_THUMBNAIL_LOCKS_GUARD = threading.Lock()
+_THUMBNAIL_LOCKS: dict[tuple[int, bool], threading.Lock] = {}
+
+
+def _thumbnail_lock(file_id: int, card_preview: bool) -> threading.Lock:
+    key = (int(file_id), bool(card_preview))
+    with _THUMBNAIL_LOCKS_GUARD:
+        lock = _THUMBNAIL_LOCKS.get(key)
+        if lock is None:
+            if len(_THUMBNAIL_LOCKS) >= 1024:
+                _THUMBNAIL_LOCKS.clear()
+            lock = threading.Lock()
+            _THUMBNAIL_LOCKS[key] = lock
+        return lock
+
 
 LOGO_CACHE = settings.file_cache_path
 LOGO_CACHE.mkdir(parents=True, exist_ok=True)
@@ -183,12 +202,13 @@ def get_uploaded_thumbnail(path: Path, mime: str, file_id: int, *, card_preview:
     if not (mime or "").startswith("image/"):
         raise bad_request("仅图片支持缩略图")
     thumbnail = thumbnail_path_for_file(file_id, card_preview=card_preview)
-    try:
-        stale = not thumbnail.exists() or thumbnail.stat().st_mtime_ns < path.stat().st_mtime_ns
-        if stale:
-            _write_thumbnail(path, thumbnail, card_preview=card_preview)
-    except (OSError, ValueError, Image.UnidentifiedImageError):
-        raise bad_request("图片缩略图生成失败")
+    with _thumbnail_lock(file_id, card_preview):
+        try:
+            stale = not thumbnail.exists() or thumbnail.stat().st_mtime_ns < path.stat().st_mtime_ns
+            if stale:
+                _write_thumbnail(path, thumbnail, card_preview=card_preview)
+        except (OSError, ValueError, Image.UnidentifiedImageError, Image.DecompressionBombError):
+            raise bad_request("图片缩略图生成失败")
     return thumbnail, "image/jpeg"
 
 
